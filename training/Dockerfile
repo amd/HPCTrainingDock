@@ -1,0 +1,258 @@
+# -----------------------------------------------------------------------
+# NOTE:
+# Dependencies are not included as part of Omniperf.
+# It's the user's responsibility to accept any licensing implications 
+# before building the project
+# -----------------------------------------------------------------------
+
+# 
+# based off the Omniperf container (that is baseed off the Omnitrace container)
+#
+ARG BUILD_DATE
+ARG BUILD_VERSION
+ARG DISTRO_VERSION
+ARG ROCM_VERSION
+ARG DOCKER_USER
+
+FROM ${DOCKER_USER}/omniperf:release-base-ubuntu-${DISTRO_VERSION}-rocm-${ROCM_VERSION}
+ARG DISTRO
+ARG DISTRO_VERSION
+ARG ROCM_VERSION
+ARG ADMIN_USERNAME
+ARG ADMIN_PASSWORD
+ARG BUILD_GCC_LATEST
+ARG BUILD_AOMP_LATEST
+ARG BUILD_LLVM_LATEST
+ARG BUILD_OG_LATEST
+ARG BUILD_CLACC_LATEST
+ARG BUILD_PYTORCH_LATEST
+ARG USE_CACHED_APPS
+ARG AMDGPU_GFXMODEL=gfx90a
+
+LABEL maintainer="david.doscher@amd.com"
+
+
+LABEL org.label-schema.build-date=$BUILD_DATE
+LABEL org.label-schema.description="AMD ROCm Training container"
+LABEL org.label-schema.vendor="AMD"
+LABEL org.label-schema.version=$BUILD_VERSION
+# LABEL org.label-schema.docker.cmd="docker run -v ... "
+
+ARG OG_BUILD_DATE
+ 
+ENV DEBIAN_FRONTEND noninteractive
+ENV TZ "US/Chicago"
+
+#
+# install a few extra things for the training classes 
+# for og13 -- libgmp-dev libmpfr-dev
+#
+RUN apt-get install -y  hwloc numactl libnuma-dev  libpci-dev \
+    lshw emacs htop pandoc ffmpeg cgdb && \
+    apt-get install -y --no-install-recommends gedit dos2unix && \
+    apt-get install -qy libgmp-dev libmpfr-dev liblzma-dev libbabeltrace-dev
+
+#
+# some  networking tools, including the OpenSSH server 
+#
+RUN apt-get install -y  net-tools iproute2 openssh-server iputils-ping && \
+    systemctl enable ssh && service ssh start
+
+EXPOSE 22
+
+#
+# Install our desired compilers
+#
+COPY training/sources/scripts/compiler_setup.sh /tmp/compiler_setup.sh
+RUN sed -i -e "s/ROCM_VERSION/${ROCM_VERSION}/" /tmp/compiler_setup.sh
+
+RUN  chmod u+x /tmp/compiler_setup.sh  \
+     && /tmp/compiler_setup.sh \
+     && rm /tmp/compiler_setup.sh
+
+# install module files
+
+COPY  training/sources/lua/gcc/*          /etc/lmod/modules/Linux/gcc/
+COPY  training/sources/lua/clang/*        /etc/lmod/modules/Linux/clang/
+
+# Build the latest AMD OpenMP compiler if requested
+RUN apt-get update && apt-get install -y gawk ninja-build generate-ninja ccache
+RUN pip3 install CppHeaderParser
+
+# Grab any cache files of compiler builds
+#COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/gcc-13.2.0.tgz /opt/rocmplus-${ROCM_VERSION}/gcc-13.2.0.tgz
+
+# Build the latest GCC for AMD compiler if requested
+COPY training/sources/scripts/amd_gcc_setup.sh /tmp/amd_gcc_setup.sh
+RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" \
+           -e "s/BUILD_GCC_LATEST/${BUILD_GCC_LATEST}/g" \
+           -e "s/DISTRO_NAME/${DISTRO}/g" \
+           -e "s/DISTRO_VERSION/${DISTRO_VERSION}/g" \
+           /tmp/amd_gcc_setup.sh && \
+    chmod u+x /tmp/amd_gcc_setup.sh && \
+          /tmp/amd_gcc_setup.sh && rm /tmp/amd_gcc_setup.sh
+
+# Grab any cache files of compiler builds
+#COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/aomp_19.0-0.tgz /opt/rocmplus-${ROCM_VERSION}/aomp_19.0-0.tgz
+
+# install aomp
+COPY training/sources/scripts/aomp_setup.sh /tmp/aomp_setup.sh
+RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" \
+           -e "s/BUILD_AOMP_LATEST/${BUILD_AOMP_LATEST}/g" \
+           -e "s/USE_CACHED_APPS/${USE_CACHED_APPS}/g" \
+           -e "s/DISTRO_NAME/${DISTRO}/g" \
+           -e "s/DISTRO_VERSION/${DISTRO_VERSION}/g" \
+           -e "s/AMDGPU_GFXMODEL/${AMDGPU_GFXMODEL}/g" \
+           /tmp/aomp_setup.sh && \
+    chmod u+x /tmp/aomp_setup.sh && \
+          /tmp/aomp_setup.sh && rm /tmp/aomp_setup.sh
+ 
+# Grab any cache files of compiler builds
+#COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/llvm-latest.tgz /opt/rocmplus-${ROCM_VERSION}/llvm-latest.tgz
+
+# install latest llvm
+COPY training/sources/scripts/llvm-build.sh /tmp/llvm-build.sh
+RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" \
+           -e "s/BUILD_LLVM_LATEST/${BUILD_LLVM_LATEST}/g" \
+           -e "s/USE_CACHED_APPS/${USE_CACHED_APPS}/g" \
+           -e "s/DISTRO_NAME/${DISTRO}/g" \
+           -e "s/DISTRO_VERSION/${DISTRO_VERSION}/g" \
+           -e "s/AMDGPU_GFXMODEL/${AMDGPU_GFXMODEL}/g" \
+           /tmp/llvm-build.sh && \
+    chmod u+x /tmp/llvm-build.sh && \
+           /tmp/llvm-build.sh && rm /tmp/llvm-build.sh
+ 
+# Grab any cache files of compiler builds
+#COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/clacc_clang.tgz /opt/rocmplus-${ROCM_VERSION}/clacc_clang.tgz
+
+# Build the clacc_clang compiler
+COPY training/sources/scripts/clacc_setup.sh /tmp/clacc_setup.sh
+RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" \
+           -e "s/BUILD_CLACC_LATEST/${BUILD_CLACC_LATEST}/g" \
+           -e "s/DISTRO_NAME/${DISTRO}/g" \
+           -e "s/DISTRO_VERSION/${DISTRO_VERSION}/g" \
+           -e "s/AMDGPU_GFXMODEL/${AMDGPU_GFXMODEL}/g" \
+           /tmp/clacc_setup.sh && \
+    chmod u+x /tmp/clacc_setup.sh && \
+          /tmp/clacc_setup.sh && rm /tmp/clacc_setup.sh
+
+# Grab any cache files of compiler builds
+#COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/og13.tgz /opt/rocmplus-${ROCM_VERSION}/og13.tgz
+#COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/og13module.tgz /opt/rocmplus-${ROCM_VERSION}/og13module.tgz
+
+# Install the OpenMP GCC compiler latest drop
+COPY training/sources/scripts/og_setup.sh /tmp/og_setup.sh
+RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" \
+           -e "s/SCRIPT_OG_BUILD_DATE/${OG_BUILD_DATE}/g" \
+           -e "s/BUILD_OG_LATEST/${BUILD_OG_LATEST}/g" \
+           -e "s/DISTRO_NAME/${DISTRO}/g" \
+           -e "s/DISTRO_VERSION/${DISTRO_VERSION}/g" \
+           /tmp/og_setup.sh && \
+    chmod u+x /tmp/og_setup.sh && \
+          /tmp/og_setup.sh && rm /tmp/og_setup.sh
+
+WORKDIR /tmp 
+
+#
+# Install any additional apps or libs that are needed 
+#
+COPY training/sources/scripts/apps_setup_basic.sh /tmp/apps_setup_basic.sh
+
+RUN  chmod u+x /tmp/apps_setup_basic.sh && \
+     /tmp/apps_setup_basic.sh; rm /tmp/apps_setup_basic.sh
+
+#
+# Install cupy 
+#
+COPY training/sources/scripts/cupy_setup.sh /tmp/cupy_setup.sh
+
+RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" \
+           -e "s/AMDGPU_GFXMODEL/${AMDGPU_GFXMODEL}/g" \
+             /tmp/cupy_setup.sh && \
+    chmod u+x /tmp/cupy_setup.sh && \
+    /tmp/cupy_setup.sh; rm /tmp/cupy_setup.sh
+
+WORKDIR /app 
+
+#
+# Install pytorch
+#
+# Grab any cache files of compiler builds
+#COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/pytorch.tgz /opt/rocmplus-${ROCM_VERSION}/pytorch.tgz
+
+COPY training/sources/scripts/pytorch_setup.sh /tmp/pytorch_setup.sh
+
+RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" \
+           -e "s/AMDGPU_GFXMODEL/${AMDGPU_GFXMODEL}/g" \
+           -e "s/BUILD_PYTORCH_LATEST/${BUILD_PYTORCH_LATEST}/g" \
+             /tmp/pytorch_setup.sh && \
+    chmod u+x /tmp/pytorch_setup.sh && \
+    /tmp/pytorch_setup.sh |& tee /app/build.out; rm /tmp/pytorch_setup.sh
+
+WORKDIR /tmp 
+
+#
+# Install any additional apps or libs that are needed 
+#
+COPY training/sources/scripts/apps_setup.sh /tmp/apps_setup.sh
+
+RUN  chmod u+x /tmp/apps_setup.sh && \
+     /tmp/apps_setup.sh; rm /tmp/apps_setup.sh
+
+#
+# create a default .bashrc  (based on Ubuntu 22 /etc/skel/.bashrc )
+#
+RUN mkdir -p /users/default
+COPY training/sources/skel/bashrc /users/default/.bashrc
+COPY training/sources/skel/setTmpDir.sh  /users/default/setTmpDir.sh
+
+RUN  chmod a+x /users/default/.bashrc && chmod a+x /users/default/setTmpDir.sh
+
+# TODO:
+# For Plexus, we need to put a home directory for the user on 
+# /datasets/teams/hackathon-testing
+#
+# and then fix up .bashrc to cd to the new home directory
+
+#
+# add some default userids 
+#
+# add a user with sudo auth
+RUN useradd --create-home --skel /users/default --shell /bin/bash --home /users/${ADMIN_USERNAME} --password ${ADMIN_PASSWORD} --uid 11000 ${ADMIN_USERNAME}
+RUN  echo "${ADMIN_USERNAME}:${ADMIN_PASSWORD}" | chpasswd
+# add groups for access to the GPU (see /dev/dri /dev/kfd)
+RUN usermod -a -G audio,video,render ${ADMIN_USERNAME} \
+    && usermod -a -G sudo  ${ADMIN_USERNAME}
+
+
+# add some users 
+#COPY ./sources/scripts/add_users.sh /tmp/add_users.sh
+#RUN  chmod u+x /tmp/add_users.sh  \
+#     && /tmp/add_users.sh  \
+#     && rm -f /tmp/add_users.sh 
+
+# add the management script (use by the ${ADMIN_USERNAME}) 
+COPY training/manage /users/${ADMIN_USERNAME}/
+#RUN ls -lsa /users/${ADMIN_USERNAME}/
+RUN chown -R ${ADMIN_USERNAME} /users/${ADMIN_USERNAME}/bin && chmod -R a-rwx /users/${ADMIN_USERNAME}/bin && \
+    chmod -R u+rx /users/${ADMIN_USERNAME}/bin && chmod -R u-w /users/${ADMIN_USERNAME}/bin && \
+    echo "PATH=/users/${ADMIN_USERNAME}/bin:${PATH}" >> /users/${ADMIN_USERNAME}/.bash_profile
+
+RUN mkdir /Shared && chown ${ADMIN_USERNAME} /Shared && chmod 770 /Shared
+
+RUN sed --in-place=.bak \
+   '/#ADD_EXTRA_GROUPS=1/s/#ADD_EXTRA_GROUPS=1/EXTRA_GROUPS=audio video render\nADD_EXTRA_GROUPS=1\n/' \
+   /etc/adduser.conf
+
+#
+# the external init.sh script can be used for run time initialization.
+# we will start the openssh server via init.sh.
+#
+
+COPY training/init.sh /root/init.sh
+
+RUN  chmod a+rx /root/init.sh
+
+# CMD ["/usr/sbin/sshd","-D"]
+
+CMD ["/root/init.sh"]

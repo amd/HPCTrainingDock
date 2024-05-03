@@ -1,0 +1,150 @@
+
+ARG DISTRO
+ARG DISTRO_VERSION
+FROM ${DISTRO}:${DISTRO_VERSION}
+
+LABEL maintainer="david.doscher@amd.com"
+
+ENV HOME /root
+ENV LANG en_US.UTF-8
+ENV LANGUAGE en_US
+ENV LC_ALL C
+ENV SHELL /bin/bash
+ENV BASH_ENV /etc/bash.bashrc
+ENV DEBIAN_FRONTEND noninteractive
+
+WORKDIR /tmp
+SHELL [ "/bin/bash", "-c" ]
+
+ARG DISTRO
+ARG DISTRO_VERSION
+ARG EXTRA_PACKAGES=""
+ARG ROCM_VERSION="0.0"
+ARG ROCM_REPO_DIST="jammy"
+ARG AMDGPU_INSTALL_VERSION
+ARG AMDGPU_ROCM_VERSION
+ARG AMDGPU_GFXMODEL=gfx90a
+ARG PYTHON_VERSIONS="9 10 11"
+ENV PATH ${HOME}/.local/bin:${PATH}
+
+# Python3-dev and python3-venv are for AI/ML
+# Make sure we have a default compiler for the system -- gcc, g++, gfortran
+RUN apt-get update && \
+    apt-get dist-upgrade -y && \
+    apt-get install -y build-essential cmake libnuma1 wget gnupg2 m4 bash-completion git-core autoconf libtool autotools-dev \
+       python3-pip lsb-release libpapi-dev libpfm4-dev libudev1 rpm librpm-dev curl apt-utils vim tmux rsync sudo \
+       bison flex texinfo  libnuma-dev pkg-config  libibverbs-dev  rdmacm-utils ssh locales \
+       python3-dev python3-venv \
+       gcc g++ gfortran && \
+    python3 -m pip install 'cmake==3.28.3'
+
+RUN localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
+
+#RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
+#        if [ -d /etc/apt/trusted.gpg.d ]; then \
+#            wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor > /etc/apt/trusted.gpg.d/rocm.gpg; \
+#        else \
+#            wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -; \
+#        fi && \
+#        echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${ROCM_REPO_VERSION}/ ${ROCM_REPO_DIST} main" | tee /etc/apt/sources.list.d/rocm.list && \
+#        apt-get update && \
+#        apt-get dist-upgrade -y && \
+#        apt-get install -y hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev && \
+#        apt-get install -y hip-base hip-runtime-amd hip-dev && \
+#        apt-get install -y rocm-llvm rocm-core rocm-smi-lib rocm-device-libs && \
+#        apt-get install -y roctracer-dev rocprofiler-dev rccl-dev ${EXTRA_PACKAGES} && \
+#        apt-get install -y rocfft  hipfft  rocm-libs rocsolver rocblas && \ 
+#        apt-get install -y rocminfo rocm-bandwidth-test  && \ 
+#        if [ "$(echo ${ROCM_VERSION} | awk -F '.' '{print $1}')" -lt "5" ]; then apt-get install -y rocm-dev; fi && \
+#        apt-get autoclean; \
+#    fi
+
+WORKDIR /tmp
+
+# Install needed dependencies -- tcl and lmod
+RUN  apt-get install -y tcl tcl-dev \
+     lmod && \
+     sed -i -e '1,$s!/etc/lmod/modules!/etc/lmod/modules/Linux\n/etc/lmod/modules/ROCm\n/etc/lmod/modules/ROCmPlus\n/etc/lmod/modules/ROCmPlus-MPI\n/etc/lmod/modules/ROCmPlus-AMDResearchTools\n/etc/lmod/modules/ROCmPlus-LatestCompilers\n//etc/lmod/modules/ROCmPlus-AI!' /etc/lmod/modulespath && \
+     ln -s /usr/share/lmod/6.6/init/profile /etc/profile.d/z00_lmod.sh &&  ln -s /usr/share/lmod/6.6/init/cshrc /etc/profile.d/z00_lmod.csh
+
+COPY rocm/sources/scripts/rocm_setup.sh /tmp/rocm_setup.sh
+RUN sed -i -e "s/AMDGPU_ROCM_VERSION/${AMDGPU_ROCM_VERSION}/g" \
+           -e "s/ROCM_REPO_DIST/${ROCM_REPO_DIST}/g" \
+           -e "s/AMDGPU_INSTALL_VERSION/${AMDGPU_INSTALL_VERSION}/g" \
+           -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" \
+         /tmp/rocm_setup.sh && echo /tmp/rocm_setup.sh
+
+RUN  chmod u+x /tmp/rocm_setup.sh  \
+     && /tmp/rocm_setup.sh \
+     && rm /tmp/rocm_setup.sh
+
+COPY rocm/sources/lua/bash.bashrc /tmp/bash.bashrc
+RUN cat /tmp/bash.bashrc >> /etc/bash.bashrc && rm -f /tmp/bash.bashrc
+
+# omnitrace (omnitrace-avail) will throw this message using default values, so change default to 2
+# [omnitrace][116] /proc/sys/kernel/perf_event_paranoid has a value of 3. Disabling PAPI (requires a value <= 2)...
+# [omnitrace][116] In order to enable PAPI support, run 'echo N | sudo tee /proc/sys/kernel/perf_event_paranoid' where                   N is <= 2
+RUN if (( `cat /proc/sys/kernel/perf_event_paranoid` > 0 )); then echo "Please do:  echo 0  | sudo tee /proc/sys/kernel/perf_event_paranoid"; fi
+
+USER root
+
+# these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev 
+RUN apt-get update && \
+    apt-get install -y libpmix-dev libhwloc-dev  libevent-dev
+
+WORKDIR /app 
+
+#
+# install OpenMPI and UCX 
+#
+
+# Grab any cache files of compiler builds
+#COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/ucx.tgz /opt/rocmplus-${ROCM_VERSION}/ucx.tgz
+#COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/openmpi.tgz /opt/rocmplus-${ROCM_VERSION}/openmpi.tgz
+
+COPY rocm/sources/scripts/openmpi_setup.sh /tmp/openmpi_setup.sh
+RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" /tmp/openmpi_setup.sh
+
+RUN  chmod u+x /tmp/openmpi_setup.sh  \
+     && /tmp/openmpi_setup.sh \
+     && rm /tmp/openmpi_setup.sh
+
+#
+# Install mvapich
+#
+
+COPY rocm/sources/scripts/mvapich2_setup.sh /tmp/mvapich2_setup.sh
+RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" /tmp/mvapich2_setup.sh
+
+RUN  chmod u+x /tmp/mvapich2_setup.sh  \
+     && /tmp/mvapich2_setup.sh \
+     && rm /tmp/mvapich2_setup.sh
+
+# 
+# add slurm 
+#
+# Adding render group early to avoid something else grabbing it and causing problems for slurm
+RUN groupadd render -g 110
+
+    # these are for slurm   :  libpmi2-0-dev 
+RUN  apt-get update -y \
+     && apt-cache search libpmi* \
+     && apt-get install -y libpmi2-0-dev \
+     && apt-get  install -y slurmd slurmctld
+
+RUN apt-get -q clean && sudo rm -rf /var/lib/apt/lists/*
+
+COPY rocm/sources/slurm/slurm_${AMDGPU_GFXMODEL}.conf /etc/slurm/slurm.conf
+COPY rocm/sources/slurm/gres_${AMDGPU_GFXMODEL}.conf /etc/slurm/gres.conf
+
+RUN chown slurm /etc/slurm/slurm.conf \
+    && chgrp slurm /etc/slurm/slurm.conf  \
+    && chmod 777 /etc/slurm
+
+RUN echo "OPTIONS=\"--force --key-file /etc/munge/munge.key --num-threads 10\"" > /etc/default/munge
+
+ENV LC_ALL C.UTF-8
+
+WORKDIR /home
+
+SHELL [ "/bin/bash", "--login", "-c" ]
