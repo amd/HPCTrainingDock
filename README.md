@@ -1,5 +1,5 @@
-This version of the Training Container is for workstations. Specifically the Radeon 6800. It is to
-test changes to be migrated to the main MI200 Training Container at https://amd-hpc/TrainingContainer
+This version of the Training Container is for workstations and data center GPUs. Specifically, it
+is tested on Radeon 6800XT graphics card and MI200 series and MI300A data center GPUs.i
 
 Training Docker Container build steps
 
@@ -10,23 +10,33 @@ This assumes your userid is part of the Docker group and you can issue Docker co
 If you need to use sudo, you will need to modify the command below to look for Docker images that start with "root" instead of a userid (such as amdtrain).
 
 
-1) Build the four levels of the Container with Ubuntu 22.04, Rocm 5.6.0, Omnitrace, Omniperf and extra compilers and packages
+1) Build the four levels of the Container with Ubuntu 22.04, Rocm 6.1.0, Omnitrace, Omniperf and extra compilers and packages
 
 ```
-git clone --recursive git@github.com:amd-hpc/TrainingDock.git
+git clone --recursive git@github.com:AMD/HPCTrainingDock.git
 cd TrainingDock
 ```
 
-For standard builds
+For standard builds with the admin username settings of your choice for the build
 ```
-   ./build-docker.sh --rocm-versions 5.6.0 --distro-versions 22.04 --admin_username admin --admin_password [PASSWORD]
+   ./build-docker.sh --rocm-versions 6.1.0 --distro-versions 22.04 --admin_username admin --admin_password [PASSWORD]
 ```
+
+You can build for many other recent rocm-versions if you prefer.
+
 
 Options that might be useful for the build are below. The first is an option
 to show more docker build output
 
 ```
 --output-verbosity -- flag for more verbose output during the build
+```
+Build for a specific GPU model. The docker build script will try and detect the GPU on the system you are
+building on, but you can also have it build for a different GPU model than your local GPU. This option
+specifies building for the MI200 series data center GPU.
+
+```
+--gfx-model gfx90a
 ```
 
 Omnitrace will by default download a pre-built version. You can also build from source,
@@ -84,7 +94,7 @@ docker run -it --device=/dev/kfd --device=/dev/dri --group-add video -p 2222:22 
 login -- need to wait for container to start before logging in
 
 ```
-ssh teacher@localhost -p 2222
+ssh <admin_username>@localhost -p 2222
 ```
 
 If you get the message below, wait a little longer. It is still starting up.
@@ -99,13 +109,13 @@ First startup slurm with the manage script
 ./manage.sh
 ```
 
-To transfer all the files from the "TransferFiles" directory over to the teacher account
+To transfer all the files from the "TransferFiles" directory over to the <admin_username> account
 
 ```
-rsync -avz -e "ssh -p 2222" ../TransferFiles/ teacher@localhost:.
+rsync -avz -e "ssh -p 2222" ../TransferFiles/ <admin_username>@localhost:.
 ```
 
-To check all the test cases, run the ./runTests.sh script in the teacher account or at ../examples/TestExamples/runTests.sh.
+To check all the test cases, run the ./runTests.sh script in the <admin_username> account or at ../examples/TestExamples/runTests.sh.
 
 ```
 rm -rf HPCTrainingExamples && \
