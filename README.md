@@ -14,12 +14,12 @@ If you need to use sudo, you will need to modify the command below to look for D
 
 ```
 git clone --recursive git@github.com:AMD/HPCTrainingDock.git
-cd TrainingDock
+cd HPCTrainingDock
 ```
 
 For standard builds with the admin username settings of your choice for the build
 ```
-   ./build-docker.sh --rocm-versions 6.1.0 --distro-versions 22.04 --admin_username admin --admin_password [PASSWORD]
+   ./build-docker.sh --rocm-versions 6.1.0 --distro-versions 22.04 --admin-username admin --admin-password [PASSWORD]
 ```
 
 You can build for many other recent rocm-versions if you prefer.
