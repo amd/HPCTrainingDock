@@ -27,6 +27,9 @@ ARG AMDGPU_GFXMODEL=gfx90a
 ARG PYTHON_VERSIONS="9 10 11"
 ENV PATH ${HOME}/.local/bin:${PATH}
 
+RUN chown -Rv _apt:root /var/cache/apt/archives/partial/
+RUN chmod -Rv 700 /var/cache/apt/archives/partial/
+
 # Python3-dev and python3-venv are for AI/ML
 # Make sure we have a default compiler for the system -- gcc, g++, gfortran
 RUN apt-get update && \

@@ -28,7 +28,7 @@ else
    cd ucx-1.16.0
    mkdir build && cd build
    ../contrib/configure-release --prefix=/opt/rocmplus-SCRIPT_ROCM_VERSION/ucx \
-      --with-rocm=/opt/rocm-SCRIPT_ROCM_VERSION  --without-cuda  --enable-optimizations \
+      --with-rocm=/opt/rocm-SCRIPT_ROCM_VERSION  --without-cuda \
       --enable-mt  --enable-optimizations  --disable-logging \
       --disable-debug --enable-assertions --enable-params-check \
       --enable-examples
@@ -76,6 +76,8 @@ else
                 --disable-debug   CC=gcc CXX=g++ FC=gfortran
    make -j 16
    make install
+   # make ucx the default point-to-point
+   echo "pml = ucx" >> /opt/rocmplus-SCRIPT_ROCM_VERSION/openmpi/etc/openmpi-mca-params.conf
    cd /app
    rm -rf openmpi-5.0.3 openmpi-5.0.3.tar.bz2
 fi
