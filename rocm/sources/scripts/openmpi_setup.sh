@@ -1,15 +1,36 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+: ${ROCM_VERSIONS:="6.0"}
+
+n=0
+while [[ $# -gt 0 ]]
+do
+   case "${1}" in
+      "--rocm-version")
+          shift
+          ROCM_VERSION=${1}
+          reset-last
+          ;;
+      *)
+         last ${1}
+         ;;
+   esac
+   n=$((${n} + 1))
+   shift
+done
+
+echo "ROCM_VERSION is $ROCM_VERSION"
 
 #
 # Install UCX
 #
 
-if [ -f /opt/rocmplus-SCRIPT_ROCM_VERSION/ucx.tgz ]; then
+if [ -f /opt/rocmplus-${ROCM_VERSION}/ucx.tgz ]; then
    #install the cached version
-   cd /opt/rocmplus-SCRIPT_ROCM_VERSION
+   cd /opt/rocmplus-${ROCM_VERSION}
    tar -xzf ucx.tgz
-   chown -R root:root /opt/rocmplus-SCRIPT_ROCM_VERSION/ucx
-   rm /opt/rocmplus-SCRIPT_ROCM_VERSION/ucx.tgz
+   chown -R root:root /opt/rocmplus-${ROCM_VERSION}/ucx
+   rm /opt/rocmplus-${ROCM_VERSION}/ucx.tgz
 else
    export OMPI_ALLOW_RUN_AS_ROOT=1
    export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
@@ -27,8 +48,8 @@ else
    tar xzf ucx-1.16.0.tar.gz
    cd ucx-1.16.0
    mkdir build && cd build
-   ../contrib/configure-release --prefix=/opt/rocmplus-SCRIPT_ROCM_VERSION/ucx \
-      --with-rocm=/opt/rocm-SCRIPT_ROCM_VERSION  --without-cuda \
+   ../contrib/configure-release --prefix=/opt/rocmplus-${ROCM_VERSION}/ucx \
+      --with-rocm=/opt/rocm-${ROCM_VERSION}  --without-cuda \
       --enable-mt  --enable-optimizations  --disable-logging \
       --disable-debug --enable-assertions --enable-params-check \
       --enable-examples
@@ -43,12 +64,12 @@ fi
 # Install OpenMPI
 #
 
-if [ -f /opt/rocmplus-SCRIPT_ROCM_VERSION/openmpi.tgz ]; then
+if [ -f /opt/rocmplus-${ROCM_VERSION}/openmpi.tgz ]; then
    #install the cached version
-   cd /opt/rocmplus-SCRIPT_ROCM_VERSION
+   cd /opt/rocmplus-${ROCM_VERSION}
    tar -xzf openmpi.tgz
-   chown -R root:root /opt/rocmplus-SCRIPT_ROCM_VERSION/openmpi
-   rm /opt/rocmplus-SCRIPT_ROCM_VERSION/openmpi.tgz
+   chown -R root:root /opt/rocmplus-${ROCM_VERSION}/openmpi
+   rm /opt/rocmplus-${ROCM_VERSION}/openmpi.tgz
 else
    # no cached version, so build it
 
@@ -71,13 +92,15 @@ else
    tar -xjf openmpi-5.0.3.tar.bz2
    cd openmpi-5.0.3
    mkdir build && cd build
-   ../configure --prefix=/opt/rocmplus-SCRIPT_ROCM_VERSION/openmpi --with-ucx=/opt/rocmplus-SCRIPT_ROCM_VERSION/ucx --enable-mca-no-build=btl-uct \
+   ../configure --prefix=/opt/rocmplus-${ROCM_VERSION}/openmpi \
+                --with-ucx=/opt/rocmplus-${ROCM_VERSION}/ucx \
+                --enable-mca-no-build=btl-uct \
                 --enable-mpi --enable-mpi-fortran \
                 --disable-debug   CC=gcc CXX=g++ FC=gfortran
    make -j 16
    make install
    # make ucx the default point-to-point
-   echo "pml = ucx" >> /opt/rocmplus-SCRIPT_ROCM_VERSION/openmpi/etc/openmpi-mca-params.conf
+   echo "pml = ucx" >> /opt/rocmplus-${ROCM_VERSION}/openmpi/etc/openmpi-mca-params.conf
    cd /app
    rm -rf openmpi-5.0.3 openmpi-5.0.3.tar.bz2
 fi
@@ -95,7 +118,7 @@ cat > ${MODULE_PATH}/5.0.3.lua <<-EOF
 	whatis(" This is a GPU-Aware version of OpenMPI")
 	whatis("URL: https://github.com/open-mpi/ompi.git")
 
-	local base = "/opt/rocmplus-SCRIPT_ROCM_VERSION/openmpi"
+	local base = "/opt/rocmplus-${ROCM_VERSION}/openmpi"
 
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))

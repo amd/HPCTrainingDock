@@ -109,7 +109,7 @@ COPY rocm/sources/scripts/openmpi_setup.sh /tmp/openmpi_setup.sh
 RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" /tmp/openmpi_setup.sh
 
 RUN  chmod u+x /tmp/openmpi_setup.sh  \
-     && /tmp/openmpi_setup.sh \
+     && /tmp/openmpi_setup.sh --rocm-version ${ROCM_VERSION} \
      && rm /tmp/openmpi_setup.sh
 
 #
