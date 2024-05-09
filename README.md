@@ -2,10 +2,9 @@
 This version of the Training Container is for workstations and data center GPUs. Specifically, it
 is tested on Radeon 6800XT graphics card and MI200 series and MI300A data center GPUs.
 
-##Training Docker Container Build Steps
+## Training Docker Container Build Steps
 
 These instructions will setup a container on `localhost` and assume that Docker is installed, your userid is part of the Docker group and you can issue Docker commands without `sudo`. If you need to use sudo, you will need to modify the command below to look for Docker images that start with ***root*** instead of a userid (such as amdtrain).
-
 
 # 1.  Building the Four Images of the Container 
 This container is set up to use Ubuntu 22.04 as OS, and will build four different images called `rocm`, `omnitrace`,  `omniperf` and `training`. 
@@ -26,7 +25,7 @@ You can build for many other recent rocm-versions if you prefer. To show more do
 ```bash
 --output-verbosity 
 ```
-***NOTE***: The docker build script will try and detect the GPU on the system you are building on, but you can also have it build for a different GPU model than your local GPU, by specifying the target architecture with the `--amdgpu-gfxmodel` option. For instance, to build for the MI200 series data center GPU we would provide this:
+**NOTE**: The docker build script will try and detect the GPU on the system you are building on, but you can also have it build for a different GPU model than your local GPU, by specifying the target architecture with the `--amdgpu-gfxmodel` option. For instance, to build for the MI200 series data center GPU we would provide this:
 
 ```bash
 --amdgpu-gfxmodel=gfx90a
@@ -87,7 +86,7 @@ To start the container, run:
 ```bash
 docker run -it --device=/dev/kfd --device=/dev/dri --group-add video -p 2222:22 --detach --name Training --rm -v /home/amdtrain/Class/training/hostdir:/hostdir --security-opt seccomp=unconfined docker.io/library/training
 ```
-***NOTE***: if you are testing the container on a machine that does not have a GPU (such as your laptop), you need to remove the `--device=/dev/kfd` option from the above command. You can check what containers are running by running `docker ps`.
+**NOTE**: if you are testing the container on a machine that does not have a GPU (such as your laptop), you need to remove the `--device=/dev/kfd` option from the above command. You can check what containers are running by running `docker ps`.
 
 # 4. Accessing the Container
 
