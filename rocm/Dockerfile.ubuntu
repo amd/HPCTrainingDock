@@ -106,7 +106,6 @@ WORKDIR /app
 #COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/openmpi.tgz /opt/rocmplus-${ROCM_VERSION}/openmpi.tgz
 
 COPY rocm/sources/scripts/openmpi_setup.sh /tmp/openmpi_setup.sh
-RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" /tmp/openmpi_setup.sh
 
 RUN  chmod u+x /tmp/openmpi_setup.sh  \
      && /tmp/openmpi_setup.sh --rocm-version ${ROCM_VERSION} \
