@@ -12,7 +12,7 @@ This container is set up to use Ubuntu 22.04 as OS, and will build four differen
 The version of ROCm is 6.1.0, and several compilers and other dependencies will be built as part of the images setup. First, clone this repo and go into the folder where the Docker build script lives: 
 
 ```bash
-git clone --recursive git@github.com:AMD/HPCTrainingDock.git
+git clone --recursive git@github.com:amd/HPCTrainingDock.git
 cd HPCTrainingDock
 ```
 
