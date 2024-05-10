@@ -18,4 +18,4 @@ end
 execute{cmd=cmd, modeA = {"load"}}
 prepend_path("PATH", "/opt/miniconda3/bin")
 
-load("rocm/6.0.2")
+load("rocm/6.1.0")
