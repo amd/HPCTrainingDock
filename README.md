@@ -4,7 +4,8 @@ is tested on Radeon 6800XT graphics card and MI200 series and MI300A data center
 
 ## Training Docker Container Build Steps
 
-These instructions will setup a container on `localhost` and assume that Docker is installed, your userid is part of the Docker group and you can issue Docker commands without `sudo`. If you need to use sudo, you will need to modify the command below to look for Docker images that start with ***root*** instead of a userid (such as amdtrain).
+These instructions will setup a container on `localhost` and assume that Docker is installed, your userid is part of the Docker group and you can issue Docker commands without `sudo`. 
+[comment]: <> If you need to use `sudo`, you will need to modify the command below to look for Docker images that start with ***root*** instead of a userid (such as amdtrain).
 
 ### 1.  Building the Four Images of the Container 
 This container is set up to use Ubuntu 22.04 as OS, and will build four different images called `rocm`, `omnitrace`,  `omniperf` and `training`. 
@@ -15,13 +16,13 @@ git clone --recursive git@github.com:AMD/HPCTrainingDock.git
 cd HPCTrainingDock
 ```
 
-To build the four images run the following command (note that `<admin>` is set to `admin` by default but the password **must** be specified):
+To build the four images, run the following command (note that `<admin>` is set to `admin` by default but the password **must** be specified, otherwise you will get an error from the build script):
 
 ```
    ./build-docker.sh --rocm-versions 6.1.0 --distro-versions 22.04 --admin-username <admin> --admin-password <password>
 ```
 
-You can build for many other recent rocm-versions if you prefer. To show more docker build output, add this option to the build command above:
+You can build for many other recent ROCm versions if you prefer. To show more docker build output, add this option to the build command above:
 
 ```bash
 --output-verbosity 
@@ -33,7 +34,7 @@ You can build for many other recent rocm-versions if you prefer. To show more do
 --amdgpu-gfxmodel=gfx90a
 ```
 
-For MI300 series, the value to specify is `gfx942`. Note that you can also build the images on a machine that does not have any GPU hardware (such as your laptop) provided you specify a target hardwarw with the flag above.
+For MI300 series, the value to specify is `gfx942`. Note that you can also build the images on a machine that does not have any GPU hardware (such as your laptop) provided you specify a target hardware with the flag above.
 
 Omnitrace will by default download a pre-built version. You can also build from source,
 which is useful if the right version of omnitrace is not available as pre-build. To build omnitrace from source, append the following to the build command above:
@@ -42,7 +43,7 @@ which is useful if the right version of omnitrace is not available as pre-build.
 --omnitrace-build-from-source
 ```
 
-Building extra compilers takes a long time. A cached option can be used  to shorten subsequent build times, just append these options to the build command above:
+Building extra compilers takes a long time, but a cached option can be used  to shorten subsequent build times, just append these options to the build command above:
 
 ```bash
 --build-gcc-option 
@@ -67,7 +68,7 @@ The above flag will allow you to use pre-built `gcc` and `aomp` located in `Cach
 
 ### 2. Previewing the Images
  
-Assuming that the build of the images has been successful, you can see details on the images that have been built by doing
+Assuming that the build of the images has been successful, you can see details on the images that have been built by doing:
 
 ```bash
  docker images 
@@ -95,7 +96,9 @@ To start the container, run:
 docker run -it --device=/dev/kfd --device=/dev/dri --group-add video -p 2222:22 --detach --name Training --rm -v /home/amdtrain/Class/training/hostdir:/hostdir --security-opt seccomp=unconfined docker.io/library/training
 ```
 
-**NOTE**: if you are testing the container on a machine that does not have a GPU (such as your laptop), you need to remove the `--device=/dev/kfd` option from the above command. You can check what containers are running by running `docker ps`.
+**NOTE**: if you are testing the container on a machine that does not have a GPU (such as your laptop), you need to remove the `--device=/dev/kfd` option from the above command. 
+
+You can check what containers are running by running `docker ps`.
 
 ### 4. Accessing the Container
 
@@ -142,10 +145,12 @@ The container comes with a variety of modules installed, which their necessary d
    Core/lmod/6.6    Core/settarg/6.6
 ```
 
-In the above display (D) stands as "default". The modules are searched in the `MODULEPATH` environment variable, which is set during the images creation. Below, we report details on most of the modules displayed above. 
+In the above display, (D) stands for "default". The modules are searched in the `MODULEPATH` environment variable, which is set during the images creation. Below, we report details on most of the modules displayed above. 
 
 Module name: `clang/base`
+
 Modulefile location: `/etc/lmod/modules/Linux/clang`
+
 Modulefile content:
 ```bash
  whatis("Clang (LLVM) Base version 14 compiler")
@@ -161,7 +166,9 @@ Modulefile content:
 ```
 
 Module name: `clang/15`
+
 Modulefile location: `/etc/lmod/modules/Linux/clang`
+
 Modulefile content:
 ```bash
  whatis("Clang (LLVM) Version 15 compiler")
@@ -177,7 +184,9 @@ Modulefile content:
 ```
 
 Module name: `gcc/base`
+
 Modulefile location: `/etc/lmod/modules/Linux/gcc`
+
 Modulefile content: 
 ```bash
  whatis("GCC Version base version (11) compiler")
@@ -193,7 +202,9 @@ Modulefile content:
 ```
 
 Module name: `gccc/11`
+
 Modulefile location: `/etc/lmod/modules/Linux/gcc`
+
 Modulefile content:
 ```bash
  whatis("GCC Version 11 compiler")
@@ -209,7 +220,9 @@ Modulefile content:
 ```
 
 Module name: `miniconda/23.11.0`
+
 Modulefile location: `/etc/lmod/modules/Linux/miniconda3`
+
 Modulefile content:
 ```bash
  local root = "/opt/miniconda3"
@@ -236,7 +249,9 @@ load("rocm/6.1.0")
 ```
 
 Module name: `amdclang/17.0-6.1.0`
+
 Modulefile location: `/etc/lmod/modules/ROCm/amdclang`
+
 Modulefile content:
 ```bash
 whatis("Name: AMDCLANG")
@@ -261,7 +276,9 @@ family("compiler")
 ```
 
 Module name: `hipfort/6.1.0`
+
 Modulefile location: `/etc/lmod/modules/ROCm/hipfort`
+
 Modulefile content:
 ```bash
 whatis("Name: ROCm HIPFort")
@@ -274,7 +291,9 @@ load("rocm/6.1.0")
 ```
 
 Module name: `opencl/6.1.0`
+
 Modulefile location: `/etc/lmod/modules/ROCm/opencl`
+
 Modulefile content:
 ```bash
 whatis("Name: ROCm OpenCL")
@@ -290,7 +309,9 @@ family("OpenCL")
 ```
 
 Module name: `rocm/6.1.0`
+
 Modulefile location: `/etc/lmod/modules/ROCm/rocm`
+
 Modulefile content: 
 ```bash
 whatis("Name: ROCm")
@@ -313,7 +334,9 @@ family("GPUSDK")
 ```
 
 Module name: `mvapich2/2.3.7 `
+
 Modulefile location: `/etc/lmod/modules/ROCmPlus-MPI/mvapich2`
+
 Modulefile content: 
 ```bash
 whatis("Name: GPU-aware mvapich")
@@ -333,7 +356,9 @@ family("MPI")
 ```
 
 Module name: `openmpi/5.0.3`
+
 Modulefile location: `/etc/lmod/modules/ROCmPlus-MPI/openmpi`
+
 Modulefile content:
 ```bash
 whatis("Name: GPU-aware openmpi")
@@ -353,7 +378,9 @@ family("MPI")
 ```
 
 Module name: `omniperf/2.0.0`
+
 Modulefile location: `/etc/lmod/modules/ROCmPlus-AMDResearchTools/omniperf`
+
 Modulefile content:
 ```bash 
 local help_message = [[
@@ -400,7 +427,9 @@ setenv("MPLCONFIGDIR",pathJoin(home,".matplotlib"))
 ```
 
 Module name: `omnitrace/1.11.2`
+
 Modulefile location: `/etc/lmod/modules/ROCmPlus-AMDResearchTools/omnitrace`
+
 Modulefile content:
 ```bash
 whatis("Name: omnitrace")
@@ -422,7 +451,9 @@ setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metric
 ```
 
 Module name: `cupy/13.0.0b1`
+
 Modulefile location: `/etc/lmod/modules/ROCmPlus-AI/cupy`
+
 Modulefile content:
 ```bash
 whatis("HIP version of cuPY or hipPY")
@@ -431,7 +462,9 @@ prepend_path("PYTHONPATH","/opt/rocmplus-6.1.0/cupy")
 ```
 
 Module name: `pytorch/2.2`
+
 Modulefile location: `/etc/lmod/modules/ROCmPlus-AI/pytorch`
+
 Modulefile content:
 ```bash
 whatis("HIP version of pytorch")
@@ -440,7 +473,9 @@ prepend_path("PYTHONPATH","/opt/rocmplus-6.1.0/pytorch/lib/python3.10/site-packa
 ```
 
 Module name: `Core/lmod/6.6`
+
 Modulefile location: `/usr/share/lmod/lmod/modulefiles/Core/lmod`
+
 Modulefile content:
 ```bash
 -- -*- lua -*-
@@ -449,7 +484,9 @@ prepend_path('PATH','/usr/share/lmod/lmod/libexec')
 ```
 
 Module name: `Core/settarg/6.6`
+
 Modulefile location: `/usr/share/lmod/lmod/modulefiles/Core/settarg`
+
 Modulefile content:
 ```bash
 local base        = "/usr/share/lmod/lmod/settarg"
@@ -546,13 +583,13 @@ curl -fsSL https://install.julialang.org | sh
 exit
 ```
 
-Then, update your bashrc:
+Then, update your `.bashrc`:
 
 ```bash
 source ~/.bashrc
 ```
 
-To see what version of Julia can be installed do:
+To see what versions of `Julia` can be installed do:
 
 ```bash
 juliaup list
@@ -564,8 +601,9 @@ Once you selected the version you want (let's assume it's 1.10), you can install
 juliaup add 1.10
 ```
 
-Julia will be installed in `$HOME/.julia/juliaup/julia-1.10.3+0.x64.linux.gnu`. 
-Next, `cd` into `/etc/lmod/modules` and create a folder for Julia:
+The package will be installed in `$HOME/.julia/juliaup/julia-1.10.3+0.x64.linux.gnu`. 
+
+Next, `cd` into `/etc/lmod/modules` and create a folder for `Julia`:
 
 ```bash
 sudo mkdir Julia
