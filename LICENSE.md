@@ -10,12 +10,21 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 This file pulls in the following packages subject to the licenses identified below: 
-| Package, Version(s)      | License                                |            URL                                                 |
-|--------------------------|----------------------------------------|----------------------------------------------------------------|
-| clang, base 14 15        | Apache 2.0 License with LLVM exception | http://archive.ubuntu.com/ubuntu jammy/universe amd64 Packages |
-| gcc, base 11 12 13       | GNU General Public License             | http://archive.ubuntu.com/ubuntu jammy/main amd64 Packages     |
-| miniconda3, 23.11.0      | 3-clause BSD license                   | https://repo.anaconda.com/miniconda/                           |
-| amdclang, 17.0-6.1.0     | Apache 2.0 License                     | https://github.com/ROCm/aomp/                                  |
-| hipfort, 6.1.0           | MITx11  License                        | https://repo.radeon.com/amdgpu-install/                        |
-| rocm, 6.1.0              | MIT  License                           | https://repo.radeon.com/amdgpu-install/                        |
+| Package, Version(s)      | License                                            |            URL                                                 |
+|--------------------------|----------------------------------------------------|----------------------------------------------------------------|
+| clang, base 14 15        | Apache 2.0 License with LLVM exception             | http://archive.ubuntu.com/ubuntu jammy/universe amd64 Packages |
+| gcc, base 11 12 13       | GNU General Public License             		| http://archive.ubuntu.com/ubuntu jammy/main amd64 Packages     |
+| miniconda3, 23.11.0      | 3-clause BSD license                               | https://repo.anaconda.com/miniconda/                           |
+| amdclang, 17.0-6.1.0     | Apache 2.0 License                    	        | https://github.com/ROCm/aomp/                                  |
+| hipfort, 6.1.0           | MITx11 License                     	        | https://repo.radeon.com/amdgpu-install/                        |
+| opencl, 6.1.0            | MIT License                         	        | https://repo.radeon.com/amdgpu-install/                        |
+| rocm, 6.1.0              | MIT License                                        | https://repo.radeon.com/amdgpu-install/                        |
+| mvapich2, 2.3.7          | BSD License                                        | http://mvapich.cse.ohio-state.edu/download/mvapich/gdr         |
+| openmpi, 5.0.3           | 3-clause BSD license                               | https://download.open-mpi.org/release/open-mpi/v5.0/           |
+| omniperf, 2.0.0          | MIT License                                        | https://github.com/AMDResearch/omniperf/releases/download      |
+| omnitrace, 1.11.2        | MIT License                                        | https://github.com/AMDResearch/omnitrace/releases/download     |
+| cupy, 13.0.0b1           | MIT License 		                        | https://github.com/ROCm/cupy                                   |
+| pytorch, 2.2             | https://github.com/ROCm/pytorch/blob/main/LICENSE  | https://github.com/ROCm/pytorch				 |
+| lmod, 6.6                | MIT License					| http://archive.ubuntu.com/ubuntu jammy/universe amd64 Packages |
 
+ 
