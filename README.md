@@ -145,7 +145,11 @@ The container comes with a variety of modules installed, which their necessary d
    Core/lmod/6.6    Core/settarg/6.6
 ```
 
-In the above display, (D) stands for "default". The modules are searched in the `MODULEPATH` environment variable, which is set during the images creation. Below, we report details on most of the modules displayed above. 
+In the above display, (D) stands for "default". The modules are searched in the `MODULEPATH` environment variable, which is set during the images creation. Below, we report details on most of the modules displayed above. Note that the same information reported here can be displayed by using the command:
+```bash
+module show <module>
+``` 
+where `<module>` is the module you want to inspect.
 
 Module name: `clang/base`
 
