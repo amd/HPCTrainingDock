@@ -126,7 +126,8 @@ RUN  chmod u+x /tmp/mvapich2_setup.sh  \
 # add slurm 
 #
 # Adding render group early to avoid something else grabbing it and causing problems for slurm
-RUN groupadd render -g 110
+RUN groupadd render -g 109
+RUN groupadd renderalt -g 110
 
     # these are for slurm   :  libpmi2-0-dev 
 RUN  apt-get update -y \
