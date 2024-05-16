@@ -4,8 +4,9 @@ is tested on Radeon 6800XT graphics card and MI200 series and MI300A data center
 
 ## Training Docker Container Build Steps
 
-These instructions will setup a container on `localhost` and assume that Docker is installed, your userid is part of the Docker group and you can issue Docker commands without `sudo`. 
-[comment]: <> If you need to use `sudo`, you will need to modify the command below to look for Docker images that start with ***root*** instead of a userid (such as amdtrain).
+These instructions will setup a container on `localhost` and assume that Docker is installed, your userid is part of the Docker group and you can issue Docker commands without `sudo`.
+ 
+[//]: # If you need to use `sudo`, you will need to modify the command below to look for Docker images that start with ***root*** instead of a userid (such as amdtrain).
 
 ### 1.  Building the Four Images of the Container 
 This container is set up to use Ubuntu 22.04 as OS, and will build four different images called `rocm`, `omnitrace`,  `omniperf` and `training`. 
