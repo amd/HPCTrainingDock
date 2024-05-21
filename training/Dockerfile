@@ -221,7 +221,7 @@ RUN  chmod a+x /users/default/.bashrc && chmod a+x /users/default/setTmpDir.sh
 RUN useradd --create-home --skel /users/default --shell /bin/bash --home /users/${ADMIN_USERNAME} --password ${ADMIN_PASSWORD} --uid 11000 ${ADMIN_USERNAME}
 RUN  echo "${ADMIN_USERNAME}:${ADMIN_PASSWORD}" | chpasswd
 # add groups for access to the GPU (see /dev/dri /dev/kfd)
-RUN usermod -a -G audio,video,render renderalt ${ADMIN_USERNAME} \
+RUN usermod -a -G audio,video,render,renderalt ${ADMIN_USERNAME} \
     && usermod -a -G sudo  ${ADMIN_USERNAME}
 
 
