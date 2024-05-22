@@ -20,9 +20,6 @@ ARG DISTRO
 ARG DISTRO_VERSION
 ARG EXTRA_PACKAGES=""
 ARG ROCM_VERSION="0.0"
-ARG ROCM_REPO_DIST="jammy"
-ARG AMDGPU_INSTALL_VERSION
-ARG AMDGPU_ROCM_VERSION
 ARG AMDGPU_GFXMODEL=gfx90a
 ARG PYTHON_VERSIONS="9 10 11"
 ENV PATH ${HOME}/.local/bin:${PATH}
@@ -43,25 +40,6 @@ RUN apt-get update && \
 
 RUN localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
 
-#RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
-#        if [ -d /etc/apt/trusted.gpg.d ]; then \
-#            wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor > /etc/apt/trusted.gpg.d/rocm.gpg; \
-#        else \
-#            wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -; \
-#        fi && \
-#        echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${ROCM_REPO_VERSION}/ ${ROCM_REPO_DIST} main" | tee /etc/apt/sources.list.d/rocm.list && \
-#        apt-get update && \
-#        apt-get dist-upgrade -y && \
-#        apt-get install -y hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev && \
-#        apt-get install -y hip-base hip-runtime-amd hip-dev && \
-#        apt-get install -y rocm-llvm rocm-core rocm-smi-lib rocm-device-libs && \
-#        apt-get install -y roctracer-dev rocprofiler-dev rccl-dev ${EXTRA_PACKAGES} && \
-#        apt-get install -y rocfft  hipfft  rocm-libs rocsolver rocblas && \ 
-#        apt-get install -y rocminfo rocm-bandwidth-test  && \ 
-#        if [ "$(echo ${ROCM_VERSION} | awk -F '.' '{print $1}')" -lt "5" ]; then apt-get install -y rocm-dev; fi && \
-#        apt-get autoclean; \
-#    fi
-
 WORKDIR /tmp
 
 # Install needed dependencies -- tcl and lmod
@@ -71,14 +49,9 @@ RUN  apt-get install -y tcl tcl-dev \
      ln -s /usr/share/lmod/6.6/init/profile /etc/profile.d/z00_lmod.sh &&  ln -s /usr/share/lmod/6.6/init/cshrc /etc/profile.d/z00_lmod.csh
 
 COPY rocm/sources/scripts/rocm_setup.sh /tmp/rocm_setup.sh
-RUN sed -i -e "s/AMDGPU_ROCM_VERSION/${AMDGPU_ROCM_VERSION}/g" \
-           -e "s/ROCM_REPO_DIST/${ROCM_REPO_DIST}/g" \
-           -e "s/AMDGPU_INSTALL_VERSION/${AMDGPU_INSTALL_VERSION}/g" \
-           -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" \
-         /tmp/rocm_setup.sh && echo /tmp/rocm_setup.sh
 
 RUN  chmod u+x /tmp/rocm_setup.sh  \
-     && /tmp/rocm_setup.sh \
+     && /tmp/rocm_setup.sh --rocm-version ${ROCM_VERSION} --distro ${DISTRO} --distro-version ${DISTRO_VERSION} \
      && rm /tmp/rocm_setup.sh
 
 COPY rocm/sources/lua/bash.bashrc /tmp/bash.bashrc
@@ -116,10 +89,9 @@ RUN  chmod u+x /tmp/openmpi_setup.sh  \
 #
 
 COPY rocm/sources/scripts/mvapich2_setup.sh /tmp/mvapich2_setup.sh
-RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" /tmp/mvapich2_setup.sh
 
 RUN  chmod u+x /tmp/mvapich2_setup.sh  \
-     && /tmp/mvapich2_setup.sh \
+     && /tmp/mvapich2_setup.sh --rocm-version ${ROCM_VERSION} \
      && rm /tmp/mvapich2_setup.sh
 
 # 

@@ -2,8 +2,6 @@
 
 : ${DOCKER_USER:=$(whoami)}
 : ${ROCM_VERSIONS:="5.0"}
-: ${DISTRO:=ubuntu}
-: ${DISTRO_VERSIONS:=20.04}
 : ${PYTHON_VERSIONS:="8 9 10 11"}
 : ${BUILD_CI:=""}
 : ${PUSH:=0}
@@ -25,6 +23,9 @@
 : ${AMDGPU_GFXMODEL:=""}
 
 set -e
+
+DISTRO=`lsb_release -i | cut -f2 | tr '[:upper:]' '[:lower:]'`
+DISTRO_VERSIONS=`lsb_release -r | cut -f2`
 
 tolower()
 {
@@ -107,155 +108,6 @@ reset-last()
 {
     last() { send-error "Unsupported argument :: ${1}"; }
 }
-
-version-set()
-{
-        VERSION_MAJOR=$(echo ${DISTRO_VERSION} | sed 's/\./ /g' | awk '{print $1}')
-        VERSION_MINOR=$(echo ${DISTRO_VERSION} | sed 's/\./ /g' | awk '{print $2}')
-        VERSION_PATCH=$(echo ${DISTRO_VERSION} | sed 's/\./ /g' | awk '{print $3}')
-
-        ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
-        ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
-        ROCM_PATCH=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $3}')
-        if [ -n "${ROCM_PATCH}" ]; then
-            ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100)+(${ROCM_PATCH}) ))
-            ROCM_SEP="."
-        else
-            ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
-            ROCM_SEP=""
-        fi
-
-        if [ "x${ROCM_PATCH}" == "x" ]; then
-           AMDGPU_INSTALL_VERSION=${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_MAJOR}0${ROCM_MINOR}00-1
-           AMDGPU_ROCM_VERSION=${ROCM_MAJOR}.${ROCM_MINOR}
-	elif [ "${ROCM_PATCH}" == "0" ]; then
-           AMDGPU_INSTALL_VERSION=${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_MAJOR}0${ROCM_MINOR}0${ROCM_PATCH}-1
-           AMDGPU_ROCM_VERSION=${ROCM_MAJOR}.${ROCM_MINOR}
-	else
-           AMDGPU_INSTALL_VERSION=${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_MAJOR}0${ROCM_MINOR}0${ROCM_PATCH}-1
-           AMDGPU_ROCM_VERSION=${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_PATCH}
-	fi
-}
-
-ubuntu-set()
-{
-            ROCM_REPO_DIST="ubuntu"
-            case "${ROCM_VERSION}" in
-                4.1* | 4.0*)
-                    ROCM_REPO_DIST="xenial"
-                    ;;
-                5.3* | 5.4* | 5.5* | 5.6* | 5.7*)
-                    case "${DISTRO_VERSION}" in
-                        22.04)
-                            ROCM_REPO_DIST="jammy"
-                            ;;
-                        20.04)
-                            ROCM_REPO_DIST="focal"
-                            ;;
-                        18.04)
-                            ROCM_REPO_DIST="bionic"
-                            ;;
-                        *)
-                            ;;
-                    esac
-                    ;;
-                6.0* | 6.1*)
-                    case "${DISTRO_VERSION}" in
-                        22.04)
-                            ROCM_REPO_DIST="jammy"
-                            ;;
-                        20.04)
-                            ROCM_REPO_DIST="focal"
-                            ;;
-                        *)
-                            ;;
-                    esac
-                    ;;
-                *)
-                    ;;
-            esac
-}
-
-rhel-set()
-{
-            if [ -z "${VERSION_MINOR}" ]; then
-                send-error "Please provide a major and minor version of the OS. Supported: >= 8.7, <= 9.1"
-            fi
-
-            # Components used to create the sub-URL below
-            #   set <OS-DISTRO_VERSION> in amdgpu-install/<ROCM-VERSION>/rhel/<OS-DISTRO_VERSION>
-            RPM_PATH=${VERSION_MAJOR}.${VERSION_MINOR}
-            RPM_TAG=".el${VERSION_MAJOR}"
-
-            # set the sub-URL in https://repo.radeon.com/amdgpu-install/<sub-URL>
-            case "${ROCM_VERSION}" in
-                5.4 | 5.4.*)
-                    ROCM_RPM=${ROCM_VERSION}/rhel/${RPM_PATH}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
-                    ;;
-                5.3 | 5.3.*)
-                    ROCM_RPM=${ROCM_VERSION}/rhel/${RPM_PATH}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
-                    ;;
-                5.2 | 5.2.* | 5.1 | 5.1.* | 5.0 | 5.0.* | 4.*)
-                    send-error "Invalid ROCm version ${ROCM_VERSION}. Supported: >= 5.3.0, <= 5.4.x"
-                    ;;
-                0.0)
-                    ;;
-                *)
-                    send-error "Unsupported combination :: ${DISTRO}-${DISTRO_VERSION} + ROCm ${ROCM_VERSION}"
-                    ;;
-            esac
-
-            # use Rocky Linux as a base image for RHEL builds
-            DISTRO_BASE_IMAGE=rockylinux
-
-            #verbose-build docker build . ${PULL} -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_BASE_IMAGE} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
-
-#	    ROCM_DOCKER_OPTS="${ROCM_DOCKER_OPTS} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_BASE_IMAGE} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM}"
-}
-
-opensuse-set()
-{
-            case "${DISTRO_VERSION}" in
-                15.*)
-                    DISTRO_IMAGE="opensuse/leap"
-                    echo "DISTRO_IMAGE: ${DISTRO_IMAGE}"
-                    ;;
-                *)
-                    send-error "Invalid opensuse version ${DISTRO_VERSION}. Supported: 15.x"
-                    ;;
-            esac
-            case "${ROCM_VERSION}" in
-                5.4 | 5.4.*)
-                    ROCM_RPM=${ROCM_VERSION}/sle/${DISTRO_VERSION}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm
-                    ;;
-                5.3 | 5.3.*)
-                    ROCM_RPM=${ROCM_VERSION}/sle/${DISTRO_VERSION}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm
-                    ;;
-                5.2 | 5.2.*)
-                    ROCM_RPM=22.20${ROCM_SEP}${ROCM_PATCH}/sle/${DISTRO_VERSION}/amdgpu-install-22.20.${ROCM_VERSN}-1.noarch.rpm
-                    ;;
-                5.1 | 5.1.*)
-                    ROCM_RPM=22.10${ROCM_SEP}${ROCM_PATCH}/sle/15/amdgpu-install-22.10${ROCM_SEP}${ROCM_PATCH}.${ROCM_VERSN}-1.noarch.rpm
-                    ;;
-                5.0 | 5.0.*)
-                    ROCM_RPM=21.50${ROCM_SEP}${ROCM_PATCH}/sle/15/amdgpu-install-21.50${ROCM_SEP}${ROCM_PATCH}.${ROCM_VERSN}-1.noarch.rpm
-                    ;;
-                4.5 | 4.5.*)
-                    ROCM_RPM=21.40${ROCM_SEP}${ROCM_PATCH}/sle/15/amdgpu-install-21.40${ROCM_SEP}${ROCM_PATCH}.${ROCM_VERSN}-1.noarch.rpm
-                    ;;
-                0.0)
-                    ;;
-                *)
-                    send-error "Unsupported combination :: ${DISTRO}-${DISTRO_VERSION} + ROCm ${ROCM_VERSION}"
-                ;;
-            esac
-            PERL_REPO="SLE_${VERSION_MAJOR}_SP${VERSION_MINOR}"
-	    #verbose-build docker build . ${PULL} -f rocm/${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PERL_REPO=${PERL_REPO} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
-
-#	    ROCM_DOCKER_OPTS="${ROCM_DOCKER_OPTS} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PERL_REPO=${PERL_REPO}"
-}
-
-reset-last
 
 n=0
 while [[ $# -gt 0 ]]
@@ -447,25 +299,12 @@ do
            fi
         fi
 
-	version-set
-
-        if [ "${DISTRO}" = "ubuntu" ]; then
-	    ubuntu-set
-        elif [ "${DISTRO}" = "rhel" ]; then
-	    rhel-set
-        elif [ "${DISTRO}" = "opensuse" ]; then
-	    opensuse-set
-        fi
-
 	GENERAL_DOCKER_OPTS="--build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION}"
 	if [ "x${AMDGPU_GFXMODEL}" = "x" ]; then
 	   AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 	fi
 
         verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${ROCM_DOCKER_OPTS} \
-	   --build-arg ROCM_REPO_DIST=${ROCM_REPO_DIST} \
-	   --build-arg AMDGPU_INSTALL_VERSION=${AMDGPU_INSTALL_VERSION} \
-	   --build-arg AMDGPU_ROCM_VERSION=${AMDGPU_ROCM_VERSION} \
 	   --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
 	   --tag ${DOCKER_USER}/rocm:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
 	   .
