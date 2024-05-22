@@ -43,14 +43,14 @@ COPY  omnitrace/sources/lua/miniconda3/23.11.0.lua  /etc/lmod/modules/Linux/mini
 RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g"  /etc/lmod/modules/Linux/miniconda3/23.11.0.lua
 
 COPY omnitrace/sources/scripts/omnitrace_setup.sh /tmp/omnitrace_setup.sh
-RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" \
-           -e "s/OMNITRACE_BUILD_FROM_SOURCE/${OMNITRACE_BUILD_FROM_SOURCE}/g" \
-           -e "s/DISTRO_VERSION/${DISTRO_VERSION}/g" \
-           -e "s/AMDGPU_GFXMODEL/${AMDGPU_GFXMODEL}/g" \
-           /tmp/omnitrace_setup.sh
 
 RUN chmod u+x /tmp/omnitrace_setup.sh && \
-          /tmp/omnitrace_setup.sh && rm /tmp/omnitrace_setup.sh
+          /tmp/omnitrace_setup.sh \
+            --rocm-version ${ROCM_VERSION} \
+            --distro-version ${DISTRO_VERSION} \
+            --amdgpu_gfxmode ${AMDGPU_GFXMODEL} \
+            --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE} && \
+          rm /tmp/omnitrace_setup.sh
 
 # omnitrace (omnitrace-avail) will throw this message using default values, so change default to 2
 # [omnitrace][116] /proc/sys/kernel/perf_event_paranoid has a value of 3. Disabling PAPI (requires a value <= 2)...

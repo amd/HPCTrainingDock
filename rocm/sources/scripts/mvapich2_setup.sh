@@ -1,5 +1,27 @@
 #!/bin/bash
 
+reset-last()
+{
+    last() { send-error "Unsupported argument :: ${1}"; }
+}
+
+n=0
+while [[ $# -gt 0 ]]
+do
+   case "${1}" in
+      "--rocm-version")
+          shift
+          ROCM_VERSION=${1}
+          reset-last
+          ;;
+      *)
+         last ${1}
+         ;;
+   esac
+   n=$((${n} + 1))
+   shift
+done
+
 #
 # Install mvapich
 #
