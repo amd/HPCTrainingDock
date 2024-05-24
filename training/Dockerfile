@@ -241,7 +241,7 @@ RUN chown -R ${ADMIN_USERNAME} /users/${ADMIN_USERNAME}/bin && chmod -R a-rwx /u
 RUN mkdir /Shared && chown ${ADMIN_USERNAME} /Shared && chmod 770 /Shared
 
 RUN sed --in-place=.bak \
-   '/#ADD_EXTRA_GROUPS=1/s/#ADD_EXTRA_GROUPS=1/EXTRA_GROUPS=audio video render\nADD_EXTRA_GROUPS=1\n/' \
+   '/#ADD_EXTRA_GROUPS=1/s/#ADD_EXTRA_GROUPS=1/EXTRA_GROUPS=audio video render renderalt\nADD_EXTRA_GROUPS=1\n/' \
    /etc/adduser.conf
 
 #
