@@ -48,9 +48,8 @@ WORKDIR /app
 # install OpenMPI and UCX 
 #
 
-# Grab any cache files of compiler builds
-#COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/ucx.tgz /opt/rocmplus-${ROCM_VERSION}/ucx.tgz
-#COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/openmpi.tgz /opt/rocmplus-${ROCM_VERSION}/openmpi.tgz
+# Grab any cached files of MPI builds
+COPY CacheFiles/* /opt/rocmplus-${ROCM_VERSION}/
 
 COPY rocm/sources/scripts/openmpi_setup.sh /tmp/openmpi_setup.sh
 
@@ -73,22 +72,17 @@ RUN  /tmp/mvapich2_setup.sh --rocm-version ${ROCM_VERSION} && \
 RUN groupadd render -g 109
 RUN groupadd renderalt -g 110
 
-    # these are for slurm   :  libpmi2-0-dev 
-RUN  apt-get update -y \
-     && apt-cache search libpmi* \
-     && apt-get install -y libpmi2-0-dev \
-     && apt-get  install -y slurmd slurmctld
+#
+# Install Slurm
+#
 
-RUN apt-get -q clean && sudo rm -rf /var/lib/apt/lists/*
+COPY rocm/sources/scripts/slurm_setup.sh /tmp/slurm_setup.sh
 
-COPY rocm/sources/slurm/slurm_${AMDGPU_GFXMODEL}.conf /etc/slurm/slurm.conf
-COPY rocm/sources/slurm/gres_${AMDGPU_GFXMODEL}.conf /etc/slurm/gres.conf
+COPY rocm/sources/slurm/slurm_${AMDGPU_GFXMODEL}.conf /tmp/slurm.conf
+COPY rocm/sources/slurm/gres_${AMDGPU_GFXMODEL}.conf /tmp/gres.conf
 
-RUN chown slurm /etc/slurm/slurm.conf \
-    && chgrp slurm /etc/slurm/slurm.conf  \
-    && chmod 777 /etc/slurm
-
-RUN echo "OPTIONS=\"--force --key-file /etc/munge/munge.key --num-threads 10\"" > /etc/default/munge
+RUN  /tmp/slurm_setup.sh --amdgpu_gfxmodel ${AMDGPU_GFXMODEL} && \
+     rm /tmp/slurm_setup.sh
 
 ENV LC_ALL C.UTF-8
 

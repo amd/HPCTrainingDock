@@ -90,6 +90,7 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "1" ] ; then
    cmake --build omnitrace-build --target all --parallel 16
    cmake --build omnitrace-build --target install
    PATH=${SAVE_PATH}
+   rm -rf omnitrace-source
 fi
 
 # In either case, create a module file for Omnitrace

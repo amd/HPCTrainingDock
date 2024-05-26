@@ -7,12 +7,13 @@
 : ${PUSH:=0}
 : ${PULL:=--pull}
 : ${OUTPUT_VERBOSITY:=""}
+: ${BUILD_OPENMPI:="1"}
 : ${BUILD_AOMP_LATEST:="0"}
 : ${BUILD_LLVM_LATEST:="0"}
 : ${BUILD_GCC_LATEST:="0"}
 : ${BUILD_OG_LATEST:="0"}
 : ${BUILD_CLACC_LATEST:="0"}
-: ${BUILD_PYTORCH_LATEST:="0"}
+: ${BUILD_PYTORCH:="0"}
 : ${BUILD_ALL_LATEST:="0"}
 : ${RETRY:=3}
 : ${NO_CACHE:=""}
@@ -21,11 +22,6 @@
 : ${ADMIN_PASSWORD:=""}
 : ${USE_CACHED_APPS:=0}
 : ${AMDGPU_GFXMODEL:=""}
-
-set -e
-
-DISTRO=`lsb_release -i | cut -f2 | tr '[:upper:]' '[:lower:]'`
-DISTRO_VERSIONS=`lsb_release -r | cut -f2`
 
 tolower()
 {
@@ -109,6 +105,13 @@ reset-last()
     last() { send-error "Unsupported argument :: ${1}"; }
 }
 
+set -e
+
+DISTRO=`lsb_release -i | cut -f2 | tr '[:upper:]' '[:lower:]'`
+DISTRO_VERSIONS=`lsb_release -r | cut -f2`
+
+AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+
 n=0
 while [[ $# -gt 0 ]]
 do
@@ -182,6 +185,10 @@ do
             RETRY=${1}
             reset-last
             ;;
+        "--build-openmpi")
+            BUILD_OPENMPI="1"
+            reset-last
+            ;;
         "--build-aomp-latest")
             BUILD_AOMP_LATEST="1"
             reset-last
@@ -202,18 +209,19 @@ do
             BUILD_CLACC_LATEST="1"
             reset-last
             ;;
-        "--build-pytorch-latest")
-            BUILD_PYTORCH_LATEST="1"
+        "--build-pytorch")
+            BUILD_PYTORCH="1"
             reset-last
             ;;
         "--build-all-latest")
+            BUILD_OPENMPI="1"
             BUILD_ALL_LATEST="1"
             BUILD_AOMP_LATEST="1"
             #BUILD_LLVM_LATEST="1"
             BUILD_GCC_LATEST="1"
             #BUILD_OG_LATEST="1"
             #BUILD_CLACC_LATEST="1"
-            BUILD_PYTORCH_LATEST="1"
+            BUILD_PYTORCH="1"
             reset-last
             ;;
         "--use-cached-apps")
@@ -254,87 +262,96 @@ TRAINING_DOCKER_OPTS="${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build
 
 TRAINING_DOCKER_OPTS="${TRAINING_DOCKER_OPTS} -f training/Dockerfile.mod"
 
-for DISTRO_VERSION in ${DISTRO_VERSIONS}
+for ROCM_VERSION in ${ROCM_VERSIONS}
 do
-    for ROCM_VERSION in ${ROCM_VERSIONS}
-    do
-        cp rocm/Dockerfile.ubuntu rocm/Dockerfile.ubuntu.mod
-        if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/ucx.tgz ]; then
-           sed -i -e "/ucx.tgz/s/^#//" rocm/Dockerfile.ubuntu.mod
-        fi
-        if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/openmpi.tgz ]; then
-           sed -i -e "/openmpi.tgz/s/^#//" rocm/Dockerfile.ubuntu.mod
-        fi
+    if [ -d CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/ ]; then
+       USE_CACHED_APPS=1
+    fi
 
-        cp training/Dockerfile training/Dockerfile.mod
-        if [ "${BUILD_GCC_LATEST}" = "1" ]; then
-           if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/gcc-13.2.0.tgz ]; then
-              sed -i -e "/gcc-13.2.0.tgz/s/^#//" training/Dockerfile.mod
-           fi
-        fi
-        if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
-           if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/aomp_19.0-0.tgz ]; then
-              sed -i -e "/aomp_19.0-0.tgz/s/^#//" training/Dockerfile.mod
-           fi
-        fi
-        if [ "${BUILD_LLVM_LATEST}" = "1" ]; then
-           if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/llvm-latest.tgz ]; then
-              sed -i -e "/llvm-latest.tgz/s/^#//" training/Dockerfile.mod
-           fi
-        fi
-        if [ "${BUILD_CLACC_LATEST}" = "1" ]; then
-           if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/clacc_clang.tgz ]; then
-              sed -i -e "/clacc_clang.tgz/s/^#//" training/Dockerfile.mod
-           fi
-        fi
-        if [ "${BUILD_OG_LATEST}" = "1" ]; then
-           if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/og13.tgz ]; then
-              sed -i -e "/og13.tgz/s/^#//" training/Dockerfile.mod
-              sed -i -e "/og13module.tgz/s/^#//" training/Dockerfile.mod
-           fi
-        fi
-        if [ "${BUILD_PYTORCH_LATEST}" = "1" ]; then
-           if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/pytorch.tgz ]; then
-              sed -i -e "/pytorch.tgz/s/^#//" training/Dockerfile.mod
-           fi
-        fi
+    cp rocm/Dockerfile.ubuntu rocm/Dockerfile.ubuntu.mod
+#   if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/ucx.tgz ]; then
+#      sed -i -e "/ucx.tgz/s/^#//" rocm/Dockerfile.ubuntu.mod
+#   fi
+#   if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/openmpi.tgz ]; then
+#      sed -i -e "/openmpi.tgz/s/^#//" rocm/Dockerfile.ubuntu.mod
+#   fi
 
-	GENERAL_DOCKER_OPTS="--build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION}"
-	if [ "x${AMDGPU_GFXMODEL}" = "x" ]; then
-	   AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-	fi
+    cp training/Dockerfile training/Dockerfile.mod
+    if [ "${BUILD_GCC_LATEST}" = "1" ]; then
+       if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/gcc-13.2.0.tgz ]; then
+          sed -i -e "/gcc-13.2.0.tgz/s/^#//" training/Dockerfile.mod
+       fi
+    fi
+    if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
+       if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/aomp_19.0-0.tgz ]; then
+          sed -i -e "/aomp_19.0-0.tgz/s/^#//" training/Dockerfile.mod
+       fi
+    fi
+    if [ "${BUILD_LLVM_LATEST}" = "1" ]; then
+       if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/llvm-latest.tgz ]; then
+          sed -i -e "/llvm-latest.tgz/s/^#//" training/Dockerfile.mod
+       fi
+    fi
+    if [ "${BUILD_CLACC_LATEST}" = "1" ]; then
+       if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/clacc_clang.tgz ]; then
+          sed -i -e "/clacc_clang.tgz/s/^#//" training/Dockerfile.mod
+       fi
+    fi
+    if [ "${BUILD_OG_LATEST}" = "1" ]; then
+       if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/og13.tgz ]; then
+          sed -i -e "/og13.tgz/s/^#//" training/Dockerfile.mod
+          sed -i -e "/og13module.tgz/s/^#//" training/Dockerfile.mod
+       fi
+    fi
+    if [ "${BUILD_PYTORCH}" = "1" ]; then
+       if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/pytorch.tgz ]; then
+          sed -i -e "/pytorch.tgz/s/^#//" training/Dockerfile.mod
+       fi
+    fi
 
-        verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${ROCM_DOCKER_OPTS} \
-	   --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
-	   --tag ${DOCKER_USER}/rocm:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
-	   .
+    GENERAL_DOCKER_OPTS="--build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION}"
 
-        verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${OMNITRACE_DOCKER_OPTS} \
-	   --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
-	   -t ${DOCKER_USER}/omnitrace:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
-	   .
+    rm -rf CacheFiles/*.tgz
+    if [ "${BUILD_OPENMPI}" = "0" ] && [ "${USE_CACHED_APPS}" = "1" ]; then
+       if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/ucx.tgz ]; then
+          ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/ucx.tgz ucx.tgz
+       fi
+       if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/openmpi.tgz ]; then
+          ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/openmpi.tgz openmpi.tgz
+       fi
+    fi
+    date > CacheFiles/timestamp
+    verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${ROCM_DOCKER_OPTS} \
+       --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
+       --tag ${DOCKER_USER}/rocm:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
+       .
+    rm -rf CacheFiles/*.tgz
 
-        verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${OMNIPERF_DOCKER_OPTS} \
-	   -t ${DOCKER_USER}/omniperf:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
-	   .
+    verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${OMNITRACE_DOCKER_OPTS} \
+       --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
+       -t ${DOCKER_USER}/omnitrace:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
+       .
 
-        verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${TRAINING_DOCKER_OPTS} \
-	   --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
-	   --build-arg BUILD_GCC_LATEST=${BUILD_GCC_LATEST} \
-	   --build-arg BUILD_AOMP_LATEST=${BUILD_AOMP_LATEST} \
-	   --build-arg BUILD_LLVM_LATEST=${BUILD_LLVM_LATEST} \
-	   --build-arg BUILD_OG_LATEST=${BUILD_OG_LATEST} \
-	   --build-arg BUILD_CLACC_LATEST=${BUILD_CLACC_LATEST} \
-	   --build-arg BUILD_PYTORCH_LATEST=${BUILD_PYTORCH_LATEST} \
-	   --build-arg USE_CACHED_APPS=${USE_CACHED_APPS} \
-	   -t ${DOCKER_USER}/training:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
-	   -t training \
-	   .
+    verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${OMNIPERF_DOCKER_OPTS} \
+       -t ${DOCKER_USER}/omniperf:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
+       .
 
-	rm -f rocm/Dockerfile.ubuntu.mod training/Dockerfile.mod
+    verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${TRAINING_DOCKER_OPTS} \
+       --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
+       --build-arg BUILD_GCC_LATEST=${BUILD_GCC_LATEST} \
+       --build-arg BUILD_AOMP_LATEST=${BUILD_AOMP_LATEST} \
+       --build-arg BUILD_LLVM_LATEST=${BUILD_LLVM_LATEST} \
+       --build-arg BUILD_OG_LATEST=${BUILD_OG_LATEST} \
+       --build-arg BUILD_CLACC_LATEST=${BUILD_CLACC_LATEST} \
+       --build-arg BUILD_PYTORCH_LATEST=${BUILD_PYTORCH_LATEST} \
+       --build-arg USE_CACHED_APPS=${USE_CACHED_APPS} \
+       -t ${DOCKER_USER}/training:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
+       -t training \
+       .
 
-        if [ "${PUSH}" -ne 0 ]; then
-            docker push ${CONTAINER}
-        fi
-    done
+    rm -f rocm/Dockerfile.ubuntu.mod training/Dockerfile.mod
+
+    if [ "${PUSH}" -ne 0 ]; then
+        docker push ${CONTAINER}
+    fi
 done

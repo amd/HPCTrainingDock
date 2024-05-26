@@ -24,11 +24,15 @@ do
    shift
 done
 
-echo "ROCM_VERSION is $ROCM_VERSION"
-
-
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
+echo ""
+echo "============================"
+echo " Installing OpenMPI with:"
+echo "ROCM_VERSION is $ROCM_VERSION"
+echo "============================"
+echo ""
 
 if [ "${DISTRO}" = "ubuntu" ]; then
    # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev 
@@ -36,17 +40,31 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    apt-get install -y libpmix-dev libhwloc-dev  libevent-dev
 fi
 
+mkdir -p /opt/rocmplus-${ROCM_VERSION}
+
 #
 # Install UCX
 #
 
 if [ -f /opt/rocmplus-${ROCM_VERSION}/ucx.tgz ]; then
+   echo ""
+   echo "============================"
+   echo " Installing Cached UCX"
+   echo "============================"
+   echo ""
+
    #install the cached version
    cd /opt/rocmplus-${ROCM_VERSION}
    tar -xzf ucx.tgz
    chown -R root:root /opt/rocmplus-${ROCM_VERSION}/ucx
    rm /opt/rocmplus-${ROCM_VERSION}/ucx.tgz
 else
+   echo ""
+   echo "============================"
+   echo " Building UCX"
+   echo "============================"
+   echo ""
+
    export OMPI_ALLOW_RUN_AS_ROOT=1
    export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
 
@@ -80,12 +98,24 @@ fi
 #
 
 if [ -f /opt/rocmplus-${ROCM_VERSION}/openmpi.tgz ]; then
+   echo ""
+   echo "============================"
+   echo " Installing Cached OpenMPI"
+   echo "============================"
+   echo ""
+
    #install the cached version
    cd /opt/rocmplus-${ROCM_VERSION}
    tar -xzf openmpi.tgz
    chown -R root:root /opt/rocmplus-${ROCM_VERSION}/openmpi
    rm /opt/rocmplus-${ROCM_VERSION}/openmpi.tgz
 else
+   echo ""
+   echo "============================"
+   echo " Building OpenMPI"
+   echo "============================"
+   echo ""
+
    # no cached version, so build it
 
    export OMPI_ALLOW_RUN_AS_ROOT=1
