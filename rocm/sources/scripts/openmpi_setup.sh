@@ -40,6 +40,11 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    apt-get install -y libpmix-dev libhwloc-dev  libevent-dev
 fi
 
+# omnitrace (omnitrace-avail) will throw this message using default values, so change default to 2
+# [omnitrace][116] /proc/sys/kernel/perf_event_paranoid has a value of 3. Disabling PAPI (requires a value <= 2)...
+# [omnitrace][116] In order to enable PAPI support, run 'echo N | sudo tee /proc/sys/kernel/perf_event_paranoid' where                   N is <= 2
+if (( `cat /proc/sys/kernel/perf_event_paranoid` > 0 )); then echo "Please do:  echo 0  | sudo tee /proc/sys/kernel/perf_event_paranoid"; fi
+
 mkdir -p /opt/rocmplus-${ROCM_VERSION}
 
 #

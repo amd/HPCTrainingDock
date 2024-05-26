@@ -246,13 +246,7 @@ if [ "x${ADMIN_PASSWORD}" == "x" ] ; then
 	exit;
 fi
 
-DOCKER_FILE="Dockerfile.${DISTRO}"
-
-if [ -n "${BUILD_CI}" ]; then DOCKER_FILE="${DOCKER_FILE}.ci"; fi
-#if [ ! -f ${DOCKER_FILE} ]; then cd docker; fi
-if [ ! -f rocm/${DOCKER_FILE} ]; then send-error "File \"${DOCKER_FILE}\" not found"; fi
-
-ROCM_DOCKER_OPTS="${PULL} -f rocm/${DOCKER_FILE}.mod ${NO_CACHE} --build-arg DISTRO=${DISTRO}"
+ROCM_DOCKER_OPTS="${PULL} -f rocm/Dockerfile ${NO_CACHE} --build-arg DISTRO=${DISTRO}"
 
 OMNITRACE_DOCKER_OPTS="-f omnitrace/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg OMNITRACE_BUILD_FROM_SOURCE=\"${OMNITRACE_BUILD_FROM_SOURCE}\" --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\""
 
@@ -267,14 +261,6 @@ do
     if [ -d CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/ ]; then
        USE_CACHED_APPS=1
     fi
-
-    cp rocm/Dockerfile.ubuntu rocm/Dockerfile.ubuntu.mod
-#   if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/ucx.tgz ]; then
-#      sed -i -e "/ucx.tgz/s/^#//" rocm/Dockerfile.ubuntu.mod
-#   fi
-#   if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/openmpi.tgz ]; then
-#      sed -i -e "/openmpi.tgz/s/^#//" rocm/Dockerfile.ubuntu.mod
-#   fi
 
     cp training/Dockerfile training/Dockerfile.mod
     if [ "${BUILD_GCC_LATEST}" = "1" ]; then
@@ -309,7 +295,7 @@ do
        fi
     fi
 
-    GENERAL_DOCKER_OPTS="--build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION}"
+    GENERAL_DOCKER_OPTS="--build-arg DISTRO=${DISTRO} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION}"
 
     rm -rf CacheFiles/*.tgz
     if [ "${BUILD_OPENMPI}" = "0" ] && [ "${USE_CACHED_APPS}" = "1" ]; then
@@ -349,7 +335,7 @@ do
        -t training \
        .
 
-    rm -f rocm/Dockerfile.ubuntu.mod training/Dockerfile.mod
+    rm -f training/Dockerfile.mod
 
     if [ "${PUSH}" -ne 0 ]; then
         docker push ${CONTAINER}

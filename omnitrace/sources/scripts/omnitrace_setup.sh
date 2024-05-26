@@ -5,6 +5,12 @@ reset-last()
     last() { send-error "Unsupported argument :: ${1}"; }
 }
 
+
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
+AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+
 reset-last
 
 n=0
@@ -14,11 +20,6 @@ do
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
-          reset-last
-          ;;
-      "--distro-version")
-          shift
-          DISTRO_VERSION=${1}
           reset-last
           ;;
       "--amdgpu_gfxmodel")
@@ -38,6 +39,14 @@ do
    n=$((${n} + 1))
    shift
 done
+
+echo ""
+echo "============================"
+echo " Installing Omnitrace with:"
+echo "ROCM_VERSION is $ROCM_VERSION"
+echo "AMDGPU_GFXMODEL is $AMDGPU_GFXMODEL"
+echo "============================"
+echo ""
 
 if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "0" ] ; then
    if  wget -q https://github.com/AMDResearch/omnitrace/releases/download/v1.11.1/omnitrace-install.py && \

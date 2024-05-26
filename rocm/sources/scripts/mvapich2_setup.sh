@@ -22,6 +22,14 @@ do
    shift
 done
 
+
+echo ""
+echo "============================"
+echo " Installing MVAPICH with:"
+echo "ROCM_VERSION is $ROCM_VERSION"
+echo "============================"
+echo ""
+
 #
 # Install mvapich
 #
