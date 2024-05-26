@@ -26,6 +26,16 @@ done
 
 echo "ROCM_VERSION is $ROCM_VERSION"
 
+
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
+if [ "${DISTRO}" = "ubuntu" ]; then
+   # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev 
+   apt-get update && \
+   apt-get install -y libpmix-dev libhwloc-dev  libevent-dev
+fi
+
 #
 # Install UCX
 #

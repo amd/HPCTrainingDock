@@ -3,7 +3,7 @@ ARG DISTRO
 ARG DISTRO_VERSION
 FROM ${DISTRO}:${DISTRO_VERSION}
 
-LABEL maintainer="david.doscher@amd.com"
+LABEL maintainer="bob.robey@amd.com"
 
 ENV HOME /root
 ENV LANG en_US.UTF-8
@@ -18,41 +18,19 @@ SHELL [ "/bin/bash", "-c" ]
 
 ARG DISTRO
 ARG DISTRO_VERSION
-ARG EXTRA_PACKAGES=""
 ARG ROCM_VERSION="0.0"
 ARG AMDGPU_GFXMODEL=gfx90a
-ARG PYTHON_VERSIONS="9 10 11"
 ENV PATH ${HOME}/.local/bin:${PATH}
 
-RUN chown -Rv _apt:root /var/cache/apt/archives/partial/
-RUN chmod -Rv 700 /var/cache/apt/archives/partial/
+COPY rocm/sources/scripts/baseospackages_setup.sh /tmp/baseospackages_setup.sh
 
-# Python3-dev and python3-venv are for AI/ML
-# Make sure we have a default compiler for the system -- gcc, g++, gfortran
-RUN apt-get update && \
-    apt-get dist-upgrade -y && \
-    apt-get install -y build-essential cmake libnuma1 wget gnupg2 m4 bash-completion git-core autoconf libtool autotools-dev \
-       python3-pip lsb-release libpapi-dev libpfm4-dev libudev1 rpm librpm-dev curl apt-utils vim tmux rsync sudo \
-       bison flex texinfo  libnuma-dev pkg-config  libibverbs-dev  rdmacm-utils ssh locales \
-       python3-dev python3-venv \
-       gcc g++ gfortran && \
-    python3 -m pip install 'cmake==3.28.3'
-
-RUN localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
-
-WORKDIR /tmp
-
-# Install needed dependencies -- tcl and lmod
-RUN  apt-get install -y tcl tcl-dev \
-     lmod && \
-     sed -i -e '1,$s!/etc/lmod/modules!/etc/lmod/modules/Linux\n/etc/lmod/modules/ROCm\n/etc/lmod/modules/ROCmPlus\n/etc/lmod/modules/ROCmPlus-MPI\n/etc/lmod/modules/ROCmPlus-AMDResearchTools\n/etc/lmod/modules/ROCmPlus-LatestCompilers\n//etc/lmod/modules/ROCmPlus-AI!' /etc/lmod/modulespath && \
-     ln -s /usr/share/lmod/6.6/init/profile /etc/profile.d/z00_lmod.sh &&  ln -s /usr/share/lmod/6.6/init/cshrc /etc/profile.d/z00_lmod.csh
+RUN  /tmp/baseospackages_setup.sh && \
+     rm /tmp/baseospackages_setup.sh
 
 COPY rocm/sources/scripts/rocm_setup.sh /tmp/rocm_setup.sh
 
-RUN  chmod u+x /tmp/rocm_setup.sh  \
-     && /tmp/rocm_setup.sh --rocm-version ${ROCM_VERSION} --distro ${DISTRO} --distro-version ${DISTRO_VERSION} \
-     && rm /tmp/rocm_setup.sh
+RUN  /tmp/rocm_setup.sh --rocm-version ${ROCM_VERSION} && \
+     rm /tmp/rocm_setup.sh
 
 COPY rocm/sources/lua/bash.bashrc /tmp/bash.bashrc
 RUN cat /tmp/bash.bashrc >> /etc/bash.bashrc && rm -f /tmp/bash.bashrc
@@ -63,10 +41,6 @@ RUN cat /tmp/bash.bashrc >> /etc/bash.bashrc && rm -f /tmp/bash.bashrc
 RUN if (( `cat /proc/sys/kernel/perf_event_paranoid` > 0 )); then echo "Please do:  echo 0  | sudo tee /proc/sys/kernel/perf_event_paranoid"; fi
 
 USER root
-
-# these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev 
-RUN apt-get update && \
-    apt-get install -y libpmix-dev libhwloc-dev  libevent-dev
 
 WORKDIR /app 
 
@@ -80,9 +54,8 @@ WORKDIR /app
 
 COPY rocm/sources/scripts/openmpi_setup.sh /tmp/openmpi_setup.sh
 
-RUN  chmod u+x /tmp/openmpi_setup.sh  \
-     && /tmp/openmpi_setup.sh --rocm-version ${ROCM_VERSION} \
-     && rm /tmp/openmpi_setup.sh
+RUN  /tmp/openmpi_setup.sh --rocm-version ${ROCM_VERSION} && \
+     rm /tmp/openmpi_setup.sh
 
 #
 # Install mvapich
@@ -90,9 +63,8 @@ RUN  chmod u+x /tmp/openmpi_setup.sh  \
 
 COPY rocm/sources/scripts/mvapich2_setup.sh /tmp/mvapich2_setup.sh
 
-RUN  chmod u+x /tmp/mvapich2_setup.sh  \
-     && /tmp/mvapich2_setup.sh --rocm-version ${ROCM_VERSION} \
-     && rm /tmp/mvapich2_setup.sh
+RUN  /tmp/mvapich2_setup.sh --rocm-version ${ROCM_VERSION} && \
+     rm /tmp/mvapich2_setup.sh
 
 # 
 # add slurm 

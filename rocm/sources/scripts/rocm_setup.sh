@@ -1,8 +1,6 @@
 #!/bin/bash
 
 : ${ROCM_VERSION:="6.0"}
-: ${DISTRO:="ubuntu"}
-: ${DISTRO_VERSION:="22.04"}
 
 version-set()
 {
@@ -162,23 +160,15 @@ opensuse-set()
 #  ROCM_DOCKER_OPTS="${ROCM_DOCKER_OPTS} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PERL_REPO=${PERL_REPO}"
 }
 
-reset-last()
-{
-    last() { send-error "Unsupported argument :: ${1}"; }
-}
-
-
 ROCM_REPO_DIST=`lsb_release -c | cut -f2`
-DISTRO=`lsb_release -i | cut -f2`
-DISTRO_VERSION=`lsb_release -r | cut -f2`
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 #echo "After autodetection"
 #echo "ROCM_REPO_DIST is $ROCM_REPO_DIST" 
 #echo "DISTRO is $DISTRO" 
 #echo "DISTRO_VERSION is $DISTRO_VERSION" 
 #echo ""
-
-reset-last
 
 n=0
 while [[ $# -gt 0 ]]
@@ -187,17 +177,6 @@ do
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
-          reset-last
-          ;;
-      "--distro")
-          shift
-          DISTRO_OVERRIDE=${1}
-          reset-last
-          ;;
-      "--distro-version")
-          shift
-          DISTRO_VERSION_OVERRIDE=${1}
-          reset-last
           ;;
       *)
          last ${1}
@@ -206,22 +185,6 @@ do
    n=$((${n} + 1))
    shift
 done
-
-OVERRIDE="0"
-if [ -z "$DISTRO_OVERRIDE}" ]; then
-   DISTRO=$DISTRO_OVERRIDE
-   OVERRIDE="1"
-fi
-
-if [ -z "$DISTRO_VERSION_OVERRIDE}" ]; then
-   DISTRO_VERSION=$DISTRO_VERSION_OVERRIDE
-   OVERRIDE="1"
-fi
-
-if [ "$OVERRIDE}" = "1" ]; then
-   # Only need to do this if the distro or version is overridden
-   rocm-repo-dist-set
-fi
 
 #echo "After input parsing"
 #echo "DISTRO is $DISTRO" 
@@ -236,6 +199,8 @@ fi
 # AMDGPU_INSTALL_VERSION 
 version-set
 
+echo ""
+echo "=================================="
 echo "Starting ROCm Install with"
 echo "DISTRO: $DISTRO" 
 echo "DISTRO_VERSION: $DISTRO_VERSION" 
@@ -243,6 +208,8 @@ echo "ROCM_REPO_DIST: $ROCM_REPO_DIST"
 echo "ROCM_VERSION: $ROCM_VERSION" 
 echo "AMDGPU_ROCM_VERSION: $AMDGPU_ROCM_VERSION" 
 echo "AMDGPU_INSTALL_VERSION: $AMDGPU_INSTALL_VERSION" 
+echo "=================================="
+echo ""
 
 wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -
 apt-get update

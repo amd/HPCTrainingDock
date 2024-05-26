@@ -244,7 +244,7 @@ if [ -n "${BUILD_CI}" ]; then DOCKER_FILE="${DOCKER_FILE}.ci"; fi
 #if [ ! -f ${DOCKER_FILE} ]; then cd docker; fi
 if [ ! -f rocm/${DOCKER_FILE} ]; then send-error "File \"${DOCKER_FILE}\" not found"; fi
 
-ROCM_DOCKER_OPTS="${PULL} -f rocm/${DOCKER_FILE}.mod ${NO_CACHE} --build-arg DISTRO=${DISTRO} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\""
+ROCM_DOCKER_OPTS="${PULL} -f rocm/${DOCKER_FILE}.mod ${NO_CACHE} --build-arg DISTRO=${DISTRO}"
 
 OMNITRACE_DOCKER_OPTS="-f omnitrace/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg OMNITRACE_BUILD_FROM_SOURCE=\"${OMNITRACE_BUILD_FROM_SOURCE}\" --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\""
 

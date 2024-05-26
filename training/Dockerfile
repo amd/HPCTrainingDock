@@ -64,7 +64,6 @@ EXPOSE 22
 # Install our desired compilers
 #
 COPY training/sources/scripts/compiler_setup.sh /tmp/compiler_setup.sh
-RUN sed -i -e "s/ROCM_VERSION/${ROCM_VERSION}/" /tmp/compiler_setup.sh
 
 RUN  chmod u+x /tmp/compiler_setup.sh  \
      && /tmp/compiler_setup.sh \
