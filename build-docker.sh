@@ -297,6 +297,7 @@ do
 
     GENERAL_DOCKER_OPTS="--build-arg DISTRO=${DISTRO} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION}"
 
+# Building rocm docker
     rm -rf CacheFiles/*.tgz
     if [ "${BUILD_OPENMPI}" = "0" ] && [ "${USE_CACHED_APPS}" = "1" ]; then
        if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/ucx.tgz ]; then
@@ -313,15 +314,25 @@ do
        .
     rm -rf CacheFiles/*.tgz
 
+# Building omnitrace docker
+    if [ "${BUILD_OMNITRACE_FROM_SOURCE}" = "0" ] && [ "${USE_CACHED_APPS}" = "1" ]; then
+       if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/omnitrace.tgz ]; then
+          ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/omnitrace.tgz omnitrace.tgz
+       fi
+    fi
+    date > CacheFiles/timestamp
     verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${OMNITRACE_DOCKER_OPTS} \
        --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
        -t ${DOCKER_USER}/omnitrace:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        .
+    rm -rf CacheFiles/*.tgz
 
+# Building omniperf docker
     verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${OMNIPERF_DOCKER_OPTS} \
        -t ${DOCKER_USER}/omniperf:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        .
 
+# Building training docker
     verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${TRAINING_DOCKER_OPTS} \
        --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
        --build-arg BUILD_GCC_LATEST=${BUILD_GCC_LATEST} \
