@@ -4,14 +4,14 @@ echo ""
 echo "############# Compiler Setup script ################"
 echo ""
 
-sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+sudo DEBIAN_FRONTEND=noninteractive add-apt-repository -y ppa:ubuntu-toolchain-r/test
 
 #sudo apt-get -qq update && sudo apt-get -qqy install gcc-9 g++-9 gfortran-9
 #sudo apt-get -qq update && sudo apt-get -qqy install gcc-10 g++-10 gfortran-10
 # Need to install libstdc++ for aomp install and some occasional software
-sudo apt-get -qq update && sudo apt-get -qqy install libstdc++-11-dev
-sudo apt-get -qq update && sudo apt-get -qqy install gcc-12 g++-12 gfortran-12 libstdc++-12-dev
-sudo apt-get -qq update && sudo apt-get -qqy install gcc-13 g++-13 gfortran-13 libstdc++-13-dev
+sudo DEBIAN_FRONTEND=noninteractive apt-get -qq update && sudo apt-get -qqy install libstdc++-11-dev
+sudo DEBIAN_FRONTEND=noninteractive apt-get -qq update && sudo apt-get -qqy install gcc-12 g++-12 gfortran-12 libstdc++-12-dev
+sudo DEBIAN_FRONTEND=noninteractive apt-get -qq update && sudo apt-get -qqy install gcc-13 g++-13 gfortran-13 libstdc++-13-dev
 #sudo update-alternatives \
 #      --install /usr/bin/gcc      gcc      /usr/bin/gcc-9      70 \
 #      --slave   /usr/bin/g++      g++      /usr/bin/g++-9         \
@@ -41,13 +41,13 @@ sudo update-alternatives \
       --slave   /usr/bin/gcov     gcov     /usr/bin/gcov-13        \
       --slave   /usr/lib/libstdc++.so libstdc++.so /usr/lib/gcc/x86_64-linux-gnu/13/libstdc++.so
 
-sudo apt-get -qy install gcc-11-offload-amdgcn
-sudo apt-get -qy install gcc-12-offload-amdgcn
-sudo apt-get -qy install gcc-13-offload-amdgcn
+sudo DEBIAN_FRONTEND=noninteractive apt-get -qy install gcc-11-offload-amdgcn
+sudo DEBIAN_FRONTEND=noninteractive apt-get -qy install gcc-12-offload-amdgcn
+sudo DEBIAN_FRONTEND=noninteractive apt-get -qy install gcc-13-offload-amdgcn
 
-sudo apt-get -qq install clang libomp-14-dev
+sudo DEBIAN_FRONTEND=noninteractive apt-get -qq install clang libomp-14-dev
 #sudo apt-get -qq update && sudo apt-get -q install -y clang-14 libomp-14-dev
-sudo apt-get -qq update && sudo apt-get -q install -y clang-15 libomp-15-dev
+sudo DEBIAN_FRONTEND=noninteractive apt-get -qq update && sudo apt-get -q install -y clang-15 libomp-15-dev
 
 sudo update-alternatives \
       --install /usr/bin/clang     clang     /usr/bin/clang-14      70 \

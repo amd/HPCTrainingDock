@@ -25,10 +25,6 @@ echo "ROCM_VERSION is $ROCM_VERSION"
 echo "====================================="
 echo ""
 
-set -v
-
-pwd
-
 INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0
 wget -q https://github.com/AMDResearch/omniperf/releases/download/v2.0.0-RC1/omniperf-2.0.0-RC1.tar.gz && \
      tar xfz omniperf-2.0.0-RC1.tar.gz && \

@@ -1,16 +1,64 @@
 #!/bin/bash
 
-set -v
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
-if [ "BUILD_LLVM_LATEST" = "1" ]; then
-   if [ -f /opt/rocmplus-SCRIPT_ROCM_VERSION/llvm-latest.tgz ]; then
+AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+
+n=0
+while [[ $# -gt 0 ]]
+do
+   case "${1}" in
+      "--rocm-version")
+          shift
+          ROCM_VERSION=${1}
+          ;;
+      "--amdgpu-gfxmodel")
+          shift
+          AMDGPU_GFXMODEL=${1}
+          ;;
+      "--build-llvm-latest")
+          shift
+          BUILD_LLVM_LATEST=${1}
+          ;;
+      *)  
+         last ${1}
+         ;;
+   esac
+   n=$((${n} + 1))
+   shift
+done
+
+echo ""
+echo "==================================="
+echo "Starting LLVM Latest Install with"
+echo "BUILD_LLVM_LATEST: $BUILD_LLVM_LATEST" 
+echo "ROCM_VERSION: $ROCM_VERSION" 
+echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL" 
+echo "==================================="
+echo ""
+
+if [ "${BUILD_LLVM_LATEST}" = "1" ]; then
+   if [ -f /opt/rocmplus-${ROCM_VERSION}/llvm-latest.tgz ]; then
+      echo ""
+      echo "============================"
+      echo " Installing LLVM Latest"
+      echo "============================"
+      echo ""
+
       #install the cached version
-      cd /opt/rocmplus-SCRIPT_ROCM_VERSION
+      cd /opt/rocmplus-${ROCM_VERSION}
       tar -xzf llvm-latest.tgz
-      chown -R root:root /opt/rocmplus-SCRIPT_ROCM_VERSION/llvm-latest
-      rm /opt/rocmplus-SCRIPT_ROCM_VERSION/llvm-latest.tgz
+      chown -R root:root /opt/rocmplus-${ROCM_VERSION}/llvm-latest
+      rm /opt/rocmplus-${ROCM_VERSION}/llvm-latest.tgz
    else
-      INSTALL_DIR=/opt/rocmplus-SCRIPT_ROCM_VERSION/llvm-latest
+      echo ""
+      echo "============================"
+      echo " Building LLVM Latest"
+      echo "============================"
+      echo ""
+
+      INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/llvm-latest
       git clone https://github.com/llvm/llvm-project.git
       cd llvm-project
 
@@ -26,7 +74,7 @@ if [ "BUILD_LLVM_LATEST" = "1" ]; then
         -DLLVM_ENABLE_PROJECTS="clang;lld;flang" \
         -DLLVM_ENABLE_RUNTIMES="libcxxabi;libcxx;openmp" \
         -DLLVM_TARGETS_TO_BUILD="host;AMDGPU"    \
-        -DLIBOMPTARGET_AMDGCN_GFXLIST="${AMDGPU_GFX}" \
+        -DLIBOMPTARGET_AMDGCN_GFXLIST="${AMDGPU_GFXMODEL}" \
         -DLLVM_PARALLEL_COMPILE_JOBS=20          \
         -DLLVM_PARALLEL_LINK_JOBS=10             \
          ../llvm
@@ -49,7 +97,7 @@ if [ "BUILD_LLVM_LATEST" = "1" ]; then
    cat > ${MODULE_PATH}/gcc11_hipstdpar.lua <<-EOF
 	whatis("LLVM latest compiler version with stdpar patch applied")
 
-	local base = "/opt/rocmplus-SCRIPT_ROCM_VERSION/llvm-latest"
+	local base = "/opt/rocmplus-${ROCM_VERSION}/llvm-latest"
 
 	prepend_path("PATH", pathJoin(base, "bin"))
 	setenv("CC", pathJoin(base, "bin/clang"))
@@ -65,7 +113,7 @@ if [ "BUILD_LLVM_LATEST" = "1" ]; then
 	prepend_path("MANPATH", pathJoin(base, "man"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-	load("rocm/SCRIPT_ROCM_VERSION")
+	load("rocm/${ROCM_VERSION}")
 	family("compiler")
 EOF
 fi

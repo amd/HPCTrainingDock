@@ -254,7 +254,7 @@ OMNIPERF_DOCKER_OPTS="-f omniperf/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER
 
 TRAINING_DOCKER_OPTS="${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg BUILD_DATE=$(date +'%Y-%m-%dT%H:%M:%SZ') --build-arg OG_BUILD_DATE=$(date -u +'%y-%m-%d') --build-arg BUILD_VERSION=1.1 --build-arg DISTRO=${DISTRO} --build-arg ADMIN_USERNAME=${ADMIN_USERNAME} --build-arg ADMIN_PASSWORD=${ADMIN_PASSWORD}"
 
-TRAINING_DOCKER_OPTS="${TRAINING_DOCKER_OPTS} -f training/Dockerfile.mod"
+TRAINING_DOCKER_OPTS="${TRAINING_DOCKER_OPTS} -f training/Dockerfile"
 
 for ROCM_VERSION in ${ROCM_VERSIONS}
 do
@@ -262,38 +262,38 @@ do
        USE_CACHED_APPS=1
     fi
 
-    cp training/Dockerfile training/Dockerfile.mod
-    if [ "${BUILD_GCC_LATEST}" = "1" ]; then
-       if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/gcc-13.2.0.tgz ]; then
-          sed -i -e "/gcc-13.2.0.tgz/s/^#//" training/Dockerfile.mod
-       fi
-    fi
-    if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
-       if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/aomp_19.0-0.tgz ]; then
-          sed -i -e "/aomp_19.0-0.tgz/s/^#//" training/Dockerfile.mod
-       fi
-    fi
-    if [ "${BUILD_LLVM_LATEST}" = "1" ]; then
-       if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/llvm-latest.tgz ]; then
-          sed -i -e "/llvm-latest.tgz/s/^#//" training/Dockerfile.mod
-       fi
-    fi
-    if [ "${BUILD_CLACC_LATEST}" = "1" ]; then
-       if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/clacc_clang.tgz ]; then
-          sed -i -e "/clacc_clang.tgz/s/^#//" training/Dockerfile.mod
-       fi
-    fi
-    if [ "${BUILD_OG_LATEST}" = "1" ]; then
-       if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/og13.tgz ]; then
-          sed -i -e "/og13.tgz/s/^#//" training/Dockerfile.mod
-          sed -i -e "/og13module.tgz/s/^#//" training/Dockerfile.mod
-       fi
-    fi
-    if [ "${BUILD_PYTORCH}" = "1" ]; then
-       if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/pytorch.tgz ]; then
-          sed -i -e "/pytorch.tgz/s/^#//" training/Dockerfile.mod
-       fi
-    fi
+#   cp training/Dockerfile training/Dockerfile.mod
+#   if [ "${BUILD_GCC_LATEST}" = "1" ]; then
+#      if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/gcc-13.2.0.tgz ]; then
+#         sed -i -e "/gcc-13.2.0.tgz/s/^#//" training/Dockerfile.mod
+#      fi
+#   fi
+#   if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
+#      if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/aomp_19.0-0.tgz ]; then
+#         sed -i -e "/aomp_19.0-0.tgz/s/^#//" training/Dockerfile.mod
+#      fi
+#   fi
+#   if [ "${BUILD_LLVM_LATEST}" = "1" ]; then
+#      if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/llvm-latest.tgz ]; then
+#         sed -i -e "/llvm-latest.tgz/s/^#//" training/Dockerfile.mod
+#      fi
+#   fi
+#   if [ "${BUILD_CLACC_LATEST}" = "1" ]; then
+#      if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/clacc_clang.tgz ]; then
+#         sed -i -e "/clacc_clang.tgz/s/^#//" training/Dockerfile.mod
+#      fi
+#   fi
+#   if [ "${BUILD_OG_LATEST}" = "1" ]; then
+#      if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/og13.tgz ]; then
+#         sed -i -e "/og13.tgz/s/^#//" training/Dockerfile.mod
+#         sed -i -e "/og13module.tgz/s/^#//" training/Dockerfile.mod
+#      fi
+#   fi
+#   if [ "${BUILD_PYTORCH}" = "1" ]; then
+#      if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/pytorch.tgz ]; then
+#         sed -i -e "/pytorch.tgz/s/^#//" training/Dockerfile.mod
+#      fi
+#   fi
 
     GENERAL_DOCKER_OPTS="--build-arg DISTRO=${DISTRO} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION}"
 
@@ -333,6 +333,39 @@ do
        .
 
 # Building training docker
+    if [ "${USE_CACHED_APPS}" = "1" ]; then
+       if [ "${BUILD_GCC_LATEST}" = "0" ]; then
+          if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/gcc-13.2.0.tgz ]; then
+             ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/gcc-13.2.0.tgz gcc-13.2.0.tgz
+          fi
+       fi
+       if [ "${BUILD_AOMP_LATEST}" = "0" ]; then
+          if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/aomp_19.0-0.tgz ]; then
+             ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/aomp_19.0-0.tgz aomp_19.0-0.tgz
+          fi
+       fi
+       if [ "${BUILD_LLVM_LATEST}" = "0" ]; then
+          if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/llvm-latest.tgz ]; then
+             ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/llvm-latest.tgz llvm-latest.tgz
+          fi
+       fi
+       if [ "${BUILD_CLACC_LATEST}" = "0" ]; then
+          if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/clacc_clang.tgz ]; then
+             ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/clacc_clang.tgz clacc_clang.tgz
+          fi
+       fi
+       if [ "${BUILD_OG_LATEST}" = "0" ]; then
+          if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/og13.tgz ]; then
+             ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/og13.tgz og13.tgz
+          fi
+       fi
+       if [ "${BUILD_PYTORCH}" = "0" ]; then
+          if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/pytorch.tgz ]; then
+             ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/pytorch.tgz pytorch.tgz
+          fi
+       fi
+    fi
+    date > CacheFiles/timestamp
     verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${TRAINING_DOCKER_OPTS} \
        --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
        --build-arg BUILD_GCC_LATEST=${BUILD_GCC_LATEST} \
@@ -340,13 +373,12 @@ do
        --build-arg BUILD_LLVM_LATEST=${BUILD_LLVM_LATEST} \
        --build-arg BUILD_OG_LATEST=${BUILD_OG_LATEST} \
        --build-arg BUILD_CLACC_LATEST=${BUILD_CLACC_LATEST} \
-       --build-arg BUILD_PYTORCH_LATEST=${BUILD_PYTORCH_LATEST} \
+       --build-arg BUILD_PYTORCH=${BUILD_PYTORCH} \
        --build-arg USE_CACHED_APPS=${USE_CACHED_APPS} \
        -t ${DOCKER_USER}/training:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        -t training \
        .
-
-    rm -f training/Dockerfile.mod
+    rm -rf CacheFiles/*.tgz
 
     if [ "${PUSH}" -ne 0 ]; then
         docker push ${CONTAINER}

@@ -25,7 +25,7 @@ ARG BUILD_AOMP_LATEST
 ARG BUILD_LLVM_LATEST
 ARG BUILD_OG_LATEST
 ARG BUILD_CLACC_LATEST
-ARG BUILD_PYTORCH_LATEST
+ARG BUILD_PYTORCH
 ARG USE_CACHED_APPS
 ARG AMDGPU_GFXMODEL=gfx90a
 
@@ -65,9 +65,8 @@ EXPOSE 22
 #
 COPY training/sources/scripts/compiler_setup.sh /tmp/compiler_setup.sh
 
-RUN  chmod u+x /tmp/compiler_setup.sh  \
-     && /tmp/compiler_setup.sh \
-     && rm /tmp/compiler_setup.sh
+RUN /tmp/compiler_setup.sh && \
+    rm /tmp/compiler_setup.sh
 
 # install module files
 
@@ -79,61 +78,31 @@ RUN apt-get update && apt-get install -y gawk ninja-build generate-ninja ccache
 RUN pip3 install CppHeaderParser
 
 # Grab any cache files of compiler builds
-#COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/gcc-13.2.0.tgz /opt/rocmplus-${ROCM_VERSION}/gcc-13.2.0.tgz
+COPY CacheFiles/* /opt/rocmplus-${ROCM_VERSION}/
 
 # Build the latest GCC for AMD compiler if requested
 COPY training/sources/scripts/amd_gcc_setup.sh /tmp/amd_gcc_setup.sh
-RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" \
-           -e "s/BUILD_GCC_LATEST/${BUILD_GCC_LATEST}/g" \
-           -e "s/DISTRO_NAME/${DISTRO}/g" \
-           -e "s/DISTRO_VERSION/${DISTRO_VERSION}/g" \
-           /tmp/amd_gcc_setup.sh && \
-    chmod u+x /tmp/amd_gcc_setup.sh && \
-          /tmp/amd_gcc_setup.sh && rm /tmp/amd_gcc_setup.sh
+RUN /tmp/amd_gcc_setup.sh --build-gcc-latest ${BUILD_GCC_LATEST} --rocm-version ${ROCM_VERSION} && \
+    rm /tmp/amd_gcc_setup.sh
 
 # Grab any cache files of compiler builds
-#COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/aomp_19.0-0.tgz /opt/rocmplus-${ROCM_VERSION}/aomp_19.0-0.tgz
 
 # install aomp
 COPY training/sources/scripts/aomp_setup.sh /tmp/aomp_setup.sh
-RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" \
-           -e "s/BUILD_AOMP_LATEST/${BUILD_AOMP_LATEST}/g" \
-           -e "s/USE_CACHED_APPS/${USE_CACHED_APPS}/g" \
-           -e "s/DISTRO_NAME/${DISTRO}/g" \
-           -e "s/DISTRO_VERSION/${DISTRO_VERSION}/g" \
-           -e "s/AMDGPU_GFXMODEL/${AMDGPU_GFXMODEL}/g" \
-           /tmp/aomp_setup.sh && \
-    chmod u+x /tmp/aomp_setup.sh && \
-          /tmp/aomp_setup.sh && rm /tmp/aomp_setup.sh
+RUN /tmp/aomp_setup.sh --build-aomp-latest ${BUILD_AOMP_LATEST} --rocm-version ${ROCM_VERSION} && rm /tmp/aomp_setup.sh
  
 # Grab any cache files of compiler builds
 #COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/llvm-latest.tgz /opt/rocmplus-${ROCM_VERSION}/llvm-latest.tgz
 
 # install latest llvm
 COPY training/sources/scripts/llvm-build.sh /tmp/llvm-build.sh
-RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" \
-           -e "s/BUILD_LLVM_LATEST/${BUILD_LLVM_LATEST}/g" \
-           -e "s/USE_CACHED_APPS/${USE_CACHED_APPS}/g" \
-           -e "s/DISTRO_NAME/${DISTRO}/g" \
-           -e "s/DISTRO_VERSION/${DISTRO_VERSION}/g" \
-           -e "s/AMDGPU_GFXMODEL/${AMDGPU_GFXMODEL}/g" \
-           /tmp/llvm-build.sh && \
-    chmod u+x /tmp/llvm-build.sh && \
-           /tmp/llvm-build.sh && rm /tmp/llvm-build.sh
+RUN /tmp/llvm-build.sh --build-llvm-latest ${BUILD_LLVM_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/llvm-build.sh
  
 # Grab any cache files of compiler builds
-#COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/clacc_clang.tgz /opt/rocmplus-${ROCM_VERSION}/clacc_clang.tgz
 
 # Build the clacc_clang compiler
 COPY training/sources/scripts/clacc_setup.sh /tmp/clacc_setup.sh
-RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" \
-           -e "s/BUILD_CLACC_LATEST/${BUILD_CLACC_LATEST}/g" \
-           -e "s/DISTRO_NAME/${DISTRO}/g" \
-           -e "s/DISTRO_VERSION/${DISTRO_VERSION}/g" \
-           -e "s/AMDGPU_GFXMODEL/${AMDGPU_GFXMODEL}/g" \
-           /tmp/clacc_setup.sh && \
-    chmod u+x /tmp/clacc_setup.sh && \
-          /tmp/clacc_setup.sh && rm /tmp/clacc_setup.sh
+RUN /tmp/clacc_setup.sh --build-clacc-latest ${BUILD_CLACC_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/clacc_setup.sh
 
 # Grab any cache files of compiler builds
 #COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/og13.tgz /opt/rocmplus-${ROCM_VERSION}/og13.tgz
@@ -141,14 +110,7 @@ RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" \
 
 # Install the OpenMP GCC compiler latest drop
 COPY training/sources/scripts/og_setup.sh /tmp/og_setup.sh
-RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" \
-           -e "s/SCRIPT_OG_BUILD_DATE/${OG_BUILD_DATE}/g" \
-           -e "s/BUILD_OG_LATEST/${BUILD_OG_LATEST}/g" \
-           -e "s/DISTRO_NAME/${DISTRO}/g" \
-           -e "s/DISTRO_VERSION/${DISTRO_VERSION}/g" \
-           /tmp/og_setup.sh && \
-    chmod u+x /tmp/og_setup.sh && \
-          /tmp/og_setup.sh && rm /tmp/og_setup.sh
+RUN /tmp/og_setup.sh --build-og-latest ${BUILD_OG_LATEST} --rocm-version ${ROCM_VERSION} && rm /tmp/og_setup.sh
 
 WORKDIR /tmp 
 
@@ -165,11 +127,7 @@ RUN  chmod u+x /tmp/apps_setup_basic.sh && \
 #
 COPY training/sources/scripts/cupy_setup.sh /tmp/cupy_setup.sh
 
-RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" \
-           -e "s/AMDGPU_GFXMODEL/${AMDGPU_GFXMODEL}/g" \
-             /tmp/cupy_setup.sh && \
-    chmod u+x /tmp/cupy_setup.sh && \
-    /tmp/cupy_setup.sh; rm /tmp/cupy_setup.sh
+RUN /tmp/cupy_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/cupy_setup.sh
 
 WORKDIR /app 
 
@@ -177,16 +135,10 @@ WORKDIR /app
 # Install pytorch
 #
 # Grab any cache files of compiler builds
-#COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/pytorch.tgz /opt/rocmplus-${ROCM_VERSION}/pytorch.tgz
 
 COPY training/sources/scripts/pytorch_setup.sh /tmp/pytorch_setup.sh
 
-RUN sed -i -e "s/SCRIPT_ROCM_VERSION/${ROCM_VERSION}/g" \
-           -e "s/AMDGPU_GFXMODEL/${AMDGPU_GFXMODEL}/g" \
-           -e "s/BUILD_PYTORCH_LATEST/${BUILD_PYTORCH_LATEST}/g" \
-             /tmp/pytorch_setup.sh && \
-    chmod u+x /tmp/pytorch_setup.sh && \
-    /tmp/pytorch_setup.sh |& tee /app/build.out; rm /tmp/pytorch_setup.sh
+RUN /tmp/pytorch_setup.sh --build-pytorch ${BUILD_PYTORCH} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} |& tee /app/build.out; rm /tmp/pytorch_setup.sh
 
 WORKDIR /tmp 
 

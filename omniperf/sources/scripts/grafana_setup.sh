@@ -25,10 +25,6 @@ echo "GRAFANA_INSTALL_FROM_SOURCE is $GRAFANA_INSTALL_FROM_SOURCE"
 echo "====================================="
 echo ""
 
-set -v
-
-pwd
-
 # fix the nodejs install if broken
 cd /etc/apt/sources.list.d  \
  && ls -lsa  \

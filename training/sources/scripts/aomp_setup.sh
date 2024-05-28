@@ -1,16 +1,62 @@
 #!/bin/bash
 
+
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
+n=0
+while [[ $# -gt 0 ]]
+do
+   case "${1}" in
+      "--rocm-version")
+          shift
+          ROCM_VERSION=${1}
+          ;;
+      "--build-aomp-latest")
+          shift
+          BUILD_AOMP_LATEST=${1}
+          ;;
+      *)  
+         last ${1}
+         ;;
+   esac
+   n=$((${n} + 1))
+   shift
+done
+
 export AOMP_VERSION_NUMBER=19.0-0
 export AOMP_VERSION_SHORT=19.0
-if [ "BUILD_AOMP_LATEST" = "1" ]; then
-   if [ -f /opt/rocmplus-SCRIPT_ROCM_VERSION/aomp_${AOMP_VERSION_NUMBER}.tgz ]; then
+
+echo ""
+echo "==================================="
+echo "Starting AOMP Latest Install with"
+echo "ROCM_VERSION: $ROCM_VERSION" 
+echo "BUILD_AOMP_LATEST: $BUILD_AOMP_LATEST" 
+echo "AOMP_VERSION_NUMBER: $AOMP_VERSION_NUMBER" 
+echo "==================================="
+echo ""
+
+if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
+   if [ -f /opt/rocmplus-${ROCM_VERSION}/aomp_${AOMP_VERSION_NUMBER}.tgz ]; then
+      echo ""
+      echo "============================"
+      echo " Installing Cached AOMP Latest"
+      echo "============================"
+      echo ""
+
       #install the cached version
-      cd /opt/rocmplus-SCRIPT_ROCM_VERSION
+      cd /opt/rocmplus-${ROCM_VERSION}
       tar -xzf aomp_${AOMP_VERSION_NUMBER}.tgz
-      chown -R root:root /opt/rocmplus-SCRIPT_ROCM_VERSION/aomp_${AOMP_VERSION_NUMBER}
-      rm /opt/rocmplus-SCRIPT_ROCM_VERSION/aomp_${AOMP_VERSION_NUMBER}.tgz
+      chown -R root:root /opt/rocmplus-${ROCM_VERSION}/aomp_${AOMP_VERSION_NUMBER}
+      rm /opt/rocmplus-${ROCM_VERSION}/aomp_${AOMP_VERSION_NUMBER}.tgz
    else
-      export AOMP=/opt/rocmplus-SCRIPT_ROCM_VERSION/aomp
+      echo ""
+      echo "============================"
+      echo " Building AOMP Latest"
+      echo "============================"
+      echo ""
+
+      export AOMP=/opt/rocmplus-${ROCM_VERSION}/aomp
       chmod a+w /opt
 
 # Installs aomp from .deb package but then we can't specify where to install it
@@ -37,7 +83,7 @@ if [ "BUILD_AOMP_LATEST" = "1" ]; then
    cat > ${MODULE_PATH}/amdclang-${AOMP_VERSION_SHORT}.lua <<-EOF
 	whatis("AMD OpenMP Compiler version 19.0-0 based on LLVM")
 	
-	local base = "/opt/rocmplus-SCRIPT_ROCM_VERSION/aomp_19.0-0"
+	local base = "/opt/rocmplus-${ROCM_VERSION}/aomp_19.0-0"
 
 	prepend_path("PATH", pathJoin(base, "bin"))
 	setenv("CC", pathJoin(base, "bin/amdclang"))
@@ -51,7 +97,7 @@ if [ "BUILD_AOMP_LATEST" = "1" ]; then
 	prepend_path("MANPATH", pathJoin(base, "man"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-	load("rocm/SCRIPT_ROCM_VERSION")
+	load("rocm/${ROCM_VERSION}")
 	family("compiler")
 EOF
 fi

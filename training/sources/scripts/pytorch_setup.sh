@@ -1,12 +1,64 @@
 #!/bin/bash
-if [ "BUILD_PYTORCH_LATEST" = "1" ]; then
-   if [ -f /opt/rocmplus-SCRIPT_ROCM_VERSION/pytorch.tgz ]; then
+
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
+AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+
+n=0
+while [[ $# -gt 0 ]]
+do
+   case "${1}" in
+      "--rocm-version")
+          shift
+          ROCM_VERSION=${1}
+          ;;
+      "--amdgpu-gfxmodel")
+          shift
+          AMDGPU_GFXMODEL=${1}
+          ;;
+      "--build-pytorch")
+          shift
+          BUILD_PYTORCH=${1}
+          ;;
+      *)  
+         last ${1}
+         ;;
+   esac
+   n=$((${n} + 1))
+   shift
+done
+
+echo ""
+echo "==================================="
+echo "Starting Pytorch Install with"
+echo "BUILD_PYTORCH: $BUILD_PYTORCH" 
+echo "ROCM_VERSION: $ROCM_VERSION" 
+echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL" 
+echo "==================================="
+echo ""
+
+
+if [ "${BUILD_PYTORCH}" = "1" ]; then
+   if [ -f /opt/rocmplus-${ROCM_VERSION}/pytorch.tgz ]; then
+      echo ""
+      echo "============================"
+      echo " Installing Cached Pytorch"
+      echo "============================"
+      echo ""
+
       #install the cached version
-      cd /opt/rocmplus-SCRIPT_ROCM_VERSION
+      cd /opt/rocmplus-${ROCM_VERSION}
       tar -xzf pytorch.tgz
-      chown -R root:root /opt/rocmplus-SCRIPT_ROCM_VERSION/pytorch
-      rm /opt/rocmplus-SCRIPT_ROCM_VERSION/pytorch.tgz
+      chown -R root:root /opt/rocmplus-${ROCM_VERSION}/pytorch
+      rm /opt/rocmplus-${ROCM_VERSION}/pytorch.tgz
    else
+      echo ""
+      echo "============================"
+      echo " Building Pytorch"
+      echo "============================"
+      echo ""
+
       module load rocm
       # Build with GPU aware MPI not working yet
       #module load openmpi
@@ -19,7 +71,7 @@ if [ "BUILD_PYTORCH_LATEST" = "1" ]; then
       unset BUILD_OG_LATEST
       unset USE_CACHED_APPS
       
-      export PYTHONPATH=/opt/rocmplus-SCRIPT_ROCM_VERSION/pytorch/lib/python3.10/site-packages:$PYTHONPATH
+      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages:$PYTHONPATH
       
       # Install of pre-built pytorch for reference
       #pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/rocm6.0
@@ -30,18 +82,18 @@ if [ "BUILD_PYTORCH_LATEST" = "1" ]; then
       export USE_CUDA=0
       export MAX_JOBS=20
       export USE_MPI=0
-      export PYTORCH_ROCM_ARCH="AMDGPU_GFXMODEL"
+      export PYTORCH_ROCM_ARCH="${AMDGPU_GFXMODEL}"
       
       git clone -q --recursive -b release/2.2 https://github.com/ROCm/pytorch
       cd pytorch
       pip3 install -r requirements.txt
       pip3 install intel::mkl-static intel::mkl-include
       
-      #export CMAKE_PREFIX_PATH=/opt/rocmplus-SCRIPT_ROCM_VERSION/pytorch
-      mkdir /opt/rocmplus-SCRIPT_ROCM_VERSION/pytorch
+      #export CMAKE_PREFIX_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch
+      mkdir /opt/rocmplus-${ROCM_VERSION}/pytorch
       python3 tools/amd_build/build_amd.py >& /dev/null
       
-      python3 setup.py develop --prefix=/opt/rocmplus-SCRIPT_ROCM_VERSION/pytorch
+      python3 setup.py develop --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch
       echo ""
       echo ""
       echo ""
@@ -55,7 +107,7 @@ if [ "BUILD_PYTORCH_LATEST" = "1" ]; then
       echo "Starting setup.py install"
       echo "===================="
       echo ""
-      python3 setup.py install -v --prefix=/opt/rocmplus-SCRIPT_ROCM_VERSION/pytorch
+      python3 setup.py install -v --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch
       echo ""
       echo ""
       echo ""
@@ -67,7 +119,7 @@ if [ "BUILD_PYTORCH_LATEST" = "1" ]; then
       
       pip uninstall torchvision
       git clone --recursive -b release/0.17 https://github.com/pytorch/vision torchvision
-      python3 setup.py install --prefix=/opt/rocmplus-SCRIPT_ROCM_VERSION/pytorch
+      python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch
       
       rm -rf /app/pytorch
       
@@ -83,8 +135,8 @@ mkdir -p ${MODULE_PATH}
 cat > ${MODULE_PATH}/2.2.lua <<-EOF
         whatis("HIP version of pytorch")
 
-        load("rocm/SCRIPT_ROCM_VERSION")
-        prepend_path("PYTHONPATH","/opt/rocmplus-SCRIPT_ROCM_VERSION/pytorch/lib/python3.10/site-packages")
+        load("rocm/${ROCM_VERSION}")
+        prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages")
 EOF
 
 #pip download --only-binary :all: --dest /opt/wheel_files_6.0/pytorch-rocm --no-cache --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/rocm6.0
