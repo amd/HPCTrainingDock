@@ -262,42 +262,12 @@ do
        USE_CACHED_APPS=1
     fi
 
-#   cp training/Dockerfile training/Dockerfile.mod
-#   if [ "${BUILD_GCC_LATEST}" = "1" ]; then
-#      if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/gcc-13.2.0.tgz ]; then
-#         sed -i -e "/gcc-13.2.0.tgz/s/^#//" training/Dockerfile.mod
-#      fi
-#   fi
-#   if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
-#      if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/aomp_19.0-0.tgz ]; then
-#         sed -i -e "/aomp_19.0-0.tgz/s/^#//" training/Dockerfile.mod
-#      fi
-#   fi
-#   if [ "${BUILD_LLVM_LATEST}" = "1" ]; then
-#      if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/llvm-latest.tgz ]; then
-#         sed -i -e "/llvm-latest.tgz/s/^#//" training/Dockerfile.mod
-#      fi
-#   fi
-#   if [ "${BUILD_CLACC_LATEST}" = "1" ]; then
-#      if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/clacc_clang.tgz ]; then
-#         sed -i -e "/clacc_clang.tgz/s/^#//" training/Dockerfile.mod
-#      fi
-#   fi
-#   if [ "${BUILD_OG_LATEST}" = "1" ]; then
-#      if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/og13.tgz ]; then
-#         sed -i -e "/og13.tgz/s/^#//" training/Dockerfile.mod
-#         sed -i -e "/og13module.tgz/s/^#//" training/Dockerfile.mod
-#      fi
-#   fi
-#   if [ "${BUILD_PYTORCH}" = "1" ]; then
-#      if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/pytorch.tgz ]; then
-#         sed -i -e "/pytorch.tgz/s/^#//" training/Dockerfile.mod
-#      fi
-#   fi
-
     GENERAL_DOCKER_OPTS="--build-arg DISTRO=${DISTRO} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION}"
 
 # Building rocm docker
+    if [ ! -d CacheFiles]; then
+       mkdir CacheFiles
+    fi
     rm -rf CacheFiles/*.tgz
     if [ "${BUILD_OPENMPI}" = "0" ] && [ "${USE_CACHED_APPS}" = "1" ]; then
        if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/ucx.tgz ]; then
@@ -334,32 +304,32 @@ do
 
 # Building training docker
     if [ "${USE_CACHED_APPS}" = "1" ]; then
-       if [ "${BUILD_GCC_LATEST}" = "0" ]; then
+       if [ "${BUILD_GCC_LATEST}" = "1" ]; then
           if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/gcc-13.2.0.tgz ]; then
              ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/gcc-13.2.0.tgz gcc-13.2.0.tgz
           fi
        fi
-       if [ "${BUILD_AOMP_LATEST}" = "0" ]; then
+       if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
           if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/aomp_19.0-0.tgz ]; then
              ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/aomp_19.0-0.tgz aomp_19.0-0.tgz
           fi
        fi
-       if [ "${BUILD_LLVM_LATEST}" = "0" ]; then
+       if [ "${BUILD_LLVM_LATEST}" = "1" ]; then
           if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/llvm-latest.tgz ]; then
              ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/llvm-latest.tgz llvm-latest.tgz
           fi
        fi
-       if [ "${BUILD_CLACC_LATEST}" = "0" ]; then
+       if [ "${BUILD_CLACC_LATEST}" = "1" ]; then
           if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/clacc_clang.tgz ]; then
              ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/clacc_clang.tgz clacc_clang.tgz
           fi
        fi
-       if [ "${BUILD_OG_LATEST}" = "0" ]; then
+       if [ "${BUILD_OG_LATEST}" = "1" ]; then
           if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/og13.tgz ]; then
              ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/og13.tgz og13.tgz
           fi
        fi
-       if [ "${BUILD_PYTORCH}" = "0" ]; then
+       if [ "${BUILD_PYTORCH}" = "1" ]; then
           if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/pytorch.tgz ]; then
              ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/pytorch.tgz pytorch.tgz
           fi

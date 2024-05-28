@@ -38,6 +38,8 @@ echo "GCC_VERSION: $GCC_VERSION"
 echo "==================================="
 echo ""
 
+ls -l /opt/rocmplus-${ROCM_VERSION}/
+
 if [ "${BUILD_GCC_LATEST}" = "1" ] ; then
    if  [ -f /opt/rocmplus-${ROCM_VERSION}/${GCC_VERSION}.tgz ]; then
       echo ""

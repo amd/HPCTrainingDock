@@ -37,7 +37,7 @@ wget -q https://github.com/AMDResearch/omniperf/releases/download/v2.0.0-RC1/omn
         -DCMAKE_BUILD_TYPE=Release \
         -DPYTHON_DEPS=${INSTALL_DIR}/python-libs \
         -DMOD_INSTALL_PATH=${INSTALL_DIR}/modulefiles .. \
-     && make install \
+     && make install
 cd ../.. && rm -rf omniperf-2.0.0-RC1 omniperf-2.0.0-RC1.tar.gz
 
 sed -i -e 's/ascii/utf-8/' /opt/rocmplus-*/omniperf-*/bin/utils/specs.py
