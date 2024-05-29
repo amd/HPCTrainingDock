@@ -31,7 +31,7 @@ COPY omnitrace/sources/scripts/miniconda3_setup.sh /tmp/miniconda3_setup.sh
 
 RUN /tmp/miniconda3_setup.sh \
         --rocm-version ${ROCM_VERSION} \
-        --python_versions "${PYTHON_VERSIONS}" \
+        --python-versions "${PYTHON_VERSIONS}" \
     rm /tmp/miniconda3_setup.sh
 
 #   conda init && \
@@ -43,7 +43,7 @@ COPY CacheFiles/* /opt/rocmplus-${ROCM_VERSION}/
 
 RUN /tmp/omnitrace_setup.sh \
        --rocm-version ${ROCM_VERSION} \
-       --amdgpu_gfxmode ${AMDGPU_GFXMODEL} \
+       --amdgpu-gfxmode ${AMDGPU_GFXMODEL} \
        --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE} && \
     rm /tmp/omnitrace_setup.sh
 

@@ -14,6 +14,7 @@
 : ${BUILD_OG_LATEST:="0"}
 : ${BUILD_CLACC_LATEST:="0"}
 : ${BUILD_PYTORCH:="0"}
+: ${BUILD_CUPY:="0"}
 : ${BUILD_ALL_LATEST:="0"}
 : ${RETRY:=3}
 : ${NO_CACHE:=""}
@@ -49,7 +50,8 @@ usage()
     print_default_option build-gcc-latest -- flag to build the latest version of gcc with offloading
     print_default_option build-og-latest -- flag to build the latest version of gcc develop with offloading
     print_default_option build-clacc-latest -- flag to build the latest version of clacc with offloading
-    print_default_option build-pytorch-latest -- flag to build the latest version of pytorch
+    print_default_option build-pytorch -- flag to build the latest version of pytorch
+    print_default_option build-cupy -- flag to build the latest version of cupy
     print_default_option use_cached-apps -- flag to use pre-built gcc and aomp located in CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} directory
     print_default_option omnitrace-build-from-source -- flag to build omnitrace from source instead of using pre-built versions
     print_default_option output-verbosity -- flag to show more docker build output
@@ -213,6 +215,10 @@ do
             BUILD_PYTORCH="1"
             reset-last
             ;;
+        "--build-cupy")
+            BUILD_CUPY="1"
+            reset-last
+            ;;
         "--build-all-latest")
             BUILD_OPENMPI="1"
             BUILD_ALL_LATEST="1"
@@ -222,6 +228,7 @@ do
             #BUILD_OG_LATEST="1"
             #BUILD_CLACC_LATEST="1"
             BUILD_PYTORCH="1"
+            BUILD_CUPY="1"
             reset-last
             ;;
         "--use-cached-apps")
@@ -334,6 +341,11 @@ do
              ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/pytorch.tgz pytorch.tgz
           fi
        fi
+       if [ "${BUILD_CUPY}" = "1" ]; then
+          if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/cupy.tgz ]; then
+             ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/cupy.tgz cupy.tgz
+          fi
+       fi
     fi
     date > CacheFiles/timestamp
     verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${TRAINING_DOCKER_OPTS} \
@@ -344,6 +356,7 @@ do
        --build-arg BUILD_OG_LATEST=${BUILD_OG_LATEST} \
        --build-arg BUILD_CLACC_LATEST=${BUILD_CLACC_LATEST} \
        --build-arg BUILD_PYTORCH=${BUILD_PYTORCH} \
+       --build-arg BUILD_CUPY=${BUILD_CUPY} \
        --build-arg USE_CACHED_APPS=${USE_CACHED_APPS} \
        -t ${DOCKER_USER}/training:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        -t training \

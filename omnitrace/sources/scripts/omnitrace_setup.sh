@@ -22,7 +22,7 @@ do
           ROCM_VERSION=${1}
           reset-last
           ;;
-      "--amdgpu_gfxmodel")
+      "--amdgpu-gfxmodel")
           shift
           AMDGPU_GFXMODEL=${1}
           reset-last

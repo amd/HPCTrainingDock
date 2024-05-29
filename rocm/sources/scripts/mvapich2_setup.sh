@@ -5,6 +5,8 @@ reset-last()
     last() { send-error "Unsupported argument :: ${1}"; }
 }
 
+ROCM_VERSION=6.0
+
 n=0
 while [[ $# -gt 0 ]]
 do

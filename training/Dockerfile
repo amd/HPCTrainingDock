@@ -127,7 +127,7 @@ RUN  chmod u+x /tmp/apps_setup_basic.sh && \
 #
 COPY training/sources/scripts/cupy_setup.sh /tmp/cupy_setup.sh
 
-RUN /tmp/cupy_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/cupy_setup.sh
+RUN /tmp/cupy_setup.sh --build-cupy ${BUILD_CUPY} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/cupy_setup.sh
 
 WORKDIR /app 
 

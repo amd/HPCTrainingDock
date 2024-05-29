@@ -44,7 +44,7 @@ ENV PATH=$HOME/.yarn/bin:$HOME/.config/yarn/global/node_modules/.bin:$PATH
 
 COPY omniperf/sources/scripts/omniperf_setup.sh /tmp/omniperf_setup.sh
 
-RUN  /tmp/omniperf_setup.sh --rocm_version ${ROCM_VERSION} && \
+RUN  /tmp/omniperf_setup.sh --rocm-version ${ROCM_VERSION} && \
      rm /tmp/omniperf_setup.sh
 
 # Overwrite grafana ini file

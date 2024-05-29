@@ -76,7 +76,7 @@ COPY rocm/sources/scripts/slurm_setup.sh /tmp/slurm_setup.sh
 COPY rocm/sources/slurm/slurm_${AMDGPU_GFXMODEL}.conf /tmp/slurm.conf
 COPY rocm/sources/slurm/gres_${AMDGPU_GFXMODEL}.conf /tmp/gres.conf
 
-RUN  /tmp/slurm_setup.sh --amdgpu_gfxmodel ${AMDGPU_GFXMODEL} && \
+RUN  /tmp/slurm_setup.sh --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
      rm /tmp/slurm_setup.sh
 
 ENV LC_ALL C.UTF-8

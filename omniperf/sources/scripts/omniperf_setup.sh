@@ -6,7 +6,7 @@ n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
-      "--grafana_install_from_source")
+      "--rocm-version")
           shift
           ROCM_VERSION=1
           ;;
