@@ -36,6 +36,7 @@ echo "==================================="
 echo "Starting cuPY Install with"
 echo "ROCM_VERSION: $ROCM_VERSION" 
 echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL" 
+echo "BUILD_CUPY: $BUILD_CUPY" 
 echo "==================================="
 echo ""
 
@@ -54,6 +55,11 @@ if [ "${BUILD_CUPY}" = "1" ]; then
       chown -R root:root /opt/rocmplus-${ROCM_VERSION}/cupy
       rm /opt/rocmplus-${ROCM_VERSION}/cupy.tgz
    else
+      echo ""
+      echo "============================"
+      echo " Building cuPY"
+      echo "============================"
+      echo ""
 
       module load rocm/${ROCM_VERSION}
       
