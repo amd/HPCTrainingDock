@@ -35,7 +35,7 @@ rocm-repo-dist-set()
 {
    if [ "${DISTRO}" = "ubuntu" ]; then
        ubuntu-set
-   elif [ "${DISTRO}" = "rhel" ]; then
+   elif [ "${DISTRO}" = "rocky linux" ]; then
        rhel-set
    elif [ "${DISTRO}" = "opensuse" ]; then
        opensuse-set
@@ -160,9 +160,13 @@ opensuse-set()
 #  ROCM_DOCKER_OPTS="${ROCM_DOCKER_OPTS} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PERL_REPO=${PERL_REPO}"
 }
 
-ROCM_REPO_DIST=`lsb_release -c | cut -f2`
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+if [ "${DISTRO}" == "rocky linux" ]; then
+   ROCM_REPO_DIST=${DISTRO_VERSION}
+else
+   ROCM_REPO_DIST=`lsb_release -c | cut -f2`
+fi
 
 #echo "After autodetection"
 #echo "ROCM_REPO_DIST is $ROCM_REPO_DIST" 
@@ -211,14 +215,35 @@ echo "AMDGPU_INSTALL_VERSION: $AMDGPU_INSTALL_VERSION"
 echo "=================================="
 echo ""
 
-wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -
-apt-get update
-wget -q https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/ubuntu/${ROCM_REPO_DIST}/amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
-apt-get install -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
-amdgpu-install -y  --usecase=hiplibsdk,rocm --no-dkms
+if [ "${DISTRO}" == "rocky linux" ]; then
+   cat >> /etc/yum.repos.d/rocm.repo <<-EOF
+	[ROCm-${AMDGPU_ROCM_VERSION}]
+	name=ROCm${AMDGPU_ROCM_VERSION}
+	baseurl=https://repo.radeon.com/rocm/rhel9/${AMDGPU_ROCM_VERSION}/main
+	enabled=1
+	priority=50
+	gpgcheck=1
+	gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
+EOF
+cat /etc/yum.repos.d/rocm.repo
 
-# Required by DeepSpeed
-ln -s /opt/rocm-${ROCM_VERSION}/.info/version /opt/rocm-${ROCM_VERSION}/.info/version-dev
+   #yum clean all
+
+   yum install https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${ROCM_REPO_DIST}/amdgpu-install_${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
+fi
+
+if [ "${DISTRO}" == "ubuntu" ]; then
+   sudo mkdir --parents --mode=0755 /etc/apt/keyrings
+   wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+   apt-get update
+   wget -q https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/${DISTRO}/${ROCM_REPO_DIST}/amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+
+   apt-get install -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+   amdgpu-install -y  --usecase=hiplibsdk,rocm --no-dkms
+
+   # Required by DeepSpeed
+   ln -s /opt/rocm-${ROCM_VERSION}/.info/version /opt/rocm-${ROCM_VERSION}/.info/version-dev
+fi
 
 # rocm-validation-suite is optional
 #apt-get install -qy rocm-validation-suite

@@ -44,7 +44,7 @@ WORKDIR /app
 #
 
 # Grab any cached files of MPI builds
-COPY CacheFiles/* /opt/rocmplus-${ROCM_VERSION}/
+COPY CacheFiles/*.tgz CacheFiles/timestamp /opt/rocmplus-${ROCM_VERSION}/
 
 COPY rocm/sources/scripts/openmpi_setup.sh /tmp/openmpi_setup.sh
 

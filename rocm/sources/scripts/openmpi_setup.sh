@@ -39,6 +39,11 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    apt-get update && \
    apt-get install -y libpmix-dev libhwloc-dev  libevent-dev
 fi
+if [ "${DISTRO}" = "rocky linux" ]; then
+   # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev 
+   yum update && \
+   yum install -y pmix hwloc
+fi
 
 # omnitrace (omnitrace-avail) will throw this message using default values, so change default to 2
 # [omnitrace][116] /proc/sys/kernel/perf_event_paranoid has a value of 3. Disabling PAPI (requires a value <= 2)...

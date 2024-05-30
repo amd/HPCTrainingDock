@@ -253,7 +253,7 @@ if [ "x${ADMIN_PASSWORD}" == "x" ] ; then
 	exit;
 fi
 
-ROCM_DOCKER_OPTS="${PULL} -f rocm/Dockerfile ${NO_CACHE} --build-arg DISTRO=${DISTRO}"
+ROCM_DOCKER_OPTS="${PULL} -f rocm/Dockerfile ${NO_CACHE}"
 
 OMNITRACE_DOCKER_OPTS="-f omnitrace/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg OMNITRACE_BUILD_FROM_SOURCE=\"${OMNITRACE_BUILD_FROM_SOURCE}\" --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\""
 
@@ -272,7 +272,7 @@ do
     GENERAL_DOCKER_OPTS="--build-arg DISTRO=${DISTRO} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION}"
 
 # Building rocm docker
-    if [ ! -d CacheFiles]; then
+    if [ ! -d CacheFiles ]; then
        mkdir CacheFiles
     fi
     rm -rf CacheFiles/*.tgz

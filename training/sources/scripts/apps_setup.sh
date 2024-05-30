@@ -21,4 +21,5 @@ sudo apt-get install -y valgrind \
                         openssl \
 			swig \
                         python3-scipy  python3-h5sparse \
-			libtbb-dev
+			libtbb-dev \
+			nano
