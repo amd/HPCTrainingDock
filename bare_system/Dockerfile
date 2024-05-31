@@ -13,9 +13,15 @@ ENV SHELL /bin/bash
 ENV BASH_ENV /etc/bash.bashrc
 ENV DEBIAN_FRONTEND noninteractive
 
-WORKDIR /tmp
-SHELL [ "/bin/bash", "-c" ]
+# Adding render group early to avoid something else grabbing it and causing problems for slurm
+RUN groupadd render -g 109
+RUN groupadd renderalt -g 110
+
+RUN apt-get update
+RUN apt-get install -q -y git
 
 WORKDIR /home
+RUN git clone https://github.com/AMD/HPCTrainingDock
 
 SHELL [ "/bin/bash", "--login", "-c" ]
+ENTRYPOINT ["/bin/bash"]
