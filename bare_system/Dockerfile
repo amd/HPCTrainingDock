@@ -24,14 +24,16 @@ RUN apt-get install -q -y git vim sudo
 
 SHELL ["/bin/bash", "-c"]
 
-RUN groupadd student && useradd -m -s /bin/bash -g student student
-RUN usermod -a -G video,render,renderalt,sudo --password $(echo amdtest | openssl passwd -1 -stdin) student
+RUN adduser --home /home/student --shell /bin/bash --disabled-password --gecos '' student
+RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+#RUN usermod -a -G video,render,renderalt,sudo --password $(echo amdtest | openssl passwd -1 -stdin) student
+RUN usermod -a -G video,render,renderalt,sudo student
 
 RUN chown -R student:student /home/student
 USER student
 ENV HOME=/home/student
 WORKDIR /home/student
 RUN git clone https://github.com/AMD/HPCTrainingDock
-
+RUN HPCTrainingDock/bare_system/main_setup.sh
 
 ENTRYPOINT ["bash"]
