@@ -5,10 +5,10 @@
 
 ROCM_VERSION=6.1.0
 
-apt-get update
-apt-get install git
+#sudo apt-get update
+#sudo apt-get install git
 
-git clone https://github.com/AMD/HPCTrainingDock
+#git clone https://github.com/AMD/HPCTrainingDock
 
 HPCTrainingDock/rocm/sources/scripts/baseospackages_setup.sh
 

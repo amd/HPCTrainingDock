@@ -12,14 +12,14 @@ echo "==================================="
 echo ""
 
 if [ "${DISTRO}" = "ubuntu" ]; then
-   chown -Rv _apt:root /var/cache/apt/archives/partial/
-   chmod -Rv 700 /var/cache/apt/archives/partial/
+   sudo chown -Rv _apt:root /var/cache/apt/archives/partial/
+   sudo chmod -Rv 700 /var/cache/apt/archives/partial/
 
    # Python3-dev and python3-venv are for AI/ML
    # Make sure we have a default compiler for the system -- gcc, g++, gfortran
-   apt-get update && \
-   apt-get dist-upgrade -y && \
-   apt-get install -y build-essential cmake libnuma1 wget gnupg2 m4 bash-completion git-core autoconf libtool autotools-dev \
+   sudo apt-get update && \
+   sudo apt-get dist-upgrade -y && \
+   sudo apt-get install -y build-essential cmake libnuma1 wget gnupg2 m4 bash-completion git-core autoconf libtool autotools-dev \
       python3-pip lsb-release libpapi-dev libpfm4-dev libudev1 rpm librpm-dev curl apt-utils vim tmux rsync sudo \
       bison flex texinfo  libnuma-dev pkg-config  libibverbs-dev  rdmacm-utils ssh locales \
       python3-dev python3-venv \
@@ -28,7 +28,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
 
 # Install needed dependencies -- tcl and lmod
-   apt-get install -y tcl tcl-dev \
+   sudo apt-get install -y tcl tcl-dev \
      lmod && \
      sed -i -e '1,$s!/etc/lmod/modules!/etc/lmod/modules/Linux\n/etc/lmod/modules/ROCm\n/etc/lmod/modules/ROCmPlus\n/etc/lmod/modules/ROCmPlus-MPI\n/etc/lmod/modules/ROCmPlus-AMDResearchTools\n/etc/lmod/modules/ROCmPlus-LatestCompilers\n//etc/lmod/modules/ROCmPlus-AI!' /etc/lmod/modulespath && \
      ln -s /usr/share/lmod/6.6/init/profile /etc/profile.d/z00_lmod.sh &&  ln -s /usr/share/lmod/6.6/init/cshrc /etc/profile.d/z00_lmod.csh

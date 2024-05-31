@@ -17,11 +17,21 @@ ENV DEBIAN_FRONTEND noninteractive
 RUN groupadd render -g 109
 RUN groupadd renderalt -g 110
 
-RUN apt-get update
-RUN apt-get install -q -y git
+WORKDIR /tmp
 
-WORKDIR /home
+RUN apt-get update
+RUN apt-get install -q -y git vim sudo
+
+SHELL ["/bin/bash", "-c"]
+
+RUN groupadd student && useradd -m -s /bin/bash -g student student
+RUN usermod -a -G video,render,renderalt,sudo --password $(echo amdtest | openssl passwd -1 -stdin) student
+
+RUN chown -R student:student /home/student
+USER student
+ENV HOME=/home/student
+WORKDIR /home/student
 RUN git clone https://github.com/AMD/HPCTrainingDock
 
-SHELL [ "/bin/bash", "--login", "-c" ]
-ENTRYPOINT ["/bin/bash"]
+
+ENTRYPOINT ["bash"]
