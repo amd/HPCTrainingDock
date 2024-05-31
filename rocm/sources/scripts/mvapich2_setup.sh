@@ -24,6 +24,8 @@ do
    shift
 done
 
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 echo ""
 echo "============================"
@@ -36,9 +38,14 @@ echo ""
 # Install mvapich
 #
 
-apt-get -qqy install alien 
-wget -q http://mvapich.cse.ohio-state.edu/download/mvapich/gdr/2.3.7/mofed5.0/mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
-alien --scripts -i mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
+if [ "${DISTRO}" = "ubuntu" ]; then
+   apt-get -qqy install alien 
+   wget -q http://mvapich.cse.ohio-state.edu/download/mvapich/gdr/2.3.7/mofed5.0/mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
+   alien --scripts -i mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
+fi
+if [ "${DISTRO}" = "rocky linux" ]; then
+   yum install http://mvapich.cse.ohio-state.edu/download/mvapich/gdr/2.3.7/mofed5.0/mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
+fi
 
 # Adding -p option to avoid error if directory already exists
 mkdir -p /opt/rocmplus-${ROCM_VERSION}
