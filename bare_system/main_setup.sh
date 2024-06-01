@@ -1,15 +1,32 @@
 #!/bin/bash
 
-# docker build --build-arg DISTRO=ubuntu --build-arg DISTRO_VERSION=22.04 -t bare .
-# docker run -it  --shm-size=256m --device=/dev/kfd --device=/dev/dri --group-add video  -p 2222:22 --name Bare  --rm -v /home/bobrobey/Class/training/hostdir:/hostdir --security-opt seccomp=unconfined bare
+: ${ROCM_VERSIONS:="6.0"}
 
-ROCM_VERSION=6.1.0
+reset-last()
+{
+   last() { send-error "Unsupported argument :: ${1}"; }
+}
 
-#sudo apt-get update
-#sudo apt-get install git
+n=0
+while [[ $# -gt 0 ]]
+do
+   case "${1}" in
+      "--rocm-version")
+          shift
+          ROCM_VERSION=${1}
+          reset-last
+          ;;
+      *)
+         last ${1}
+         ;;
+   esac
+   n=$((${n} + 1))
+   shift
+done
 
-#git clone https://github.com/AMD/HPCTrainingDock
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
-HPCTrainingDock/rocm/sources/scripts/baseospackages_setup.sh
+rocm/sources/scripts/baseospackages_setup.sh
 
-HPCTrainingDock/rocm/sources/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION}
+rocm/sources/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION}

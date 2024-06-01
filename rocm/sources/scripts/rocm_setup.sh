@@ -233,16 +233,18 @@ cat /etc/yum.repos.d/rocm.repo
 fi
 
 if [ "${DISTRO}" == "ubuntu" ]; then
-   sudo mkdir --parents --mode=0755 /etc/apt/keyrings
+   #mkdir --parents --mode=0755 /etc/apt/keyrings
+   #sudo mkdir --parents --mode=0755 /etc/apt/keyrings
    wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
-   apt-get update
+   sudo DEBIAN_FRONTEND=noninteractive apt-get update
+
    wget -q https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/${DISTRO}/${ROCM_REPO_DIST}/amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
 
-   apt-get install -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
-   amdgpu-install -y  --usecase=hiplibsdk,rocm --no-dkms
+   sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+   DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms
 
    # Required by DeepSpeed
-   ln -s /opt/rocm-${ROCM_VERSION}/.info/version /opt/rocm-${ROCM_VERSION}/.info/version-dev
+   sudo ln -s /opt/rocm-${ROCM_VERSION}/.info/version /opt/rocm-${ROCM_VERSION}/.info/version-dev
 fi
 
 # rocm-validation-suite is optional
@@ -291,10 +293,10 @@ fi
 # Create a module file for rocm sdk
 export MODULE_PATH=/etc/lmod/modules/ROCm/rocm
 
-mkdir -p ${MODULE_PATH}
+sudo mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat > ${MODULE_PATH}/${ROCM_VERSION}.lua <<-EOF
+cat <<-EOF | sudo tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ROCm")
 	whatis("Version: ${ROCM_VERSION}")
 	whatis("Category: AMD")
@@ -317,10 +319,10 @@ EOF
 # Create a module file for amdclang compiler
 export MODULE_PATH=/etc/lmod/modules/ROCm/amdclang
 
-mkdir -p ${MODULE_PATH}
+sudo mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat > ${MODULE_PATH}/17.0-${ROCM_VERSION}.lua <<-EOF
+cat <<-EOF | sudo tee ${MODULE_PATH}/17.0-${ROCM_VERSION}.lua
 	whatis("Name: AMDCLANG")
 	whatis("Version: ${ROCM_VERSION}")
 	whatis("Category: AMD")
@@ -345,10 +347,10 @@ EOF
 # Create a module file for hipfort package
 export MODULE_PATH=/etc/lmod/modules/ROCm/hipfort
 
-mkdir -p ${MODULE_PATH}
+sudo mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat > ${MODULE_PATH}/${ROCM_VERSION}.lua <<-EOF
+cat <<-EOF | sudo tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ROCm HIPFort")
 	whatis("Version: ${ROCM_VERSION}")
 
@@ -361,10 +363,10 @@ EOF
 # Create a module file for opencl compiler
 export MODULE_PATH=/etc/lmod/modules/ROCm/opencl
 
-mkdir -p ${MODULE_PATH}
+sudo mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat > ${MODULE_PATH}/${ROCM_VERSION}.lua <<-EOF
+cat <<-EOF | sudo tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ROCm OpenCL")
 	whatis("Version: ${ROCM_VERSION}")
 	whatis("Category: AMD")

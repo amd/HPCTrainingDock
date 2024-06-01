@@ -3,6 +3,10 @@ ARG DISTRO
 ARG DISTRO_VERSION
 FROM ${DISTRO}:${DISTRO_VERSION}
 
+ARG DISTRO
+ARG DISTRO_VERSION
+ARG ROCM_VERSION
+
 LABEL maintainer="bob.robey@amd.com"
 
 ENV HOME /root
@@ -19,8 +23,8 @@ RUN groupadd renderalt -g 110
 
 WORKDIR /tmp
 
-RUN apt-get update
-RUN apt-get install -q -y git vim sudo
+RUN apt-get -q -y update
+RUN apt-get install -q -y vim sudo apt-utils
 
 SHELL ["/bin/bash", "-c"]
 
@@ -33,7 +37,10 @@ RUN chown -R student:student /home/student
 USER student
 ENV HOME=/home/student
 WORKDIR /home/student
-RUN git clone https://github.com/AMD/HPCTrainingDock
-RUN HPCTrainingDock/bare_system/main_setup.sh
+
+ADD bare_system bare_system
+ADD rocm rocm
+
+RUN bare_system/main_setup.sh --rocm-version ${ROCM_VERSION}
 
 ENTRYPOINT ["bash"]
