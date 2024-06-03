@@ -35,7 +35,7 @@ echo ""
 
 if [ "${DISTRO}" = "ubuntu" ] ; then
     wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /opt/miniconda-installer.sh && \
-    bash /opt/miniconda-installer.sh -b -p /opt/miniconda3 && \
+    sudo bash /opt/miniconda-installer.sh -b -p /opt/miniconda3 && \
     export PATH="/opt/miniconda3/bin:${PATH}" && \
     conda config --set always_yes yes --set changeps1 no && \
     conda update -c defaults -n base conda && \
@@ -48,10 +48,10 @@ fi
 ## Create a module file for miniconda3
 export MODULE_PATH=/etc/lmod/modules/Linux/miniconda3/
 
-mkdir -p ${MODULE_PATH}
+sudo mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat > ${MODULE_PATH}/23.11.0.lua <<-EOF
+cat <<-EOF | sudo tee ${MODULE_PATH}/23.11.0.lua
 	local root = "/opt/miniconda3"
 	setenv("ANACONDA3ROOT", root)
 	setenv("PYTHONROOT", root)

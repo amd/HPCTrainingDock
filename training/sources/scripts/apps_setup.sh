@@ -1,8 +1,8 @@
 
 echo "########## Install additional libs and apps #############"
 
-sudo apt-get update
-sudo apt-get install -y valgrind \
+sudo DEBIAN_FRONTEND=noninteractive apt-get update
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y valgrind \
                         kcachegrind kcachegrind-converters \
                         libboost-all-dev \
                         libeigen3-dev \
@@ -21,5 +21,4 @@ sudo apt-get install -y valgrind \
                         openssl \
 			swig \
                         python3-scipy  python3-h5sparse \
-			libtbb-dev \
-			nano
+			libtbb-dev

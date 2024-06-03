@@ -7,7 +7,7 @@
 : ${PUSH:=0}
 : ${PULL:=--pull}
 : ${OUTPUT_VERBOSITY:=""}
-: ${BUILD_OPENMPI:="1"}
+: ${BUILD_OPENMPI:="0"}
 : ${BUILD_AOMP_LATEST:="0"}
 : ${BUILD_LLVM_LATEST:="0"}
 : ${BUILD_GCC_LATEST:="0"}
@@ -220,7 +220,7 @@ do
             reset-last
             ;;
         "--build-all-latest")
-            BUILD_OPENMPI="1"
+            #BUILD_OPENMPI="1"
             BUILD_ALL_LATEST="1"
             BUILD_AOMP_LATEST="1"
             #BUILD_LLVM_LATEST="1"
@@ -255,7 +255,7 @@ fi
 
 ROCM_DOCKER_OPTS="${PULL} -f rocm/Dockerfile ${NO_CACHE}"
 
-OMNITRACE_DOCKER_OPTS="-f omnitrace/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg OMNITRACE_BUILD_FROM_SOURCE=\"${OMNITRACE_BUILD_FROM_SOURCE}\" --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\""
+OMNITRACE_DOCKER_OPTS="-f omnitrace/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg OMNITRACE_BUILD_FROM_SOURCE=\"${OMNITRACE_BUILD_FROM_SOURCE}\" --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL}"
 
 OMNIPERF_DOCKER_OPTS="-f omniperf/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER}"
 
@@ -265,44 +265,23 @@ TRAINING_DOCKER_OPTS="${TRAINING_DOCKER_OPTS} -f training/Dockerfile"
 
 for ROCM_VERSION in ${ROCM_VERSIONS}
 do
-    if [ -d CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/ ]; then
+    if [ -d CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/ ]; then
        USE_CACHED_APPS=1
     fi
 
     GENERAL_DOCKER_OPTS="--build-arg DISTRO=${DISTRO} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION}"
 
 # Building rocm docker
-    if [ ! -d CacheFiles ]; then
-       mkdir CacheFiles
-    fi
-    rm -rf CacheFiles/*.tgz
-    if [ "${BUILD_OPENMPI}" = "0" ] && [ "${USE_CACHED_APPS}" = "1" ]; then
-       if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/ucx.tgz ]; then
-          ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/ucx.tgz ucx.tgz
-       fi
-       if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/openmpi.tgz ]; then
-          ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/openmpi.tgz openmpi.tgz
-       fi
-    fi
-    date > CacheFiles/timestamp
     verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${ROCM_DOCKER_OPTS} \
        --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
        --tag ${DOCKER_USER}/rocm:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        .
-    rm -rf CacheFiles/*.tgz
 
 # Building omnitrace docker
-    if [ "${BUILD_OMNITRACE_FROM_SOURCE}" = "0" ] && [ "${USE_CACHED_APPS}" = "1" ]; then
-       if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/omnitrace.tgz ]; then
-          ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/omnitrace.tgz omnitrace.tgz
-       fi
-    fi
-    date > CacheFiles/timestamp
     verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${OMNITRACE_DOCKER_OPTS} \
        --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
        -t ${DOCKER_USER}/omnitrace:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        .
-    rm -rf CacheFiles/*.tgz
 
 # Building omniperf docker
     verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${OMNIPERF_DOCKER_OPTS} \
@@ -310,44 +289,6 @@ do
        .
 
 # Building training docker
-    if [ "${USE_CACHED_APPS}" = "1" ]; then
-       if [ "${BUILD_GCC_LATEST}" = "1" ]; then
-          if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/gcc-13.2.0.tgz ]; then
-             ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/gcc-13.2.0.tgz gcc-13.2.0.tgz
-          fi
-       fi
-       if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
-          if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/aomp_19.0-0.tgz ]; then
-             ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/aomp_19.0-0.tgz aomp_19.0-0.tgz
-          fi
-       fi
-       if [ "${BUILD_LLVM_LATEST}" = "1" ]; then
-          if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/llvm-latest.tgz ]; then
-             ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/llvm-latest.tgz llvm-latest.tgz
-          fi
-       fi
-       if [ "${BUILD_CLACC_LATEST}" = "1" ]; then
-          if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/clacc_clang.tgz ]; then
-             ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/clacc_clang.tgz clacc_clang.tgz
-          fi
-       fi
-       if [ "${BUILD_OG_LATEST}" = "1" ]; then
-          if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/og13.tgz ]; then
-             ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/og13.tgz og13.tgz
-          fi
-       fi
-       if [ "${BUILD_PYTORCH}" = "1" ]; then
-          if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/pytorch.tgz ]; then
-             ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/pytorch.tgz pytorch.tgz
-          fi
-       fi
-       if [ "${BUILD_CUPY}" = "1" ]; then
-          if [ -f CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/cupy.tgz ]; then
-             ln -s CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/cupy.tgz cupy.tgz
-          fi
-       fi
-    fi
-    date > CacheFiles/timestamp
     verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${TRAINING_DOCKER_OPTS} \
        --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
        --build-arg BUILD_GCC_LATEST=${BUILD_GCC_LATEST} \
@@ -361,7 +302,6 @@ do
        -t ${DOCKER_USER}/training:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        -t training \
        .
-    rm -rf CacheFiles/*.tgz
 
     if [ "${PUSH}" -ne 0 ]; then
         docker push ${CONTAINER}

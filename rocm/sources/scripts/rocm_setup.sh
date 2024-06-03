@@ -378,4 +378,3 @@ cat <<-EOF | sudo tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	prepend_path("PATH", pathJoin(base, "bin"))
 	family("OpenCL")
 EOF
-

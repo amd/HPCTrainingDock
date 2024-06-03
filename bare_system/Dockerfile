@@ -40,6 +40,8 @@ WORKDIR /home/student
 
 ADD bare_system bare_system
 ADD rocm rocm
+ADD omnitrace omnitrace
+ADD cache.list CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}.tgz /opt/rocmplus-${ROCM_VERSION}/
 
 RUN bare_system/main_setup.sh --rocm-version ${ROCM_VERSION}
 

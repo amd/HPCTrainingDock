@@ -84,10 +84,10 @@ if [ "${BUILD_CUPY}" = "1" ]; then
    # Create a module file for cupy
    export MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/cupy
    
-   mkdir -p ${MODULE_PATH}
+   sudo mkdir -p ${MODULE_PATH}
    
    # The - option suppresses tabs
-   cat > ${MODULE_PATH}/13.0.0b1.lua <<-EOF
+   cat <<-EOF | sudo tee ${MODULE_PATH}/13.0.0b1.lua
 	whatis("HIP version of cuPY or hipPY")
 
 	load("rocm/${ROCM_VERSION}")

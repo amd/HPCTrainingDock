@@ -10,6 +10,7 @@ DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | t
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+OMNITRACE_BUILD_FROM_SOURCE=0
 
 reset-last
 
@@ -45,8 +46,11 @@ echo "============================"
 echo " Installing Omnitrace with:"
 echo "ROCM_VERSION is $ROCM_VERSION"
 echo "AMDGPU_GFXMODEL is $AMDGPU_GFXMODEL"
+echo "OMNITRACE_BUILD_FROM_SOURCE is $OMNITRACE_BUILD_FROM_SOURCE"
 echo "============================"
 echo ""
+
+ls -l /opt/rocmplus-${ROCM_VERSION}/
 
 if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "0" ] ; then
    if [ -f /opt/rocmplus-${ROCM_VERSION}/omnitrace.tgz ]; then
@@ -111,7 +115,7 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "1" ] ; then
           omnitrace-source
 
    cmake --build omnitrace-build --target all --parallel 16
-   cmake --build omnitrace-build --target install
+   sudo cmake --build omnitrace-build --target install
    PATH=${SAVE_PATH}
    rm -rf omnitrace-source
 fi
@@ -119,10 +123,10 @@ fi
 # In either case, create a module file for Omnitrace
 export MODULE_PATH=/etc/lmod/modules/ROCmPlus-AMDResearchTools/omnitrace
 
-mkdir -p ${MODULE_PATH}
+sudo mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat > ${MODULE_PATH}/1.11.2.lua <<-EOF
+cat <<-EOF | sudo tee ${MODULE_PATH}/1.11.2.lua
 	whatis("Name: omnitrace")
 	whatis("Version: 1.11.2")
 	whatis("Category: AMD")

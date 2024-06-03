@@ -39,26 +39,28 @@ echo ""
 #
 
 if [ "${DISTRO}" = "ubuntu" ]; then
-   apt-get -qqy install alien 
-   wget -q http://mvapich.cse.ohio-state.edu/download/mvapich/gdr/2.3.7/mofed5.0/mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
-   alien --scripts -i mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
+   sudo DEBIAN_FRONTEND=noninteractive apt-get -qqy install alien 
+   sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}
+   sudo mkdir -p /opt/mvapich2
+   sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/mvapich2
+   sudo wget -q http://mvapich.cse.ohio-state.edu/download/mvapich/gdr/2.3.7/mofed5.0/mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
+   sudo alien --scripts -i mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
 fi
 if [ "${DISTRO}" = "rocky linux" ]; then
    yum install http://mvapich.cse.ohio-state.edu/download/mvapich/gdr/2.3.7/mofed5.0/mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
 fi
 
 # Adding -p option to avoid error if directory already exists
-mkdir -p /opt/rocmplus-${ROCM_VERSION}
-mv /opt/mvapich2 /opt/rocmplus-${ROCM_VERSION}/mvapich2
+sudo mv /opt/mvapich2 /opt/rocmplus-${ROCM_VERSION}/mvapich2
 rm -f mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
 
 # Create a module file for Mvapich
 export MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/mvapich2
 
-mkdir -p ${MODULE_PATH}
+sudo mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat > ${MODULE_PATH}/2.3.7.lua <<-EOF
+cat <<-EOF | sudo tee ${MODULE_PATH}/2.3.7.lua
 	whatis("Name: GPU-aware mvapich")
 	whatis("Version: 2.3.7")
 	whatis("Description: An open source Message Passing Interface implementation")
@@ -74,6 +76,3 @@ cat > ${MODULE_PATH}/2.3.7.lua <<-EOF
 	load("rocm/${ROCM_VERSION}")
 	family("MPI")
 EOF
-
-
-

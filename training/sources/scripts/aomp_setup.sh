@@ -77,10 +77,10 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
    # In either case, create a module file for AOMP compiler
    export MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/aomp
 
-   mkdir -p ${MODULE_PATH}
+   sudo mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat > ${MODULE_PATH}/amdclang-${AOMP_VERSION_SHORT}.lua <<-EOF
+   cat <<-EOF | sudo tee ${MODULE_PATH}/amdclang-${AOMP_VERSION_SHORT}.lua
 	whatis("AMD OpenMP Compiler version 19.0-0 based on LLVM")
 	
 	local base = "/opt/rocmplus-${ROCM_VERSION}/aomp_19.0-0"

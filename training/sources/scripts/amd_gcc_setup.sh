@@ -66,7 +66,7 @@ if [ "${BUILD_GCC_LATEST}" = "1" ] ; then
       # Set install directory
       export DEST=/opt/rocmplus-${ROCM_VERSION}/${GCC_VERSION}
       chmod a+w /opt
-      mkdir $DEST
+      sudo mkdir $DEST
 
       # modules
       module load rocm
@@ -113,7 +113,7 @@ if [ "${BUILD_GCC_LATEST}" = "1" ] ; then
       --enable-offload-targets=amdgcn-amdhsa=$DEST/amdgcn-amdhsa --disable-bootstrap
 
       make -j 16
-      make install
+      sudo make install
       cd ..
 
       rm -rf build buildhost
@@ -128,7 +128,7 @@ if [ "${BUILD_GCC_LATEST}" = "1" ] ; then
    mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat > ${MODULE_PATH}/13.2.0.lua <<-EOF
+   cat <<-EOF | sudo tee ${MODULE_PATH}/13.2.0.lua
 	whatis("Custom built GCC Version 13.2.0 compiler")
 	whatis("This version enables offloading to AMD GPUs")
 

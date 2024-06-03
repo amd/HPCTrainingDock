@@ -37,6 +37,7 @@ RUN cat /tmp/bash.bashrc >> /etc/bash.bashrc && rm -f /tmp/bash.bashrc
 
 USER root
 
+# using /app rather than /tmp because prte encodes the HLD and removing /tmp files may cause problems
 WORKDIR /app 
 
 #
@@ -44,7 +45,10 @@ WORKDIR /app
 #
 
 # Grab any cached files of MPI builds
-COPY CacheFiles/*.tgz CacheFiles/timestamp /opt/rocmplus-${ROCM_VERSION}/
+COPY cache.list \
+     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/ucx.* \
+     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/openmpi.* \
+     /opt/rocmplus-${ROCM_VERSION}/
 
 COPY rocm/sources/scripts/openmpi_setup.sh /tmp/openmpi_setup.sh
 

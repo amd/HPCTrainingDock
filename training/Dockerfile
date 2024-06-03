@@ -79,7 +79,15 @@ RUN apt-get update && apt-get install -y gawk ninja-build generate-ninja ccache
 RUN pip3 install CppHeaderParser
 
 # Grab any cache files of compiler builds
-COPY CacheFiles/* /opt/rocmplus-${ROCM_VERSION}/
+COPY cache.list \
+     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/gcc-13.2.0.* \
+     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/aomp_19.0-0.* \
+     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/llvm-latest.* \
+     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/clacc-clang.* \
+     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/og13.* \
+     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/cupy.* \
+     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/pytorch.* \
+     /opt/rocmplus-${ROCM_VERSION}/
 
 # Build the latest GCC for AMD compiler if requested
 COPY training/sources/scripts/amd_gcc_setup.sh /tmp/amd_gcc_setup.sh

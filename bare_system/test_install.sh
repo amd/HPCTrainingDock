@@ -7,6 +7,8 @@ reset-last()
    last() { send-error "Unsupported argument :: ${1}"; }
 }
 
+AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+
 n=0
 while [[ $# -gt 0 ]]
 do
@@ -16,6 +18,11 @@ do
           ROCM_VERSION=${1}
           reset-last
           ;;
+      "--amdgpu-gfxmodel")
+            shift
+            AMDGPU_GFXMODEL=${1}
+            reset-last
+            ;;
       *)
          last ${1}
          ;;
@@ -29,6 +36,10 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 
 set -v
 
-docker build --no-cache --build-arg DISTRO=${DISTRO} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} -t bare -f bare_system/Dockerfile .
+docker build --no-cache --build-arg DISTRO=${DISTRO}  \
+             --build-arg DISTRO_VERSION=${DISTRO_VERSION} \
+             --build-arg ROCM_VERSION=${ROCM_VERSION} \
+             --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
+             -t bare -f bare_system/Dockerfile .
 
 docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --group-add render --group-add renderalt -p 2222:22 --name Bare  --rm -v /home/bobrobey/Class/training/hostdir:/hostdir --security-opt seccomp=unconfined bare

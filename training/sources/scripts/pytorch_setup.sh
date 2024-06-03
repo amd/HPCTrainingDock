@@ -129,10 +129,10 @@ fi
 # Create a module file for Pytorch
 export MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/pytorch
 
-mkdir -p ${MODULE_PATH}
+sudo mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat > ${MODULE_PATH}/2.2.lua <<-EOF
+cat <<-EOF | sudo tee ${MODULE_PATH}/2.2.lua
         whatis("HIP version of pytorch")
 
         load("rocm/${ROCM_VERSION}")

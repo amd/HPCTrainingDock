@@ -36,8 +36,9 @@ echo ""
 
 if [ "${DISTRO}" = "ubuntu" ]; then
    # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev 
-   apt-get update && \
-   apt-get install -y libpmix-dev libhwloc-dev  libevent-dev
+   sudo DEBIAN_FRONTEND=noninteractive apt-get update && \
+   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
+      libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen
 fi
 if [ "${DISTRO}" = "rocky linux" ]; then
    # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev 
@@ -55,6 +56,9 @@ mkdir -p /opt/rocmplus-${ROCM_VERSION}
 #
 # Install UCX
 #
+
+echo "List of pre-installed packages"
+ls -l /opt/rocmplus-${ROCM_VERSION}
 
 if [ -f /opt/rocmplus-${ROCM_VERSION}/ucx.tgz ]; then
    echo ""
@@ -85,21 +89,21 @@ else
    export OMPI_MCA_pml_ucx_devices=any
    export OMPI_MCA_pml_ucx_verbose=100
 
-   # using /app rather than /tmp because prte encodes the HLD and removing /tmp files may cause problems
-   cd /app
    wget -q https://github.com/openucx/ucx/releases/download/v1.16.0/ucx-1.16.0.tar.gz
    tar xzf ucx-1.16.0.tar.gz
    cd ucx-1.16.0
    mkdir build && cd build
+
+   echo "../contrib/configure-release --prefix=/opt/rocmplus-${ROCM_VERSION}/ucx --with-rocm=/opt/rocm-${ROCM_VERSION}  --without-cuda --enable-mt  --enable-optimizations  --disable-logging --disable-debug --enable-assertions --enable-params-check --enable-examples"
    ../contrib/configure-release --prefix=/opt/rocmplus-${ROCM_VERSION}/ucx \
       --with-rocm=/opt/rocm-${ROCM_VERSION}  --without-cuda \
       --enable-mt  --enable-optimizations  --disable-logging \
       --disable-debug --enable-assertions --enable-params-check \
       --enable-examples
       make -j 16
-      make install
+      sudo make install
 
-   cd /app
+   cd ../..
    rm -rf ucx-1.16.0 ucx-1.16.0.tar.gz
 fi
 
@@ -140,8 +144,6 @@ else
 
    # dad 3/25/3023 removed --enable-mpi-f90 --enable-mpi-c as they apparently are not options 
    # dad 3/30/2023 remove --with-pmix
-   # using /app rather than /tmp because prte encodes the HLD and removing /tmp files may cause problems
-   cd /app
 
    wget -q https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.3.tar.bz2
    tar -xjf openmpi-5.0.3.tar.bz2
@@ -153,20 +155,20 @@ else
                 --enable-mpi --enable-mpi-fortran \
                 --disable-debug   CC=gcc CXX=g++ FC=gfortran
    make -j 16
-   make install
+   sudo make install
    # make ucx the default point-to-point
-   echo "pml = ucx" >> /opt/rocmplus-${ROCM_VERSION}/openmpi/etc/openmpi-mca-params.conf
-   cd /app
+   echo "pml = ucx" | sudo tee -a /opt/rocmplus-${ROCM_VERSION}/openmpi/etc/openmpi-mca-params.conf
+   cd ../..
    rm -rf openmpi-5.0.3 openmpi-5.0.3.tar.bz2
 fi
 
 # In either case of Cache or Build from source, create a module file for OpenMPI
 export MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/openmpi
 
-mkdir -p ${MODULE_PATH}
+sudo mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat > ${MODULE_PATH}/5.0.3.lua <<-EOF
+cat <<-EOF | sudo tee ${MODULE_PATH}/5.0.3.lua
 	whatis("Name: GPU-aware openmpi")
 	whatis("Version: 5.0.3")
 	whatis("Description: An open source Message Passing Interface implementation")

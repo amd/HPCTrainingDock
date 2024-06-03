@@ -91,10 +91,10 @@ if [ "${BUILD_LLVM_LATEST}" = "1" ]; then
    # In either case, create a module file for llvm-latest compiler
    export MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/llvm-latest
 
-   mkdir -p ${MODULE_PATH}
+   sudo mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat > ${MODULE_PATH}/gcc11_hipstdpar.lua <<-EOF
+   cat <<-EOF | sudo tee ${MODULE_PATH}/gcc11_hipstdpar.lua
 	whatis("LLVM latest compiler version with stdpar patch applied")
 
 	local base = "/opt/rocmplus-${ROCM_VERSION}/llvm-latest"

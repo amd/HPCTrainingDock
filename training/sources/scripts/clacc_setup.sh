@@ -85,10 +85,10 @@ if [ "${BUILD_CLACC_LATEST}" = "1" ]; then
    # In either case, create a module file for CLACC compiler
    export MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/clacc
 
-   mkdir -p ${MODULE_PATH}
+   sudo mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat > ${MODULE_PATH}/clang-17.0.0.lua <<-EOF
+   cat <<-EOF | sudo tee ${MODULE_PATH}/clang-17.0.0.lua
 	whatis("Clang OpenMP Compiler with CLACC version 17.0-0 based on LLVM")
 
 	local base = "/opt/rocmplus-${ROCM_VERSION}/clacc_clang"
