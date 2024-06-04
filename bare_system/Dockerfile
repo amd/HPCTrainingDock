@@ -30,7 +30,7 @@ RUN apt-get install -q -y vim sudo apt-utils
 
 SHELL ["/bin/bash", "-c"]
 
-RUN adduser --home /home/student --shell /bin/bash --disabled-password --gecos '' student
+RUN adduser --home /home/student --uid 20000 --shell /bin/bash --disabled-password --gecos '' student
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 #RUN usermod -a -G video,render,renderalt,sudo --password $(echo amdtest | openssl passwd -1 -stdin) student
 RUN usermod -a -G video,render,renderalt,sudo student
