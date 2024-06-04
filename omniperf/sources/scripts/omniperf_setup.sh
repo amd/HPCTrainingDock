@@ -27,17 +27,17 @@ echo ""
 
 INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0
 wget -q https://github.com/AMDResearch/omniperf/releases/download/v2.0.0-RC1/omniperf-2.0.0-RC1.tar.gz && \
-     tar xfz omniperf-2.0.0-RC1.tar.gz && \
+     sudo tar xfz omniperf-2.0.0-RC1.tar.gz && \
      cd ./omniperf-2.0.0-RC1\
-     && python3 -m pip install -t ${INSTALL_DIR}/python-libs -r requirements.txt \
-     && python3 -m pip install -t ${INSTALL_DIR}/python-libs pytest \
+     && sudo python3 -m pip install -t ${INSTALL_DIR}/python-libs -r requirements.txt \
+     && sudo python3 -m pip install -t ${INSTALL_DIR}/python-libs pytest \
      && mkdir build \
      && cd build  \
      &&  cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}/ \
         -DCMAKE_BUILD_TYPE=Release \
         -DPYTHON_DEPS=${INSTALL_DIR}/python-libs \
         -DMOD_INSTALL_PATH=${INSTALL_DIR}/modulefiles .. \
-     && make install
+     && sudo make install
 cd ../.. && rm -rf omniperf-2.0.0-RC1 omniperf-2.0.0-RC1.tar.gz
 
 sed -i -e 's/ascii/utf-8/' /opt/rocmplus-*/omniperf-*/bin/utils/specs.py

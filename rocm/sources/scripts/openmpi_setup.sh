@@ -57,9 +57,6 @@ mkdir -p /opt/rocmplus-${ROCM_VERSION}
 # Install UCX
 #
 
-echo "List of pre-installed packages"
-ls -l /opt/rocmplus-${ROCM_VERSION}
-
 if [ -f /opt/rocmplus-${ROCM_VERSION}/ucx.tgz ]; then
    echo ""
    echo "============================"
@@ -69,9 +66,9 @@ if [ -f /opt/rocmplus-${ROCM_VERSION}/ucx.tgz ]; then
 
    #install the cached version
    cd /opt/rocmplus-${ROCM_VERSION}
-   tar -xzf ucx.tgz
-   chown -R root:root /opt/rocmplus-${ROCM_VERSION}/ucx
-   rm /opt/rocmplus-${ROCM_VERSION}/ucx.tgz
+   sudo tar -xzf ucx.tgz
+   sudo chown -R root:root /opt/rocmplus-${ROCM_VERSION}/ucx
+   sudo rm /opt/rocmplus-${ROCM_VERSION}/ucx.tgz
 else
    echo ""
    echo "============================"
@@ -120,9 +117,9 @@ if [ -f /opt/rocmplus-${ROCM_VERSION}/openmpi.tgz ]; then
 
    #install the cached version
    cd /opt/rocmplus-${ROCM_VERSION}
-   tar -xzf openmpi.tgz
-   chown -R root:root /opt/rocmplus-${ROCM_VERSION}/openmpi
-   rm /opt/rocmplus-${ROCM_VERSION}/openmpi.tgz
+   sudo tar -xzf openmpi.tgz
+   sudo chown -R root:root /opt/rocmplus-${ROCM_VERSION}/openmpi
+   sudo rm /opt/rocmplus-${ROCM_VERSION}/openmpi.tgz
 else
    echo ""
    echo "============================"

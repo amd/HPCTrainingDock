@@ -42,4 +42,7 @@ docker build --no-cache --build-arg DISTRO=${DISTRO}  \
              --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
              -t bare -f bare_system/Dockerfile .
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --group-add render --group-add renderalt -p 2222:22 --name Bare  --rm -v /home/bobrobey/Class/training/hostdir:/hostdir --security-opt seccomp=unconfined bare
+docker run -it --device=/dev/kfd --device=/dev/dri \
+           --group-add video --group-add render --group-add renderalt \
+	   -p 2222:22 --name Bare  --security-opt seccomp=unconfined \
+	   --rm -v /home/bobrobey/Class/training/hostdir:/hostdir bare

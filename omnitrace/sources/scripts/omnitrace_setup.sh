@@ -62,9 +62,9 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "0" ] ; then
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf omnitrace.tgz
-      chown -R root:root /opt/rocmplus-${ROCM_VERSION}/omnitrace
-      rm /opt/rocmplus-${ROCM_VERSION}/omnitrace.tgz
+      sudo tar -xzf omnitrace.tgz
+      sudo chown -R root:root /opt/rocmplus-${ROCM_VERSION}/omnitrace
+      sudo rm /opt/rocmplus-${ROCM_VERSION}/omnitrace.tgz
    else
       if  wget -q https://github.com/AMDResearch/omnitrace/releases/download/v1.11.1/omnitrace-install.py && \
           python3 ./omnitrace-install.py --prefix /opt/rocmplus-${ROCM_VERSION}/omnitrace --rocm "${ROCM_VERSION}" -d ubuntu -v "${DISTRO_VERSION}"; then

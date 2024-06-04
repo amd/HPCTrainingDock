@@ -6,6 +6,7 @@ FROM ${DISTRO}:${DISTRO_VERSION}
 ARG DISTRO
 ARG DISTRO_VERSION
 ARG ROCM_VERSION
+ARG AMDGPU_GFXMODEL
 
 LABEL maintainer="bob.robey@amd.com"
 
@@ -26,6 +27,7 @@ WORKDIR /tmp
 RUN apt-get -q -y update
 RUN apt-get install -q -y vim sudo apt-utils
 
+
 SHELL ["/bin/bash", "-c"]
 
 RUN adduser --home /home/student --shell /bin/bash --disabled-password --gecos '' student
@@ -41,8 +43,10 @@ WORKDIR /home/student
 ADD bare_system bare_system
 ADD rocm rocm
 ADD omnitrace omnitrace
-ADD cache.list CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}.tgz /opt/rocmplus-${ROCM_VERSION}/
+ADD omniperf omniperf
+ADD training training
+COPY cache.list CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/*.tgz /opt/rocmplus-${ROCM_VERSION}/
 
-RUN bare_system/main_setup.sh --rocm-version ${ROCM_VERSION}
+RUN bare_system/main_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu_gfxmodel ${AMDGPU_GFXMODEL}
 
 ENTRYPOINT ["bash"]

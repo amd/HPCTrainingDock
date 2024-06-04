@@ -35,7 +35,7 @@ echo ""
 
 if [ "${DISTRO}" = "ubuntu" ] ; then
     wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /opt/miniconda-installer.sh && \
-    sudo bash /opt/miniconda-installer.sh -b -p /opt/miniconda3 && \
+    sudo /opt/miniconda-installer.sh -b -p /opt/miniconda3 && \
     export PATH="/opt/miniconda3/bin:${PATH}" && \
     conda config --set always_yes yes --set changeps1 no && \
     conda update -c defaults -n base conda && \
