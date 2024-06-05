@@ -69,7 +69,7 @@ sudo chmod u+s /usr/bin/update-alternatives
 sudo update-alternatives --config gcc
 sudo update-alternatives --config clang
 
-sudo apt autoremove
+sudo apt-get autoremove
 sudo apt-get -q clean && sudo rm -rf /var/lib/apt/lists/*
 
 # sudo apt purge --autoremove -y gcc-11

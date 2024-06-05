@@ -34,15 +34,16 @@ echo ""
 
 
 if [ "${DISTRO}" = "ubuntu" ] ; then
-    wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /opt/miniconda-installer.sh && \
-    sudo /opt/miniconda-installer.sh -b -p /opt/miniconda3 && \
-    export PATH="/opt/miniconda3/bin:${PATH}" && \
-    conda config --set always_yes yes --set changeps1 no && \
-    conda update -c defaults -n base conda && \
-    for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c defaults -c conda-forge python=3.${i} pip; done && \
-    for i in ${PYTHON_VERSIONS}; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done && \
-    conda clean -a -y && \
-    sudo rm -rf /opt/miniconda-installer.sh
+    wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda-installer.sh 
+    chmod +x /tmp/miniconda-installer.sh
+    sudo /tmp/miniconda-installer.sh -b -p /opt/miniconda3 
+    export PATH="/opt/miniconda3/bin:${PATH}" 
+    conda config --set always_yes yes --set changeps1 no 
+    conda update -c defaults -n base conda 
+    for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c defaults -c conda-forge python=3.${i} pip; done 
+    for i in ${PYTHON_VERSIONS}; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+    conda clean -a -y 
+    rm -f /tmp/miniconda-installer.sh
 fi
 
 ## Create a module file for miniconda3
