@@ -49,6 +49,8 @@ ls -l CacheFiles
 
 rocm/sources/scripts/baseospackages_setup.sh
 
+rocm/sources/scripts/lmod_setup.sh
+
 rocm/sources/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION}
 
 if [ -z "${AMDGPU_GFXMODEL}" ]; then
@@ -68,6 +70,9 @@ omniperf/sources/scripts/grafana_setup.sh
 omniperf/sources/scripts/omniperf_setup.sh --rocm-version ${ROCM_VERSION}
 
 training/sources/scripts/compiler_setup.sh
+
+sudo cp  training/sources/lua/gcc/*          /etc/lmod/modules/Linux/gcc/
+sudo cp  training/sources/lua/clang/*        /etc/lmod/modules/Linux/clang/
 
 training/sources/scripts/apps_setup_basic.sh
 

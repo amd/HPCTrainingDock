@@ -27,6 +27,11 @@ COPY rocm/sources/scripts/baseospackages_setup.sh /tmp/baseospackages_setup.sh
 RUN  /tmp/baseospackages_setup.sh && \
      rm /tmp/baseospackages_setup.sh
 
+COPY rocm/sources/scripts/lmod_setup.sh /tmp/lmod_setup.sh
+
+RUN  /tmp/lmod_setup.sh && \
+     rm /tmp/lmod_setup.sh
+
 COPY rocm/sources/scripts/rocm_setup.sh /tmp/rocm_setup.sh
 
 RUN  /tmp/rocm_setup.sh --rocm-version ${ROCM_VERSION} && \
