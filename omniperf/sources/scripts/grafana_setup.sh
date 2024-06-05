@@ -65,7 +65,7 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get autoclean -y
 popd
 pushd /var/lib/grafana/plugins/custom-svg
 sudo sed -i "s/  bindIp.*/  bindIp: 0.0.0.0/" /etc/mongod.conf
-isudo mkdir -p /var/lib/grafana
+sudo mkdir -p /var/lib/grafana
 touch /var/lib/grafana/grafana.lib
 chown grafana:grafana /var/lib/grafana/grafana.lib
 popd
