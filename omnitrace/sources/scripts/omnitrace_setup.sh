@@ -1,5 +1,13 @@
 #!/bin/bash
 
+send-error()
+{
+    usage
+    echo -e "\nError: ${@}"
+    exit 1
+}
+
+
 reset-last()
 {
     last() { send-error "Unsupported argument :: ${1}"; }

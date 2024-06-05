@@ -49,7 +49,7 @@ COPY cache.list \
 
 RUN /tmp/omnitrace_setup.sh \
        --rocm-version ${ROCM_VERSION} \
-       --amdgpu-gfxmode ${AMDGPU_GFXMODEL} \
+       --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
        --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE} && \
     rm /tmp/omnitrace_setup.sh
 

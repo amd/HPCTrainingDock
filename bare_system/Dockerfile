@@ -49,4 +49,10 @@ COPY cache.list CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AM
 
 RUN bare_system/main_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu_gfxmodel ${AMDGPU_GFXMODEL}
 
+# install module files
+COPY  training/sources/lua/gcc/*          /etc/lmod/modules/Linux/gcc/
+COPY  training/sources/lua/clang/*        /etc/lmod/modules/Linux/clang/
+RUN bare_system/modulespath_setup.sh
+
+
 ENTRYPOINT ["bash"]
