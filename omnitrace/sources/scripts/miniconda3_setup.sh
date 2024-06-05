@@ -42,7 +42,7 @@ if [ "${DISTRO}" = "ubuntu" ] ; then
     for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c defaults -c conda-forge python=3.${i} pip; done && \
     for i in ${PYTHON_VERSIONS}; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done && \
     conda clean -a -y && \
-    rm -rf /opt/miniconda-installer.sh
+    sudo rm -rf /opt/miniconda-installer.sh
 fi
 
 ## Create a module file for miniconda3

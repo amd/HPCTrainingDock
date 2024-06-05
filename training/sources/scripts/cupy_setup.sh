@@ -53,7 +53,7 @@ if [ "${BUILD_CUPY}" = "1" ]; then
       cd /opt/rocmplus-${ROCM_VERSION}
       tar -xzf cupy.tgz
       chown -R root:root /opt/rocmplus-${ROCM_VERSION}/cupy
-      rm /opt/rocmplus-${ROCM_VERSION}/cupy.tgz
+      sudo rm /opt/rocmplus-${ROCM_VERSION}/cupy.tgz
    else
       echo ""
       echo "============================"
@@ -70,14 +70,14 @@ if [ "${BUILD_CUPY}" = "1" ]; then
       git clone -q --depth 1 --recursive https://github.com/ROCm/cupy.git
       cd cupy
       
-      sed -i -e '/numpy/s/1.27/1.25/' setup.py
+      sudo sed -i -e '/numpy/s/1.27/1.25/' setup.py
       python3 setup.py -q bdist_wheel
       
-      mkdir -p /opt/rocmplus-${ROCM_VERSION}/cupy
+      sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/cupy
       pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/cupy dist/cupy-13.0.0b1-cp310-cp310-linux_x86_64.whl
       
       cd ..
-      rm -rf cupy
+      sudo rm -rf cupy
       module unload rocm/${ROCM_VERSION}
    fi
       
