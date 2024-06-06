@@ -4,6 +4,7 @@ DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | t
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+BUILD_PYTORCH=0
 
 n=0
 while [[ $# -gt 0 ]]
@@ -38,8 +39,13 @@ echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL"
 echo "==================================="
 echo ""
 
+if [ "${BUILD_PYTORCH}" = "0" ]; then
 
-if [ "${BUILD_PYTORCH}" = "1" ]; then
+   echo "pytorch will not be build, according to the specified value of BUILD_PYTORCH"
+   echo "BUILD_PYTORCH: $BUILD_PYTORCH"
+   exit 1
+
+else 
    if [ -f /opt/rocmplus-${ROCM_VERSION}/pytorch.tgz ]; then
       echo ""
       echo "============================"
@@ -59,6 +65,8 @@ if [ "${BUILD_PYTORCH}" = "1" ]; then
       echo "============================"
       echo ""
 
+
+      source /etc/profile.d/lmod.sh
       module load rocm
       # Build with GPU aware MPI not working yet
       #module load openmpi
