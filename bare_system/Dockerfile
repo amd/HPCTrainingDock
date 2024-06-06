@@ -30,6 +30,9 @@ RUN apt-get install -q -y vim sudo apt-utils
 
 SHELL ["/bin/bash", "-c"]
 
+COPY rocm/sources/scripts/lmod_setup_1.sh /tmp/lmod_setup_1.sh
+RUN /tmp/lmod_setup_1.sh && rm /tmp/lmod_setup_1.sh
+
 RUN adduser --home /home/student --uid 20000 --shell /bin/bash --disabled-password --gecos '' student
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 #RUN usermod -a -G video,render,renderalt,sudo --password $(echo amdtest | openssl passwd -1 -stdin) student
