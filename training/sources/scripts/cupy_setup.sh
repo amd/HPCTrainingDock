@@ -40,8 +40,13 @@ echo "BUILD_CUPY: $BUILD_CUPY"
 echo "==================================="
 echo ""
 
+if [ "${BUILD_CUPY}" = "0" ]; then
 
-if [ "${BUILD_CUPY}" = "1" ]; then
+   echo "cupy will not be build, according to the specified value of BUILD_CUPY"
+   echo "BUILD_CUPY: $BUILD_CUPY"
+   exit 1
+
+else 
    if [ -f /opt/rocmplus-${ROCM_VERSION}/cupy.tgz ]; then
       echo ""
       echo "============================"
@@ -61,6 +66,8 @@ if [ "${BUILD_CUPY}" = "1" ]; then
       echo "============================"
       echo ""
 
+
+      source /etc/profile.d/lmod.sh
       module load rocm/${ROCM_VERSION}
       
       export CUPY_INSTALL_USE_HIP=1

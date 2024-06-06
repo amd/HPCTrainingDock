@@ -1,13 +1,15 @@
 #!/bin/bash
 
 : ${ROCM_VERSIONS:="6.0"}
+: ${BUILD_PYTORCH:="1"}
+: ${BUILD_CUPY:="1"}
 
 OMNITRACE_BUILD_FROM_SOURCE=0
 PYTHON_VERSIONS="9 10"
 
 reset-last()
 {
-   last() { send-error "Unsupported argument :: ${1}"; }
+   last() { echo "Unsupported argument :: ${1}"; }
 }
 
 n=0
@@ -71,6 +73,8 @@ omniperf/sources/scripts/omniperf_setup.sh --rocm-version ${ROCM_VERSION}
 
 training/sources/scripts/compiler_setup.sh
 
+sudo mkdir -p /etc/lmod/modules/Linux/gcc/
+sudo mkdir -p /etc/lmod/modules/Linux/clang/
 sudo cp  training/sources/lua/gcc/*          /etc/lmod/modules/Linux/gcc/
 sudo cp  training/sources/lua/clang/*        /etc/lmod/modules/Linux/clang/
 

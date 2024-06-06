@@ -29,18 +29,18 @@ INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0
 wget -q https://github.com/AMDResearch/omniperf/releases/download/v2.0.0-RC1/omniperf-2.0.0-RC1.tar.gz && \
      sudo tar xfz omniperf-2.0.0-RC1.tar.gz && \
      cd ./omniperf-2.0.0-RC1\
-     && sudo python3 -m pip install -t ${INSTALL_DIR}/python-libs -r requirements.txt \
-     && sudo python3 -m pip install -t ${INSTALL_DIR}/python-libs pytest \
+     && sudo python3 -m pip install -t ${INSTALL_DIR}/python-libs -r requirements.txt --upgrade \
+     && sudo python3 -m pip install -t ${INSTALL_DIR}/python-libs pytest --upgrade \
      && sudo mkdir build \
      && cd build  \
-     &&  cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}/ \
+     &&  sudo cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}/ \
         -DCMAKE_BUILD_TYPE=Release \
         -DPYTHON_DEPS=${INSTALL_DIR}/python-libs \
         -DMOD_INSTALL_PATH=${INSTALL_DIR}/modulefiles .. \
      && sudo make install
 cd ../.. && sudo rm -rf omniperf-2.0.0-RC1 omniperf-2.0.0-RC1.tar.gz
 
-sed -i -e 's/ascii/utf-8/' /opt/rocmplus-*/omniperf-*/bin/utils/specs.py
+sudo sed -i -e 's/ascii/utf-8/' /opt/rocmplus-*/omniperf-*/bin/utils/specs.py
 
 # Create a module file for Mvapich
 export MODULE_PATH=/etc/lmod/modules/ROCmPlus-AMDResearchTools/omniperf
@@ -48,7 +48,7 @@ export MODULE_PATH=/etc/lmod/modules/ROCmPlus-AMDResearchTools/omniperf
 sudo mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat > ${MODULE_PATH}/2.0.0.lua <<-EOF
+cat <<-EOF | sudo tee ${MODULE_PATH}/2.0.0.lua
 	local help_message = [[
 
 	Omniperf is an open-source performance analysis tool for profiling
