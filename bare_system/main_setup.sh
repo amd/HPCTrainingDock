@@ -3,6 +3,7 @@
 : ${ROCM_VERSIONS:="6.0"}
 : ${BUILD_PYTORCH:="1"}
 : ${BUILD_CUPY:="1"}
+: ${BUILD_PYTORCH:="1"}
 
 OMNITRACE_BUILD_FROM_SOURCE=0
 PYTHON_VERSIONS="9 10"
@@ -83,6 +84,6 @@ training/sources/scripts/apps_setup_basic.sh
 
 training/sources/scripts/cupy_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-cupy ${BUILD_CUPY} 
 
-training/sources/scripts/pytorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
+training/sources/scripts/pytorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-pytorch ${BUILD_PYTORCH}
 
 training/sources/scripts/apps_setup.sh
