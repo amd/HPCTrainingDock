@@ -1,4 +1,7 @@
-#!/bin/sh
+#!/bin/bash
+
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 echo ""
 echo "############# Compiler Setup script ################"
@@ -69,10 +72,105 @@ sudo chmod u+s /usr/bin/update-alternatives
 sudo update-alternatives --config gcc
 sudo update-alternatives --config clang
 
-sudo apt-get autoremove
-sudo apt-get -q clean && sudo rm -rf /var/lib/apt/lists/*
+sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove
+sudo DEBIAN_FRONTEND=noninteractive apt-get -q clean && sudo rm -rf /var/lib/apt/lists/*
 
 # sudo apt purge --autoremove -y gcc-11
 
 sudo rm -rf /etc/apt/trusted.gpg.d/ubuntu-toolchain-r_ubuntu_test.gpg
 sudo rm -rf /etc/apt/sources.list.d/ubuntu-toolchain-r-ubuntu-test-focal.list
+
+MODULE_PATH=/etc/lmod/modules/Linux/gcc
+sudo mkdir ${MODULE_PATH}
+
+
+if [ "${DISTRO_VERSION}" = "22.04" ]; then
+   GCC_VERSION_LIST="11 12 13"
+   GCC_BASE_VERSION=11
+   CLANG_VERSION_LIST="14 15"
+   CLANG_BASE_VERSION=14
+elif [ "${DISTRO_VERSION}" = "20.04" ]; then
+	# more were needed for 20.04
+   GCC_VERSION_LIST="11 12 13"
+   GCC_BASE_VERSION=11
+   CLANG_VERSION_LIST="14 15"
+   CLANG_BASE_VERSION=14
+else
+   GCC_VERSION_LIST="11 12 13"
+   GCC_BASE_VERSION=11
+   CLANG_VERSION_LIST="14 15"
+   CLANG_BASE_VERSION=14
+fi
+
+# The - option suppresses tabs
+for GCC_VERSION in ${GCC_VERSION_LIST}
+do
+   cat <<-EOF | sudo tee ${MODULE_PATH}/${GCC_VERSION}.lua
+	whatis("GCC Version ${GCC_VERSION} compiler")
+	setenv("CC", "/usr/bin/gcc-${GCC_VERSION}")
+	setenv("CXX", "/usr/bin/g++-${GCC_VERSION}")
+	setenv("F77", "/usr/bin/gfortran-${GCC_VERSION}")
+	setenv("F90", "/usr/bin/gfortran-${GCC_VERSION}")
+	setenv("FC", "/usr/bin/gfortran-${GCC_VERSION}")
+	append_path("INCLUDE_PATH", "/usr/include")
+	prepend_path("LIBRARY_PATH", "/usr/lib/gcc/x86_64-linux-gnu/${GCC_VERSION}")
+	prepend_path("LD_LIBRARY_PATH", "/usr/lib/gcc/x86_64-linux-gnu/${GCC_VERSION}")
+	family("compiler")
+EOF
+done
+
+cat <<-EOF | sudo tee ${MODULE_PATH}/base.lua
+	whatis("GCC Version base version (${GCC_BASE_VERSION}) compiler")
+	setenv("CC", "/usr/bin/gcc")
+	setenv("CXX", "/usr/bin/g++")
+	setenv("F77", "/usr/bin/gfortran")
+	setenv("F90", "/usr/bin/gfortran")
+	setenv("FC", "/usr/bin/gfortran")
+	append_path("INCLUDE_PATH", "/usr/include")
+	prepend_path("LIBRARY_PATH", "/usr/lib/gcc/x86_64-linux-gnu/${GCC_BASE_VERSION}")
+	prepend_path("LD_LIBRARY_PATH", "/usr/lib/gcc/x86_64-linux-gnu/${GCC_BASE_VERSION}")
+	family("compiler")
+EOF
+
+cat <<-EOF | sudo tee ${MODULE_PATH}/.version
+	#%Module
+	set ModulesVersion "${GCC_BASE_VERSION}"
+EOF
+
+MODULE_PATH=/etc/lmod/modules/Linux/clang
+sudo mkdir ${MODULE_PATH}
+
+for CLANG_VERSION in ${CLANG_VERSION_LIST}
+do
+   cat <<-EOF | sudo tee ${MODULE_PATH}/${CLANG_VERSION}.lua
+	whatis("Clang (LLVM) Version ${CLANG_VERSION} compiler")
+	setenv("CC", "/usr/bin/clang-${CLANG_VERSION}")
+	setenv("CXX", "/usr/bin/clang++-${CLANG_VERSION}")
+	setenv("F77", "/usr/bin/flang-${CLANG_VERSION}")
+	setenv("F90", "/usr/bin/flang-${CLANG_VERSION}")
+	setenv("FC", "/usr/bin/flang-${CLANG_VERSION}")
+	append_path("INCLUDE_PATH", "/usr/include")
+	prepend_path("LIBRARY_PATH", "/usr/lib/llvm-${CLANG_VERSION}/lib")
+	prepend_path("LD_LIBRARY_PATH", "/usr/lib/llvm-${CLANG_VERSION}/lib")
+	family("compiler")
+EOF
+done
+
+cat <<-EOF | sudo tee ${MODULE_PATH}/base.lua
+	whatis("Clang (LLVM) Base version ${CLANG_BASE_VERSION} compiler")
+	setenv("CC", "/usr/bin/clang")
+	setenv("CXX", "/usr/bin/clang++")
+	setenv("F77", "/usr/bin/flang")
+	setenv("F90", "/usr/bin/flang")
+	setenv("FC", "/usr/bin/flang")
+	append_path("INCLUDE_PATH", "/usr/include")
+	prepend_path("LIBRARY_PATH", "/usr/lib/llvm-${CLANG_BASE_VERSION}/lib")
+	prepend_path("LD_LIBRARY_PATH", "/usr/lib/llvm-${CLANG_BASE_VERSION}/lib")
+	family("compiler")
+EOF
+
+cat <<-EOF | sudo tee ${MODULE_PATH}/.version
+	#%Module
+	set ModulesVersion "${CLANG_BASE_VERSION}"
+EOF
+

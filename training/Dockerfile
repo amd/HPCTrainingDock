@@ -71,8 +71,8 @@ RUN /tmp/compiler_setup.sh && \
 
 # install module files
 
-COPY  training/sources/lua/gcc/*          /etc/lmod/modules/Linux/gcc/
-COPY  training/sources/lua/clang/*        /etc/lmod/modules/Linux/clang/
+#COPY  training/sources/lua/gcc/*          /etc/lmod/modules/Linux/gcc/
+#COPY  training/sources/lua/clang/*        /etc/lmod/modules/Linux/clang/
 
 # Build the latest AMD OpenMP compiler if requested
 RUN apt-get update && apt-get install -y gawk ninja-build generate-ninja ccache

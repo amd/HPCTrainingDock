@@ -26,17 +26,18 @@ echo "====================================="
 echo ""
 
 # fix the nodejs install if broken
-cd /etc/apt/sources.list.d
+pushd /etc/apt/sources.list.d
 ls -lsa 
 rm -f  nodesource.list
 sudo DEBIAN_FRONTEND=noninteractive apt-get --fix-broken install
 sudo DEBIAN_FRONTEND=noninteractive apt-get update
 sudo DEBIAN_FRONTEND=noninteractive apt-get remove nodejs
 sudo DEBIAN_FRONTEND=noninteractive apt-get remove nodejs-doc 
+popd
 
 sudo DEBIAN_FRONTEND=noninteractive apt-get update 
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y apt-transport-https software-properties-common  adduser libfontconfig1 wget curl
-wget -q https://dl.grafana.com/enterprise/release/grafana-enterprise_8.3.4_amd64.deb
+wget -q https://dl.grafana.com/enterprise/release/grafana-enterprise_8.3.4_amd64.deb 
 sudo dpkg -i grafana-enterprise_8.3.4_amd64.deb
 echo "deb https://packages.grafana.com/enterprise/deb stable main" | tee -a /etc/apt/sources.list.d/grafana.list
 echo "deb [signed-by=/usr/share/keyrings/yarnkey.gpg] https://dl.yarnpkg.com/debian stable main" | tee /etc/apt/sources.list.d/yarn.list

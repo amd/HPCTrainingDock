@@ -52,6 +52,7 @@ ls -l CacheFiles
 rocm/sources/scripts/baseospackages_setup.sh
 
 rocm/sources/scripts/lmod_setup.sh
+source /etc/profile.d/lmod.sh
 
 rocm/sources/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION}
 
@@ -73,10 +74,10 @@ omniperf/sources/scripts/omniperf_setup.sh --rocm-version ${ROCM_VERSION}
 
 training/sources/scripts/compiler_setup.sh
 
-sudo mkdir -p /etc/lmod/modules/Linux/gcc/
-sudo mkdir -p /etc/lmod/modules/Linux/clang/
-sudo cp  training/sources/lua/gcc/*          /etc/lmod/modules/Linux/gcc/
-sudo cp  training/sources/lua/clang/*        /etc/lmod/modules/Linux/clang/
+#sudo mkdir -p /etc/lmod/modules/Linux/gcc/
+#sudo mkdir -p /etc/lmod/modules/Linux/clang/
+#sudo cp  training/sources/lua/gcc/*          /etc/lmod/modules/Linux/gcc/
+#sudo cp  training/sources/lua/clang/*        /etc/lmod/modules/Linux/clang/
 
 training/sources/scripts/apps_setup_basic.sh
 
