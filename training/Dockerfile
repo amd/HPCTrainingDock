@@ -163,9 +163,8 @@ RUN  chmod u+x /tmp/apps_setup.sh && \
 # create a default .bashrc  (based on Ubuntu 22 /etc/skel/.bashrc )
 #
 RUN mkdir -p /users/default
-#COPY training/sources/skel/bashrc /users/default/.bashrc
+COPY training/sources/skel/bashrc /users/default/.bashrc
 COPY training/sources/skel/setTmpDir.sh  /users/default/setTmpDir.sh
-
 RUN  chmod a+x /users/default/.bashrc && chmod a+x /users/default/setTmpDir.sh
 
 # TODO:

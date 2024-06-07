@@ -98,7 +98,7 @@ function configureSlurm()
        MI210_COUNT = `rocminfo | grep MI210 | wc -l`
        MI250_COUNT = `rocminfo | grep MI250 | wc -l`
        MI300_COUNT = `rocminfo | grep '^NAME' | grep MI300 | wc -l`
-       if [ "${MI210_COUNT}" -ge 1 ];
+       if [ "${MI210_COUNT}" -ge 1 ]; then
           gpustring=Gres=gpu:MI210:${MI210_COUNT}
           sudo sed -i -e 's/Type=.* /Type=MI210 /' \
                       -e 's/NodeName=.* /NodeName=localhost /' /etc/slurm/gres.conf
@@ -107,7 +107,7 @@ function configureSlurm()
           file_string=/dev/dri/renderD[${first_number}-${last_number}]
           sudo sed -i -e 's/File=.* /File=${file_string}/' /etc/slurm/gres.conf
        fi
-       if [ "${MI250_COUNT}" -ge 1 ];
+       if [ "${MI250_COUNT}" -ge 1 ]; then
           gpustring=Gres=gpu:MI250:${MI250_COUNT}
           sudo sed -i -e 's/Type=.* /Type=MI250 /' \
                       -e 's/NodeName=.* /NodeName=localhost /' /etc/slurm/gres.conf
@@ -116,7 +116,7 @@ function configureSlurm()
           file_string=/dev/dri/renderD[${first_number}-${last_number}]
           sudo sed -i -e 's/File=.* /File=${file_string}/' /etc/slurm/gres.conf
        fi
-       if [ "${MI300_COUNT}" -ge 1 ];
+       if [ "${MI300_COUNT}" -ge 1 ]; then
           gpustring=Gres=gpu:MI300:${MI300_COUNT}
           sudo sed -i -e 's/Type=.* /Type=MI300A /' \
                       -e 's/NodeName=.* /NodeName=localhost /' /etc/slurm/gres.conf
