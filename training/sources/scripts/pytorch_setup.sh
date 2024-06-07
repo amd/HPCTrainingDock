@@ -94,14 +94,14 @@ else
       
       git clone -q --recursive -b release/2.2 https://github.com/ROCm/pytorch
       cd pytorch
-      pip3 install -r requirements.txt
-      pip3 install intel::mkl-static intel::mkl-include
+      sudo pip3 install -r requirements.txt
+      sudo pip3 install intel::mkl-static intel::mkl-include
       
       #export CMAKE_PREFIX_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch
-      mkdir /opt/rocmplus-${ROCM_VERSION}/pytorch
-      python3 tools/amd_build/build_amd.py >& /dev/null
+      sudo mkdir /opt/rocmplus-${ROCM_VERSION}/pytorch
+      sudo python3 tools/amd_build/build_amd.py >& /dev/null
       
-      python3 setup.py develop --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch
+      sudo python3 setup.py develop --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch
       echo ""
       echo ""
       echo ""

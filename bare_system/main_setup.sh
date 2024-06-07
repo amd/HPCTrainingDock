@@ -52,8 +52,9 @@ ls -l CacheFiles
 
 rocm/sources/scripts/baseospackages_setup.sh
 
-#rocm/sources/scripts/lmod_setup.sh
-#source /etc/profile.d/lmod.sh
+rocm/sources/scripts/lmod_setup.sh
+
+source ~/.bashrc
 
 rocm/sources/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION}
 
