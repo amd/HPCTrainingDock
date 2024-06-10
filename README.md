@@ -1,16 +1,26 @@
-# Docker Training Container Setup Instructions
-This version of the Training Container is for workstations and data center GPUs. Specifically, it
-is tested on Radeon 6800XT graphics card and MI200 series and MI300A data center GPUs.
+# 1. Synopsis
+Welcome to AMD's training environment repo!
 
-## Training Docker Container Build Steps
+Here, you will have the option to build and run a Docker container on which you will find a rich variety of AMD GPU software for you to test and experiment with.
+Alternative to the Docker container, we also provide the option to install the aforementioned AMD GPU software on a bare system, through a series of installation scripts. Currently, we are only supporting an Ubuntu operating system (OS), but work is underway to add support for other operating systems as well. Note that we provide the option to test the bare system install before you deploy it, using a Docker container. Details are provided next.
 
-These instructions will setup a container on `localhost` and assume that Docker is installed, your userid is part of the Docker group and you can issue Docker commands without `sudo`.
+This version of the training environment is for workstations and data center GPUs. Specifically, it has been tested on Radeon 6800XT graphics card and MI200 series and MI300A data center GPUs.
+
+# 2. Training Environment Setup Instructions
+We currently provide two options for the setup of the training environment: a Docker container, and a bare system install. The latter can be tested with a Docker container before deployment.  
+
+## 2.1 Training Docker Container Build Steps
+
+These instructions will setup a container on `localhost` and assume that:
+1. Docker is installed.
+2. Your userid is part of the Docker group.
+3. You can issue Docker commands without `sudo`.
  
 <!-- If you need to use `sudo`, you will need to modify the command below to look for Docker images that start with ***root*** instead of a userid (such as amdtrain).-->
 
-### 1.  Building the Four Images of the Container 
-This container is set up to use Ubuntu 22.04 as OS, and will build four different images called `rocm`, `omnitrace`,  `omniperf` and `training`. 
-The version of ROCm is 6.1.0, and several compilers and other dependencies will be built as part of the images setup. First, clone this repo and go into the folder where the Docker build script lives: 
+### 2.1.1  Building the Four Images of the Container 
+The Docker container is set up to use Ubuntu 22.04 as OS, and will build four different images called `rocm`, `omnitrace`,  `omniperf` and `training`. 
+The version of ROCm is 6.1.0, and several compilers and other dependencies will be built as part of the images setup (more on this later). First, clone this repo and go into the folder where the Docker build script lives: 
 
 ```bash
 git clone --recursive git@github.com:amd/HPCTrainingDock.git
@@ -35,7 +45,7 @@ You can build for many other recent ROCm versions if you prefer. To show more do
 --amdgpu-gfxmodel=gfx90a
 ```
 
-For MI300 series, the value to specify is `gfx942`. Note that you can also build the images on a machine that does not have any GPU hardware (such as your laptop) provided you specify a target hardware with the flag above.
+For the MI200 series, the value to specify is `gfx90a`, for the MI300 series, the value is `gfx942`. Note that you can also build the images on a machine that does not have any GPU hardware (such as your laptop) provided you specify a target hardware with the flag above.
 
 Omnitrace will by default download a pre-built version. You can also build from source,
 which is useful if the right version of omnitrace is not available as pre-build. To build omnitrace from source, append the following to the build command above:
@@ -67,7 +77,7 @@ Then, the cached versions can be installed specifying:
 ```
 The above flag will allow you to use pre-built `gcc` and `aomp` located in `CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}`.
 
-### 2. Previewing the Images
+### 2.1.2 Previewing the Images
  
 Assuming that the build of the images has been successful, you can see details on the images that have been built by doing:
 
@@ -89,7 +99,7 @@ You can also display the operating system running on the container by doing:
 cat ../../etc/os-release
 ```
 
-### 3. Starting the Container
+### 2.1.3 Starting the Container
 
 To start the container, run:
 
@@ -101,7 +111,7 @@ docker run -it --device=/dev/kfd --device=/dev/dri --group-add video -p 2222:22 
 
 You can check what containers are running by running `docker ps`.
 
-### 4. Accessing the Container
+### 2.1.4 Accessing the Container
 
 It is necessary to wait a few seconds for the container to start up, before you will be allowed to login.
 After the container started, you can log in by doing:
@@ -122,9 +132,102 @@ Once you are in, you can startup slurm with the manage script `manage.sh` locate
 rsync -avz -e "ssh -p 2222" <file> <admin>@localhost:<path/to/destination>
 ```
 
-### 5. Inspecting the Container
+### 2.15 Killing the Container and Cleaning Up your System
 
-The container comes with a variety of modules installed, which their necessary dependencies. To inspect the modules available, run `module avail`, which will show you this output:
+To exit the container, just do:
+```bash
+exit
+```
+Note that the container will still be running in the background. To kill it, do:
+
+```bash
+docker kill Training
+```
+
+To clean up your system, run:
+
+```bash
+docker rmi -f $(docker images -q)
+docker system prune -a
+```
+
+## 2.2 Training Enviroment Install on Bare System
+
+In this section, we provide instrucitons on how to install AMD GPU software on a bare system. This is achieved with the same set of scripts used for the setup of the Docker container, except that instead of being called from within a Dockerfile, they are called from a top level script that does not require the use of Docker. There is however a script called `test_install.sh` that will run a Docker container to test the bare system install. 
+
+To test the bare system install, do:
+
+```bash
+git clone --recursive git@github.com:amd/HPCTrainingDock.git && \
+cd HPCTrainingDock/bare_system && \
+./test_install.sh
+```
+
+The above command sequence will clone this repo and then execute the `test_install.sh` script. This script calls a the `main_install.sh` which is what you would execute to perform the actual installation on your system. The `test_install.sh` sets up a Docker container where you can test the installation of the software before proceeding to deploy it on your actual system by running `main_install.sh`. The `test_install.sh` script automatically runs the Docker container after it is built, and you can inspect it as `student`.
+
+
+If you are satisfied with the test installation, you can proceed to install the training environment on your actual system, by doing:
+
+```bash
+git clone --recursive git@github.com:amd/HPCTrainingDock.git && \
+cd HPCTrainingDock/bare_system && \
+./main_install.sh
+```
+
+The above command will execute the `main_install.sh` script on your system that will install the training environment for you. Note that you need to be able to run `sudo` on your system for things to work. The `main_install.sh` script calls a series of other scripts to install the software (these are given several runtime flags that are not reported here for simplicity):
+
+```bash
+ // install linux software such as cmake and system compilers
+rocm/sources/scripts/baseospackages_setup.sh
+
+// install lmod and create the modulepath
+rocm/sources/scripts/lmod_setup.sh 
+
+// install ROCm and create ROCm module
+rocm/sources/scripts/rocm_setup.sh 
+
+// install OpenMPI and create OpenMPI module
+rocm/sources/scripts/openmpi_setup.sh 
+
+// install MVAPICH2 and create MVAPICH2 module
+rocm/sources/scripts/mvapich2_setup.sh 
+
+// install Miniconda3 and create Miniconda3 module
+omnitrace/sources/scripts/miniconda3_setup.sh 
+
+// install Omnitrace and create Omnitrace module
+omnitrace/sources/scripts/omnitrace_setup.sh 
+
+// install Grafana (needed for Omniperf)
+omniperf/sources/scripts/grafana_setup.sh
+
+// install Omniperf and create Omniperf module
+omniperf/sources/scripts/omniperf_setup.sh 
+
+// install clang/14  clang/15  gcc/11  gcc/12  gcc/13 and create modules
+training/sources/scripts/compiler_setup.sh
+
+// install liblapack and libopenblas
+training/sources/scripts/apps_setup_basic.sh
+
+// install CuPy and create CuPy module
+training/sources/scripts/cupy_setup.sh 
+
+// install PyTorch and create PyTorch module
+training/sources/scripts/pytorch_setup.sh 
+
+// install additional libs and apps such as valgrind, boost, parmetis, openssl, etc.
+training/sources/scripts/apps_setup.sh
+
+```
+
+**NOTE**: as mentioned before, those scripts are the same used by the Docker containers (either the actual Training Docker Container or the Test Docker Container run by `test_install.sh`). The reason why the script work for both installations (bare system and Docker) is because the commands are executed at the `sudo` level. Since Docker is already at the `sudo` level, the instructions in the scripts work in both contexts.
+
+
+
+# 3. Inspecting the Training Environment
+
+The training environemtn comes with a variety of modules installed, which their necessary dependencies. To inspect the modules available, run `module avail`, which will show you this output:
 
 ```bash
 ---------------------------------------------------------------------------------------- /etc/lmod/modules/Linux -----------------------------------------------------------------------------------------
@@ -575,7 +678,7 @@ Settarg can do more.  Please see the Lmod website for more details.
 help(helpMsg)
 ```
 
-### 6. Add Your Own Modules
+# 4. Adding Your Own Modules
 
 The information above about the modules and modulefiles in the container can be used to include your own modules. As a simple example, below we show how to install `Julia` as a module within the container.
 First, install the Julia installation manager Juliaup:
@@ -634,32 +737,21 @@ Now, `module avail` will show this additional module:
    julia.1.10
 ```
 
-### 7. Test the Container
+# 5. Testing the Environment
 
-You can check that the training exercies run in the container by running the `runTests.sh` script: this will execute the following commands:
+You can check that our training exercies run with your installation, by running the `runTests.sh` script: this will execute the following commands:
 
 ```bash
 rm -rf HPCTrainingExamples && \
 git clone https://github.com/amd/HPCTrainingExamples && \
-cd HPCTrainingExamples/tests && \
+cd HPCTrainingExamples && \
+export REPO_DIR = $PWD && \
+cd tests && \
 mkdir build && cd build && \
 cmake .. && make test
 ```                                                                      
-### 8. Kill the Container and Cleanup
 
-To exit the container, just do:
-```bash
-exit
-```
-Note that the container will still be running in the background. To kill it, do:
+# 6. Feedback
 
-```bash
-docker kill Training
-```
-
-To clean up your system, run:
-
-```bash
-docker rmi -f $(docker images -q)
-docker system prune -a
-```
+We very much welcome user experience and feedback, please feel free to reach out to us by creating pull requests of opening issues if you consider it necessary.
+We will get back to you as soon as possible. For information on licenses, please see the `LICENSE.md` file.
