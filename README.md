@@ -739,16 +739,14 @@ Now, `module avail` will show this additional module:
 
 # 5. Testing the Environment
 
-You can check that our training exercies run with your installation, by running the `runTests.sh` script: this will execute the following commands:
+You can check that our training exercies run with your installation, by doing:
 
 ```bash
-rm -rf HPCTrainingExamples && \
 git clone https://github.com/amd/HPCTrainingExamples && \
 cd HPCTrainingExamples && \
 export REPO_DIR = $PWD && \
 cd tests && \
-mkdir build && cd build && \
-cmake .. && make test
+./runTests.sh
 ```                                                                      
 
 # 6. Feedback
