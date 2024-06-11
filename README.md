@@ -743,9 +743,7 @@ You can check that our training exercies run with your installation, by doing:
 
 ```bash
 git clone https://github.com/amd/HPCTrainingExamples && \
-cd HPCTrainingExamples && \
-export REPO_DIR = $PWD && \
-cd tests && \
+cd HPCTrainingExamples/tests && \
 ./runTests.sh
 ```                                                                      
 
