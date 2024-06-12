@@ -109,8 +109,8 @@ reset-last()
 
 set -e
 
-DISTRO=`lsb_release -i | cut -f2 | tr '[:upper:]' '[:lower:]'`
-DISTRO_VERSIONS=`lsb_release -r | cut -f2`
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 
@@ -129,8 +129,8 @@ do
             ;;
         "--distro-versions")
             shift
-            DISTRO_VERSIONS=${1}
-            last() { DISTRO_VERSIONS="${DISTRO_VERSIONS} ${1}"; }
+            DISTRO_VERSION=${1}
+            last() { DISTRO_VERSION="${DISTRO_VERSION} ${1}"; }
             ;;
         "--rocm-versions")
             shift
