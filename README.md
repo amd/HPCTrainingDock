@@ -1,13 +1,13 @@
 # 1. Synopsis
-Welcome to AMD's training environment repo!
+Welcome to AMD's model installation repo!
 
 Here, you will have the option to build and run a Docker container on which you will find a rich variety of AMD GPU software for you to test and experiment with.
 Alternative to the Docker container, we also provide the option to install the aforementioned AMD GPU software on a bare system, through a series of installation scripts. Currently, we are only supporting an Ubuntu operating system (OS), but work is underway to add support for other operating systems as well. Note that we provide the option to test the bare system install before you deploy it, using a Docker container. Details are provided next.
 
-This version of the training environment is for workstations and data center GPUs. Specifically, it has been tested on Radeon 6800XT graphics card and MI200 series and MI300A data center GPUs.
+This version of the model installation is for workstations and data center GPUs. Specifically, it has been tested on Radeon 6800XT graphics card and MI200 series and MI300A data center GPUs.
 
-# 2. Training Environment Setup Instructions
-We currently provide two options for the setup of the training environment: a Docker container, and a bare system install. The latter can be tested with a Docker container before deployment.  
+# 2. Model Installation Setup Instructions
+We currently provide two options for the setup of the software: a Docker container, and a bare system install. The latter can be tested with a Docker container before deployment.  
 
 ## 2.1 Training Docker Container Build Steps
 
@@ -166,7 +166,7 @@ cd HPCTrainingDock/bare_system && \
 The above command sequence will clone this repo and then execute the `test_install.sh` script. This script calls a the `main_install.sh` which is what you would execute to perform the actual installation on your system. The `test_install.sh` sets up a Docker container where you can test the installation of the software before proceeding to deploy it on your actual system by running `main_install.sh`. The `test_install.sh` script automatically runs the Docker container after it is built, and you can inspect it as `student`.
 
 
-If you are satisfied with the test installation, you can proceed to install the training environment on your actual system, by doing:
+If you are satisfied with the test installation, you can proceed with the actual installation on your systemr by doing:
 
 ```bash
 git clone --recursive git@github.com:amd/HPCTrainingDock.git && \
@@ -174,7 +174,7 @@ cd HPCTrainingDock/bare_system && \
 ./main_install.sh
 ```
 
-The above command will execute the `main_install.sh` script on your system that will install the training environment for you. Note that you need to be able to run `sudo` on your system for things to work. The `main_install.sh` script calls a series of other scripts to install the software (these are given several runtime flags that are not reported here for simplicity):
+The above command will execute the `main_install.sh` script on your system that will proceed with the installation for you. Note that you need to be able to run `sudo` on your system for things to work. The `main_install.sh` script calls a series of other scripts to install the software (these are given several runtime flags that are not reported here for simplicity):
 
 ```bash
  // install linux software such as cmake and system compilers
@@ -225,7 +225,7 @@ training/sources/scripts/apps_setup.sh
 
 
 
-# 3. Inspecting the Training Environment
+# 3. Inspecting the Model Installation Environment
 
 The training environemtn comes with a variety of modules installed, which their necessary dependencies. To inspect the modules available, run `module avail`, which will show you this output:
 
@@ -737,7 +737,7 @@ Now, `module avail` will show this additional module:
    julia.1.10
 ```
 
-# 5. Testing the Environment
+# 5. Testing the Installation
 
 You can check that our training exercies run with your installation, by doing:
 
