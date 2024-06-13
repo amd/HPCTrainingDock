@@ -159,8 +159,8 @@ To test the bare system install, do:
 
 ```bash
 git clone --recursive git@github.com:amd/HPCTrainingDock.git && \
-cd HPCTrainingDock/bare_system && \
-./test_install.sh
+cd HPCTrainingDock && \
+./bare_sysem/test_install.sh --rocm-version <rocm-version>
 ```
 
 The above command sequence will clone this repo and then execute the `test_install.sh` script. This script calls a the `main_install.sh` which is what you would execute to perform the actual installation on your system. The `test_install.sh` sets up a Docker container where you can test the installation of the software before proceeding to deploy it on your actual system by running `main_install.sh`. The `test_install.sh` script automatically runs the Docker container after it is built, and you can inspect it as `student`.
@@ -170,8 +170,8 @@ If you are satisfied with the test installation, you can proceed with the actual
 
 ```bash
 git clone --recursive git@github.com:amd/HPCTrainingDock.git && \
-cd HPCTrainingDock/bare_system && \
-./main_install.sh
+cd HPCTrainingDock && \
+./bare_system/main_install.sh --rocm-version <rocm-version>
 ```
 
 The above command will execute the `main_install.sh` script on your system that will proceed with the installation for you. Note that you need to be able to run `sudo` on your system for things to work. The `main_install.sh` script calls a series of other scripts to install the software (these are given several runtime flags that are not reported here for simplicity):
