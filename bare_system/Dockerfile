@@ -51,7 +51,7 @@ ADD omniperf omniperf
 ADD training training
 COPY cache.list CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/*.tgz /opt/rocmplus-${ROCM_VERSION}/
 
-RUN bare_system/main_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu_gfxmodel ${AMDGPU_GFXMODEL}
+RUN bare_system/main_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
 
 # install module files
 #COPY  training/sources/lua/gcc/*          /etc/lmod/modules/Linux/gcc/

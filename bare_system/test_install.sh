@@ -44,5 +44,5 @@ docker build --no-cache --build-arg DISTRO=${DISTRO}  \
 
 docker run -it --device=/dev/kfd --device=/dev/dri \
            --group-add video --group-add render --group-add renderalt \
-	   -p 2222:22 --name BareGiacomo  --security-opt seccomp=unconfined \
+	   -p 2222:22 --name Bare  --security-opt seccomp=unconfined \
 	   --rm -v /home/bobrobey/Class/training/hostdir:/hostdir bare

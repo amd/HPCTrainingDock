@@ -137,17 +137,14 @@ else
    export OMPI_MCA_pml_ucx_devices=any
    export OMPI_MCA_pml_ucx_verbose=100
 
-   sudo wget -q https://github.com/openucx/ucc/archive/refs/tags/v1.3.0.tar.gz
-   sudo tar xzf v1.3.0.tar.gz
+   wget -q https://github.com/openucx/ucc/archive/refs/tags/v1.3.0.tar.gz
+   tar xzf v1.3.0.tar.gz
    cd ucc-1.3.0
 
-   sudo touch config/m4/tl_coll_plugins_list.m4
-   sudo touch config/m4/tls_list.m4
-   sudo autoreconf --install
-
+   ./autogen.sh
    echo "./configure --prefix=/opt/rocmplus-${ROCM_VERSION}/ucc  --with-rocm=/opt/rocm-${ROCM_VERSION}  --with-ucx=/opt/rocmplus-${ROCM_VERSION}/ucx "
-   ./configure --prefix=/opt/rocmplus-${ROCM_VERSION}/ucc  --with-rocm=/opt/rocm-${ROCM_VERSION}  --with-ucx=/opt/rocmplus-${ROCM_VERSION}/ucx 
-   sudo make -j 16
+   ./configure --prefix=/opt/rocmplus-${ROCM_VERSION}/ucc  --with-rocm=/opt/rocm-${ROCM_VERSION}  --with-ucx=/opt/rocmplus-${ROCM_VERSION}/ucx
+   make -j 16
    sudo make install
    cd ..
    rm -rf ucc-1.3.0 v1.3.0.tar.gz
