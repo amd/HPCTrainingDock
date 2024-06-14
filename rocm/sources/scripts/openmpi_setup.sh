@@ -105,6 +105,56 @@ else
 fi
 
 #
+# Install UCC
+#
+
+if [ -f /opt/rocmplus-${ROCM_VERSION}/ucc.tgz ]; then
+   echo ""
+   echo "============================"
+   echo " Installing Cached UCC"
+   echo "============================"
+   echo ""
+
+   #install the cached version
+   cd /opt/rocmplus-${ROCM_VERSION}
+   sudo tar -xzf ucc.tgz
+   sudo chown -R root:root /opt/rocmplus-${ROCM_VERSION}/ucc
+   sudo rm /opt/rocmplus-${ROCM_VERSION}/ucc.tgz
+else
+   echo ""
+   echo "============================"
+   echo " Building UCC"
+   echo "============================"
+   echo ""
+
+   export OMPI_ALLOW_RUN_AS_ROOT=1
+   export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+
+   export OMPI_MCA_pml=ucx
+   export OMPI_MCA_osc=ucx
+
+   export OMPI_MCA_pml_ucx_tls=any
+   export OMPI_MCA_pml_ucx_devices=any
+   export OMPI_MCA_pml_ucx_verbose=100
+
+   sudo wget -q https://github.com/openucx/ucc/archive/refs/tags/v1.3.0.tar.gz
+   sudo tar xzf v1.3.0.tar.gz
+   cd ucc-1.3.0
+
+   sudo touch config/m4/tl_coll_plugins_list.m4
+   sudo touch config/m4/tls_list.m4
+   sudo autoreconf --install
+
+   echo "./configure --prefix=/opt/rocmplus-${ROCM_VERSION}/ucc  --with-rocm=/opt/rocm-${ROCM_VERSION}  --with-ucx=/opt/rocmplus-${ROCM_VERSION}/ucx "
+   ./configure --prefix=/opt/rocmplus-${ROCM_VERSION}/ucc  --with-rocm=/opt/rocm-${ROCM_VERSION}  --with-ucx=/opt/rocmplus-${ROCM_VERSION}/ucx 
+   sudo make -j 16
+   sudo make install
+   cd ..
+   rm -rf ucc-1.3.0 v1.3.0.tar.gz
+fi
+
+
+#
 # Install OpenMPI
 #
 
@@ -148,6 +198,7 @@ else
    mkdir build && cd build
    ../configure --prefix=/opt/rocmplus-${ROCM_VERSION}/openmpi \
                 --with-ucx=/opt/rocmplus-${ROCM_VERSION}/ucx \
+		--with-ucc=/opt/rocmplus-${ROCM_VERSION}/ucc \
                 --enable-mca-no-build=btl-uct \
                 --enable-mpi --enable-mpi-fortran \
                 --disable-debug   CC=gcc CXX=g++ FC=gfortran
