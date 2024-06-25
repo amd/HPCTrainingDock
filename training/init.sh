@@ -20,18 +20,18 @@ if [ "${MI210_COUNT}" -ge 1 ]; then
    first_number=`cd /dev/dri && ls renderD* | sed -e 's/^renderD//g' |head -1`
    last_number=`cd /dev/dri && ls renderD* | sed -e 's/^renderD//g' |tail -1`
    file_string=/dev/dri/renderD[${first_number}-${last_number}]
-   sed -i -e 's/Type=.* /Type=MI210 /' \
-          -e 's/NodeName=.* /NodeName=localhost /' \
-          -e 's/File=.* /File=${file_string}/' gres.conf.orig > gres.conf
+   sed -e 's/Type=.* /Type=MI210 /' \
+       -e 's/NodeName=.* /NodeName=localhost /' \
+       -e 's/File=.* /File=${file_string}/' gres.conf.orig > gres.conf
 fi
 if [ "${MI250_COUNT}" -ge 1 ]; then
    gpustring=Gres=gpu:MI250:${MI250_COUNT}
    first_number=`cd /dev/dri && ls renderD* | sed -e 's/^renderD//g' |head -1`
    last_number=`cd /dev/dri && ls renderD* | sed -e 's/^renderD//g' |tail -1`
    file_string=/dev/dri/renderD[${first_number}-${last_number}]
-   sed -i -e 's/Type=.* /Type=MI250 /' \
-          -e 's/NodeName=.* /NodeName=localhost /' \
-          -e 's/File=.* /File=${file_string}/' gres.conf.orig > gres.conf
+   sed -e 's/Type=.* /Type=MI250 /' \
+       -e 's/NodeName=.* /NodeName=localhost /' \
+       -e 's/File=.* /File=${file_string}/' gres.conf.orig > gres.conf
 fi
 if [ "${MI300_COUNT}" -ge 1 ]; then
    gpustring=Gres=gpu:MI300:${MI300_COUNT}
@@ -42,7 +42,7 @@ if [ "${MI300_COUNT}" -ge 1 ]; then
 fi
 
 sed -e "s/^NodeName=.*/${nodeconfig} ${gpustring} /" \
-    -e 's/^NodeName=[[:alpha:]]\+/NodeName=localhost /' \
+    -e 's/NodeName=.* /NodeName=localhost /' \
     -e "s/^PartitionName=.*/${partitionconfig}/" \
     -e '/^InactiveLimit/s/=.*/=60/' \
     -e '/^KillWait/s/=.*/=30/' \
@@ -51,6 +51,7 @@ sed -e "s/^NodeName=.*/${nodeconfig} ${gpustring} /" \
     -e '/^SlurmdTimeout/s/=.*/=300/' \
     -e '/^Waittime/s/=.*/=300/' \
     -e '/^TaskPlugin/s/affinity/none/' \
+    -e '/^TaskPlugin/s!task/none!task/cgroup!' \
     ./slurm.conf.orig > slurm.conf
 
 sudo cp slurm.conf /etc/slurm/slurm.conf
