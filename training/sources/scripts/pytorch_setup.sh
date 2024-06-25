@@ -82,7 +82,7 @@ else
       export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages:$PYTHONPATH
       
       # Install of pre-built pytorch for reference
-      #pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/rocm6.0
+      #sudo pip3 install --target=/opt/rocmplus-${ROCM_VERSION}/pytorch torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.0
       
       export _GLIBCXX_USE_CXX11_ABI=1
       export ROCM_HOME=${ROCM_PATH}
@@ -92,44 +92,48 @@ else
       export USE_MPI=0
       export PYTORCH_ROCM_ARCH="${AMDGPU_GFXMODEL}"
       
-      git clone -q --recursive -b release/2.2 https://github.com/ROCm/pytorch
+      #git clone -q --recursive -b release/2.2 https://github.com/ROCm/pytorch
+      git clone --recursive https://github.com/pytorch/pytorch
       cd pytorch
+      git submodule sync
+      git submodule update --init --recursive
+      sudo pip3 install mkl-static mkl-include
       sudo pip3 install -r requirements.txt
-      sudo pip3 install intel::mkl-static intel::mkl-include
       
-      #export CMAKE_PREFIX_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch
+      export CMAKE_PREFIX_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch
       sudo mkdir /opt/rocmplus-${ROCM_VERSION}/pytorch
       sudo python3 tools/amd_build/build_amd.py >& /dev/null
       
-      sudo python3 setup.py develop --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch
-      echo ""
-      echo ""
-      echo ""
-      echo "===================="
-      echo "Finished setup.py develop"
-      echo "===================="
-      echo ""
-      echo ""
       echo ""
       echo "===================="
       echo "Starting setup.py install"
       echo "===================="
       echo ""
-      python3 setup.py install -v --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch
-      echo ""
-      echo ""
+      sudo python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch
       echo ""
       echo "===================="
       echo "Finished setup.py install"
       echo "===================="
       echo ""
-      echo ""
+     
+      sudo pip3 uninstall torchvision
+      sudo mkdir /opt/rocmplus-${ROCM_VERSION}/pytorch/vision
+      export CMAKE_PREFIX_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/vision
+      cd ..
+      git clone --recursive https://github.com/pytorch/vision 
+      cd vision
+      sudo python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch/vision
+
+      sudo pip3 uninstall torchaudio
+      sudo mkdir /opt/rocmplus-${ROCM_VERSION}/pytorch/audio
+      export CMAKE_PREFIX_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/audio
+      cd ..
+      git clone --recursive https://github.com/pytorch/audio
+      cd audio
+      sudo python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch/audio
       
-      pip uninstall torchvision
-      git clone --recursive -b release/0.17 https://github.com/pytorch/vision torchvision
-      python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch
-      
-      rm -rf /app/pytorch
+      cd ..
+      sudo rm -rf pytorch vision audio
       
    fi
 fi
