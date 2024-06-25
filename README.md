@@ -4,6 +4,8 @@ Welcome to AMD's model installation repo!
 Here, you will have the option to build and run a Docker container on which you will find a rich variety of AMD GPU software for you to test and experiment with.
 Alternative to the Docker container, we also provide the option to install the aforementioned AMD GPU software on a bare system, through a series of installation scripts. Currently, we are only supporting an Ubuntu operating system (OS), but work is underway to add support for other operating systems as well. Note that we provide the option to test the bare system install before you deploy it, using a Docker container. Details are provided next.
 
+**NOTE**: if `Podman` is installed on your system instead of Docker, currently it is necessary to append the `--format docker` flag to the `docker build` commands present in our scripts. 
+
 This version of the model installation is for workstations and data center GPUs. Specifically, it has been tested on Radeon 6800XT graphics card and MI200 series and MI300A data center GPUs.
 
 # 2. Model Installation Setup Instructions

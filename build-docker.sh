@@ -263,6 +263,9 @@ TRAINING_DOCKER_OPTS="${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build
 
 TRAINING_DOCKER_OPTS="${TRAINING_DOCKER_OPTS} -f training/Dockerfile"
 
+export BUILDAH_FORMAT=docker
+echo " ----------------------------------------------------------------> BUILDAH_FORMAT = ${BUILDAH_FORMAT}"
+
 for ROCM_VERSION in ${ROCM_VERSIONS}
 do
     if [ -d CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/ ]; then

@@ -144,6 +144,7 @@ cat <<-EOF | sudo tee ${MODULE_PATH}/2.2.lua
         whatis("HIP version of pytorch")
 
         load("rocm/${ROCM_VERSION}")
+        conflict("miniconda3")
         prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages")
 EOF
 
