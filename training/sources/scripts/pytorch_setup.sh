@@ -92,7 +92,6 @@ else
       export USE_MPI=0
       export PYTORCH_ROCM_ARCH="${AMDGPU_GFXMODEL}"
       
-      #git clone -q --recursive -b release/2.2 https://github.com/ROCm/pytorch
       git clone --recursive https://github.com/pytorch/pytorch
       cd pytorch
       git submodule sync
@@ -100,7 +99,6 @@ else
       sudo pip3 install mkl-static mkl-include
       sudo pip3 install -r requirements.txt
       
-      export CMAKE_PREFIX_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch
       sudo mkdir /opt/rocmplus-${ROCM_VERSION}/pytorch
       sudo python3 tools/amd_build/build_amd.py >& /dev/null
       
@@ -118,15 +116,13 @@ else
      
       sudo pip3 uninstall torchvision
       sudo mkdir /opt/rocmplus-${ROCM_VERSION}/pytorch/vision
-      export CMAKE_PREFIX_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/vision
       cd ..
-      git clone --recursive https://github.com/pytorch/vision 
+      git clone --recursive https://github.com/pytorch/vision
       cd vision
       sudo python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch/vision
 
       sudo pip3 uninstall torchaudio
       sudo mkdir /opt/rocmplus-${ROCM_VERSION}/pytorch/audio
-      export CMAKE_PREFIX_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/audio
       cd ..
       git clone --recursive https://github.com/pytorch/audio
       cd audio

@@ -62,24 +62,24 @@ if [ -z "${AMDGPU_GFXMODEL}" ]; then
    AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 fi
 
-#rocm/sources/scripts/openmpi_setup.sh --rocm-version ${ROCM_VERSION}
+rocm/sources/scripts/openmpi_setup.sh --rocm-version ${ROCM_VERSION}
 
-#rocm/sources/scripts/mvapich2_setup.sh --rocm-version ${ROCM_VERSION}
+rocm/sources/scripts/mvapich2_setup.sh --rocm-version ${ROCM_VERSION}
 
-#omnitrace/sources/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --python-versions ${PYTHON_VERSIONS}
+omnitrace/sources/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --python-versions ${PYTHON_VERSIONS}
 
-#omnitrace/sources/scripts/omnitrace_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE}
+omnitrace/sources/scripts/omnitrace_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE}
 
-#omniperf/sources/scripts/grafana_setup.sh
+omniperf/sources/scripts/grafana_setup.sh
 
-#omniperf/sources/scripts/omniperf_setup.sh --rocm-version ${ROCM_VERSION}
+omniperf/sources/scripts/omniperf_setup.sh --rocm-version ${ROCM_VERSION}
 
-#training/sources/scripts/compiler_setup.sh
+training/sources/scripts/compiler_setup.sh
 
-#training/sources/scripts/apps_setup_basic.sh
+training/sources/scripts/apps_setup_basic.sh
 
-#training/sources/scripts/cupy_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-cupy ${BUILD_CUPY} 
+training/sources/scripts/cupy_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-cupy ${BUILD_CUPY} 
 
 training/sources/scripts/pytorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-pytorch ${BUILD_PYTORCH}
 
-#training/sources/scripts/apps_setup.sh
+training/sources/scripts/apps_setup.sh
