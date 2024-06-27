@@ -113,20 +113,25 @@ else
       echo "Finished setup.py install"
       echo "===================="
       echo ""
-     
+    
+      echo 'Defaults:%sudo env_keep += "PYTHONPATH"' | sudo EDITOR='tee -a' visudo
+
+      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages/torchvision-0.20.0a0+bf01bab-py3.10-linux-x86_64.egg:$PYTHONPATH
+      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages/pillow-10.3.0-py3.10-linux-x86_64.egg:$PYTHONPATH
       sudo pip3 uninstall torchvision
-      sudo mkdir /opt/rocmplus-${ROCM_VERSION}/pytorch/vision
+      sudo mkdir /opt/rocmplus-${ROCM_VERSION}/vision
       cd ..
       git clone --recursive https://github.com/pytorch/vision
       cd vision
-      sudo python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch/vision
+      sudo python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/vision
 
+      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/audio/lib/python3.10/site-packages/torchaudio-2.4.0a0+7f6209b-py3.10-linux-x86_64.egg:$PYTHONPATH
       sudo pip3 uninstall torchaudio
-      sudo mkdir /opt/rocmplus-${ROCM_VERSION}/pytorch/audio
+      sudo mkdir /opt/rocmplus-${ROCM_VERSION}/audio
       cd ..
       git clone --recursive https://github.com/pytorch/audio
       cd audio
-      sudo python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch/audio
+      sudo python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/audio
       
       cd ..
       sudo rm -rf pytorch vision audio
@@ -145,6 +150,9 @@ cat <<-EOF | sudo tee ${MODULE_PATH}/2.2.lua
 
         load("rocm/${ROCM_VERSION}")
         conflict("miniconda3")
+	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}//vision/lib/python3.10/site-packages/torchvision-0.20.0a0+bf01bab-py3.10-linux-x86_64.egg")
+	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages/pillow-10.3.0-py3.10-linux-x86_64.egg")
+	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/audio/lib/python3.10/site-packages/torchaudio-2.4.0a0+7f6209b-py3.10-linux-x86_64.egg")
         prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages")
 EOF
 
