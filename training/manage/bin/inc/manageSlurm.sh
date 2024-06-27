@@ -111,25 +111,25 @@ function configureSlurm()
           first_number=`cd /dev/dri && ls renderD* | sed -e 's/^renderD//g' |head -1`
           last_number=`cd /dev/dri && ls renderD* | sed -e 's/^renderD//g' |tail -1`
           file_string=/dev/dri/renderD[${first_number}-${last_number}]
-          sed -e 's/Type=.* /Type=MI210 /' \
-              -e 's/NodeName=.* /NodeName=localhost /' \
-              -e 's/File=.* /File=${file_string}/' gres.conf.orig > gres.conf
+          sed -e 's/Type=[[:alnum:]]* /Type=MI210 /' \
+              -e 's/NodeName=[[:alnum:]]* /NodeName=localhost /' \
+              -e "s!File=.*!File=${file_string}!" gres.conf.orig > gres.conf
        fi
        if [ "${MI250_COUNT}" -ge 1 ]; then
           gpustring=Gres=gpu:MI250:${MI250_COUNT}
           first_number=`cd /dev/dri && ls renderD* | sed -e 's/^renderD//g' |head -1`
           last_number=`cd /dev/dri && ls renderD* | sed -e 's/^renderD//g' |tail -1`
           file_string=/dev/dri/renderD[${first_number}-${last_number}]
-          sed -e 's/Type=.* /Type=MI250 /' \
-              -e 's/NodeName=.* /NodeName=localhost /' \
-              -e 's/File=.* /File=${file_string}/' gres.conf.orig > gres.conf
+          sed -e 's/Type=[[:alnum:]]* /Type=MI250 /' \
+              -e 's/NodeName=[[:alnum:]]* /NodeName=localhost /' \
+              -e "s!File=.*!File=${file_string}!" gres.conf.orig > gres.conf
        fi
        if [ "${MI300_COUNT}" -ge 1 ]; then
           gpustring=Gres=gpu:MI300:${MI300_COUNT}
           file_string=/dev/dri/renderD[128,136,144,152]
-          sed -e 's/Type=.* /Type=MI300A /' \
-              -e 's/NodeName=.* /NodeName=localhost /' \
-              -e 's/File=.* /File=${file_string}/' gres.conf.orig > gres.conf
+          sed -e 's/Type=[[:alnum:]]* /Type=MI300A /' \
+              -e 's/NodeName=[[:alnum:]]* /NodeName=localhost /' \
+              -e "s!File=.*!File=${file_string}!" gres.conf.orig > gres.conf
        fi
        echo "Diff of changes made"
        diff gres.conf gres.conf.orig
