@@ -229,7 +229,7 @@ training/sources/scripts/apps_setup.sh
 
 # 3. Inspecting the Model Installation Environment
 
-The training environemtn comes with a variety of modules installed, which their necessary dependencies. To inspect the modules available, run `module avail`, which will show you this output:
+The training environment comes with a variety of modules installed, which their necessary dependencies. To inspect the modules available, run `module avail`, which will show you this output (assuming the installation has been performed with ROCm 6.1.0):
 
 ```bash
 ---------------------------------------------------------------------------------------- /etc/lmod/modules/Linux -----------------------------------------------------------------------------------------
@@ -579,6 +579,10 @@ Modulefile content:
 ```bash
 whatis("HIP version of pytorch")
 load("rocm/6.1.0")
+conflict("miniconda3")
+prepend_path("PYTHONPATH","/opt/rocmplus-6.1.0/vision/lib/python3.10/site-packages/torchvision-0.20.0a0+bf01bab-py3.10-linux-x86_64.egg")
+prepend_path("PYTHONPATH","/opt/rocmplus-6.1.0/vision/lib/python3.10/site-packages/pillow-10.3.0-py3.10-linux-x86_64.egg")
+prepend_path("PYTHONPATH","/opt/rocmplus-6.1.0/audio/lib/python3.10/site-packages/torchaudio-2.4.0a0+7f6209b-py3.10-linux-x86_64.egg")
 prepend_path("PYTHONPATH","/opt/rocmplus-6.1.0/pytorch/lib/python3.10/site-packages")
 ```
 

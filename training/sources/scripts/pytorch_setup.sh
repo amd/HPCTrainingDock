@@ -150,7 +150,7 @@ cat <<-EOF | sudo tee ${MODULE_PATH}/2.2.lua
 
         load("rocm/${ROCM_VERSION}")
         conflict("miniconda3")
-	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}//vision/lib/python3.10/site-packages/torchvision-0.20.0a0+bf01bab-py3.10-linux-x86_64.egg")
+	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages/torchvision-0.20.0a0+bf01bab-py3.10-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages/pillow-10.3.0-py3.10-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/audio/lib/python3.10/site-packages/torchaudio-2.4.0a0+7f6209b-py3.10-linux-x86_64.egg")
         prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages")

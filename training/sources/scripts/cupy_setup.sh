@@ -81,6 +81,7 @@ else
       python3 setup.py -q bdist_wheel
       
       sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/cupy
+      sudo pip3 install pytest mock
       sudo pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/cupy dist/cupy-13.0.0b1-cp310-cp310-linux_x86_64.whl
       
       cd ..
