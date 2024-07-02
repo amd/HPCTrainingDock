@@ -30,15 +30,15 @@ RUN apt-get install -q -y vim sudo apt-utils
 
 SHELL ["/bin/bash", "-c"]
 
-RUN adduser --home /home/student --uid 20000 --shell /bin/bash --disabled-password --gecos '' student
+RUN adduser --home /home/sysadmin --uid 20000 --shell /bin/bash --disabled-password --gecos '' sysadmin
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
-#RUN usermod -a -G video,render,renderalt,sudo --password $(echo amdtest | openssl passwd -1 -stdin) student
-RUN usermod -a -G video,render,renderalt,sudo student
+#RUN usermod -a -G video,render,renderalt,sudo --password $(echo amdtest | openssl passwd -1 -stdin) sysadmin
+RUN usermod -a -G video,render,renderalt,sudo sysadmin
 
-RUN chown -R student:student /home/student
-USER student
-ENV HOME=/home/student
-WORKDIR /home/student
+RUN chown -R sysadmin:sysadmin /home/sysadmin
+USER sysadmin
+ENV HOME=/home/sysadmin
+WORKDIR /home/sysadmin
 
 #COPY rocm/sources/scripts/lmod_setup.sh /tmp/lmod_setup.sh
 #RUN /tmp/lmod_setup.sh 
