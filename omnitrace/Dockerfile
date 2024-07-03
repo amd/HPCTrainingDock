@@ -42,10 +42,10 @@ RUN /tmp/miniconda3_setup.sh \
 COPY omnitrace/sources/scripts/omnitrace_setup.sh /tmp/omnitrace_setup.sh
 
 # Grab any cached files of Omnitrace builds
-RUN echo "CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}"
-COPY cache.list \
-     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/omnitrace.* \
-     /opt/rocmplus-${ROCM_VERSION}/
+#RUN echo "CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}"
+#COPY cache.list \
+#     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/omnitrace.* \
+#     /opt/rocmplus-${ROCM_VERSION}/
 
 RUN /tmp/omnitrace_setup.sh \
        --rocm-version ${ROCM_VERSION} \
