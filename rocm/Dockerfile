@@ -50,10 +50,10 @@ WORKDIR /app
 #
 
 # Grab any cached files of MPI builds
-COPY cache.list \
-     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/ucx.* \
-     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/openmpi.* \
-     /opt/rocmplus-${ROCM_VERSION}/
+#COPY cache.list \
+#     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/ucx.* \
+#     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/openmpi.* \
+#     /opt/rocmplus-${ROCM_VERSION}/
 
 COPY rocm/sources/scripts/openmpi_setup.sh /tmp/openmpi_setup.sh
 

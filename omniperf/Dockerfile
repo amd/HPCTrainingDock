@@ -42,10 +42,10 @@ ENV PATH=$HOME/.yarn/bin:$HOME/.config/yarn/global/node_modules/.bin:$PATH
 # Install Omniperf
 #
 
-COPY omniperf/sources/scripts/omniperf_setup.sh /tmp/omniperf_setup.sh
+#COPY omniperf/sources/scripts/omniperf_setup.sh /tmp/omniperf_setup.sh
 
-RUN  /tmp/omniperf_setup.sh --rocm-version ${ROCM_VERSION} && \
-     rm /tmp/omniperf_setup.sh
+#RUN  /tmp/omniperf_setup.sh --rocm-version ${ROCM_VERSION} && \
+#     rm /tmp/omniperf_setup.sh
 
 # Overwrite grafana ini file
 COPY omniperf/docker/grafana.ini /etc/grafana
