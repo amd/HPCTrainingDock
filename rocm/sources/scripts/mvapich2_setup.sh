@@ -39,20 +39,27 @@ echo ""
 #
 
 if [ "${DISTRO}" = "ubuntu" ]; then
-   sudo DEBIAN_FRONTEND=noninteractive apt-get -qqy install alien 
-   sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}
-   sudo mkdir -p /opt/mvapich2
    sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/mvapich2
-   sudo wget -q http://mvapich.cse.ohio-state.edu/download/mvapich/gdr/2.3.7/mofed5.0/mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
-   sudo alien --scripts -i mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
+   sudo wget http://mvapich.cse.ohio-state.edu/download/mvapich/mv2/mvapich2-2.3.7.tar.gz
+   sudo  gzip -dc mvapich2-2.3.7.tar.gz | tar -x
+   cd mvapich2-2.3.7
+   export FFLAGS=-fallow-argument-mismatch
+   echo 'Defaults:%sudo env_keep += "FFLAGS"' | sudo EDITOR='tee -a' visudo
+   sudo ./configure --prefix=/opt/rocmplus-${ROCM_VERSION}/mvapich2
+   sudo make -j
+   sudo make install
+   cd ../
+   sudo rm -rf mvapich2-2.3.7
+   sudo rm mvapich2-2.3.7.tar.gz
+
 fi
 if [ "${DISTRO}" = "rocky linux" ]; then
    yum install http://mvapich.cse.ohio-state.edu/download/mvapich/gdr/2.3.7/mofed5.0/mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
 fi
 
 # Adding -p option to avoid error if directory already exists
-sudo mv /opt/mvapich2 /opt/rocmplus-${ROCM_VERSION}/mvapich2
-rm -f mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
+#sudo mv /opt/mvapich2 /opt/rocmplus-${ROCM_VERSION}/mvapich2
+#rm -f mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
 
 # Create a module file for Mvapich
 export MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/mvapich2
@@ -66,7 +73,7 @@ cat <<-EOF | sudo tee ${MODULE_PATH}/2.3.7.lua
 	whatis("Description: An open source Message Passing Interface implementation")
 	whatis(" This is a GPU-aware version of Mvapich")
 
-	local base = "/opt/rocmplus-${ROCM_VERSION}/mvapich2/gdr/2.3.7/no-mcast/no-openacc/rocm5.1/mofed5.0/mpirun/gnu10.3.1"
+	local base = "/opt/rocmplus-${ROCM_VERSION}/mvapich2/"
 	local mbase = "/etc/lmod/modules/ROCmPlus-MPI"
 
 	prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
