@@ -76,13 +76,13 @@ fi
 if [ "${UCX_PATH_INPUT}" != "" ]; then
    UCX_PATH="${UCX_PATH_INPUT}"
 else
-   UCX_PATH="$INSTALL_PATH}"/ucx
+   UCX_PATH="${INSTALL_PATH}"/ucx
 fi
 
 if [ "${UCC_PATH_INPUT}" != "" ]; then
    UCC_PATH="${UCC_PATH_INPUT}"
 else
-   UCC_PATH="$INSTALL_PATH}"/ucc
+   UCC_PATH="${INSTALL_PATH}"/ucc
 fi
 
 echo ""
@@ -219,6 +219,14 @@ else
    wget -q https://github.com/openucx/ucc/archive/refs/tags/v1.3.0.tar.gz
    tar xzf v1.3.0.tar.gz
    cd ucc-1.3.0
+
+   export AMDGPU_GFXMODEL_UCC=${AMDGPU_GFXMODEL}
+   echo 'Defaults:%sudo env_keep += "AMDGPU_GFXMODEL_UCC"' | sudo EDITOR='tee -a' visudo
+
+   sudo sed -i '31i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu --offload-arch='"${AMDGPU_GFXMODEL_UCC}"' ${@:5} -fPIC -O3 -o ${pic_filepath}"' cuda_lt.sh
+   sudo sed -i '32d' cuda_lt.sh
+   sudo sed -i '41i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu --offload-arch='"${AMDGPU_GFXMODEL_UCC}"' ${@:5} -O3 -o ${npic_filepath}"' cuda_lt.sh
+   sudo sed -i '42d' cuda_lt.sh
 
    ./autogen.sh
    echo "./configure --prefix=${UCC_PATH}  --with-rocm=/opt/rocm-${ROCM_VERSION}  --with-ucx=${UCX_INSTALL} "
