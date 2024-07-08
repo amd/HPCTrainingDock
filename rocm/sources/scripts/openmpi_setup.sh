@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 
-: ${ROCM_VERSIONS:="6.0"}
+ROCM_VERSION=6.1.2
+REPLACE=0
+DRY_RUN=0
+MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/openmpi
+INSTALL_PATH_INPUT=""
+UCX_PATH_INPUT=""
+UCC_PATH_INPUT=""
+OPENMPI_PATH_INPUT=""
+
+AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 
 reset-last()
 {
@@ -11,9 +20,40 @@ n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
+      "--amdgpu-gfxmodel")
+          shift
+          AMDGPU_GFXMODEL=${1}
+          reset-last
+          ;;
+      "--dry_run")
+          DRY_RUN=1
+	  ;;
+      "--install-path")
+          shift
+          INSTALL_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--module_path")
+          shift
+          MODULE_PATH=${1}
+          reset-last
+	  ;;
+      "--replace")
+          REPLACE=1
+	  ;;
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
+          reset-last
+          ;;
+      "--ucc-path")
+          shift
+          UCC_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--ucx-path")
+          shift
+          UCX_PATH_INPUT=${1}
           reset-last
           ;;
       *)
@@ -27,6 +67,24 @@ done
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
+if [ "${INSTALL_PATH_INPUT}" != "" ]; then
+   INSTALL_PATH="${INSTALL_PATH_INPUT}"
+else
+   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}
+fi
+
+if [ "${UCX_PATH_INPUT}" != "" ]; then
+   UCX_PATH="${UCX_PATH_INPUT}"
+else
+   UCX_PATH="$INSTALL_PATH}"/ucx
+fi
+
+if [ "${UCC_PATH_INPUT}" != "" ]; then
+   UCC_PATH="${UCC_PATH_INPUT}"
+else
+   UCC_PATH="$INSTALL_PATH}"/ucc
+fi
+
 echo ""
 echo "============================"
 echo " Installing OpenMPI with:"
@@ -35,15 +93,20 @@ echo "============================"
 echo ""
 
 if [ "${DISTRO}" = "ubuntu" ]; then
-   # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev 
-   sudo DEBIAN_FRONTEND=noninteractive apt-get update && \
-   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
-      libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen
-fi
-if [ "${DISTRO}" = "rocky linux" ]; then
-   # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev 
-   yum update && \
-   yum install -y pmix hwloc
+   echo "Install of libpmix-dev libhwloc-dev libevent-dev libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen packages"
+   if [[ "${DRY_RUN}" == "0" ]]; then
+      # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev 
+      sudo DEBIAN_FRONTEND=noninteractive apt-get update && \
+      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
+         libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen
+   fi
+elif [ "${DISTRO}" = "rocky linux" ]; then
+   echo "Install of pmix and hwloc packages"
+   if [[ "${DRY_RUN}" == "0" ]]; then
+      # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev 
+      yum update && \
+      yum install -y pmix hwloc
+   fi
 fi
 
 # omnitrace (omnitrace-avail) will throw this message using default values, so change default to 2
@@ -51,13 +114,15 @@ fi
 # [omnitrace][116] In order to enable PAPI support, run 'echo N | sudo tee /proc/sys/kernel/perf_event_paranoid' where                   N is <= 2
 if (( `cat /proc/sys/kernel/perf_event_paranoid` > 0 )); then echo "Please do:  echo 0  | sudo tee /proc/sys/kernel/perf_event_paranoid"; fi
 
-mkdir -p /opt/rocmplus-${ROCM_VERSION}
+if [[ "${DRY_RUN}" == "0" ]]; then
+   mkdir -p "${INSTALL_PATH}"
+fi
 
 #
 # Install UCX
 #
 
-if [ -f /opt/rocmplus-${ROCM_VERSION}/ucx.tgz ]; then
+if [ -f ${INSTALL_PATH}/ucx.tgz ]; then
    echo ""
    echo "============================"
    echo " Installing Cached UCX"
@@ -65,11 +130,17 @@ if [ -f /opt/rocmplus-${ROCM_VERSION}/ucx.tgz ]; then
    echo ""
 
    #install the cached version
-   cd /opt/rocmplus-${ROCM_VERSION}
+   cd "${INSTALL_PATH}"
    sudo tar -xzf ucx.tgz
-   sudo chown -R root:root /opt/rocmplus-${ROCM_VERSION}/ucx
-   sudo rm /opt/rocmplus-${ROCM_VERSION}/ucx.tgz
+   sudo chown -R root:root "${INSTALL_PATH}"/ucx
+   sudo rm "${INSTALL_PATH}"/ucx.tgz
 else
+   if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
+      echo "There is a previous installation and the replace flag is false"
+      echo "  use --replace to request replacing the current installation" 
+      exit
+   fi
+
    echo ""
    echo "============================"
    echo " Building UCX"
@@ -91,14 +162,16 @@ else
    cd ucx-1.16.0
    mkdir build && cd build
 
-   echo "../contrib/configure-release --prefix=/opt/rocmplus-${ROCM_VERSION}/ucx --with-rocm=/opt/rocm-${ROCM_VERSION}  --without-cuda --enable-mt  --enable-optimizations  --disable-logging --disable-debug --enable-assertions --enable-params-check --enable-examples"
-   ../contrib/configure-release --prefix=/opt/rocmplus-${ROCM_VERSION}/ucx \
+   echo "../contrib/configure-release --prefix="${UCX_PATH}" --with-rocm=/opt/rocm-${ROCM_VERSION}  --without-cuda --enable-mt  --enable-optimizations  --disable-logging --disable-debug --enable-assertions --enable-params-check --enable-examples"
+   ../contrib/configure-release --prefix="${UCX_PATH}" \
       --with-rocm=/opt/rocm-${ROCM_VERSION}  --without-cuda \
       --enable-mt  --enable-optimizations  --disable-logging \
       --disable-debug --enable-assertions --enable-params-check \
       --enable-examples
       make -j 16
-      sudo make install
+      if [[ "${DRY_RUN}" == "0" ]]; then
+         sudo make install
+      fi
 
    cd ../..
    rm -rf ucx-1.16.0 ucx-1.16.0.tar.gz
@@ -108,7 +181,7 @@ fi
 # Install UCC
 #
 
-if [ -f /opt/rocmplus-${ROCM_VERSION}/ucc.tgz ]; then
+if [ -f "${INSTALL_PATH}"/ucc.tgz ]; then
    echo ""
    echo "============================"
    echo " Installing Cached UCC"
@@ -116,11 +189,17 @@ if [ -f /opt/rocmplus-${ROCM_VERSION}/ucc.tgz ]; then
    echo ""
 
    #install the cached version
-   cd /opt/rocmplus-${ROCM_VERSION}
+   cd "${INSTALL_PATH}"
    sudo tar -xzf ucc.tgz
-   sudo chown -R root:root /opt/rocmplus-${ROCM_VERSION}/ucc
-   sudo rm /opt/rocmplus-${ROCM_VERSION}/ucc.tgz
+   sudo chown -R root:root "${INSTALL_PATH}"/ucc
+   sudo rm "${INSTALL_PATH}"/ucc.tgz
 else
+   if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
+      echo "There is a previous installation and the replace flag is false"
+      echo "  use --replace to request replacing the current installation" 
+      exit
+   fi
+
    echo ""
    echo "============================"
    echo " Building UCC"
@@ -142,10 +221,16 @@ else
    cd ucc-1.3.0
 
    ./autogen.sh
-   echo "./configure --prefix=/opt/rocmplus-${ROCM_VERSION}/ucc  --with-rocm=/opt/rocm-${ROCM_VERSION}  --with-ucx=/opt/rocmplus-${ROCM_VERSION}/ucx "
-   ./configure --prefix=/opt/rocmplus-${ROCM_VERSION}/ucc  --with-rocm=/opt/rocm-${ROCM_VERSION}  --with-ucx=/opt/rocmplus-${ROCM_VERSION}/ucx
+   echo "./configure --prefix=${UCC_PATH}  --with-rocm=/opt/rocm-${ROCM_VERSION}  --with-ucx=${UCX_INSTALL} "
+   ./configure --prefix="${UCC_PATH}"  --with-rocm=/opt/rocm-${ROCM_VERSION} --with-ucx="${UCX_PATH}"
    make -j 16
-   sudo make install
+   pwd
+   exit
+
+   if [[ "${DRY_RUN}" == "0" ]]; then
+      sudo make install
+   fi
+
    cd ..
    rm -rf ucc-1.3.0 v1.3.0.tar.gz
 fi
@@ -155,7 +240,7 @@ fi
 # Install OpenMPI
 #
 
-if [ -f /opt/rocmplus-${ROCM_VERSION}/openmpi.tgz ]; then
+if [ -f "${INSTALL_PATH}"/openmpi.tgz ]; then
    echo ""
    echo "============================"
    echo " Installing Cached OpenMPI"
@@ -163,11 +248,17 @@ if [ -f /opt/rocmplus-${ROCM_VERSION}/openmpi.tgz ]; then
    echo ""
 
    #install the cached version
-   cd /opt/rocmplus-${ROCM_VERSION}
+   cd "${INSTALL_PATH}"
    sudo tar -xzf openmpi.tgz
-   sudo chown -R root:root /opt/rocmplus-${ROCM_VERSION}/openmpi
-   sudo rm /opt/rocmplus-${ROCM_VERSION}/openmpi.tgz
+   sudo chown -R root:root "${INSTALL_PATH}"/openmpi
+   sudo rm "${INSTALL_PATH}"/openmpi.tgz
 else
+   if [[ -d "${INSTALL_PATH}/openmpi" ]] && [[ "${REPLACE}" == "0" ]] ; then
+      echo "There is a previous installation and the replace flag is false"
+      echo "  use --replace to request replacing the current installation" 
+      exit
+   fi
+
    echo ""
    echo "============================"
    echo " Building OpenMPI"
@@ -193,34 +284,37 @@ else
    tar -xjf openmpi-5.0.3.tar.bz2
    cd openmpi-5.0.3
    mkdir build && cd build
-   ../configure --prefix=/opt/rocmplus-${ROCM_VERSION}/openmpi \
-                --with-ucx=/opt/rocmplus-${ROCM_VERSION}/ucx \
-		--with-ucc=/opt/rocmplus-${ROCM_VERSION}/ucc \
+   ../configure --prefix="${INSTALL_PATH}"/openmpi \
+                --with-ucx="${UCX_PATH}" \
+		--with-ucc="${UCC__PATH}" \
                 --enable-mca-no-build=btl-uct \
                 --enable-mpi --enable-mpi-fortran \
                 --disable-debug   CC=gcc CXX=g++ FC=gfortran
    make -j 16
-   sudo make install
+
+   if [[ "${DRY_RUN}" == "0" ]]; then
+      sudo make install
+   fi
    # make ucx the default point-to-point
-   echo "pml = ucx" | sudo tee -a /opt/rocmplus-${ROCM_VERSION}/openmpi/etc/openmpi-mca-params.conf
+   echo "pml = ucx" | sudo tee -a "${INSTALL_PATH}"/openmpi/etc/openmpi-mca-params.conf
    cd ../..
    rm -rf openmpi-5.0.3 openmpi-5.0.3.tar.bz2
 fi
 
 # In either case of Cache or Build from source, create a module file for OpenMPI
-export MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/openmpi
 
-sudo mkdir -p ${MODULE_PATH}
+if [[ "${DRY_RUN}" == "0" ]]; then
+   sudo mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | sudo tee ${MODULE_PATH}/5.0.3.lua
+   cat <<-EOF | sudo tee ${MODULE_PATH}/5.0.3.lua
 	whatis("Name: GPU-aware openmpi")
 	whatis("Version: 5.0.3")
 	whatis("Description: An open source Message Passing Interface implementation")
 	whatis(" This is a GPU-Aware version of OpenMPI")
 	whatis("URL: https://github.com/open-mpi/ompi.git")
 
-	local base = "/opt/rocmplus-${ROCM_VERSION}/openmpi"
+	local base = "${INSTALL_PATH}/openmpi"
 
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
@@ -229,3 +323,5 @@ cat <<-EOF | sudo tee ${MODULE_PATH}/5.0.3.lua
 	load("rocm/${ROCM_VERSION}")
 	family("MPI")
 EOF
+
+fi

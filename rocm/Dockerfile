@@ -57,7 +57,7 @@ WORKDIR /app
 
 COPY rocm/sources/scripts/openmpi_setup.sh /tmp/openmpi_setup.sh
 
-RUN  /tmp/openmpi_setup.sh --rocm-version ${ROCM_VERSION} && \
+RUN  /tmp/openmpi_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
      rm /tmp/openmpi_setup.sh
 
 #

@@ -62,7 +62,8 @@ if [ -z "${AMDGPU_GFXMODEL}" ]; then
    AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 fi
 
-rocm/sources/scripts/openmpi_setup.sh --rocm-version ${ROCM_VERSION}
+rocm/sources/scripts/openmpi_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu_gfxmodel ${AMDGPU_GFXMODEL}
+
 
 rocm/sources/scripts/mvapich2_setup.sh --rocm-version ${ROCM_VERSION}
 
