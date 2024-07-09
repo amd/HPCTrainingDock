@@ -232,8 +232,6 @@ else
    echo "./configure --prefix=${UCC_PATH}  --with-rocm=/opt/rocm-${ROCM_VERSION}  --with-ucx=${UCX_INSTALL} "
    ./configure --prefix="${UCC_PATH}"  --with-rocm=/opt/rocm-${ROCM_VERSION} --with-ucx="${UCX_PATH}"
    make -j 16
-   pwd
-   exit
 
    if [[ "${DRY_RUN}" == "0" ]]; then
       sudo make install
