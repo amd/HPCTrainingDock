@@ -8,6 +8,7 @@ INSTALL_PATH_INPUT=""
 UCX_PATH_INPUT=""
 UCC_PATH_INPUT=""
 OPENMPI_PATH_INPUT=""
+USE_CACHE_BUILD=1
 
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 
@@ -114,15 +115,16 @@ fi
 # [omnitrace][116] In order to enable PAPI support, run 'echo N | sudo tee /proc/sys/kernel/perf_event_paranoid' where                   N is <= 2
 if (( `cat /proc/sys/kernel/perf_event_paranoid` > 0 )); then echo "Please do:  echo 0  | sudo tee /proc/sys/kernel/perf_event_paranoid"; fi
 
-if [[ "${DRY_RUN}" == "0" ]]; then
+if [[ "${DRY_RUN}" == "0" ]] && [[ ! -d ${INSTALL_PATH} ]] ; then
    mkdir -p "${INSTALL_PATH}"
 fi
+cd "${INSTALL_PATH}"
 
 #
 # Install UCX
 #
 
-if [ -f ${INSTALL_PATH}/ucx.tgz ]; then
+if [ -f ${INSTALL_PATH}/CacheFiles/ucx.tgz ]; then
    echo ""
    echo "============================"
    echo " Installing Cached UCX"
@@ -130,10 +132,10 @@ if [ -f ${INSTALL_PATH}/ucx.tgz ]; then
    echo ""
 
    #install the cached version
-   cd "${INSTALL_PATH}"
-   sudo tar -xzf ucx.tgz
+   echo "cached file is ${INSTALL_PATH}/CacheFiles/ucx.tgz"
+   sudo tar -xzf ${INSTALL_PATH}/CacheFiles/ucx.tgz
    sudo chown -R root:root "${INSTALL_PATH}"/ucx
-   sudo rm "${INSTALL_PATH}"/ucx.tgz
+   sudo rm "${INSTALL_PATH}"/CacheFiles/ucx.tgz
 else
    if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
       echo "There is a previous installation and the replace flag is false"
@@ -181,7 +183,7 @@ fi
 # Install UCC
 #
 
-if [ -f "${INSTALL_PATH}"/ucc.tgz ]; then
+if [ -f "${INSTALL_PATH}"/CacheFiles/ucc.tgz ]; then
    echo ""
    echo "============================"
    echo " Installing Cached UCC"
@@ -190,9 +192,9 @@ if [ -f "${INSTALL_PATH}"/ucc.tgz ]; then
 
    #install the cached version
    cd "${INSTALL_PATH}"
-   sudo tar -xzf ucc.tgz
+   sudo tar -xzf "${INSTALL_PATH}"/CacheFiles/ucc.tgz
    sudo chown -R root:root "${INSTALL_PATH}"/ucc
-   sudo rm "${INSTALL_PATH}"/ucc.tgz
+   sudo rm "${INSTALL_PATH}"/CacheFiles/ucc.tgz
 else
    if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
       echo "There is a previous installation and the replace flag is false"
@@ -248,7 +250,7 @@ fi
 # Install OpenMPI
 #
 
-if [ -f "${INSTALL_PATH}"/openmpi.tgz ]; then
+if [ -f "${INSTALL_PATH}"/CacheFiles/openmpi.tgz ]; then
    echo ""
    echo "============================"
    echo " Installing Cached OpenMPI"
@@ -257,9 +259,9 @@ if [ -f "${INSTALL_PATH}"/openmpi.tgz ]; then
 
    #install the cached version
    cd "${INSTALL_PATH}"
-   sudo tar -xzf openmpi.tgz
+   sudo tar -xzf "${INSTALL_PATH}"/CacheFiles/openmpi.tgz
    sudo chown -R root:root "${INSTALL_PATH}"/openmpi
-   sudo rm "${INSTALL_PATH}"/openmpi.tgz
+   sudo rm "${INSTALL_PATH}"/CacheFiles/openmpi.tgz
 else
    if [[ -d "${INSTALL_PATH}/openmpi" ]] && [[ "${REPLACE}" == "0" ]] ; then
       echo "There is a previous installation and the replace flag is false"

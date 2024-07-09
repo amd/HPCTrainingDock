@@ -40,7 +40,7 @@ echo ""
 
 if [ "${DISTRO}" = "ubuntu" ]; then
    sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/mvapich2
-   sudo wget http://mvapich.cse.ohio-state.edu/download/mvapich/mv2/mvapich2-2.3.7.tar.gz
+   sudo wget -q http://mvapich.cse.ohio-state.edu/download/mvapich/mv2/mvapich2-2.3.7.tar.gz
    sudo  gzip -dc mvapich2-2.3.7.tar.gz | tar -x
    cd mvapich2-2.3.7
    export FFLAGS=-fallow-argument-mismatch
