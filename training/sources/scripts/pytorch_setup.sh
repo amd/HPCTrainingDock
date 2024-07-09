@@ -46,7 +46,7 @@ if [ "${BUILD_PYTORCH}" = "0" ]; then
    exit 1
 
 else 
-   if [ -f /opt/rocmplus-${ROCM_VERSION}/pytorch.tgz ]; then
+   if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/pytorch.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached Pytorch"
@@ -55,9 +55,9 @@ else
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf pytorch.tgz
+      tar -xzf CacheFiles/pytorch.tgz
       chown -R root:root /opt/rocmplus-${ROCM_VERSION}/pytorch
-      rm /opt/rocmplus-${ROCM_VERSION}/pytorch.tgz
+      rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/pytorch.tgz
    else
       echo ""
       echo "============================"

@@ -288,7 +288,7 @@ else
    # dad 3/25/3023 removed --enable-mpi-f90 --enable-mpi-c as they apparently are not options 
    # dad 3/30/2023 remove --with-pmix
 
-   wget -q https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.3.tar.bz2
+   wget https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.3.tar.bz2
    tar -xjf openmpi-5.0.3.tar.bz2
    cd openmpi-5.0.3
    mkdir build && cd build

@@ -41,7 +41,7 @@ echo ""
 ls -l /opt/rocmplus-${ROCM_VERSION}/
 
 if [ "${BUILD_GCC_LATEST}" = "1" ] ; then
-   if  [ -f /opt/rocmplus-${ROCM_VERSION}/${GCC_VERSION}.tgz ]; then
+   if  [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/${GCC_VERSION}.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached AMD GCC Latest"
@@ -50,8 +50,8 @@ if [ "${BUILD_GCC_LATEST}" = "1" ] ; then
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf ${GCC_VERSION}.tgz
-      chown -R root:root /opt/rocmplus-${ROCM_VERSION}/${GCC_VERSION}
+      tar -xzf CacheFiles/${GCC_VERSION}.tgz
+      chown -R root:root /opt/rocmplus-${ROCM_VERSION}/CacheFiles/${GCC_VERSION}
       rm ${GCC_VERSION}.tgz
    else
       echo ""
