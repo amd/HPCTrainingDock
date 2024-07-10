@@ -62,25 +62,26 @@ else
       source /etc/profile.d/lmod.sh
       module load rocm/${ROCM_VERSION}
 
+      sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/kokkos
+
       git clone https://github.com/kokkos/kokkos 
       cd kokkos
 
-      sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/kokkos
-
       sudo mkdir build
       cd build
+
       sudo cmake -DCMAKE_INSTALL_PREFIX=/opt/rocmplus-${ROCM_VERSION}/kokkos \
-                 -DKokkos_ENABLE_SERIAL=ON \
-                 -DKokkos_ENABLE_HIP=ON \ 
-		 -DKokkos_ARCH_ZEN=ON \
-		 -DKokkos_ARCH_VEGA90A=ON \
-                 -DCMAKE_CXX_COMPILER=hipcc ..
+            -DKokkos_ENABLE_SERIAL=ON \
+            -DKokkos_ENABLE_HIP=ON \ 
+            -DKokkos_ARCH_ZEN=ON \
+	    -DKokkos_ARCH_VEGA90A=ON \
+            -DCMAKE_CXX_COMPILER=hipcc .. 
 
       make -j
       sudo make install
 
       cd ../..
-      sudo irm -rf kokkos
+      sudo rm -rf kokkos
 
       module unload rocm/${ROCM_VERSION}
 
