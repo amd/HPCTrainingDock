@@ -47,7 +47,7 @@ if [ "${BUILD_CUPY}" = "0" ]; then
    exit 1
 
 else 
-   if [ -f /opt/rocmplus-${ROCM_VERSION}/cupy.tgz ]; then
+   if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/cupy.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached cuPY"
@@ -56,9 +56,9 @@ else
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf cupy.tgz
+      tar -xzf CacheFiles/cupy.tgz
       chown -R root:root /opt/rocmplus-${ROCM_VERSION}/cupy
-      sudo rm /opt/rocmplus-${ROCM_VERSION}/cupy.tgz
+      sudo rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/cupy.tgz
    else
       echo ""
       echo "============================"

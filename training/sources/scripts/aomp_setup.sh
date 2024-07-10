@@ -37,7 +37,7 @@ echo "==================================="
 echo ""
 
 if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
-   if [ -f /opt/rocmplus-${ROCM_VERSION}/aomp_${AOMP_VERSION_NUMBER}.tgz ]; then
+   if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/aomp_${AOMP_VERSION_NUMBER}.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached AOMP Latest"
@@ -46,9 +46,9 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf aomp_${AOMP_VERSION_NUMBER}.tgz
+      tar -xzf CacheFiles/aomp_${AOMP_VERSION_NUMBER}.tgz
       chown -R root:root /opt/rocmplus-${ROCM_VERSION}/aomp_${AOMP_VERSION_NUMBER}
-      rm /opt/rocmplus-${ROCM_VERSION}/aomp_${AOMP_VERSION_NUMBER}.tgz
+      rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/aomp_${AOMP_VERSION_NUMBER}.tgz
    else
       echo ""
       echo "============================"
