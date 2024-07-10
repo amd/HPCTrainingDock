@@ -4,7 +4,7 @@ Welcome to AMD's model installation repo!
 Here, you will have the option to build and run a Docker container on which you will find a rich variety of AMD GPU software for you to test and experiment with.
 Alternative to the Docker container, we also provide the option to install the aforementioned AMD GPU software on a bare system, through a series of installation scripts. Currently, we are only supporting an Ubuntu operating system (OS), but work is underway to add support for other operating systems as well. Note that we provide the option to test the bare system install before you deploy it, using a Docker container. Details are provided next.
 
-**NOTE**: if `Podman` is installed on your system instead of Docker, currently it is necessary to append the `--format docker` flag to the `docker build` commands present in our scripts. 
+**NOTE**: if `Podman` is installed on your system instead of Docker, currently it is necessary to append the `--format docker` flag to the `docker build` commands present in our scripts. Additionally, in some OS cases `--distro` option also needs to be specified (otherwise Podman might complain with "7 arguments instead of 1" type of errors).
 
 This version of the model installation is for workstations and data center GPUs. Specifically, it has been tested on Radeon 6800XT graphics card and MI200 series and MI300A data center GPUs.
 
@@ -106,7 +106,7 @@ cat ../../etc/os-release
 To start the container, run:
 
 ```bash
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video -p 2222:22 --detach --name Training --rm -v /home/amdtrain/Class/training/hostdir:/hostdir --security-opt seccomp=unconfined docker.io/library/training
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video -p 2222:22 --detach --name Training --rm -v $HOME/Class/training/hostdir:/hostdir --security-opt seccomp=unconfined docker.io/library/training
 ```
 
 **NOTE**: if you are testing the container on a machine that does not have a GPU (such as your laptop), you need to remove the `--device=/dev/kfd` option from the above command. 
@@ -229,7 +229,7 @@ training/sources/scripts/apps_setup.sh
 
 # 3. Inspecting the Model Installation Environment
 
-The training environment comes with a variety of modules installed, which their necessary dependencies. To inspect the modules available, run `module avail`, which will show you this output (assuming the installation has been performed with ROCm 6.1.0):
+The training environment comes with a variety of modules installed, with their necessary dependencies. To inspect the modules available, run `module avail`, which will show you this output (assuming the installation has been performed with ROCm 6.1.0):
 
 ```bash
 ---------------------------------------------------------------------------------------- /etc/lmod/modules/Linux -----------------------------------------------------------------------------------------
@@ -715,7 +715,7 @@ Once you selected the version you want (let's assume it's 1.10), you can install
 juliaup add 1.10
 ```
 
-The package will be installed in `$HOME/.julia/juliaup/julia-1.10.3+0.x64.linux.gnu`. 
+The package will be installed in `$HOME/.julia/juliaup/julia-1.10.3+0.x64.linux.gnu` (or later minor version, please check). 
 
 Next, `cd` into `/etc/lmod/modules` and create a folder for `Julia`:
 
@@ -723,11 +723,11 @@ Next, `cd` into `/etc/lmod/modules` and create a folder for `Julia`:
 sudo mkdir Julia
 ```
 
-Go in the folder just created and create a modulefile (here called `julia.1.10.lua`) with this content (replace `<admin>` with your admin username:
+Go in the folder just created and create a modulefile (here called `julia.1.10.lua`) with this content (replace `<admin>` with your admin username):
 
 ```bash
 whatis("Julia Version 1.10")
-append_path("PATH", "/users/<admin>/.julia/juliaup/julia-1.10.3+0.x64.linux.gnu/bin")
+append_path("PATH", "/home/<admin>/.julia/juliaup/julia-1.10.3+0.x64.linux.gnu/bin")
 ```
 
 Finally, add the new modulefile location to `MODULEPATH` (needs to be repeated every time you exit the container):
@@ -745,7 +745,7 @@ Now, `module avail` will show this additional module:
 
 # 5. Testing the Installation
 
-You can check that our training exercies run with your installation, by doing:
+You can check that your Docker container installation works as intended by testing it with examples from HPCTrainingExamples repository:
 
 ```bash
 git clone https://github.com/amd/HPCTrainingExamples && \
