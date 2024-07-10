@@ -64,7 +64,6 @@ fi
 
 rocm/sources/scripts/openmpi_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
 
-
 rocm/sources/scripts/mvapich2_setup.sh --rocm-version ${ROCM_VERSION}
 
 omnitrace/sources/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --python-versions ${PYTHON_VERSIONS}
@@ -84,3 +83,5 @@ training/sources/scripts/cupy_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-g
 training/sources/scripts/pytorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-pytorch ${BUILD_PYTORCH}
 
 training/sources/scripts/apps_setup.sh
+
+training/sources/scripts/kokkos_setup.sh
