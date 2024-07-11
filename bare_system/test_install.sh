@@ -8,6 +8,8 @@ reset-last()
 }
 
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 n=0
 while [[ $# -gt 0 ]]
@@ -23,6 +25,16 @@ do
             AMDGPU_GFXMODEL=${1}
             reset-last
             ;;
+      "--distro")
+          shift
+          DISTRO=${1}
+          last() { DISTRO="${DISTRO} ${1}"; }
+          ;;
+      "--distro-versions")
+          shift
+          DISTRO_VERSION=${1}
+          last() { DISTRO_VERSION="${DISTRO_VERSION} ${1}"; }
+          ;;
       *)
          last ${1}
          ;;
@@ -30,9 +42,6 @@ do
    n=$((${n} + 1))
    shift
 done
-
-DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 if [ ! -d CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL} ]; then
    mkdir -p CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
