@@ -42,9 +42,9 @@ echo ""
 
 if [ "${BUILD_CUPY}" = "0" ]; then
 
-   echo "cupy will not be build, according to the specified value of BUILD_CUPY"
+   echo "cupy will not be built, according to the specified value of BUILD_CUPY"
    echo "BUILD_CUPY: $BUILD_CUPY"
-   exit 1
+   exit
 
 else 
    if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/cupy.tgz ]; then

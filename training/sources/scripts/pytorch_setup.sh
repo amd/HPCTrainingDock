@@ -43,7 +43,7 @@ if [ "${BUILD_PYTORCH}" = "0" ]; then
 
    echo "pytorch will not be build, according to the specified value of BUILD_PYTORCH"
    echo "BUILD_PYTORCH: $BUILD_PYTORCH"
-   exit 1
+   exit
 
 else 
    if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/pytorch.tgz ]; then
