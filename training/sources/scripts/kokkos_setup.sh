@@ -64,20 +64,21 @@ else
 
       sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/kokkos
 
-      git clone https://github.com/kokkos/kokkos 
+      git clone https://github.com/kokkos/kokkos
       cd kokkos
 
       sudo mkdir build
       cd build
 
       sudo cmake -DCMAKE_INSTALL_PREFIX=/opt/rocmplus-${ROCM_VERSION}/kokkos \
-            -DKokkos_ENABLE_SERIAL=ON \
-            -DKokkos_ENABLE_HIP=ON \ 
-            -DKokkos_ARCH_ZEN=ON \
-	    -DKokkos_ARCH_VEGA90A=ON \
-            -DCMAKE_CXX_COMPILER=hipcc .. 
+	         -DCMAKE_PREFIX_PATH=/opt/rocm-${ROCM_VERSION} \
+                 -DKokkos_ENABLE_SERIAL=ON \
+                 -DKokkos_ENABLE_HIP=ON \
+                 -DKokkos_ARCH_ZEN=ON \
+	         -DKokkos_ARCH_VEGA90A=ON \
+                 -DCMAKE_CXX_COMPILER=hipcc ..
 
-      make -j
+      sudo make -j
       sudo make install
 
       cd ../..
@@ -92,7 +93,7 @@ else
    sudo mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | sudo tee ${MODULE_PATH}/4.3.1.lua
+   cat <<-EOF | sudo tee ${MODULE_PATH}/kokkos-4.3.1.lua
         whatis("Kokkos - Performance Portability Language")
 
         load("rocm/${ROCM_VERSION}")
