@@ -1,8 +1,5 @@
 #!/bin/bash
 
-DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 BUILD_PYTORCH=0
 
@@ -145,8 +142,8 @@ export MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/pytorch
 sudo mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | sudo tee ${MODULE_PATH}/2.2.lua
-        whatis("HIP version of pytorch")
+cat <<-EOF | sudo tee ${MODULE_PATH}/2.3.1.lua
+        whatis("HIP version of PyTorch")
 
         load("rocm/${ROCM_VERSION}")
         conflict("miniconda3")

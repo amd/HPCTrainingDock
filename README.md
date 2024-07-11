@@ -4,7 +4,7 @@ Welcome to AMD's model installation repo!
 Here, you will have the option to build and run a Docker container on which you will find a rich variety of AMD GPU software for you to test and experiment with.
 Alternative to the Docker container, we also provide the option to install the aforementioned AMD GPU software on a bare system, through a series of installation scripts. Currently, we are only supporting an Ubuntu operating system (OS), but work is underway to add support for other operating systems as well. Note that we provide the option to test the bare system install before you deploy it, using a Docker container. Details are provided next.
 
-**NOTE**: if `Podman` is installed on your system instead of Docker, currently it is necessary to append the `--format docker` flag to the `docker build` commands present in our scripts. Additionally, in some OS cases `--distro` option also needs to be specified (otherwise Podman might complain with "7 arguments instead of 1" type of errors).
+**NOTE**: if `Podman` is installed on your system instead of Docker, currently it is necessary to append the `--format docker` flag to the `docker build` commands present in our scripts. Additionally, in some OS cases, the  `--distro` option also needs to be specified (otherwise Podman might complain with "7 arguments instead of 1" type of errors).
 
 This version of the model installation is for workstations and data center GPUs. Specifically, it has been tested on Radeon 6800XT graphics card and MI200 series and MI300A data center GPUs.
 
@@ -32,7 +32,7 @@ cd HPCTrainingDock
 To build the four images, run the following command (note that `<admin>` is set to `admin` by default but the password **must** be specified, otherwise you will get an error from the build script):
 
 ```
-   ./build-docker.sh --rocm-versions 6.1.0 --distro-versions 22.04 --admin-username <admin> --admin-password <password>
+   ./build-docker.sh --rocm-versions 6.1.0 --distro ubuntu --distro-versions 22.04 --admin-username <admin> --admin-password <password>
 ```
 
 You can build for many other recent ROCm versions if you prefer. To show more docker build output, add this option to the build command above:
@@ -745,7 +745,7 @@ Now, `module avail` will show this additional module:
 
 # 5. Testing the Installation
 
-You can check that your Docker container installation works as intended by testing it with examples from HPCTrainingExamples repository:
+You can check that your Docker container installation works as intended by testing it with examples from the HPCTrainingExamples repository:
 
 ```bash
 git clone https://github.com/amd/HPCTrainingExamples && \
