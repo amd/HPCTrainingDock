@@ -231,7 +231,7 @@ else
    sudo sed -i '42d' cuda_lt.sh
 
    ./autogen.sh
-   echo "./configure --prefix=${UCC_PATH}  --with-rocm=/opt/rocm-${ROCM_VERSION}  --with-ucx=${UCX_INSTALL} "
+   echo "./configure --prefix=${UCC_PATH}  --with-rocm=/opt/rocm-${ROCM_VERSION}  --with-ucx=${UCX_PATH} "
    ./configure --prefix="${UCC_PATH}"  --with-rocm=/opt/rocm-${ROCM_VERSION} --with-ucx="${UCX_PATH}"
    make -j 16
 
