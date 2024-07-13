@@ -98,6 +98,10 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "1" ] ; then
       CPU_TYPE=zen4
    fi
 
+   # Fixing error "mv: cannot stat 't-es.gmo': No such file or directory: (language support) due to missing gettext
+   sudo apt-get update
+   sudo apt-get install -y gettext
+
    git clone --depth 1 https://github.com/AMDResearch/omnitrace.git omnitrace-source --recurse-submodules && \
        cmake                                         \
           -B omnitrace-build                      \
