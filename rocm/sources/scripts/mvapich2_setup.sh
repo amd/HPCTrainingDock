@@ -87,6 +87,7 @@ cat <<-EOF | sudo tee ${MODULE_PATH}/2.3.7.lua
 	local base = "/opt/rocmplus-${ROCM_VERSION}/mvapich2/"
 	local mbase = "/etc/lmod/modules/ROCmPlus-MPI"
 
+        setenv("MV2_PATH", base)
 	prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib64"))
 	prepend_path("C_INCLUDE_PATH",pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH",pathJoin(base, "include"))
