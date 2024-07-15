@@ -12,6 +12,26 @@ USE_CACHE_BUILD=1
 
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 
+usage()
+{
+    echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
+    echo "--dry-run default off"
+    echo "--help: this usage information"
+    echo "--install-path [ INSTALL_PATH ] default /opt/rocmplus-<ROCM_VERSION>/openmpi (ucx, and ucc)"
+    echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/openmpi"
+    echo "--replace default off"
+    echo "--rocm-version [ ROCM_VERSION ] default 6.1.2"
+    echo "--ucc-path default <INSTALL_PATH>/ucc"
+    echo "--ucx-path default <INSTALL_PATH>/ucx"
+}
+
+send-error()
+{
+    usage
+    echo -e "\nError: ${@}"
+    exit 1
+}
+
 reset-last()
 {
    last() { send-error "Unsupported argument :: ${1}"; }
@@ -28,6 +48,9 @@ do
           ;;
       "--dry_run")
           DRY_RUN=1
+	  ;;
+      "--help")
+	  usage
 	  ;;
       "--install-path")
           shift
@@ -57,6 +80,9 @@ do
           UCX_PATH_INPUT=${1}
           reset-last
           ;;
+      "--*")
+          send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
+	  ;;
       *)
          last ${1}
          ;;
@@ -159,7 +185,15 @@ else
    export OMPI_MCA_pml_ucx_devices=any
    export OMPI_MCA_pml_ucx_verbose=100
 
-   wget -q https://github.com/openucx/ucx/releases/download/v1.16.0/ucx-1.16.0.tar.gz
+   count=0
+   while [ "$count" -lt 3 ]; do
+      wget -q --continue --tries=10 https://github.com/openucx/ucx/releases/download/v1.16.0/ucx-1.16.0.tar.gz && break
+      $((count++))
+   done
+   if [ ! -f ucx-1.16.0.tar.gz ]; then
+      echo "Failed to download ucx-1.16.0.tar.gz package ... exiting"
+      exit 1
+   fi
    tar xzf ucx-1.16.0.tar.gz
    cd ucx-1.16.0
    mkdir build && cd build
@@ -177,6 +211,12 @@ else
 
    cd ../..
    rm -rf ucx-1.16.0 ucx-1.16.0.tar.gz
+fi
+
+if [[ ! -d /opt/rocmplus-6.1.2/ucx/lib ]] ; then
+   echo "OpenMPI installation failed -- missing installation directories"
+   ls -l /opt/rocmplus-6.1.2/ucx 
+   exit 1
 fi
 
 #
@@ -218,7 +258,15 @@ else
    export OMPI_MCA_pml_ucx_devices=any
    export OMPI_MCA_pml_ucx_verbose=100
 
-   wget -q https://github.com/openucx/ucc/archive/refs/tags/v1.3.0.tar.gz
+   count=0
+   while [ "$count" -lt 3 ]; do
+      wget -q --continue --tries=10 https://github.com/openucx/ucc/archive/refs/tags/v1.3.0.tar.gz && break
+      $((count++))
+   done
+   if [ ! -f v1.3.0.tar.gz ]; then
+      echo "Failed to download ucc v1.3.0.tar.gz package ... exiting"
+      exit 1
+   fi
    tar xzf v1.3.0.tar.gz
    cd ucc-1.3.0
 
@@ -243,6 +291,11 @@ else
    rm -rf ucc-1.3.0 v1.3.0.tar.gz
 fi
 
+if [[ ! -d /opt/rocmplus-6.1.2/ucc/lib ]] ; then
+   echo "OpenMPI installation failed -- missing installation directories"
+   ls -l /opt/rocmplus-6.1.2/ucc
+   exit 1
+fi
 
 #
 # Install OpenMPI
@@ -288,7 +341,17 @@ else
    # dad 3/25/3023 removed --enable-mpi-f90 --enable-mpi-c as they apparently are not options 
    # dad 3/30/2023 remove --with-pmix
 
-   wget https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.3.tar.bz2
+   set -v
+
+   count=0
+   while [ "$count" -lt 3 ]; do
+      wget -q --continue --tries=10 https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.3.tar.bz2 && break
+      $((count++))
+   done
+   if [ ! -f openmpi-5.0.3.tar.bz2 ]; then
+      echo "Failed to download openmpi-5.0.3.tar.bz2 package ... exiting"
+      exit 1
+   fi
    tar -xjf openmpi-5.0.3.tar.bz2
    cd openmpi-5.0.3
    mkdir build && cd build
@@ -307,6 +370,12 @@ else
    echo "pml = ucx" | sudo tee -a "${INSTALL_PATH}"/openmpi/etc/openmpi-mca-params.conf
    cd ../..
    rm -rf openmpi-5.0.3 openmpi-5.0.3.tar.bz2
+fi
+
+if [[ ! -d /opt/rocmplus-6.1.2/openmpi/lib ]] ; then
+   echo "OpenMPI installation failed -- missing installation directories"
+   ls -l /opt/rocmplus-6.1.2/openmpi
+   exit 1
 fi
 
 # In either case of Cache or Build from source, create a module file for OpenMPI

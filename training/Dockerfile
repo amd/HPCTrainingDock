@@ -124,6 +124,13 @@ RUN /tmp/og_setup.sh --build-og-latest ${BUILD_OG_LATEST} --rocm-version ${ROCM_
 WORKDIR /tmp 
 
 #
+# Install kokkos
+#
+COPY training/sources/scripts/kokkos_setup.sh /tmp/kokkos_setup.sh
+
+RUN /tmp/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-kokkos ${BUILD_KOKKOS} && rm /tmp/kokkos_setup.sh
+
+#
 # Install any additional apps or libs that are needed 
 #
 COPY training/sources/scripts/apps_setup_basic.sh /tmp/apps_setup_basic.sh
@@ -143,7 +150,6 @@ WORKDIR /app
 #
 # Install pytorch
 #
-# Grab any cache files of compiler builds
 
 COPY training/sources/scripts/pytorch_setup.sh /tmp/pytorch_setup.sh
 
