@@ -1,6 +1,7 @@
 #!/bin/bash
 
 : ${ROCM_VERSION:="6.0"}
+: ${ROCM_INSTALLPATH:="/opt/"}
 
 reset-last()
 {
@@ -8,6 +9,8 @@ reset-last()
 }
 
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 n=0
 while [[ $# -gt 0 ]]
@@ -18,11 +21,26 @@ do
           ROCM_VERSION=${1}
           reset-last
           ;;
+      "--rocm-install-path")
+          shift
+          ROCM_INSTALLPATH=${1}
+          reset-last
+          ;;
       "--amdgpu-gfxmodel")
             shift
             AMDGPU_GFXMODEL=${1}
             reset-last
             ;;
+      "--distro")
+          shift
+          DISTRO=${1}
+          last() { DISTRO="${DISTRO} ${1}"; }
+          ;;
+      "--distro-versions")
+          shift
+          DISTRO_VERSION=${1}
+          last() { DISTRO_VERSION="${DISTRO_VERSION} ${1}"; }
+          ;;
       *)
          last ${1}
          ;;
@@ -31,12 +49,10 @@ do
    shift
 done
 
-DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-
-if [ ! -d CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL} ]; then
-   mkdir -p CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
-   touch CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/test.tgz
+CACHE_FILES="CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}"
+if [ ! -d ${CACHE_FILES} ]; then
+   mkdir -p ${CACHE_FILES}
+   touch ${CACHE_FILES}/test.tgz
 fi
 
 set -v
@@ -44,6 +60,7 @@ set -v
 docker build --no-cache --build-arg DISTRO=${DISTRO}  \
              --build-arg DISTRO_VERSION=${DISTRO_VERSION} \
              --build-arg ROCM_VERSION=${ROCM_VERSION} \
+             --build-arg ROCM_INSTALLPATH=${ROCM_INSTALLPATH} \
              --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
              -t bare -f bare_system/Dockerfile .
 

@@ -1,4 +1,3 @@
-
 ARG DISTRO
 ARG DISTRO_VERSION
 FROM ${DISTRO}:${DISTRO_VERSION}
@@ -6,6 +5,7 @@ FROM ${DISTRO}:${DISTRO_VERSION}
 ARG DISTRO
 ARG DISTRO_VERSION
 ARG ROCM_VERSION
+ARG ROCM_INSTALLPATH
 ARG AMDGPU_GFXMODEL
 
 LABEL maintainer="bob.robey@amd.com"
@@ -41,7 +41,7 @@ ENV HOME=/home/sysadmin
 WORKDIR /home/sysadmin
 
 #COPY rocm/sources/scripts/lmod_setup.sh /tmp/lmod_setup.sh
-#RUN /tmp/lmod_setup.sh 
+#RUN /tmp/lmod_setup.sh
 #&& rm /tmp/lmod_setup.sh
 
 ADD bare_system bare_system
@@ -51,7 +51,7 @@ ADD omniperf omniperf
 ADD training training
 COPY cache.list CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/*.tgz /opt/rocmplus-${ROCM_VERSION}/
 
-RUN bare_system/main_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
+RUN bare_system/main_setup.sh --rocm-version ${ROCM_VERSION} --rocm-install-path ${ROCM_INSTALLPATH} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
 
 # install module files
 #COPY  training/sources/lua/gcc/*          /etc/lmod/modules/Linux/gcc/
