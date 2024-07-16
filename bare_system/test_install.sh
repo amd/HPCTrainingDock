@@ -49,6 +49,7 @@ do
    shift
 done
 
+
 CACHE_FILES="CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}"
 if [ ! -d ${CACHE_FILES} ]; then
    mkdir -p ${CACHE_FILES}

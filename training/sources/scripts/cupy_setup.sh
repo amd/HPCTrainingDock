@@ -1,8 +1,5 @@
 #/bin/bash
 
-DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-
 ROCM_VERSION=6.0
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 BUILD_CUPY=0
@@ -33,7 +30,7 @@ done
 
 echo ""
 echo "==================================="
-echo "Starting cuPY Install with"
+echo "Starting Cupy Install with"
 echo "ROCM_VERSION: $ROCM_VERSION" 
 echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL" 
 echo "BUILD_CUPY: $BUILD_CUPY" 
@@ -42,15 +39,15 @@ echo ""
 
 if [ "${BUILD_CUPY}" = "0" ]; then
 
-   echo "cupy will not be build, according to the specified value of BUILD_CUPY"
+   echo "CuPy will not be built, according to the specified value of BUILD_CUPY"
    echo "BUILD_CUPY: $BUILD_CUPY"
-   exit 1
+   exit
 
 else 
    if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/cupy.tgz ]; then
       echo ""
       echo "============================"
-      echo " Installing Cached cuPY"
+      echo " Installing Cached CuPy"
       echo "============================"
       echo ""
 
@@ -62,7 +59,7 @@ else
    else
       echo ""
       echo "============================"
-      echo " Building cuPY"
+      echo " Building CuPy"
       echo "============================"
       echo ""
 
@@ -96,7 +93,7 @@ else
    
    # The - option suppresses tabs
    cat <<-EOF | sudo tee ${MODULE_PATH}/13.0.0b1.lua
-	whatis("HIP version of cuPY or hipPY")
+	whatis("HIP version of CuPy")
 
 	load("rocm/${ROCM_VERSION}")
 	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/cupy")

@@ -40,17 +40,28 @@ echo ""
 
 if [ "${DISTRO}" = "ubuntu" ]; then
    sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/mvapich2
-   sudo wget -q http://mvapich.cse.ohio-state.edu/download/mvapich/mv2/mvapich2-2.3.7.tar.gz
-   sudo  gzip -dc mvapich2-2.3.7.tar.gz | tar -x
-   cd mvapich2-2.3.7
-   export FFLAGS=-fallow-argument-mismatch
-   echo 'Defaults:%sudo env_keep += "FFLAGS"' | sudo EDITOR='tee -a' visudo
-   sudo ./configure --prefix=/opt/rocmplus-${ROCM_VERSION}/mvapich2
-   sudo make -j
-   sudo make install
-   cd ../
-   sudo rm -rf mvapich2-2.3.7
-   sudo rm mvapich2-2.3.7.tar.gz
+
+   # install the GPU aware version of mvapich2 using an rpm (MV2-GDR 2.3.7)
+   #sudo DEBIAN_FRONTEND=noninteractive apt-get -qqy install alien
+   sudo wget -q http://mvapich.cse.ohio-state.edu/download/mvapich/gdr/2.3.7/mofed5.0/mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
+   #sudo alien --scripts -i mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
+   #sudo dpkg-deb -x mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.deb /opt/rocmplus-${ROCM_VERSION}/mvapich2
+   sudo rpm --prefix /opt/rocmplus-${ROCM_VERSION}/mvapich2 -Uvh --nodeps mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
+   sudo rm mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
+   #sudo rm mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.deb
+
+   # install a non GPU aware version of mvapich2 from source (MV2 2.3.7)
+   #sudo wget -q http://mvapich.cse.ohio-state.edu/download/mvapich/mv2/mvapich2-2.3.7.tar.gz
+   #sudo  gzip -dc mvapich2-2.3.7.tar.gz | tar -x
+   #cd mvapich2-2.3.7
+   #export FFLAGS=-fallow-argument-mismatch
+   #echo 'Defaults:%sudo env_keep += "FFLAGS"' | sudo EDITOR='tee -a' visudo
+   #sudo ./configure --prefix=/opt/rocmplus-${ROCM_VERSION}/mvapich2
+   #sudo make -j
+   #sudo make install
+   #cd ../
+   #sudo rm -rf mvapich2-2.3.7
+   #sudo rm mvapich2-2.3.7.tar.gz
 
 fi
 if [ "${DISTRO}" = "rocky linux" ]; then
@@ -71,12 +82,13 @@ cat <<-EOF | sudo tee ${MODULE_PATH}/2.3.7.lua
 	whatis("Name: GPU-aware mvapich")
 	whatis("Version: 2.3.7")
 	whatis("Description: An open source Message Passing Interface implementation")
-	whatis(" This is a GPU-aware version of Mvapich")
+	whatis(" This is a GPU-aware version of Mvapich2 (MV2-GDR 2.3.7)")
 
 	local base = "/opt/rocmplus-${ROCM_VERSION}/mvapich2/"
 	local mbase = "/etc/lmod/modules/ROCmPlus-MPI"
 
-	prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
+        setenv("MV2_PATH", base)
+	prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib64"))
 	prepend_path("C_INCLUDE_PATH",pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH",pathJoin(base, "include"))
 	prepend_path("PATH",pathJoin(base, "bin"))
