@@ -43,12 +43,43 @@ if [ "${DISTRO}" = "ubuntu" ]; then
 
    # install the GPU aware version of mvapich2 using an rpm (MV2-GDR 2.3.7)
    #sudo DEBIAN_FRONTEND=noninteractive apt-get -qqy install alien
-   sudo wget -q http://mvapich.cse.ohio-state.edu/download/mvapich/gdr/2.3.7/mofed5.0/mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
+   sudo wget -q https://mvapich.cse.ohio-state.edu/download/mvapich/gdr/2.3.7/mofed5.0/mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1.slurm-2.3.7-1.t4.x86_64.rpm
+   ls -l mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1.slurm-2.3.7-1.t4.x86_64.rpm
    #sudo alien --scripts -i mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
    #sudo dpkg-deb -x mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.deb /opt/rocmplus-${ROCM_VERSION}/mvapich2
-   sudo rpm --prefix /opt/rocmplus-${ROCM_VERSION}/mvapich2 -Uvh --nodeps mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
-   sudo rm mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
+   sudo rpm --prefix /opt/rocmplus-${ROCM_VERSION}/mvapich2 -Uvh --nodeps mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1.slurm-2.3.7-1.t4.x86_64.rpm
+   sudo rm mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1.slurm-2.3.7-1.t4.x86_64.rpm
    #sudo rm mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.deb
+
+   sed -i -e "s/5.1.0/$ROCM_VERSION/g" \
+          -e '/^final_ldflags/s!"$!-L/usr/lib/x86_64-linux-gnu/ -lc"!' \
+          -e '/gcc-tce/s!tce/packages/gcc-tce/gcc-10.2.1/!!' \
+          -e '/redhat/s!-specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1!!' /opt/rocmplus-6.1.2/mvapich2/bin/mpicc
+
+   sed -i -e "s/5.1.0/$ROCM_VERSION/g" \
+          -e '/^final_ldflags/s!"$!-L/usr/lib/x86_64-linux-gnu/ -lc"!' \
+          -e '/gcc-tce/s!tce/packages/gcc-tce/gcc-10.2.1/!!' \
+          -e '/redhat/s!-specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1!!' /opt/rocmplus-6.1.2/mvapich2/bin/mpic++
+
+   sed -i -e "s/5.1.0/$ROCM_VERSION/g" \
+          -e '/^final_ldflags/s!"$!-L/usr/lib/x86_64-linux-gnu/ -lc"!' \
+          -e '/gcc-tce/s!tce/packages/gcc-tce/gcc-10.2.1/!!' \
+          -e '/redhat/s!-specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1!!' /opt/rocmplus-6.1.2/mvapich2/bin/mpicxx
+
+   sed -i -e "s/5.1.0/$ROCM_VERSION/g" \
+          -e '/^final_ldflags/s!"$!-L/usr/lib/x86_64-linux-gnu/ -lc"!' \
+          -e '/gcc-tce/s!tce/packages/gcc-tce/gcc-10.2.1/!!' \
+          -e '/redhat/s!-specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1!!' /opt/rocmplus-6.1.2/mvapich2/bin/mpif77
+
+   sed -i -e "s/5.1.0/$ROCM_VERSION/g" \
+          -e '/^final_ldflags/s!"$!-L/usr/lib/x86_64-linux-gnu/ -lc"!' \
+          -e '/gcc-tce/s!tce/packages/gcc-tce/gcc-10.2.1/!!' \
+          -e '/redhat/s!-specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1!!' /opt/rocmplus-6.1.2/mvapich2/bin/mpifort
+
+   sed -i -e "s/5.1.0/$ROCM_VERSION/g" \
+          -e '/^final_ldflags/s!"$!-L/usr/lib/x86_64-linux-gnu/ -lc"!' \
+          -e '/gcc-tce/s!tce/packages/gcc-tce/gcc-10.2.1/!!' \
+          -e '/redhat/s!-specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1!!' /opt/rocmplus-6.1.2/mvapich2/bin/mpif90
 
    # install a non GPU aware version of mvapich2 from source (MV2 2.3.7)
    #sudo wget -q http://mvapich.cse.ohio-state.edu/download/mvapich/mv2/mvapich2-2.3.7.tar.gz
