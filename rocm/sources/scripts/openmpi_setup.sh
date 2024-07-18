@@ -185,10 +185,12 @@ else
    export OMPI_MCA_pml_ucx_devices=any
    export OMPI_MCA_pml_ucx_verbose=100
 
+   cd /tmp
+
    count=0
    while [ "$count" -lt 3 ]; do
       wget -q --continue --tries=10 https://github.com/openucx/ucx/releases/download/v1.16.0/ucx-1.16.0.tar.gz && break
-      $((count++))
+      count=$((count+1))
    done
    if [ ! -f ucx-1.16.0.tar.gz ]; then
       echo "Failed to download ucx-1.16.0.tar.gz package ... exiting"
@@ -261,7 +263,7 @@ else
    count=0
    while [ "$count" -lt 3 ]; do
       wget -q --continue --tries=10 https://github.com/openucx/ucc/archive/refs/tags/v1.3.0.tar.gz && break
-      $((count++))
+      count=$((count+1))
    done
    if [ ! -f v1.3.0.tar.gz ]; then
       echo "Failed to download ucc v1.3.0.tar.gz package ... exiting"
@@ -341,12 +343,10 @@ else
    # dad 3/25/3023 removed --enable-mpi-f90 --enable-mpi-c as they apparently are not options 
    # dad 3/30/2023 remove --with-pmix
 
-   set -v
-
    count=0
    while [ "$count" -lt 3 ]; do
       wget -q --continue --tries=10 https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.3.tar.bz2 && break
-      $((count++))
+      count=$((count+1))
    done
    if [ ! -f openmpi-5.0.3.tar.bz2 ]; then
       echo "Failed to download openmpi-5.0.3.tar.bz2 package ... exiting"
