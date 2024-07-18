@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 
+# This script installs OpenMPI along with the UCX and UCC libraries. The simplest use case is:
+#   ./openmpi_setup.sh --rocm-version <ROCM_VERSION>
+# Most of the needed information for the install is autodetected. Others are set to the latest
+# available versions. Cross-compiling for a different GPU model can be done by specifying
+# the --amdgpu-gfxmodel <AMDGPU-GFXMODEL> option
+#
+# Best recommended installation also includes xpmem. That is not currently handled in this
+# script since it requires a kernel modification. Handling that in a container will take
+# some more effort. 
+
+# Variables controlling setup process
 ROCM_VERSION=6.1.2
 REPLACE=0
 DRY_RUN=0
@@ -9,8 +20,17 @@ UCX_PATH_INPUT=""
 UCC_PATH_INPUT=""
 OPENMPI_PATH_INPUT=""
 USE_CACHE_BUILD=1
+UCX_VERSION=1.17.0
+UCX_MD5CHECKSUM=53537757b71e5eae4d283e6fc32907ba
+UCC_VERSION=1.3.0
+UCC_MD5CHECKSUM=b2d14666cb9a18b0aee57898ce0a8c8b
+OPENMPI_VERSION=5.0.3
+OPENMPI_MD5CHECKSUM=af6896a78969b258da908d424c1c34ca
 
+# Autodetect defaults
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 usage()
 {
@@ -19,10 +39,16 @@ usage()
     echo "--help: this usage information"
     echo "--install-path [ INSTALL_PATH ] default /opt/rocmplus-<ROCM_VERSION>/openmpi (ucx, and ucc)"
     echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/openmpi"
+    echo "--openmpi-version [VERSION] default $OPENMPI_VERSION"
+    echo "--openmpi-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
     echo "--replace default off"
-    echo "--rocm-version [ ROCM_VERSION ] default 6.1.2"
+    echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
     echo "--ucc-path default <INSTALL_PATH>/ucc"
+    echo "--ucc-version [VERSION] default $UCC_VERSION"
+    echo "--ucc-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
     echo "--ucx-path default <INSTALL_PATH>/ucx"
+    echo "--ucx-version [VERSION] default $UCX_VERSION"
+    echo "--ucx-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
 }
 
 send-error()
@@ -62,6 +88,19 @@ do
           MODULE_PATH=${1}
           reset-last
 	  ;;
+      "--openmpi-version")
+          shift
+          OPENMPI_VERSION=${1}
+          reset-last
+          ;;
+      "--openmpi-md5checksum")
+          shift
+          OPENMPI_MD5CHECKSUM=${1}
+	  if [[ "${1}" = "" ]]; then
+             OPENMPI_MD5CHECKSUM="skip"
+	  fi
+          reset-last
+          ;;
       "--replace")
           REPLACE=1
 	  ;;
@@ -75,9 +114,35 @@ do
           UCC_PATH_INPUT=${1}
           reset-last
           ;;
+      "--ucc-version")
+          shift
+          UCC_VERSION=${1}
+          reset-last
+          ;;
+      "--ucc-md5checksum")
+          shift
+          UCC_MD5CHECKSUM=${1}
+	  if [[ "${1}" = "" ]]; then
+             UCC_MD5CHECKSUM="skip"
+	  fi
+          reset-last
+          ;;
       "--ucx-path")
           shift
           UCX_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--ucx-version")
+          shift
+          UCX_VERSION=${1}
+          reset-last
+          ;;
+      "--ucx-md5checksum")
+          shift
+          UCX_MD5CHECKSUM=${1}
+	  if [[ "${1}" = "" ]]; then
+             UCX_MD5CHECKSUM="skip"
+	  fi
           reset-last
           ;;
       "--*")
@@ -91,9 +156,6 @@ do
    shift
 done
 
-DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH="${INSTALL_PATH_INPUT}"
 else
@@ -103,13 +165,13 @@ fi
 if [ "${UCX_PATH_INPUT}" != "" ]; then
    UCX_PATH="${UCX_PATH_INPUT}"
 else
-   UCX_PATH="${INSTALL_PATH}"/ucx
+   UCX_PATH="${INSTALL_PATH}"/ucx-${UCX_VERSION}
 fi
 
 if [ "${UCC_PATH_INPUT}" != "" ]; then
    UCC_PATH="${UCC_PATH_INPUT}"
 else
-   UCC_PATH="${INSTALL_PATH}"/ucc
+   UCC_PATH="${INSTALL_PATH}"/ucc-${UCC_VERSION}
 fi
 
 echo ""
@@ -150,232 +212,264 @@ cd "${INSTALL_PATH}"
 # Install UCX
 #
 
-if [ -f ${INSTALL_PATH}/CacheFiles/ucx.tgz ]; then
-   echo ""
-   echo "============================"
-   echo " Installing Cached UCX"
-   echo "============================"
-   echo ""
-
-   #install the cached version
-   echo "cached file is ${INSTALL_PATH}/CacheFiles/ucx.tgz"
-   sudo tar -xzf ${INSTALL_PATH}/CacheFiles/ucx.tgz
-   sudo chown -R root:root "${INSTALL_PATH}"/ucx
-   sudo rm "${INSTALL_PATH}"/CacheFiles/ucx.tgz
+if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
+   echo "There is a previous installation and the replace flag is false"
+   echo "  use --replace to request replacing the current installation" 
 else
-   if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
-      echo "There is a previous installation and the replace flag is false"
-      echo "  use --replace to request replacing the current installation" 
-      exit
-   fi
+   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${INSTALL_PATH}/CacheFiles/ucx-${UCX_VERSION}.tgz ]]; then
+      echo ""
+      echo "============================"
+      echo " Installing Cached UCX"
+      echo "============================"
+      echo ""
 
-   echo ""
-   echo "============================"
-   echo " Building UCX"
-   echo "============================"
-   echo ""
+      #install the cached version
+      echo "cached file is ${INSTALL_PATH}/CacheFiles/ucx-${UCX_VERSION}.tgz"
+      sudo tar -xzf ${INSTALL_PATH}/CacheFiles/ucx-${UCX_VERSION}.tgz
+      sudo chown -R root:root "${INSTALL_PATH}"/ucx-${UCX_VERSION}
+      sudo rm "${INSTALL_PATH}"/CacheFiles/ucx-${UCX_VERSION}.tgz
+   else
 
-   export OMPI_ALLOW_RUN_AS_ROOT=1
-   export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+      echo ""
+      echo "============================"
+      echo " Building UCX"
+      echo "============================"
+      echo ""
 
-   export OMPI_MCA_pml=ucx
-   export OMPI_MCA_osc=ucx
+      cd /tmp
 
-   export OMPI_MCA_pml_ucx_tls=any
-   export OMPI_MCA_pml_ucx_devices=any
-   export OMPI_MCA_pml_ucx_verbose=100
+      UCX_DOWNLOAD_URL=https://github.com/openucx/ucx/releases/download/v${UCX_VERSION}/ucx-${UCX_VERSION}.tar.gz
+      count=0
+      while [ "$count" -lt 3 ]; do
+         wget -q --continue --tries=10 ${UCX_DOWNLOAD_URL} && break
+         count=$((count+1))
+      done
+      if [ ! -f ucx-${UCX_VERSION}.tar.gz ]; then
+         echo "Failed to download ucx-${UCX_VERSION}.tar.gz package from: "
+         echo "    ${UCX_DOWNLOAD_URL} ... exiting"
+         exit 1
+      else
+         MD5SUM_UCX=`md5sum ucx-${UCX_VERSION}.tar.gz | cut -f1 -d' ' `
+         if [[ "${UCX_MD5CHECKSUM}" =~ "skip" ]]; then
+            echo "MD5SUM is ${MD5SUM_UCX}, no check requested"
+         elif [[ "${MD5SUM_UCX}" == "${UCX_MD5CHECKSUM}" ]]; then
+            echo "MD5SUM is verified: actual ${MD5SUM_UCX}, expecting ${UCX_MD5CHECKSUM}"
+	 else
+	    echo "Error: Wrong MD5Sum for ucx-${UCX_VERSION}.tar.gz:"
+            echo "MD5SUM is ${MD5SUM_UCX}, expecting ${UCX_MD5CHECKSUM}"
+	    exit 1
+         fi
+      fi
+      tar xzf ucx-${UCX_VERSION}.tar.gz
+      cd ucx-${UCX_VERSION}
+      mkdir build && cd build
 
-   cd /tmp
+      echo " Configure command"
+      echo "   ../contrib/configure-release --prefix=${UCX_PATH}"
+      echo "      --with-rocm=/opt/rocm-${ROCM_VERSION} --without-cuda"
+      echo "      --enable-mt  --enable-optimizations  --disable-logging"
+      echo "      --disable-debug --enable-assertions --enable-params-check"
+      echo "      --enable-examples"
 
-   count=0
-   while [ "$count" -lt 3 ]; do
-      wget -q --continue --tries=10 https://github.com/openucx/ucx/releases/download/v1.16.0/ucx-1.16.0.tar.gz && break
-      count=$((count+1))
-   done
-   if [ ! -f ucx-1.16.0.tar.gz ]; then
-      echo "Failed to download ucx-1.16.0.tar.gz package ... exiting"
-      exit 1
-   fi
-   tar xzf ucx-1.16.0.tar.gz
-   cd ucx-1.16.0
-   mkdir build && cd build
-
-   echo "../contrib/configure-release --prefix="${UCX_PATH}" --with-rocm=/opt/rocm-${ROCM_VERSION}  --without-cuda --enable-mt  --enable-optimizations  --disable-logging --disable-debug --enable-assertions --enable-params-check --enable-examples"
-   ../contrib/configure-release --prefix="${UCX_PATH}" \
-      --with-rocm=/opt/rocm-${ROCM_VERSION}  --without-cuda \
-      --enable-mt  --enable-optimizations  --disable-logging \
-      --disable-debug --enable-assertions --enable-params-check \
-      --enable-examples
+      ../contrib/configure-release --prefix="${UCX_PATH}" \
+         --with-rocm=/opt/rocm-${ROCM_VERSION}  --without-cuda \
+         --enable-mt  --enable-optimizations  --disable-logging \
+         --disable-debug --enable-assertions --enable-params-check \
+         --enable-examples
       make -j 16
       if [[ "${DRY_RUN}" == "0" ]]; then
          sudo make install
       fi
 
-   cd ../..
-   rm -rf ucx-1.16.0 ucx-1.16.0.tar.gz
-fi
+      cd ../..
+      rm -rf ucx-${UCX_VERSION} ucx-${UCX_VERSION}.tar.gz
+   fi
 
-if [[ ! -d /opt/rocmplus-6.1.2/ucx/lib ]] ; then
-   echo "OpenMPI installation failed -- missing installation directories"
-   ls -l /opt/rocmplus-6.1.2/ucx 
-   exit 1
+   if [[ ! -d ${UCX_PATH}/lib ]] ; then
+      echo "UCX (OpenMPI) installation failed -- missing installation directories"
+      echo " UCX Installation path is ${UCX_PATH}"
+      ls -l "${UCX_PATH}"
+      exit 1
+   fi
 fi
 
 #
 # Install UCC
 #
 
-if [ -f "${INSTALL_PATH}"/CacheFiles/ucc.tgz ]; then
-   echo ""
-   echo "============================"
-   echo " Installing Cached UCC"
-   echo "============================"
-   echo ""
-
-   #install the cached version
-   cd "${INSTALL_PATH}"
-   sudo tar -xzf "${INSTALL_PATH}"/CacheFiles/ucc.tgz
-   sudo chown -R root:root "${INSTALL_PATH}"/ucc
-   sudo rm "${INSTALL_PATH}"/CacheFiles/ucc.tgz
+if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
+   echo "There is a previous installation and the replace flag is false"
+   echo "  use --replace to request replacing the current installation" 
 else
-   if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
-      echo "There is a previous installation and the replace flag is false"
-      echo "  use --replace to request replacing the current installation" 
-      exit
+   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${INSTALL_PATH}"/CacheFiles/ucc-${UCC_VERSION}.tgz ]]; then
+      echo ""
+      echo "============================"
+      echo " Installing Cached UCC"
+      echo "============================"
+      echo ""
+
+      #install the cached version
+      cd "${INSTALL_PATH}"
+      sudo tar -xzf "${INSTALL_PATH}"/CacheFiles/ucc-${UCC_VERSION}.tgz
+      sudo chown -R root:root "${INSTALL_PATH}"/ucc-${UCC_VERSION}
+      sudo rm "${INSTALL_PATH}"/CacheFiles/ucc-${UCC_VERSION}.tgz
+   else
+
+      echo ""
+      echo "============================"
+      echo " Building UCC"
+      echo "============================"
+      echo ""
+
+      count=0
+      while [ "$count" -lt 3 ]; do
+         wget -q --continue --tries=10 https://github.com/openucx/ucc/archive/refs/tags/v${UCC_VERSION}.tar.gz && break
+         count=$((count+1))
+      done
+      if [ ! -f v${UCC_VERSION}.tar.gz ]; then
+         echo "Failed to download ucc v${UCC_VERSION}.tar.gz package ... exiting"
+         exit 1
+      else
+         MD5SUM_UCC=`md5sum v${UCC_VERSION}.tar.gz | cut -f1 -d' ' `
+         if [[ "${UCC_MD5CHECKSUM}" =~ "skip" ]]; then
+            echo "MD5SUM is ${MD5SUM_UCC}, no check requested"
+         elif [[ "${MD5SUM_UCC}" == "${UCC_MD5CHECKSUM}" ]]; then
+            echo "MD5SUM is verified: actual ${MD5SUM_UCC}, expecting ${UCC_MD5CHECKSUM}"
+         else
+	    echo "Error: Wrong MD5Sum for v${UCC_VERSION}.tar.gz:"
+            echo "MD5SUM is ${MD5SUM_UCC}, expecting ${UCC_MD5CHECKSUM}"
+	    exit 1
+         fi
+      fi
+      tar xzf v${UCC_VERSION}.tar.gz
+      cd ucc-${UCC_VERSION}
+
+      export AMDGPU_GFXMODEL_UCC=${AMDGPU_GFXMODEL}
+      echo 'Defaults:%sudo env_keep += "AMDGPU_GFXMODEL_UCC"' | sudo EDITOR='tee -a' visudo
+
+      sudo sed -i '31i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu --offload-arch='"${AMDGPU_GFXMODEL_UCC}"' ${@:5} -fPIC -O3 -o ${pic_filepath}"' cuda_lt.sh
+      sudo sed -i '32d' cuda_lt.sh
+      sudo sed -i '41i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu --offload-arch='"${AMDGPU_GFXMODEL_UCC}"' ${@:5} -O3 -o ${npic_filepath}"' cuda_lt.sh
+      sudo sed -i '42d' cuda_lt.sh
+
+      ./autogen.sh
+      echo "./configure --prefix=${UCC_PATH}  --with-rocm=/opt/rocm-${ROCM_VERSION}  --with-ucx=${UCX_PATH} "
+      ./configure --prefix="${UCC_PATH}"  --with-rocm=/opt/rocm-${ROCM_VERSION} --with-ucx="${UCX_PATH}"
+      make -j 16
+
+      if [[ "${DRY_RUN}" == "0" ]]; then
+         sudo make install
+      fi
+
+      cd ..
+      rm -rf ucc-${UCC_VERSION} v${UCC_VERSION}.tar.gz
    fi
 
-   echo ""
-   echo "============================"
-   echo " Building UCC"
-   echo "============================"
-   echo ""
-
-   export OMPI_ALLOW_RUN_AS_ROOT=1
-   export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
-
-   export OMPI_MCA_pml=ucx
-   export OMPI_MCA_osc=ucx
-
-   export OMPI_MCA_pml_ucx_tls=any
-   export OMPI_MCA_pml_ucx_devices=any
-   export OMPI_MCA_pml_ucx_verbose=100
-
-   count=0
-   while [ "$count" -lt 3 ]; do
-      wget -q --continue --tries=10 https://github.com/openucx/ucc/archive/refs/tags/v1.3.0.tar.gz && break
-      count=$((count+1))
-   done
-   if [ ! -f v1.3.0.tar.gz ]; then
-      echo "Failed to download ucc v1.3.0.tar.gz package ... exiting"
+   if [[ ! -d "${UCC_PATH}"/lib ]] ; then
+      echo "UCC (OpenMPI) installation failed -- missing installation directories"
+      echo " UCC Installation path is ${UCC_PATH}"
+      ls -l "${UCC_PATH}"
       exit 1
    fi
-   tar xzf v1.3.0.tar.gz
-   cd ucc-1.3.0
-
-   export AMDGPU_GFXMODEL_UCC=${AMDGPU_GFXMODEL}
-   echo 'Defaults:%sudo env_keep += "AMDGPU_GFXMODEL_UCC"' | sudo EDITOR='tee -a' visudo
-
-   sudo sed -i '31i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu --offload-arch='"${AMDGPU_GFXMODEL_UCC}"' ${@:5} -fPIC -O3 -o ${pic_filepath}"' cuda_lt.sh
-   sudo sed -i '32d' cuda_lt.sh
-   sudo sed -i '41i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu --offload-arch='"${AMDGPU_GFXMODEL_UCC}"' ${@:5} -O3 -o ${npic_filepath}"' cuda_lt.sh
-   sudo sed -i '42d' cuda_lt.sh
-
-   ./autogen.sh
-   echo "./configure --prefix=${UCC_PATH}  --with-rocm=/opt/rocm-${ROCM_VERSION}  --with-ucx=${UCX_PATH} "
-   ./configure --prefix="${UCC_PATH}"  --with-rocm=/opt/rocm-${ROCM_VERSION} --with-ucx="${UCX_PATH}"
-   make -j 16
-
-   if [[ "${DRY_RUN}" == "0" ]]; then
-      sudo make install
-   fi
-
-   cd ..
-   rm -rf ucc-1.3.0 v1.3.0.tar.gz
-fi
-
-if [[ ! -d /opt/rocmplus-6.1.2/ucc/lib ]] ; then
-   echo "OpenMPI installation failed -- missing installation directories"
-   ls -l /opt/rocmplus-6.1.2/ucc
-   exit 1
 fi
 
 #
 # Install OpenMPI
 #
 
-if [ -f "${INSTALL_PATH}"/CacheFiles/openmpi.tgz ]; then
-   echo ""
-   echo "============================"
-   echo " Installing Cached OpenMPI"
-   echo "============================"
-   echo ""
-
-   #install the cached version
-   cd "${INSTALL_PATH}"
-   sudo tar -xzf "${INSTALL_PATH}"/CacheFiles/openmpi.tgz
-   sudo chown -R root:root "${INSTALL_PATH}"/openmpi
-   sudo rm "${INSTALL_PATH}"/CacheFiles/openmpi.tgz
+if [[ -d "${INSTALL_PATH}/openmpi" ]] && [[ "${REPLACE}" == "0" ]] ; then
+   echo "There is a previous installation and the replace flag is false"
+   echo "  use --replace to request replacing the current installation" 
 else
-   if [[ -d "${INSTALL_PATH}/openmpi" ]] && [[ "${REPLACE}" == "0" ]] ; then
-      echo "There is a previous installation and the replace flag is false"
-      echo "  use --replace to request replacing the current installation" 
-      exit
+   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${INSTALL_PATH}"/CacheFiles/openmpi-${OPENMPI_VERSION}.tgz ]]; then
+      echo ""
+      echo "============================"
+      echo " Installing Cached OpenMPI"
+      echo "============================"
+      echo ""
+
+      #install the cached version
+      cd "${INSTALL_PATH}"
+      sudo tar -xzf "${INSTALL_PATH}"/CacheFiles/openmpi-${OPENMPI_VERSION}.tgz
+      sudo chown -R root:root "${INSTALL_PATH}"/openmpi-${OPENMPI_VERSION}
+      sudo rm "${INSTALL_PATH}"/CacheFiles/openmpi-${OPENMPI_VERSION}.tgz
+   else
+
+      echo ""
+      echo "============================"
+      echo " Building OpenMPI"
+      echo "============================"
+      echo ""
+
+      # no cached version, so build it
+
+      export OMPI_ALLOW_RUN_AS_ROOT=1
+      export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+
+      export OMPI_MCA_pml=ucx
+      export OMPI_MCA_osc=ucx
+
+      export OMPI_MCA_pml_ucx_tls=any
+      export OMPI_MCA_pml_ucx_devices=any
+      export OMPI_MCA_pml_ucx_verbose=100
+
+      # dad 3/25/3023 removed --enable-mpi-f90 --enable-mpi-c as they apparently are not options 
+      # dad 3/30/2023 remove --with-pmix
+
+      count=0
+      while [ "$count" -lt 3 ]; do
+         wget -q --continue --tries=10 https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-${OPENMPI_VERSION}.tar.bz2 && break
+         count=$((count+1))
+      done
+      if [ ! -f openmpi-${OPENMPI_VERSION}.tar.bz2 ]; then
+         echo "Failed to download openmpi-${OPENMPI_VERSION}.tar.bz2 package ... exiting"
+         exit 1
+      else
+         MD5SUM_OPENMPI=`md5sum openmpi-${OPENMPI_VERSION}.tar.bz2 | cut -f1 -d' ' `
+         if [[ "${OPENMPI_MD5CHECKSUM}" =~ "skip" ]]; then
+            echo "MD5SUM is ${MD5SUM_OPENMPI}, no check requested"
+         elif [[ "${MD5SUM_OPENMPI}" == "${OPENMPI_MD5CHECKSUM}" ]]; then
+            echo "MD5SUM is verified: actual ${MD5SUM_OPENMPI}, expecting ${OPENMPI_MD5CHECKSUM}"
+         else
+	    echo "Error: Wrong MD5Sum for openmpi-${OPENMPI_VERSION}.tar.bz2:"
+            echo "MD5SUM is ${MD5SUM_OPENMPI}, expecting ${OPENMPI_MD5CHECKSUM}"
+	    exit 1
+         fi
+      fi
+      tar -xjf openmpi-${OPENMPI_VERSION}.tar.bz2
+      cd openmpi-${OPENMPI_VERSION}
+      mkdir build && cd build
+
+      echo "../configure --prefix=${INSTALL_PATH}/openmpi \ "
+      echo "             --with-ucx=${UCX_PATH} \ "
+      echo "             --with-ucc=${UCC__PATH} \ "
+      echo "             --enable-mca-no-build=btl-uct \ "
+      echo "             --enable-mpi --enable-mpi-fortran \ "
+      echo "             --disable-debug   CC=gcc CXX=g++ FC=gfortran"
+
+      ../configure --prefix="${INSTALL_PATH}"/openmpi \
+                   --with-ucx="${UCX_PATH}" \
+		   --with-ucc="${UCC__PATH}" \
+                   --enable-mca-no-build=btl-uct \
+                   --enable-mpi --enable-mpi-fortran \
+                   --disable-debug   CC=gcc CXX=g++ FC=gfortran
+      make -j 16
+
+      if [[ "${DRY_RUN}" == "0" ]]; then
+         sudo make install
+      fi
+      # make ucx the default point-to-point
+      echo "pml = ucx" | sudo tee -a "${INSTALL_PATH}"/openmpi/etc/openmpi-mca-params.conf
+      cd ../..
+      rm -rf openmpi-${OPENMPI_VERSION} openmpi-${OPENMPI_VERSION}.tar.bz2
    fi
 
-   echo ""
-   echo "============================"
-   echo " Building OpenMPI"
-   echo "============================"
-   echo ""
-
-   # no cached version, so build it
-
-   export OMPI_ALLOW_RUN_AS_ROOT=1
-   export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
-
-   export OMPI_MCA_pml=ucx
-   export OMPI_MCA_osc=ucx
-
-   export OMPI_MCA_pml_ucx_tls=any
-   export OMPI_MCA_pml_ucx_devices=any
-   export OMPI_MCA_pml_ucx_verbose=100
-
-   # dad 3/25/3023 removed --enable-mpi-f90 --enable-mpi-c as they apparently are not options 
-   # dad 3/30/2023 remove --with-pmix
-
-   count=0
-   while [ "$count" -lt 3 ]; do
-      wget -q --continue --tries=10 https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.3.tar.bz2 && break
-      count=$((count+1))
-   done
-   if [ ! -f openmpi-5.0.3.tar.bz2 ]; then
-      echo "Failed to download openmpi-5.0.3.tar.bz2 package ... exiting"
+   if [[ ! -d ${OPENMPI_PATH}/lib ]] ; then
+      echo "OpenMPI installation failed -- missing installation directories"
+      echo " OpenMPI Installation path is ${OPENMPI_PATH}"
+      ls -l "${OPENMPI_PATH}"
       exit 1
    fi
-   tar -xjf openmpi-5.0.3.tar.bz2
-   cd openmpi-5.0.3
-   mkdir build && cd build
-   ../configure --prefix="${INSTALL_PATH}"/openmpi \
-                --with-ucx="${UCX_PATH}" \
-		--with-ucc="${UCC__PATH}" \
-                --enable-mca-no-build=btl-uct \
-                --enable-mpi --enable-mpi-fortran \
-                --disable-debug   CC=gcc CXX=g++ FC=gfortran
-   make -j 16
-
-   if [[ "${DRY_RUN}" == "0" ]]; then
-      sudo make install
-   fi
-   # make ucx the default point-to-point
-   echo "pml = ucx" | sudo tee -a "${INSTALL_PATH}"/openmpi/etc/openmpi-mca-params.conf
-   cd ../..
-   rm -rf openmpi-5.0.3 openmpi-5.0.3.tar.bz2
-fi
-
-if [[ ! -d /opt/rocmplus-6.1.2/openmpi/lib ]] ; then
-   echo "OpenMPI installation failed -- missing installation directories"
-   ls -l /opt/rocmplus-6.1.2/openmpi
-   exit 1
 fi
 
 # In either case of Cache or Build from source, create a module file for OpenMPI
@@ -384,9 +478,9 @@ if [[ "${DRY_RUN}" == "0" ]]; then
    sudo mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-   cat <<-EOF | sudo tee ${MODULE_PATH}/5.0.3.lua
+   cat <<-EOF | sudo tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}.lua
 	whatis("Name: GPU-aware openmpi")
-	whatis("Version: 5.0.3")
+	whatis("Version: ${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}")
 	whatis("Description: An open source Message Passing Interface implementation")
 	whatis(" This is a GPU-Aware version of OpenMPI")
 	whatis("URL: https://github.com/open-mpi/ompi.git")
