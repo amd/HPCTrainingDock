@@ -1,6 +1,7 @@
 #!/bin/bash
 
 : ${ROCM_VERSION:="6.0"}
+: ${ROCM_INSTALLPATH:="/opt/"}
 
 reset-last()
 {
@@ -18,6 +19,11 @@ do
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
+          reset-last
+          ;;
+      "--rocm-install-path")
+          shift
+          ROCM_INSTALLPATH=${1}
           reset-last
           ;;
       "--amdgpu-gfxmodel")
@@ -43,9 +49,11 @@ do
    shift
 done
 
-if [ ! -d CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL} ]; then
-   mkdir -p CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
-   touch CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/test.tgz
+
+CACHE_FILES="CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}"
+if [ ! -d ${CACHE_FILES} ]; then
+   mkdir -p ${CACHE_FILES}
+   touch ${CACHE_FILES}/test.tgz
 fi
 
 set -v
@@ -53,6 +61,7 @@ set -v
 docker build --no-cache --build-arg DISTRO=${DISTRO}  \
              --build-arg DISTRO_VERSION=${DISTRO_VERSION} \
              --build-arg ROCM_VERSION=${ROCM_VERSION} \
+             --build-arg ROCM_INSTALLPATH=${ROCM_INSTALLPATH} \
              --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
              -t bare -f bare_system/Dockerfile .
 
