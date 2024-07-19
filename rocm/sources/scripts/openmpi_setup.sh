@@ -8,10 +8,11 @@
 #
 # Best recommended installation also includes xpmem. That is not currently handled in this
 # script since it requires a kernel modification. Handling that in a container will take
-# some more effort. 
+# some more effort.
 
 # Variables controlling setup process
 ROCM_VERSION=6.1.2
+ROCM_PATH=/opt/rocm-6.1.2
 REPLACE=0
 DRY_RUN=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/openmpi
@@ -39,10 +40,12 @@ usage()
     echo "--help: this usage information"
     echo "--install-path [ INSTALL_PATH ] default /opt/rocmplus-<ROCM_VERSION>/openmpi (ucx, and ucc)"
     echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/openmpi"
+    echo "--openmpi-path [OPENMPI_PATH] default $INSTALL_PATH/openmpi-$OPENMPI_VERSION-ucc-$UCC_VERSION-ucx-$UCX_VERSION"
     echo "--openmpi-version [VERSION] default $OPENMPI_VERSION"
     echo "--openmpi-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
     echo "--replace default off"
     echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+    echo "--rocm-path [ ROCM_PATH ] default /opt/rocm-$ROCM_VERSION"
     echo "--ucc-path default <INSTALL_PATH>/ucc"
     echo "--ucc-version [VERSION] default $UCC_VERSION"
     echo "--ucc-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
@@ -74,10 +77,10 @@ do
           ;;
       "--dry_run")
           DRY_RUN=1
-	  ;;
+          ;;
       "--help")
-	  usage
-	  ;;
+          usage
+          ;;
       "--install-path")
           shift
           INSTALL_PATH_INPUT=${1}
@@ -87,7 +90,12 @@ do
           shift
           MODULE_PATH=${1}
           reset-last
-	  ;;
+          ;;
+      "--openmpi-path")
+          shift
+          OPENMPI_PATH=${1}
+          reset-last
+          ;;
       "--openmpi-version")
           shift
           OPENMPI_VERSION=${1}
@@ -96,14 +104,19 @@ do
       "--openmpi-md5checksum")
           shift
           OPENMPI_MD5CHECKSUM=${1}
-	  if [[ "${1}" = "" ]]; then
+          if [[ "${1}" = "" ]]; then
              OPENMPI_MD5CHECKSUM="skip"
-	  fi
+          fi
           reset-last
           ;;
       "--replace")
           REPLACE=1
-	  ;;
+          ;;
+      "--rocm-path")
+          shift
+          ROCM_PATH_INPUT=${1}
+          reset-last
+          ;;
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
@@ -122,9 +135,9 @@ do
       "--ucc-md5checksum")
           shift
           UCC_MD5CHECKSUM=${1}
-	  if [[ "${1}" = "" ]]; then
+          if [[ "${1}" = "" ]]; then
              UCC_MD5CHECKSUM="skip"
-	  fi
+          fi
           reset-last
           ;;
       "--ucx-path")
@@ -140,14 +153,14 @@ do
       "--ucx-md5checksum")
           shift
           UCX_MD5CHECKSUM=${1}
-	  if [[ "${1}" = "" ]]; then
+          if [[ "${1}" = "" ]]; then
              UCX_MD5CHECKSUM="skip"
-	  fi
+          fi
           reset-last
           ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
-	  ;;
+          ;;
       *)
          last ${1}
          ;;
@@ -155,6 +168,12 @@ do
    n=$((${n} + 1))
    shift
 done
+
+if [ "${ROCM_PATH_INPUT}" != "" ]; then
+   ROCM_PATH="${ROCM_PATH_INPUT}"
+else
+   ROCM_PATH="/opt/rocm-${ROCM_VERSION}"
+fi
 
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH="${INSTALL_PATH_INPUT}"
@@ -171,7 +190,13 @@ fi
 if [ "${UCC_PATH_INPUT}" != "" ]; then
    UCC_PATH="${UCC_PATH_INPUT}"
 else
-   UCC_PATH="${INSTALL_PATH}"/ucc-${UCC_VERSION}
+   UCC_PATH="${INSTALL_PATH}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}
+fi
+
+if [ "${OPENMPI_PATH_INPUT}" != "" ]; then
+   OPENMPI_PATH="${OPENMPI_PATH_INPUT}"
+else
+   OPENMPI_PATH="${INSTALL_PATH}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}
 fi
 
 echo ""
@@ -184,7 +209,7 @@ echo ""
 if [ "${DISTRO}" = "ubuntu" ]; then
    echo "Install of libpmix-dev libhwloc-dev libevent-dev libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen packages"
    if [[ "${DRY_RUN}" == "0" ]]; then
-      # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev 
+      # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
       sudo DEBIAN_FRONTEND=noninteractive apt-get update && \
       sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
          libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen
@@ -192,7 +217,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
 elif [ "${DISTRO}" = "rocky linux" ]; then
    echo "Install of pmix and hwloc packages"
    if [[ "${DRY_RUN}" == "0" ]]; then
-      # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev 
+      # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
       yum update && \
       yum install -y pmix hwloc
    fi
@@ -214,7 +239,7 @@ cd "${INSTALL_PATH}"
 
 if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
    echo "There is a previous installation and the replace flag is false"
-   echo "  use --replace to request replacing the current installation" 
+   echo "  use --replace to request replacing the current installation"
 else
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${INSTALL_PATH}/CacheFiles/ucx-${UCX_VERSION}.tgz ]]; then
       echo ""
@@ -254,28 +279,35 @@ else
             echo "MD5SUM is ${MD5SUM_UCX}, no check requested"
          elif [[ "${MD5SUM_UCX}" == "${UCX_MD5CHECKSUM}" ]]; then
             echo "MD5SUM is verified: actual ${MD5SUM_UCX}, expecting ${UCX_MD5CHECKSUM}"
-	 else
-	    echo "Error: Wrong MD5Sum for ucx-${UCX_VERSION}.tar.gz:"
+         else
+            echo "Error: Wrong MD5Sum for ucx-${UCX_VERSION}.tar.gz:"
             echo "MD5SUM is ${MD5SUM_UCX}, expecting ${UCX_MD5CHECKSUM}"
-	    exit 1
+            exit 1
          fi
       fi
       tar xzf ucx-${UCX_VERSION}.tar.gz
       cd ucx-${UCX_VERSION}
       mkdir build && cd build
 
-      echo " Configure command"
-      echo "   ../contrib/configure-release --prefix=${UCX_PATH}"
-      echo "      --with-rocm=/opt/rocm-${ROCM_VERSION} --without-cuda"
-      echo "      --enable-mt  --enable-optimizations  --disable-logging"
-      echo "      --disable-debug --enable-assertions --enable-params-check"
-      echo "      --enable-examples"
+      UCX_CONFIGURE_COMMAND="../contrib/configure-release \
+         --prefix=${UCX_PATH} \
+         --with-rocm=${ROCM_PATH} \
+         --without-cuda \
+         --enable-mt \
+         --enable-optimizations \
+         --disable-logging \
+         --disable-debug \
+         --enable-assertions \
+         --enable-params-check \
+         --enable-examples"
 
-      ../contrib/configure-release --prefix="${UCX_PATH}" \
-         --with-rocm=/opt/rocm-${ROCM_VERSION}  --without-cuda \
-         --enable-mt  --enable-optimizations  --disable-logging \
-         --disable-debug --enable-assertions --enable-params-check \
-         --enable-examples
+      echo ""
+      echo "UCX_CONFIGURE_COMMAND: "
+      echo "${UCX_CONFIGURE_COMMAND}" | sed 's/\s\+/ \\\n   /g'
+      echo ""
+
+      ${UCX_CONFIGURE_COMMAND}
+
       make -j 16
       if [[ "${DRY_RUN}" == "0" ]]; then
          sudo make install
@@ -299,9 +331,9 @@ fi
 
 if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
    echo "There is a previous installation and the replace flag is false"
-   echo "  use --replace to request replacing the current installation" 
+   echo "  use --replace to request replacing the current installation"
 else
-   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${INSTALL_PATH}"/CacheFiles/ucc-${UCC_VERSION}.tgz ]]; then
+   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${INSTALL_PATH}"/CacheFiles/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz ]]; then
       echo ""
       echo "============================"
       echo " Installing Cached UCC"
@@ -310,9 +342,9 @@ else
 
       #install the cached version
       cd "${INSTALL_PATH}"
-      sudo tar -xzf "${INSTALL_PATH}"/CacheFiles/ucc-${UCC_VERSION}.tgz
-      sudo chown -R root:root "${INSTALL_PATH}"/ucc-${UCC_VERSION}
-      sudo rm "${INSTALL_PATH}"/CacheFiles/ucc-${UCC_VERSION}.tgz
+      sudo tar -xzf "${INSTALL_PATH}"/CacheFiles/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
+      sudo chown -R root:root "${INSTALL_PATH}"/ucc-${UCC_VERSION-ucx-${UCX_VERSION}}
+      sudo rm "${INSTALL_PATH}"/CacheFiles/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
    else
 
       echo ""
@@ -336,9 +368,9 @@ else
          elif [[ "${MD5SUM_UCC}" == "${UCC_MD5CHECKSUM}" ]]; then
             echo "MD5SUM is verified: actual ${MD5SUM_UCC}, expecting ${UCC_MD5CHECKSUM}"
          else
-	    echo "Error: Wrong MD5Sum for v${UCC_VERSION}.tar.gz:"
+            echo "Error: Wrong MD5Sum for v${UCC_VERSION}.tar.gz:"
             echo "MD5SUM is ${MD5SUM_UCC}, expecting ${UCC_MD5CHECKSUM}"
-	    exit 1
+            exit 1
          fi
       fi
       tar xzf v${UCC_VERSION}.tar.gz
@@ -353,8 +385,19 @@ else
       sudo sed -i '42d' cuda_lt.sh
 
       ./autogen.sh
-      echo "./configure --prefix=${UCC_PATH}  --with-rocm=/opt/rocm-${ROCM_VERSION}  --with-ucx=${UCX_PATH} "
-      ./configure --prefix="${UCC_PATH}"  --with-rocm=/opt/rocm-${ROCM_VERSION} --with-ucx="${UCX_PATH}"
+
+      UCC_CONFIGURE_COMMAND="./configure \
+        --prefix=${UCC_PATH} \
+        --with-rocm=${ROCM_PATH} \
+        --with-ucx=${UCX_PATH}"
+
+      echo ""
+      echo "UCC_CONFIGURE_COMMAND: "
+      echo "${UCC_CONFIGURE_COMMAND}" | sed 's/\s\+/ \\\n   /g'
+      echo ""
+
+      ${UCC_CONFIGURE_COMMAND}
+
       make -j 16
 
       if [[ "${DRY_RUN}" == "0" ]]; then
@@ -379,7 +422,7 @@ fi
 
 if [[ -d "${INSTALL_PATH}/openmpi" ]] && [[ "${REPLACE}" == "0" ]] ; then
    echo "There is a previous installation and the replace flag is false"
-   echo "  use --replace to request replacing the current installation" 
+   echo "  use --replace to request replacing the current installation"
 else
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${INSTALL_PATH}"/CacheFiles/openmpi-${OPENMPI_VERSION}.tgz ]]; then
       echo ""
@@ -390,9 +433,9 @@ else
 
       #install the cached version
       cd "${INSTALL_PATH}"
-      sudo tar -xzf "${INSTALL_PATH}"/CacheFiles/openmpi-${OPENMPI_VERSION}.tgz
-      sudo chown -R root:root "${INSTALL_PATH}"/openmpi-${OPENMPI_VERSION}
-      sudo rm "${INSTALL_PATH}"/CacheFiles/openmpi-${OPENMPI_VERSION}.tgz
+      sudo tar -xzf "${INSTALL_PATH}"/CacheFiles/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
+      sudo chown -R root:root "${INSTALL_PATH}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}
+      sudo rm "${INSTALL_PATH}"/CacheFiles/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
    else
 
       echo ""
@@ -413,7 +456,7 @@ else
       export OMPI_MCA_pml_ucx_devices=any
       export OMPI_MCA_pml_ucx_verbose=100
 
-      # dad 3/25/3023 removed --enable-mpi-f90 --enable-mpi-c as they apparently are not options 
+      # dad 3/25/3023 removed --enable-mpi-f90 --enable-mpi-c as they apparently are not options
       # dad 3/30/2023 remove --with-pmix
 
       count=0
@@ -431,28 +474,32 @@ else
          elif [[ "${MD5SUM_OPENMPI}" == "${OPENMPI_MD5CHECKSUM}" ]]; then
             echo "MD5SUM is verified: actual ${MD5SUM_OPENMPI}, expecting ${OPENMPI_MD5CHECKSUM}"
          else
-	    echo "Error: Wrong MD5Sum for openmpi-${OPENMPI_VERSION}.tar.bz2:"
+            echo "Error: Wrong MD5Sum for openmpi-${OPENMPI_VERSION}.tar.bz2:"
             echo "MD5SUM is ${MD5SUM_OPENMPI}, expecting ${OPENMPI_MD5CHECKSUM}"
-	    exit 1
+            exit 1
          fi
       fi
       tar -xjf openmpi-${OPENMPI_VERSION}.tar.bz2
       cd openmpi-${OPENMPI_VERSION}
       mkdir build && cd build
 
-      echo "../configure --prefix=${INSTALL_PATH}/openmpi \ "
-      echo "             --with-ucx=${UCX_PATH} \ "
-      echo "             --with-ucc=${UCC__PATH} \ "
-      echo "             --enable-mca-no-build=btl-uct \ "
-      echo "             --enable-mpi --enable-mpi-fortran \ "
-      echo "             --disable-debug   CC=gcc CXX=g++ FC=gfortran"
+      OPENMPI_CONFIGURE_COMMAND="../configure \
+         --prefix=${OPENMPI_PATH} \
+         --with-ucx=${UCX_PATH} \
+         --with-ucc=${UCC_PATH} \
+         --enable-mca-no-build=btl-uct \
+         --enable-mpi \
+	 --enable-mpi-fortran \
+         --disable-debug \
+       	 CC=gcc CXX=g++ FC=gfortran"
 
-      ../configure --prefix="${INSTALL_PATH}"/openmpi \
-                   --with-ucx="${UCX_PATH}" \
-		   --with-ucc="${UCC__PATH}" \
-                   --enable-mca-no-build=btl-uct \
-                   --enable-mpi --enable-mpi-fortran \
-                   --disable-debug   CC=gcc CXX=g++ FC=gfortran
+      echo ""
+      echo "OPENMPI_CONFIGURE_COMMAND: "
+      echo "${OPENMPI_CONFIGURE_COMMAND}" | sed 's/\s\+/ \\\n   /g'
+      echo ""
+
+      ${OPENMPI_CONFIGURE_COMMAND}
+
       make -j 16
 
       if [[ "${DRY_RUN}" == "0" ]]; then
@@ -479,20 +526,20 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 
 # The - option suppresses tabs
    cat <<-EOF | sudo tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}.lua
-	whatis("Name: GPU-aware openmpi")
-	whatis("Version: ${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}")
-	whatis("Description: An open source Message Passing Interface implementation")
-	whatis(" This is a GPU-Aware version of OpenMPI")
-	whatis("URL: https://github.com/open-mpi/ompi.git")
+        whatis("Name: GPU-aware openmpi")
+        whatis("Version: openmpi-${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}")
+        whatis("Description: An open source Message Passing Interface implementation")
+        whatis(" This is a GPU-Aware version of OpenMPI")
+        whatis("URL: https://github.com/open-mpi/ompi.git")
 
-	local base = "${INSTALL_PATH}/openmpi"
+        local base = "${OPENMPI_PATH}"
 
-	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
-	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-	prepend_path("PATH", pathJoin(base, "bin"))
-	load("rocm/${ROCM_VERSION}")
-	family("MPI")
+        prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+        prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
+        prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+        prepend_path("PATH", pathJoin(base, "bin"))
+        load("rocm/${ROCM_VERSION}")
+        family("MPI")
 EOF
 
 fi
