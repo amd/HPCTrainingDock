@@ -134,7 +134,7 @@ Once you are in, you can startup slurm with the manage script `manage.sh` locate
 rsync -avz -e "ssh -p 2222" <file> <admin>@localhost:<path/to/destination>
 ```
 
-### 2.15 Killing the Container and Cleaning Up your System
+### 2.1.5 Killing the Container and Cleaning Up your System
 
 To exit the container, just do:
 ```bash
@@ -162,7 +162,7 @@ To test the bare system install, do:
 ```bash
 git clone --recursive git@github.com:amd/HPCTrainingDock.git && \
 cd HPCTrainingDock && \
-./bare_sysem/test_install.sh --rocm-version <rocm-version>
+./bare_system/test_install.sh --rocm-version <rocm-version>
 ```
 
 The above command sequence will clone this repo and then execute the `test_install.sh` script. This script calls a the `main_install.sh` which is what you would execute to perform the actual installation on your system. The `test_install.sh` sets up a Docker container where you can test the installation of the software before proceeding to deploy it on your actual system by running `main_install.sh`. The `test_install.sh` script automatically runs the Docker container after it is built, and you can inspect it as `student`.
@@ -223,8 +223,20 @@ training/sources/scripts/apps_setup.sh
 
 ```
 
-**NOTE**: as mentioned before, those scripts are the same used by the Docker containers (either the actual Training Docker Container or the Test Docker Container run by `test_install.sh`). The reason why the script work for both installations (bare system and Docker) is because the commands are executed at the `sudo` level. Since Docker is already at the `sudo` level, the instructions in the scripts work in both contexts.
+**NOTE**: As mentioned before, those scripts are the same used by the Docker containers (either the actual Training Docker Container or the Test Docker Container run by `test_install.sh`). The reason why the script work for both installations (bare system and Docker) is because the commands are executed at the `sudo` level. Since Docker is already at the `sudo` level, the instructions in the scripts work in both contexts.
 
+
+### 2.2.1 Alternative installation directory for ROCm
+
+There is a possibility to install ROCm outside of the usual `/opt/`. `test_install.sh` and `main_install.sh` scripts have optional argument `--rocm-install-path` which allows to specify the desired path for ROCm:
+
+```bash
+./bare_system/test_install.sh --rocm-version <rocm-version> --rocm-install-path <new_path>
+```
+
+If the argument `--rocm-install-path` is specified, installation scripts will first install ROCm to the usual `/opt/` path, then move it to the `<new_path>` location, and finally update `/etc/alternatives/rocm` and module files.
+
+**NOTE**: In general, if you are moving ROCm folder outside of the usual `/opt/`, it is very important not to forget to update new path in all of its dependencies and module files.
 
 
 # 3. Inspecting the Model Installation Environment

@@ -1,6 +1,7 @@
 #!/bin/bash
 
 : ${ROCM_VERSIONS:="6.0"}
+: ${ROCM_INSTALLPATH:="/opt/"}
 : ${BUILD_PYTORCH:="1"}
 : ${BUILD_CUPY:="1"}
 : ${BUILD_KOKKOS:="1"}
@@ -20,6 +21,11 @@ do
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
+          reset-last
+          ;;
+      "--rocm-install-path")
+          shift
+          ROCM_INSTALLPATH=${1}
           reset-last
           ;;
       "--python-versions")
@@ -85,3 +91,10 @@ training/sources/scripts/pytorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgp
 training/sources/scripts/apps_setup.sh
 
 training/sources/scripts/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-kokkos ${BUILD_KOKKOS}
+
+#If ROCm should be installed in a different location
+if [ "${ROCM_INSTALLPATH}" != "/opt/" ]; then
+   sudo mv /opt/rocm-${ROCM_VERSION}/ ${ROCM_INSTALLPATH}
+   sudo ln -sfn ${ROCM_INSTALLPATH}/rocm-${ROCM_VERSION} /etc/alternatives/rocm
+   sudo sed -i "s|\/opt\/|${ROCM_INSTALLPATH}|" /etc/lmod/modules/ROCm/*/*.lua
+fi
