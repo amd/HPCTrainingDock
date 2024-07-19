@@ -27,6 +27,9 @@ UCC_VERSION=1.3.0
 UCC_MD5CHECKSUM=b2d14666cb9a18b0aee57898ce0a8c8b
 OPENMPI_VERSION=5.0.3
 OPENMPI_MD5CHECKSUM=af6896a78969b258da908d424c1c34ca
+C_COMPILER=gcc
+CXX_COMPILER=g++
+FC_COMPILER=gfortran
 
 # Autodetect defaults
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
@@ -36,7 +39,10 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 usage()
 {
     echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
+    echo "--c-compiler [ CC ] default gcc"
+    echo "--cxx-compiler [ CXX ] default g++"
     echo "--dry-run default off"
+    echo "--fc-compiler [ FC ] default gfortran"
     echo "--help: this usage information"
     echo "--install-path [ INSTALL_PATH ] default /opt/rocmplus-<ROCM_VERSION>/openmpi (ucx, and ucc)"
     echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/openmpi"
@@ -75,8 +81,23 @@ do
           AMDGPU_GFXMODEL=${1}
           reset-last
           ;;
+      "--c-compiler")
+          shift
+          C_COMPILER=${1}
+          reset-last
+          ;;
+      "--cxx-compiler")
+          shift
+          CXX_COMPILER=${1}
+          reset-last
+          ;;
       "--dry_run")
           DRY_RUN=1
+          ;;
+      "--fc-compiler")
+          shift
+          FC_COMPILER=${1}
+          reset-last
           ;;
       "--help")
           usage
@@ -241,6 +262,9 @@ if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
    echo "There is a previous installation and the replace flag is false"
    echo "  use --replace to request replacing the current installation"
 else
+   if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
+      rm -rf "${UCX_PATH}"
+   fi
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${INSTALL_PATH}/CacheFiles/ucx-${UCX_VERSION}.tgz ]]; then
       echo ""
       echo "============================"
@@ -333,6 +357,9 @@ if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
    echo "There is a previous installation and the replace flag is false"
    echo "  use --replace to request replacing the current installation"
 else
+   if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
+      rm -rf "${UCC_PATH}"
+   fi
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${INSTALL_PATH}"/CacheFiles/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz ]]; then
       echo ""
       echo "============================"
@@ -343,7 +370,7 @@ else
       #install the cached version
       cd "${INSTALL_PATH}"
       sudo tar -xzf "${INSTALL_PATH}"/CacheFiles/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
-      sudo chown -R root:root "${INSTALL_PATH}"/ucc-${UCC_VERSION-ucx-${UCX_VERSION}}
+      sudo chown -R root:root "${INSTALL_PATH}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}
       sudo rm "${INSTALL_PATH}"/CacheFiles/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
    else
 
@@ -420,10 +447,13 @@ fi
 # Install OpenMPI
 #
 
-if [[ -d "${INSTALL_PATH}/openmpi" ]] && [[ "${REPLACE}" == "0" ]] ; then
+if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
    echo "There is a previous installation and the replace flag is false"
    echo "  use --replace to request replacing the current installation"
 else
+   if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
+      rm -rf "${OPENMPI_PATH}"
+   fi
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${INSTALL_PATH}"/CacheFiles/openmpi-${OPENMPI_VERSION}.tgz ]]; then
       echo ""
       echo "============================"
@@ -459,9 +489,10 @@ else
       # dad 3/25/3023 removed --enable-mpi-f90 --enable-mpi-c as they apparently are not options
       # dad 3/30/2023 remove --with-pmix
 
+      OPENMPI_SHORT_VERSION=`echo ${OPENMPI_VERSION} | cut -f1-2 -d'.' `
       count=0
       while [ "$count" -lt 3 ]; do
-         wget -q --continue --tries=10 https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-${OPENMPI_VERSION}.tar.bz2 && break
+         wget -q --continue --tries=10 https://download.open-mpi.org/release/open-mpi/v${OPENMPI_SHORT_VERSION}/openmpi-${OPENMPI_VERSION}.tar.bz2 && break
          count=$((count+1))
       done
       if [ ! -f openmpi-${OPENMPI_VERSION}.tar.bz2 ]; then
@@ -491,7 +522,7 @@ else
          --enable-mpi \
 	 --enable-mpi-fortran \
          --disable-debug \
-       	 CC=gcc CXX=g++ FC=gfortran"
+       	 CC=${C_COMPILER} CXX=${CXX_COMPILER} FC=${FC_COMPILER}"
 
       echo ""
       echo "OPENMPI_CONFIGURE_COMMAND: "
