@@ -47,11 +47,11 @@ if [ "${DISTRO}" = "ubuntu" ]; then
 
    # install the GPU aware version of mvapich2 using an rpm (MV2-GDR 2.3.7)
    #sudo DEBIAN_FRONTEND=noninteractive apt-get -qqy install alien
-   sudo wget -q MVAPICH2_DOWNLOAD_URL=https://mvapich.cse.ohio-state.edu/download/mvapich/gdr/2.3.7/mofed5.0/${MVAPICH2_RPM_NAME}
+   sudo wget -q ${MVAPICH2_DOWNLOAD_URL}
    ls -l ${MVAPICH2_RPM_NAME}
    #sudo alien --scripts -i mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
    #sudo dpkg-deb -x mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.deb /opt/rocmplus-${ROCM_VERSION}/mvapich2
-   sudo rpm --prefix /opt/rocmplus-${ROCM_VERSION}/mvapich2 -Uvh --nodeps ${{MVAPICH2_RPM_NAME}
+   sudo rpm --prefix /opt/rocmplus-${ROCM_VERSION}/mvapich2 -Uvh --nodeps ${MVAPICH2_RPM_NAME}
    sudo rm {MVAPICH2_RPM_NAME}
    #sudo rm mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.deb
 

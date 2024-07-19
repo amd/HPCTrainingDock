@@ -44,6 +44,8 @@ if [ "${BUILD_CUPY}" = "0" ]; then
    exit
 
 else 
+   cd /tmp
+
    if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/cupy.tgz ]; then
       echo ""
       echo "============================"
@@ -53,9 +55,11 @@ else
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
+      sudo chmod u+w /opt/rocmplus-${ROCM_VERSION}
       tar -xzf CacheFiles/cupy.tgz
       chown -R root:root /opt/rocmplus-${ROCM_VERSION}/cupy
       sudo rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/cupy.tgz
+      sudo chmod u-w /opt/rocmplus-${ROCM_VERSION}
    else
       echo ""
       echo "============================"
@@ -74,15 +78,19 @@ else
       git clone -q --depth 1 --recursive https://github.com/ROCm/cupy.git
       cd cupy
       
-      sudo sed -i -e '/numpy/s/1.27/1.25/' setup.py
+      sed -i -e '/numpy/s/1.27/1.25/' setup.py
+      PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/cupy
       python3 setup.py -q bdist_wheel
       
       sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/cupy
-      sudo pip3 install pytest mock
-      sudo pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/cupy dist/cupy-13.0.0b1-cp310-cp310-linux_x86_64.whl
+      sudo chmod u+w /opt/rocmplus-${ROCM_VERSION}/cupy
+      pip3 install pytest mock
+      pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/cupy dist/cupy-13.0.0b1-cp310-cp310-linux_x86_64.whl
+      sudo -R chown root:root /opt/rocmplus-${ROCM_VERSION}/cupy
+      sudo chmod u-w /opt/rocmplus-${ROCM_VERSION}/cupy
       
       cd ..
-      sudo rm -rf cupy
+      rm -rf cupy
       module unload rocm/${ROCM_VERSION}
    fi
       
