@@ -1,8 +1,30 @@
 #/bin/bash
 
+# Variables controlling setup process
 ROCM_VERSION=6.0
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 BUILD_CUPY=0
+
+# Autodetect defaults
+AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+
+usage()
+{
+   echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
+   echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "--build-cupy"
+}
+
+send-error()
+{
+    usage
+    echo -e "\nError: ${@}"
+    exit 1
+}
+
+reset-last()
+{
+   last() { send-error "Unsupported argument :: ${1}"; }
+}
 
 n=0
 while [[ $# -gt 0 ]]
@@ -11,14 +33,17 @@ do
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
+	  reset-last
           ;;
       "--amdgpu-gfxmodel")
           shift
           AMDGPU_GFXMODEL=${1}
+	  reset-last
           ;;
       "--build-cupy")
           shift
           BUILD_CUPY=${1}
+	  reset-last
           ;;
       *)  
          last ${1}
