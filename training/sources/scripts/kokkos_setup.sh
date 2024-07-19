@@ -88,12 +88,12 @@ else
 
    fi
    # Create a module file for kokoks
-   export MODULE_PATH=/etc/lmod/modules/kokkos
+   export MODULE_PATH=/etc/lmod/modules/misc/kokkos
 
    sudo mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | sudo tee ${MODULE_PATH}/kokkos-4.3.1.lua
+   cat <<-EOF | sudo tee ${MODULE_PATH}/4.3.1.lua
         whatis("Kokkos - Performance Portability Language")
 
         load("rocm/${ROCM_VERSION}")

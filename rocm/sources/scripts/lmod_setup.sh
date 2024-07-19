@@ -7,7 +7,7 @@ echo ""
 sudo DEBIAN_FRONTEND=noninteractive apt-get -qq update
 sudo DEBIAN_FRONTEND=noninteractive apt-get -qqy install lmod
 
-sudo sed -i -e '1,$s!/etc/lmod/modules!/etc/lmod/modules/Linux\n/etc/lmod/modules/ROCm\n/etc/lmod/modules/ROCmPlus\n/etc/lmod/modules/ROCmPlus-MPI\n/etc/lmod/modules/ROCmPlus-AMDResearchTools\n/etc/lmod/modules/ROCmPlus-LatestCompilers\n/etc/lmod/modules/ROCmPlus-AI\n/etc/lmod/modules/kokkos!' /etc/lmod/modulespath
+sudo sed -i -e '1,$s!/etc/lmod/modules!/etc/lmod/modules/Linux\n/etc/lmod/modules/ROCm\n/etc/lmod/modules/ROCmPlus\n/etc/lmod/modules/ROCmPlus-MPI\n/etc/lmod/modules/ROCmPlus-AMDResearchTools\n/etc/lmod/modules/ROCmPlus-LatestCompilers\n/etc/lmod/modules/ROCmPlus-AI\n/etc/lmod/modules/misc!' /etc/lmod/modulespath
 cat /etc/lmod/modulespath
 
 NUM_PROFILE_D=`grep '/etc/profile.d' /etc/bash.bashrc |wc -l`
