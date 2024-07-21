@@ -454,7 +454,7 @@ else
    if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
       rm -rf "${OPENMPI_PATH}"
    fi
-   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${INSTALL_PATH}"/CacheFiles/openmpi-${OPENMPI_VERSION}.tgz ]]; then
+   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${INSTALL_PATH}"/CacheFiles/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz ]]; then
       echo ""
       echo "============================"
       echo " Installing Cached OpenMPI"
