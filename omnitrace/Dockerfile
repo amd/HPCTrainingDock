@@ -10,6 +10,8 @@ ARG DISTRO_VERSION
 ARG ROCM_VERSION
 ARG DOCKER_USER
 
+# This image will be built on top of the image below
+# which is the rocm image built before this one
 FROM ${DOCKER_USER}/rocm:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}
 ARG DISTRO
 ARG DISTRO_VERSION
@@ -18,7 +20,7 @@ ARG OMNITRACE_BUILD_FROM_SOURCE
 ARG PYTHON_VERSIONS
 ARG AMDGPU_GFXMODEL
 
-LABEL maintainer="david.doscher@amd.com"
+LABEL maintainer="bob.robey@amd.com"
 
 RUN ls -lsa /home
 

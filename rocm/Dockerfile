@@ -1,6 +1,9 @@
 
 ARG DISTRO
 ARG DISTRO_VERSION
+# This image will be built on top of the image below
+# which is the OS image desired and defined by DISTRO
+# and DISTRO_VERSION
 FROM ${DISTRO}:${DISTRO_VERSION}
 
 LABEL maintainer="bob.robey@amd.com"

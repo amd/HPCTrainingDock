@@ -10,7 +10,7 @@ reset-last()
 
 usage()
 {
-   echo "--rocm-version [ ROCM_VERSIONS ]:  default is $ROCM_VERSIONS"
+   echo "--rocm-version [ ROCM_VERSIONS ]:  default is $ROCM_VERSION"
    echo "--rocm-install-path [ ROCM_INSTALL_PATH ]:  default is $ROCM_INSTALLPATH"
    echo "--python-versions [ PYTHON_VERSIONS ]: default is $PYTHON_VERSIONS"
    echo "--amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: auto detected using rocminfo"

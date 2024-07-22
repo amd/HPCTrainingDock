@@ -5,15 +5,14 @@
 # before building the project
 # -----------------------------------------------------------------------
 
-# 
-# based off the Omniperf container (that is baseed off the Omnitrace container)
-#
 ARG BUILD_DATE
 ARG BUILD_VERSION
 ARG DISTRO_VERSION
 ARG ROCM_VERSION
 ARG DOCKER_USER
 
+# This image will be built on top of the image below
+# which is the omniperf image built before this one
 FROM ${DOCKER_USER}/omniperf:release-base-ubuntu-${DISTRO_VERSION}-rocm-${ROCM_VERSION}
 ARG DISTRO
 ARG DISTRO_VERSION
@@ -30,7 +29,7 @@ ARG BUILD_CUPY
 ARG USE_CACHED_APPS
 ARG AMDGPU_GFXMODEL=gfx90a
 
-LABEL maintainer="david.doscher@amd.com"
+LABEL maintainer="bob.robey@amd.com"
 
 
 LABEL org.label-schema.build-date=$BUILD_DATE
