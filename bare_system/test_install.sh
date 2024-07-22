@@ -78,10 +78,9 @@ docker build --no-cache --build-arg DISTRO=${DISTRO}  \
              --build-arg ROCM_VERSION=${ROCM_VERSION} \
              --build-arg ROCM_INSTALLPATH=${ROCM_INSTALLPATH} \
              --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
-	     --progress plain \
              -t bare -f bare_system/Dockerfile .
 
 docker run -it --device=/dev/kfd --device=/dev/dri \
            --group-add video --group-add render --group-add renderalt \
-	   -p 2222:22 --name BareHHFF  --security-opt seccomp=unconfined \
+	   -p 2222:22 --name Bare  --security-opt seccomp=unconfined \
 	   --rm -v $HOME/Class/training/hostdir:/hostdir bare
