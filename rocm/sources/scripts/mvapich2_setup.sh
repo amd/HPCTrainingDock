@@ -38,6 +38,16 @@ echo ""
 # Install mvapich
 #
 
+if [ "${DISTRO}" = "ubuntu" ]; then
+   sudo apt-get install -y libc6
+   exit
+fi
+if [ "${DISTRO}" = "rocky linux" ]; then
+   #sudo yum install -y glibc-2.39-17.fc40.i686.rpm
+   sudo yum install -y glibc-2.34-100.el9_4.2.i686.rpm
+   exit
+fi
+
 #MVAPICH2_RPM_NAME=mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1.slurm-2.3.7-1.t4.x86_64.rpm
 MVAPICH2_RPM_NAME=mvapich2-gdr-rocm5.1.mofed5.0.gnu10.3.1-2.3.7-1.t4.x86_64.rpm
 MVAPICH2_DOWNLOAD_URL=https://mvapich.cse.ohio-state.edu/download/mvapich/gdr/2.3.7/mofed5.0/${MVAPICH2_RPM_NAME}

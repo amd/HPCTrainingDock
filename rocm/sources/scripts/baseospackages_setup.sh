@@ -50,6 +50,7 @@ fi
 
 if [ "${DISTRO}" = "rocky linux" ]; then
    yum groupinstall -y "Development Tools"
+   yum install -y sudo
    yum install -y epel-release
    yum install -y --allowerasing curl dpkg-devel numactl-devel openmpi-devel papi-devel python3-pip wget zlib-devel 
    yum clean all

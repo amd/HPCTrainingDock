@@ -92,21 +92,27 @@ else
       echo "============================"
       echo ""
 
-
+      # Load the ROCm version for this CuPy build
       source /etc/profile.d/lmod.sh
       module load rocm/${ROCM_VERSION}
       
+      # Load the ROCm version for this CuPy build -- use hip compiler, path to ROCm and the GPU model
       export CUPY_INSTALL_USE_HIP=1
       export ROCM_HOME=${ROCM_PATH}
       export HCC_AMDGPU_ARCH=${AMDGPU_GFXMODEL}
       
+      # Get source from the ROCm repository of CuPy.
       git clone -q --depth 1 --recursive https://github.com/ROCm/cupy.git
       cd cupy
       
+      # use version 1.25 of numpy – need to test with later numpy version
       sed -i -e '/numpy/s/1.27/1.25/' setup.py
+      # set python path to installation directory
       PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/cupy
+      # build basic cupy package
       python3 setup.py -q bdist_wheel
       
+      # install necessary packages in installation directory
       sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/cupy
       sudo chmod u+w /opt/rocmplus-${ROCM_VERSION}/cupy
       pip3 install pytest mock
@@ -114,6 +120,7 @@ else
       sudo -R chown root:root /opt/rocmplus-${ROCM_VERSION}/cupy
       sudo chmod u-w /opt/rocmplus-${ROCM_VERSION}/cupy
       
+      # cleanup
       cd ..
       rm -rf cupy
       module unload rocm/${ROCM_VERSION}
