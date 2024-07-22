@@ -14,6 +14,17 @@ reset-last()
    last() { echo "Unsupported argument :: ${1}"; }
 }
 
+usage()
+{
+   echo "--rocm-version [ ROCM_VERSIONS ]:  default is $ROCM_VERSIONS"
+   echo "--rocm-install-path [ ROCM_INSTALL_PATH ]:  default is $ROCM_INSTALLPATH"
+   echo "--python-versions [ PYTHON_VERSIONS ]: default is $PYTHON_VERSIONS"
+   echo "--amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: WARNING this has NO default since it depends on your system's arch"
+   echo "--omnitrace-build-from-source [0 or 1]:  default is 0 (false)"
+   echo "--help: prints this message"
+   exit 1
+}
+
 n=0
 while [[ $# -gt 0 ]]
 do
@@ -42,6 +53,9 @@ do
           shift
           OMNITRACE_BUILD_FROM_SOURCE=${1}
           reset-last
+          ;;
+      "--help")
+          usage
           ;;
       *)
          last ${1}
