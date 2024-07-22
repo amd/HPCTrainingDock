@@ -7,7 +7,7 @@ echo ""
 if [ "${DISTRO}" = "ubuntu" ]; then
    sudo DEBIAN_FRONTEND=noninteractive apt-get -qq update
 fi
-if [ "${DISTRO}" = "ubuntu" ]; then
+if [ "${DISTRO}" = "rocky linux" ]; then
    sudo yum -y install lmod
 fi
 
