@@ -6,6 +6,7 @@ echo ""
 
 if [ "${DISTRO}" = "ubuntu" ]; then
    sudo DEBIAN_FRONTEND=noninteractive apt-get -qq update
+   sudo DEBIAN_FRONTEND=noninteractive apt-get -qqy install lmod
 fi
 if [ "${DISTRO}" = "rocky linux" ]; then
    sudo yum -y install lmod
