@@ -19,7 +19,7 @@ usage()
    echo "--rocm-version [ ROCM_VERSIONS ]:  default is $ROCM_VERSIONS"
    echo "--rocm-install-path [ ROCM_INSTALL_PATH ]:  default is $ROCM_INSTALLPATH"
    echo "--python-versions [ PYTHON_VERSIONS ]: default is $PYTHON_VERSIONS"
-   echo "--amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: WARNING this has NO default since it depends on your system's arch"
+   echo "--amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: no default but rocminfo is used to assign a value to it, if a value is not provided" 
    echo "--omnitrace-build-from-source [0 or 1]:  default is 0 (false)"
    echo "--help: prints this message"
    exit 1
@@ -65,8 +65,9 @@ do
    shift
 done
 
-DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+if [ -z "${AMDGPU_GFXMODEL}" ]; then
+   AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+fi
 
 ls -l CacheFiles
 
@@ -77,10 +78,6 @@ rocm/sources/scripts/lmod_setup.sh
 source ~/.bashrc
 
 rocm/sources/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION}
-
-if [ -z "${AMDGPU_GFXMODEL}" ]; then
-   AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-fi
 
 rocm/sources/scripts/openmpi_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
 
