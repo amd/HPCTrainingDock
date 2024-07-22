@@ -8,6 +8,18 @@ reset-last()
    last() { send-error "Unsupported argument :: ${1}"; }
 }
 
+usage()
+{
+   echo "--rocm-version [ ROCM_VERSIONS ]:  default is $ROCM_VERSIONS"
+   echo "--rocm-install-path [ ROCM_INSTALL_PATH ]:  default is $ROCM_INSTALLPATH"
+   echo "--python-versions [ PYTHON_VERSIONS ]: default is $PYTHON_VERSIONS"
+   echo "--amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: auto detected using rocminfo"
+   echo "--distro [DISTRO]: auto detected by looking into /etc/os-release "
+   echo "--distro-versions [DISTRO_VERSIONS]: auto detected by looking into /etc/os-release "
+   echo "--help: prints this message"
+   exit 1
+}
+
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -41,6 +53,9 @@ do
           DISTRO_VERSION=${1}
           last() { DISTRO_VERSION="${DISTRO_VERSION} ${1}"; }
           ;;
+      "--help")
+         usage
+         ;;
       *)
          last ${1}
          ;;
