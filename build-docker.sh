@@ -15,6 +15,7 @@
 : ${BUILD_CLACC_LATEST:="0"}
 : ${BUILD_PYTORCH:="0"}
 : ${BUILD_CUPY:="0"}
+: ${BUILD_KOKKOS:="0"}
 : ${BUILD_ALL_LATEST:="0"}
 : ${RETRY:=3}
 : ${NO_CACHE:=""}
@@ -32,37 +33,6 @@ tolower()
 toupper()
 {
     echo "$@" | awk -F '\\|~\\|' '{print toupper($1)}';
-}
-
-usage()
-{
-    print_option() { printf "    --%-20s %-24s     %s\n" "${1}" "${2}" "${3}"; }
-    echo "Options:"
-    print_option "help -h" "" "This message"
-    print_option "no-pull" "" "Do not pull down most recent base container"
-
-    echo ""
-    print_default_option() { printf "    --%-20s %-24s     %s (default: %s)\n" "${1}" "${2}" "${3}" "$(tolower ${4})"; }
-    print_default_option admin-username "[ADMIN_USERNAME]"
-    print_default_option admin-password "[ADMIN_PASSWORD]"
-    print_default_option build-aomp-latest -- flag to build the latest version of AOMP for offloading
-    print_default_option build-llvm-latest -- flag to build the latest version of LLVM for offloading
-    print_default_option build-gcc-latest -- flag to build the latest version of gcc with offloading
-    print_default_option build-og-latest -- flag to build the latest version of gcc develop with offloading
-    print_default_option build-clacc-latest -- flag to build the latest version of clacc with offloading
-    print_default_option build-pytorch -- flag to build the latest version of pytorch
-    print_default_option build-cupy -- flag to build the latest version of cupy
-    print_default_option use_cached-apps -- flag to use pre-built gcc and aomp located in CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} directory
-    print_default_option omnitrace-build-from-source -- flag to build omnitrace from source instead of using pre-built versions
-    print_default_option output-verbosity -- flag to show more docker build output
-    print_default_option distro "[ubuntu|opensuse|rhel]" "OS distribution" "${DISTRO}"
-    print_default_option distro-versions "[VERSION] [VERSION...]" "Ubuntu, OpenSUSE, or RHEL release" "${DISTRO_VERSIONS}"
-    print_default_option rocm-versions "[VERSION] [VERSION...]" "ROCm versions" "${ROCM_VERSIONS}"
-    print_default_option python-versions "[VERSION] [VERSION...]" "Python 3 minor releases" "${PYTHON_VERSIONS}"
-    print_default_option "docker_user" "[DOCKER_USERNAME]" "DockerHub username" "${DOCKER_USER}"
-    print_default_option "retry" "[N]" "Number of attempts to build (to account for network errors)" "${RETRY}"
-    print_default_option push "" "Push the image to Dockerhub" ""
-    #print_default_option lto "[on|off]" "Enable LTO" "${LTO}"
 }
 
 send-error()
@@ -111,14 +81,47 @@ set -e
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+
+usage()
+{
+    print_option() { printf "    --%-20s %-24s     %s\n" "${1}" "${2}" "${3}"; }
+    echo "Options:"
+    print_option "help -h" "" "prints this message to terminal"
+    echo ""
+    print_default_option() { printf "    --%-20s %-24s     %s (default: %s)\n" "${1}" "${2}" "${3}" "$(tolower ${4})"; }
+    print_default_option "pull" -- "instructs to not pull down the most recent base container" "--pull"
+    print_default_option "admin-username" "[ADMIN_USERNAME]" "container admin username" "${ADMIN_USERNAME}"
+    print_default_option admin-password "[ADMIN_PASSWORD]" "container admin password" "not set, needs to be provided as input"
+    print_default_option build-openmpi -- "flag to build OpenMPI" "not included"
+    print_default_option build-aomp-latest -- "flag to build the latest version of AOMP for offloading" "not included"
+    print_default_option build-llvm-latest -- "flag to build the latest version of LLVM for offloading" "not included"
+    print_default_option build-gcc-latest -- "flag to build the latest version of gcc with offloading" "not included"
+    print_default_option build-og-latest -- "flag to build the latest version of gcc develop with offloading" "not included"
+    print_default_option build-clacc-latest -- "flag to build the latest version of clacc with offloading" "not included"
+    print_default_option build-pytorch -- "flag to build the latest version of pytorch" "not included"
+    print_default_option build-cupy -- "flag to build the latest version of cupy" "not included"
+    print_default_option build-kokkos -- "flag to build the latest version of kokkos" "not included"
+    print_default_option build-all-latest -- "flag to build all the additional libraries that need a flag to be built" "not included"
+    print_default_option use_cached-apps -- "flag to use pre-built gcc and aomp located in CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} directory" "not included"
+    print_default_option omnitrace-build-from-source -- "flag to build omnitrace from source instead of using pre-built versions" "not included"
+    print_default_option output-verbosity -- "flag to show more docker build output" "not included"
+    print_default_option distro "[ubuntu|opensuse|rhel]" "OS distribution" "${DISTRO}"
+    print_default_option distro-versions "[VERSION] [VERSION...]" "Ubuntu, OpenSUSE, or RHEL release" "${DISTRO_VERSIONS}"
+    print_default_option amdgpu-gfxmodel [AMDGPU_GFXMODEL] "Specify the AMD GPU target architecture" "${AMDGPU_GFXMODEL}"
+    print_default_option rocm-versions "[VERSION] [VERSION...]" "ROCm versions" "${ROCM_VERSIONS}"
+    print_default_option python-versions "[VERSION] [VERSION...]" "Python 3 minor releases" "${PYTHON_VERSIONS}"
+    print_default_option "docker-user" "[DOCKER_USERNAME]" "DockerHub username" "${DOCKER_USER}"
+    print_default_option "retry" "[NUMBER OF ATTEMPTS]" "Number of attempts to build (to account for network errors)" "${RETRY}"
+    print_default_option push -- "Push the image to Dockerhub" "do not push"
+}
+
 
 n=0
 while [[ $# -gt 0 ]]
 do
     case "${1}" in
-        "-h|--help")
+        "--help")
             usage
             exit 0
             ;;
@@ -142,7 +145,7 @@ do
             PYTHON_VERSIONS=${1}
             last() { PYTHON_VERSIONS="${PYTHON_VERSIONS} ${1}"; }
             ;;
-        "--docker_user")
+        "--docker-user")
             shift
             DOCKER_USER=${1}
             reset-last
@@ -219,16 +222,20 @@ do
             BUILD_CUPY="1"
             reset-last
             ;;
+        "--build-kokkos")
+            BUILD_KOKKOS="1"
+            reset-last
+            ;;
         "--build-all-latest")
-            #BUILD_OPENMPI="1"
-            BUILD_ALL_LATEST="1"
+            BUILD_OPENMPI="1"
             BUILD_AOMP_LATEST="1"
-            #BUILD_LLVM_LATEST="1"
+            BUILD_LLVM_LATEST="1"
             BUILD_GCC_LATEST="1"
-            #BUILD_OG_LATEST="1"
-            #BUILD_CLACC_LATEST="1"
+            BUILD_OG_LATEST="1"
+            BUILD_CLACC_LATEST="1"
             BUILD_PYTORCH="1"
             BUILD_CUPY="1"
+	    BUILD_KOKKOS="1"
             reset-last
             ;;
         "--use-cached-apps")
