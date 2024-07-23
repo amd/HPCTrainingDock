@@ -7,7 +7,6 @@
 : ${PUSH:=0}
 : ${PULL:=--pull}
 : ${OUTPUT_VERBOSITY:=""}
-: ${BUILD_OPENMPI:="0"}
 : ${BUILD_AOMP_LATEST:="0"}
 : ${BUILD_LLVM_LATEST:="0"}
 : ${BUILD_GCC_LATEST:="0"}
@@ -190,10 +189,6 @@ do
             RETRY=${1}
             reset-last
             ;;
-        "--build-openmpi")
-            BUILD_OPENMPI="1"
-            reset-last
-            ;;
         "--build-aomp-latest")
             BUILD_AOMP_LATEST="1"
             reset-last
@@ -227,7 +222,6 @@ do
             reset-last
             ;;
         "--build-all-latest")
-            BUILD_OPENMPI="1"
             BUILD_AOMP_LATEST="1"
             BUILD_LLVM_LATEST="1"
             BUILD_GCC_LATEST="1"
@@ -307,6 +301,7 @@ do
        --build-arg BUILD_CLACC_LATEST=${BUILD_CLACC_LATEST} \
        --build-arg BUILD_PYTORCH=${BUILD_PYTORCH} \
        --build-arg BUILD_CUPY=${BUILD_CUPY} \
+       --build-arg BUILD_KOKKOS=${BUILD_KOKKOS} \
        --build-arg USE_CACHED_APPS=${USE_CACHED_APPS} \
        -t ${DOCKER_USER}/training:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        -t training \
