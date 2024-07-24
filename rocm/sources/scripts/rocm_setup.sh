@@ -310,16 +310,16 @@ cat <<-EOF | sudo tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Category: AMD")
 	whatis("ROCm")
 
-	local base = "/opt/rocm-${ROCM_VERSION}/"
+	local base = "/opt/rocm-${ROCM_VERSION}"
 	local mbase = " /etc/lmod/modules/ROCm/rocm"
 
-	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib64"))
-	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
-	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-	prepend_path("CPATH", pathJoin(base, "include"))
-	prepend_path("PATH", pathJoin(base, "bin"))
-	prepend_path("INCLUDE", pathJoin(base, "include"))
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "/lib"))
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "/lib64"))
+	prepend_path("C_INCLUDE_PATH", pathJoin(base, "/include"))
+	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "/include"))
+	prepend_path("CPATH", pathJoin(base, "/include"))
+	prepend_path("PATH", pathJoin(base, "/bin"))
+	prepend_path("INCLUDE", pathJoin(base, "/include"))
 	setenv("ROCM_PATH", base)
 	family("GPUSDK")
 EOF

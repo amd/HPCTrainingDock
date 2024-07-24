@@ -58,8 +58,6 @@ echo "OMNITRACE_BUILD_FROM_SOURCE is $OMNITRACE_BUILD_FROM_SOURCE"
 echo "============================"
 echo ""
 
-ls -l /opt/rocmplus-${ROCM_VERSION}/
-
 if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "0" ] ; then
    if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/omnitrace.tgz ]; then
       echo ""
@@ -86,7 +84,9 @@ fi
 
 if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "1" ] ; then
    SAVE_PATH=${PATH}
-   export PATH=$PATH:/opt/rocmplus-${ROCM_VERSION}/openmpi:/opt/rocmplus-${ROCM_VERSION}/ucx
+   export PATH=$PATH:/opt/rocmplus-${ROCM_VERSION}/openmpi/bin
+   which mpicc
+   which mpirun
    CPU_TYPE=zen3
    if [ "${AMDGFX_GFXMODE}L" = "gfx1030" ]; then
       CPU_TYPE=zen2

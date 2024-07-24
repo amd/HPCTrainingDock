@@ -22,9 +22,6 @@ ARG AMDGPU_GFXMODEL
 
 LABEL maintainer="bob.robey@amd.com"
 
-RUN ls -lsa /home
-
-WORKDIR /tmp
 WORKDIR /app
 
 USER root

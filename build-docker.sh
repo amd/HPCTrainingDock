@@ -2,7 +2,7 @@
 
 : ${DOCKER_USER:=$(whoami)}
 : ${ROCM_VERSIONS:="5.0"}
-: ${PYTHON_VERSIONS:="8 9 10 11"}
+: ${PYTHON_VERSIONS:="10"}
 : ${BUILD_CI:=""}
 : ${PUSH:=0}
 : ${PULL:=--pull}

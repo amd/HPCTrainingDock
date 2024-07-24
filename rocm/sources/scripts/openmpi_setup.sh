@@ -11,8 +11,8 @@
 # some more effort.
 
 # Variables controlling setup process
-ROCM_VERSION=6.1.2
-ROCM_PATH=/opt/rocm-6.1.2
+ROCM_VERSION=`cat /opt/rocm*/.info/version | head -1 | cut -f1 -d'-' `
+ROCM_PATH=/opt/rocm-${ROCM_VERSION}
 REPLACE=0
 DRY_RUN=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/openmpi
@@ -25,8 +25,8 @@ UCX_VERSION=1.17.0
 UCX_MD5CHECKSUM=53537757b71e5eae4d283e6fc32907ba
 UCC_VERSION=1.3.0
 UCC_MD5CHECKSUM=b2d14666cb9a18b0aee57898ce0a8c8b
-OPENMPI_VERSION=5.0.3
-OPENMPI_MD5CHECKSUM=af6896a78969b258da908d424c1c34ca
+OPENMPI_VERSION=5.0.5
+OPENMPI_MD5CHECKSUM=4dcea38dcfa6710a7ed2922fa609e41e
 C_COMPILER=gcc
 CXX_COMPILER=g++
 FC_COMPILER=gfortran
@@ -91,8 +91,9 @@ do
           CXX_COMPILER=${1}
           reset-last
           ;;
-      "--dry_run")
+      "--dry-run")
           DRY_RUN=1
+          reset-last
           ;;
       "--fc-compiler")
           shift
@@ -107,7 +108,7 @@ do
           INSTALL_PATH_INPUT=${1}
           reset-last
           ;;
-      "--module_path")
+      "--module-path")
           shift
           MODULE_PATH=${1}
           reset-last
@@ -132,6 +133,7 @@ do
           ;;
       "--replace")
           REPLACE=1
+          reset-last
           ;;
       "--rocm-path")
           shift
@@ -140,7 +142,7 @@ do
           ;;
       "--rocm-version")
           shift
-          ROCM_VERSION=${1}
+          ROCM_VERSION_INPUT=${1}
           reset-last
           ;;
       "--ucc-path")
@@ -190,10 +192,39 @@ do
    shift
 done
 
+echo "ROCM_PATH autodetected is ${ROCM_PATH}"
+echo "ROCM_VERSION autodetected is ${ROCM_VERSION}"
+
 if [ "${ROCM_PATH_INPUT}" != "" ]; then
    ROCM_PATH="${ROCM_PATH_INPUT}"
 else
    ROCM_PATH="/opt/rocm-${ROCM_VERSION}"
+fi
+
+if [ "${ROCM_VERSION_INPUT}" != "" ]; then
+   ROCM_VERSION="${ROCM_VERSION_INPUT}"
+else
+   ROCM_VERSION=`cat ${ROCM_PATH}/.info/version | cut -f1 -d'-' `
+fi
+
+echo "ROCM_PATH after input is ${ROCM_PATH}"
+echo "ROCM_VERSION after input is ${ROCM_VERSION}"
+ROCM_PATH_AFTER_INPUT=${ROCM_PATH}
+ROCM_VERSION_AFTER_INPUT=${ROCM_VERSION}
+
+# Load the ROCm version for this build
+source /etc/profile.d/lmod.sh
+module load rocm/${ROCM_VERSION}
+
+echo "ROCM_PATH after loading module is ${ROCM_PATH}"
+echo "ROCM_VERSION after loading module is ${ROCM_VERSION}"
+
+if [ "${ROCM_PATH_AFTER_INPUT}" != "${ROCM_PATH}" ]; then
+   echo "Mismatch in ROCM_PATH -- after input ${ROCM_PATH_AFTER_INPUT} after module load ${ROCM_PATH}"
+fi
+
+if [ "${ROCM_VERSION_AFTER_INPUT}" != "${ROCM_VERSION}" ]; then
+   echo "Mismatch in ROCM_VERSION -- after input ${ROCM_VERSION_AFTER_INPUT} after module load ${ROCM_VERSION}"
 fi
 
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
@@ -223,7 +254,8 @@ fi
 echo ""
 echo "============================"
 echo " Installing OpenMPI with:"
-echo "ROCM_VERSION is $ROCM_VERSION"
+echo "   ROCM_VERSION: $ROCM_VERSION"
+echo "   ROCM_PATH: ${ROCM_PATH}"
 echo "============================"
 echo ""
 
@@ -549,6 +581,8 @@ else
       exit 1
    fi
 fi
+
+module unload rocm/${ROCM_VERSION}
 
 # In either case of Cache or Build from source, create a module file for OpenMPI
 
