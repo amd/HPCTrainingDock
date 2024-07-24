@@ -223,10 +223,10 @@ do
             ;;
         "--build-all-latest")
             BUILD_AOMP_LATEST="1"
-            BUILD_LLVM_LATEST="1"
+            #BUILD_LLVM_LATEST="1"
             BUILD_GCC_LATEST="1"
-            BUILD_OG_LATEST="1"
-            BUILD_CLACC_LATEST="1"
+            #BUILD_OG_LATEST="1"
+            #BUILD_CLACC_LATEST="1"
             BUILD_PYTORCH="1"
             BUILD_CUPY="1"
 	    BUILD_KOKKOS="1"
