@@ -58,6 +58,7 @@ usage()
     echo "--ucx-path default <INSTALL_PATH>/ucx"
     echo "--ucx-version [VERSION] default $UCX_VERSION"
     echo "--ucx-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
+    exit 1
 }
 
 send-error()
