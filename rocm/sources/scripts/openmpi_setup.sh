@@ -215,7 +215,7 @@ ROCM_PATH_AFTER_INPUT=${ROCM_PATH}
 
 # Load the ROCm version for this build
 source /etc/profile.d/lmod.sh
-module load rocm/${ROCM_VERSION}
+module load rocm/${ROCM_VERSION} openmpi
 ROCM_VERSION=`cat $ROCM_PATH/.info/version | head -1 | cut -f1 -d'-'`
 
 echo "ROCM_VERSION after loading module is ${ROCM_VERSION}"
@@ -577,7 +577,7 @@ else
          sudo make install
       fi
       # make ucx the default point-to-point
-      echo "pml = ucx" | sudo tee -a "${INSTALL_PATH}"/openmpi/etc/openmpi-mca-params.conf
+      echo "pml = ucx" | sudo tee -a "${OMPI_PATH}"/etc/openmpi-mca-params.conf
       cd ../..
       rm -rf openmpi-${OPENMPI_VERSION} openmpi-${OPENMPI_VERSION}.tar.bz2
    fi
@@ -599,20 +599,20 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 
 # The - option suppresses tabs
    cat <<-EOF | sudo tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}.lua
-        whatis("Name: GPU-aware openmpi")
-        whatis("Version: openmpi-${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}")
-        whatis("Description: An open source Message Passing Interface implementation")
-        whatis(" This is a GPU-Aware version of OpenMPI")
-        whatis("URL: https://github.com/open-mpi/ompi.git")
+	whatis("Name: GPU-aware openmpi")
+	whatis("Version: openmpi-${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}")
+	whatis("Description: An open source Message Passing Interface implementation")
+	whatis(" This is a GPU-Aware version of OpenMPI")
+	whatis("URL: https://github.com/open-mpi/ompi.git")
 
-        local base = "${OPENMPI_PATH}"
+	local base = "${OPENMPI_PATH}"
 
-        prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-        prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
-        prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-        prepend_path("PATH", pathJoin(base, "bin"))
-        load("rocm/${ROCM_VERSION}")
-        family("MPI")
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("PATH", pathJoin(base, "bin"))
+	load("rocm/${ROCM_VERSION}")
+	family("MPI")
 EOF
 
 fi

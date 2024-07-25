@@ -83,10 +83,10 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "0" ] ; then
 fi
 
 if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "1" ] ; then
-   SAVE_PATH=${PATH}
-   export PATH=$PATH:/opt/rocmplus-${ROCM_VERSION}/openmpi/bin
-   which mpicc
-   which mpirun
+   # Load the ROCm version for this build
+   source /etc/profile.d/lmod.sh
+   module load rocm/${ROCM_VERSION} openmpi
+
    CPU_TYPE=zen3
    if [ "${AMDGFX_GFXMODE}L" = "gfx1030" ]; then
       CPU_TYPE=zen2
@@ -130,7 +130,6 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "1" ] ; then
 
    cmake --build omnitrace-build --target all --parallel 16
    sudo cmake --build omnitrace-build --target install
-   PATH=${SAVE_PATH}
    rm -rf omnitrace-source
 fi
 
