@@ -1,17 +1,18 @@
 SHELL:=/bin/bash
 all: rocm openmpi omnitrace cupy
+cupy: /opt/rocmplus-${ROCM_VERSION}/cupy
+rocm: /opt/rocm-${ROCM_VERSION}
 
 baseospackages:
 	rocm/sources/scripts/baseospackages_setup.sh
 
 lmod: baseospackages
 	rocm/sources/scripts/lmod_setup.sh
-	source ~/.bashrc
 
-rocm: baseospackages lmod
+/opt/rocm-${ROCM_VERSION}: baseospackages lmod
 	rocm/sources/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION}
 
-openmpi: rocm
+openmpi: /opt/rocm-${ROCM_VERSION}
 	rocm/sources/scripts/openmpi_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
 
 #rocm/sources/scripts/mvapich2_setup.sh --rocm-version ${ROCM_VERSION}
@@ -30,7 +31,9 @@ omnitrace:
 #
 #training/sources/scripts/apps_setup_basic.sh
 #
-cupy: rocm
+
+
+/opt/rocmplus-${ROCM_VERSION}/cupy: /opt/rocm-${ROCM_VERSION}
 	training/sources/scripts/cupy_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-cupy ${BUILD_CUPY}
 
 pytorch:
@@ -48,5 +51,5 @@ HPCTrainingExamples:
 openmpi_tests: openmpi HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R OpenMPI
 
-cupy_tests: HPCTrainingExamples
-	cd HPCTrainingExamples/tests/build && ctest -R Cupy
+cupy_tests: /opt/rocmplus-${ROCM_VERSION}/cupy HPCTrainingExamples
+	source /etc/profile.d/lmod.sh && cd HPCTrainingExamples/tests/build && ctest -R Cupy

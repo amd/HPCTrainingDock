@@ -97,7 +97,7 @@ else
       sudo pip3 install -r requirements.txt
       
       sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/pytorch
-      sudo chmod u+w /opt/rocmplus-${ROCM_VERSION}/pytorch
+      sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}/pytorch
       python3 tools/amd_build/build_amd.py >& /dev/null
       
       echo ""
@@ -117,7 +117,7 @@ else
       export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages:$PYTHONPATH
       pip3 uninstall torchvision
       sudo mkdir /opt/rocmplus-${ROCM_VERSION}/vision
-      sudo chmod u+w /opt/rocmplus-${ROCM_VERSION}/vision
+      sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}/vision
       cd ..
       git clone --recursive https://github.com/pytorch/vision
       cd vision
@@ -127,7 +127,7 @@ else
       export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/audio/lib/python3.10/site-packages:$PYTHONPATH
       pip3 uninstall torchaudio
       sudo mkdir /opt/rocmplus-${ROCM_VERSION}/audio
-      sudo chmod u+w /opt/rocmplus-${ROCM_VERSION}/audio
+      sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}/audio
       cd ..
       git clone --recursive https://github.com/pytorch/audio
       cd audio
@@ -136,11 +136,11 @@ else
       
       cd ..
       sudo chown root:root /opt/rocmplus-${ROCM_VERSION}/pytorch
-      sudo chmod u-w /opt/rocmplus-${ROCM_VERSION}/pytorch
+      sudo chmod og-w /opt/rocmplus-${ROCM_VERSION}/pytorch
       sudo chown root:root /opt/rocmplus-${ROCM_VERSION}/vision
-      sudo chmod u-w /opt/rocmplus-${ROCM_VERSION}/vision
+      sudo chmod og-w /opt/rocmplus-${ROCM_VERSION}/vision
       sudo chown root:root /opt/rocmplus-${ROCM_VERSION}/audio
-      sudo chmod u-w /opt/rocmplus-${ROCM_VERSION}/audio
+      sudo chmod og-w /opt/rocmplus-${ROCM_VERSION}/audio
 
       rm -rf pytorch vision audio
    fi
