@@ -5,6 +5,7 @@
 : ${BUILD_PYTORCH:="1"}
 : ${BUILD_CUPY:="1"}
 : ${BUILD_KOKKOS:="1"}
+: ${USE_MAKEFILE:="0"}
 
 OMNITRACE_BUILD_FROM_SOURCE=0
 PYTHON_VERSIONS="9 10"
@@ -21,6 +22,7 @@ usage()
    echo "--python-versions [ PYTHON_VERSIONS ]: default is $PYTHON_VERSIONS"
    echo "--amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: no default but rocminfo is used to assign a value to it, if a value is not provided" 
    echo "--omnitrace-build-from-source [0 or 1]:  default is 0 (false)"
+   echo "--use-makefile [0 or 1]:  default is 0 (false)"
    echo "--help: prints this message"
    exit 1
 }
@@ -54,6 +56,11 @@ do
           OMNITRACE_BUILD_FROM_SOURCE=${1}
           reset-last
           ;;
+      "--use-makefile")
+          shift
+          USE_MAKEFILE=1
+          reset-last
+          ;;
       "--help")
           usage
           ;;
@@ -67,6 +74,10 @@ done
 
 if [ -z "${AMDGPU_GFXMODEL}" ]; then
    AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+fi
+
+if [ "${USE_MAKEFILE}" == 1 ]; then
+   exit
 fi
 
 ls -l CacheFiles
@@ -109,3 +120,5 @@ if [ "${ROCM_INSTALLPATH}" != "/opt/" ]; then
    sudo ln -sfn ${ROCM_INSTALLPATH}/rocm-${ROCM_VERSION} /etc/alternatives/rocm
    sudo sed -i "s|\/opt\/|${ROCM_INSTALLPATH}|" /etc/lmod/modules/ROCm/*/*.lua
 fi
+
+git clone https://github.com/AMD/HPCTrainingExamples.git

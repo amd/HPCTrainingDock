@@ -7,6 +7,7 @@ ARG DISTRO_VERSION
 ARG ROCM_VERSION
 ARG ROCM_INSTALLPATH
 ARG AMDGPU_GFXMODEL
+ARG USE_MAKEFILE
 
 LABEL maintainer="bob.robey@amd.com"
 
@@ -25,7 +26,7 @@ RUN groupadd renderalt -g 110
 WORKDIR /tmp
 
 RUN apt-get -q -y update
-RUN apt-get install -q -y vim sudo apt-utils
+RUN apt-get install -q -y vim sudo apt-utils make
 
 
 SHELL ["/bin/bash", "-c"]
@@ -45,13 +46,19 @@ WORKDIR /home/sysadmin
 #&& rm /tmp/lmod_setup.sh
 
 ADD bare_system bare_system
+ADD bare_system/Makefile Makefile
 ADD rocm rocm
 ADD omnitrace omnitrace
 ADD omniperf omniperf
 ADD training training
 COPY cache.list CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/*.tgz /opt/rocmplus-${ROCM_VERSION}/
 
-RUN bare_system/main_setup.sh --rocm-version ${ROCM_VERSION} --rocm-install-path ${ROCM_INSTALLPATH} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
+ENV ROCM_VERSION=$ROCM_VERSION
+ENV AMDGPU_GFXMODEL=$AMDGPU_GFXMODEL
+ENV BUILD_CUPY=$BUILD_CUPY
+
+RUN bare_system/main_setup.sh --rocm-version ${ROCM_VERSION} --rocm-install-path ${ROCM_INSTALLPATH} \
+    --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --use-makefile ${USE_MAKEFILE}
 
 # install module files
 #COPY  training/sources/lua/gcc/*          /etc/lmod/modules/Linux/gcc/

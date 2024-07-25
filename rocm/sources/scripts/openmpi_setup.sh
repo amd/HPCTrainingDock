@@ -193,8 +193,8 @@ do
    shift
 done
 
-echo "ROCM_PATH autodetected is ${ROCM_PATH}"
 echo "ROCM_VERSION autodetected is ${ROCM_VERSION}"
+echo "ROCM_PATH autodetected is ${ROCM_PATH}"
 
 if [ "${ROCM_PATH_INPUT}" != "" ]; then
    ROCM_PATH="${ROCM_PATH_INPUT}"
@@ -208,18 +208,18 @@ else
    ROCM_VERSION=`cat ${ROCM_PATH}/.info/version | cut -f1 -d'-' `
 fi
 
-echo "ROCM_PATH after input is ${ROCM_PATH}"
 echo "ROCM_VERSION after input is ${ROCM_VERSION}"
-ROCM_PATH_AFTER_INPUT=${ROCM_PATH}
+echo "ROCM_PATH after input is ${ROCM_PATH}"
 ROCM_VERSION_AFTER_INPUT=${ROCM_VERSION}
+ROCM_PATH_AFTER_INPUT=${ROCM_PATH}
 
 # Load the ROCm version for this build
 source /etc/profile.d/lmod.sh
 module load rocm/${ROCM_VERSION}
-ROCM_VERSION=`cat $ROCM_PATH.info/version | head -1 | cut -f1 -d'-'`
+ROCM_VERSION=`cat $ROCM_PATH/.info/version | head -1 | cut -f1 -d'-'`
 
-echo "ROCM_PATH after loading module is ${ROCM_PATH}"
 echo "ROCM_VERSION after loading module is ${ROCM_VERSION}"
+echo "ROCM_PATH after loading module is ${ROCM_PATH}"
 
 if [ "${ROCM_PATH_AFTER_INPUT}" != "${ROCM_PATH}" ]; then
    echo "Mismatch in ROCM_PATH -- after input ${ROCM_PATH_AFTER_INPUT} after module load ${ROCM_PATH}"
@@ -303,7 +303,7 @@ if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
    echo "  use --replace to request replacing the current installation"
 else
    if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
-      rm -rf "${UCX_PATH}"
+      sudo rm -rf "${UCX_PATH}"
    fi
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${INSTALL_PATH}/CacheFiles/ucx-${UCX_VERSION}.tgz ]]; then
       echo ""
@@ -398,7 +398,7 @@ if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
    echo "  use --replace to request replacing the current installation"
 else
    if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
-      rm -rf "${UCC_PATH}"
+      sudo rm -rf "${UCC_PATH}"
    fi
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${INSTALL_PATH}"/CacheFiles/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz ]]; then
       echo ""
@@ -492,7 +492,7 @@ if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
    echo "  use --replace to request replacing the current installation"
 else
    if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
-      rm -rf "${OPENMPI_PATH}"
+      sudo rm -rf "${OPENMPI_PATH}"
    fi
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${INSTALL_PATH}"/CacheFiles/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz ]]; then
       echo ""
