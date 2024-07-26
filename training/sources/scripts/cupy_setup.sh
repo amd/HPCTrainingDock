@@ -115,7 +115,7 @@ else
       # install necessary packages in installation directory
       sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/cupy
       sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}/cupy
-      pip3 install pytest mock
+      pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/cupy pytest mock
       pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/cupy dist/cupy-13.0.0b1-cp310-cp310-linux_x86_64.whl
       sudo -R chown root /opt/rocmplus-${ROCM_VERSION}/cupy
       sudo -R chgrp root /opt/rocmplus-${ROCM_VERSION}/cupy
