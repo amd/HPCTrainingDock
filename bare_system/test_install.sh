@@ -75,7 +75,6 @@ done
 CACHE_FILES="CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}"
 if [ ! -d ${CACHE_FILES} ]; then
    mkdir -p ${CACHE_FILES}
-   touch ${CACHE_FILES}/test.tgz
 fi
 
 set -v
@@ -92,4 +91,4 @@ docker run -it --device=/dev/kfd --device=/dev/dri \
            --group-add video --group-add render --group-add renderalt \
 	   -p 2222:22 --name Bare  --security-opt seccomp=unconfined \
 	   --rm -v $HOME/Class/training/hostdir:/hostdir \
-	   -v $HOME/CacheFiles:/HPCTrainingDock/CacheFiles bare
+	   -v $HOME/CacheFiles:/CacheFiles bare

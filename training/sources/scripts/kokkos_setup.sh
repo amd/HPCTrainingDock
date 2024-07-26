@@ -94,11 +94,11 @@ else
 
    # The - option suppresses tabs
    cat <<-EOF | sudo tee ${MODULE_PATH}/4.3.1.lua
-        whatis("Kokkos - Performance Portability Language")
+	whatis("Kokkos - Performance Portability Language")
 
-        load("rocm/${ROCM_VERSION}")
-        load("amdclang")
-        prepend_path("PATH","/opt/rocmplus-${ROCM_VERSION}/kokkos")
+	load("rocm/${ROCM_VERSION}")
+	load("amdclang")
+	prepend_path("PATH","/opt/rocmplus-${ROCM_VERSION}/kokkos")
 EOF
 
 fi
