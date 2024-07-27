@@ -89,7 +89,8 @@ pytorch_tests: pytorch.timestamp HPCTrainingExamples
 # Deploy targets create a compressed tar image of the directory for the package
 rocm_package: rocm.timestamp
 	cd /opt && \
-	   tar -czvpf ${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/rocm.tgz rocm-${ROCM_VERSION}
+	   tar -czpf /tmp/rocm-${ROCM_VERSION}.tgz rocm-${ROCM_VERSION} && \
+	   cp -p /tmp/rocm-${ROCM_VERSION}.tgz /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
 	touch rocm_package.timestamp
 
 openmpi_package: openmpi.timestamp
@@ -108,8 +109,8 @@ omnitrace_package: omnitrace.timestamp
 
 cupy_package: cupy.timestamp
 	cd /opt/rocmplus-${ROCM_VERSION} && \
-	   echo "AMDGPU_GFXMODEL ${AMDGPU_GFXMODEL}" \
-	   tar -czvpf /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/cupy.tgz cupy
+	   tar -czvpf /tmp/cupy.tgz cupy
+	   sudo cp /tmp/cupy.tgz /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
 	touch cupy_package.timestamp
 
 pytorch_package: pytorch.timestamp
@@ -117,4 +118,13 @@ pytorch_package: pytorch.timestamp
 	   tar -czvpf ${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/${PYTORCH_NAME}.tgz ${PYTORCH_NAME}
 	touch pytorch_package.timestamp
 
-all_package: rocm_package.timestamp openmpi_package.timestamp omnitrace_package.timestamp cupy_package.timestamp pytorch_package.timestamp
+package_all:
+	cd /opt/rocmplus-${ROCM_VERSION} && \
+	   for package in `ls *`; do \
+	      if [ "${package}" =~ "cupy" ]; then \
+	         tar -czvpf ${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/${package}.tgz ${package} \
+	      fi \
+	   done
+		   
+
+#all_package: rocm_package.timestamp openmpi_package.timestamp omnitrace_package.timestamp cupy_package.timestamp pytorch_package.timestamp

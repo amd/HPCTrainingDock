@@ -1,6 +1,27 @@
 #!/bin/bash
 
 : ${ROCM_VERSION:="6.0"}
+USE_CACHE_BUILD=1
+REPLACE=0
+
+# Variables controlling setup process
+
+# Autodetect defaults
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+if [ "${DISTRO}" == "rocky linux" ]; then
+   ROCM_REPO_DIST=${DISTRO_VERSION}
+else
+   ROCM_REPO_DIST=`lsb_release -c | cut -f2`
+fi
+
+usage()
+{
+   echo "--help: this usage information"
+   echo "--replace default off"
+   echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   exit 1
+}
 
 version-set()
 {
@@ -160,13 +181,17 @@ opensuse-set()
 #  ROCM_DOCKER_OPTS="${ROCM_DOCKER_OPTS} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PERL_REPO=${PERL_REPO}"
 }
 
-DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-if [ "${DISTRO}" == "rocky linux" ]; then
-   ROCM_REPO_DIST=${DISTRO_VERSION}
-else
-   ROCM_REPO_DIST=`lsb_release -c | cut -f2`
-fi
+send-error()
+{
+    usage
+    echo -e "\nError: ${@}"
+    exit 1
+}
+
+reset-last()
+{
+   last() { send-error "Unsupported argument :: ${1}"; }
+}
 
 #echo "After autodetection"
 #echo "ROCM_REPO_DIST is $ROCM_REPO_DIST" 
@@ -178,9 +203,20 @@ n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
+      "--help")
+          usage
+          ;;
+      "--replace")
+          REPLACE=1
+          reset-last
+          ;;
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
+	  reset-last
+          ;;
+      "--*")
+          send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
       *)
          last ${1}
@@ -232,29 +268,54 @@ cat /etc/yum.repos.d/rocm.repo
    yum install https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${ROCM_REPO_DIST}/amdgpu-install_${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
 fi
 
+CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+
 if [ "${DISTRO}" == "ubuntu" ]; then
-   #mkdir --parents --mode=0755 /etc/apt/keyrings
-   #sudo mkdir --parents --mode=0755 /etc/apt/keyrings
+   if [[ -d "/opt/rocm-${ROCM_VERSION}" ]] && [[ "${REPLACE}" == "0" ]] ; then
+      echo "There is a previous installation and the replace flag is false"
+      echo "  use --replace to request replacing the current installation"
+   else
+      if [[ -d "/opt/${ROCM_VERSION}" ]] && [[ "${REPLACE}" != "0" ]] ; then
+         sudo rm -rf "/opt/${ROCM_VERSION}"
+      fi
+      if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz ]]; then
+         echo ""
+         echo "============================"
+         echo " Installing Cached ROCm"
+         echo "============================"
+         echo ""
 
-   # The installation below makes use of an AMD provided install script
+         #install the cached version
+         echo "cached file is ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz"
+         sudo tar -xzf ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz
+         sudo chown -R root:root "${INSTALL_PATH}"/rocm-${ROCM_VERSION}
+         #sudo rm "${INSTALL_PATH}"/CacheFiles/rocm-${ROCM_VERSION}.tgz
+      else
 
-   # Get the key for the ROCm software
-   wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+         #mkdir --parents --mode=0755 /etc/apt/keyrings
+         #sudo mkdir --parents --mode=0755 /etc/apt/keyrings
 
-   # Update package list
-   sudo DEBIAN_FRONTEND=noninteractive apt-get update
+         # The installation below makes use of an AMD provided install script
 
-   # Get the amdgpu-install script
-   wget -q https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/${DISTRO}/${ROCM_REPO_DIST}/amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+         # Get the key for the ROCm software
+         wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
 
-   # Run the amdgpu-install script. We have already installed the kernel driver, so use we use --no-dkms
-   sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
-   DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms
+         # Update package list
+         sudo DEBIAN_FRONTEND=noninteractive apt-get update
 
-   # Required by DeepSpeed
-   sudo ln -s /opt/rocm-${ROCM_VERSION}/.info/version /opt/rocm-${ROCM_VERSION}/.info/version-dev
+         # Get the amdgpu-install script
+         wget -q https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/${DISTRO}/${ROCM_REPO_DIST}/amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
 
-   rm -rf amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+         # Run the amdgpu-install script. We have already installed the kernel driver, so use we use --no-dkms
+         sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+         DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms
+
+         # Required by DeepSpeed
+         sudo ln -s /opt/rocm-${ROCM_VERSION}/.info/version /opt/rocm-${ROCM_VERSION}/.info/version-dev
+
+         rm -rf amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+      fi
+   fi
 fi
 
 # rocm-validation-suite is optional

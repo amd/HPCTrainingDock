@@ -76,11 +76,15 @@ if [ -z "${AMDGPU_GFXMODEL}" ]; then
    AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 fi
 
+ls -l /CacheFiles
+sudo chmod a+w /CacheFiles/
+sudo mkdir /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/
+sudo chmod a+w /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/
+
 if [ "${USE_MAKEFILE}" == 1 ]; then
    exit
 fi
 
-ls -l CacheFiles
 
 rocm/sources/scripts/baseospackages_setup.sh
 

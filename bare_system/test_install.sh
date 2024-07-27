@@ -91,4 +91,4 @@ docker run -it --device=/dev/kfd --device=/dev/dri \
            --group-add video --group-add render --group-add renderalt \
 	   -p 2222:22 --name Bare  --security-opt seccomp=unconfined \
 	   --rm -v $HOME/Class/training/hostdir:/hostdir \
-	   -v $HOME/CacheFiles:/CacheFiles bare
+	   -v $PWD/CacheFiles:/CacheFiles bare
