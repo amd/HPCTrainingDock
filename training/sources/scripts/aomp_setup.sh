@@ -37,7 +37,8 @@ echo "==================================="
 echo ""
 
 if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
-   if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/aomp_${AOMP_VERSION_NUMBER}.tgz ]; then
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+   if [ -f ${CACHE_FILES}/aomp_${AOMP_VERSION_NUMBER}.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached AOMP Latest"
@@ -46,9 +47,11 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf CacheFiles/aomp_${AOMP_VERSION_NUMBER}.tgz
-      chown -R root:root /opt/rocmplus-${ROCM_VERSION}/aomp_${AOMP_VERSION_NUMBER}
-      rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/aomp_${AOMP_VERSION_NUMBER}.tgz
+      sudo tar -xzf ${CACHE_FILES}/aomp_${AOMP_VERSION_NUMBER}.tgz
+      sudo chown -R root:root /opt/rocmplus-${ROCM_VERSION}/aomp_${AOMP_VERSION_NUMBER}
+      if [ "${USER}" != "sysadmin" ]; then
+         sudo rm ${CACHE_FILES}/aomp_${AOMP_VERSION_NUMBER}.tgz
+      fi
    else
       echo ""
       echo "============================"

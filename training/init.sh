@@ -57,11 +57,11 @@ sed -e "s/^NodeName=.*/${nodeconfig} ${gpustring} /" \
 sudo cp slurm.conf /etc/slurm/slurm.conf
 sudo cp gres.conf /etc/slurm/gres.conf
 
-service munge start
+sudo service munge start
 sleep 1
-service slurmctld start
+sudo service slurmctld start
 sleep 1
-service slurmd start
+sudo service slurmd start
 
 echo "starting ssh server and waiting for ssh logins...."
 

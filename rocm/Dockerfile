@@ -53,7 +53,8 @@ WORKDIR /app
 #
 
 # Grab any cached files of MPI builds and place them in /opt/rocmplus-VERSION
-ADD CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL} /opt/rocmplus-${ROCM_VERSION}/CacheFiles
+ADD CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL} \
+   /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
 
 COPY rocm/sources/scripts/openmpi_setup.sh /tmp/openmpi_setup.sh
 

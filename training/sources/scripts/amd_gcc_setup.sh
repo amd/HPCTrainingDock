@@ -39,7 +39,8 @@ echo "==================================="
 echo ""
 
 if [ "${BUILD_GCC_LATEST}" = "1" ] ; then
-   if  [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/${GCC_VERSION}.tgz ]; then
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+   if  [ -f ${CACHE_FILES}/${GCC_VERSION}.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached AMD GCC Latest"
@@ -48,9 +49,11 @@ if [ "${BUILD_GCC_LATEST}" = "1" ] ; then
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf CacheFiles/${GCC_VERSION}.tgz
-      chown -R root:root /opt/rocmplus-${ROCM_VERSION}/CacheFiles/${GCC_VERSION}
-      rm ${GCC_VERSION}.tgz
+      sudo tar -xzf ${CACHE_FILES}/${GCC_VERSION}.tgz
+      sudo chown -R root:root /opt/rocmplus-${ROCM_VERSION}/${GCC_VERSION}
+      if [ "${USER}" != "sysadmin" ]; then
+         sudo rm ${CACHE_FILES}/${GCC_VERSION}.tgz
+      fi
    else
       echo ""
       echo "============================"

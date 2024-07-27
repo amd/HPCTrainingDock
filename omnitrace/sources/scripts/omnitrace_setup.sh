@@ -59,7 +59,8 @@ echo "============================"
 echo ""
 
 if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "0" ] ; then
-   if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/omnitrace.tgz ]; then
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+   if [ -f ${CACHE_FILES}/omnitrace.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached Omnitrace"
@@ -68,9 +69,11 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "0" ] ; then
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      sudo tar -xzf CacheFiles/omnitrace.tgz
+      sudo tar -xzf ${CACHE_FILES}/omnitrace.tgz
       sudo chown -R root:root /opt/rocmplus-${ROCM_VERSION}/omnitrace
-      sudo rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/omnitrace.tgz
+      if [ "${USER}" != "sysadmin" ]; then
+         sudo rm ${CACHE_FILES}/omnitrace.tgz
+      fi
    else
       if  wget -q https://github.com/AMDResearch/omnitrace/releases/download/v1.11.1/omnitrace-install.py && \
           python3 ./omnitrace-install.py --prefix /opt/rocmplus-${ROCM_VERSION}/omnitrace --rocm "${ROCM_VERSION}" -d ubuntu -v "${DISTRO_VERSION}"; then

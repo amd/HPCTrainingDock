@@ -215,7 +215,7 @@ ROCM_PATH_AFTER_INPUT=${ROCM_PATH}
 
 # Load the ROCm version for this build
 source /etc/profile.d/lmod.sh
-module load rocm/${ROCM_VERSION} openmpi
+module load rocm/${ROCM_VERSION}
 ROCM_VERSION=`cat $ROCM_PATH/.info/version | head -1 | cut -f1 -d'-'`
 
 echo "ROCM_VERSION after loading module is ${ROCM_VERSION}"
@@ -294,6 +294,8 @@ if [[ "${DRY_RUN}" == "0" ]] && [[ ! -d ${INSTALL_PATH} ]] ; then
 fi
 cd "${INSTALL_PATH}"
 
+CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+
 #
 # Install UCX
 #
@@ -305,7 +307,7 @@ else
    if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
       sudo rm -rf "${UCX_PATH}"
    fi
-   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${INSTALL_PATH}/CacheFiles/ucx-${UCX_VERSION}.tgz ]]; then
+   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${CACHE_FILES}/ucx-${UCX_VERSION}.tgz ]]; then
       echo ""
       echo "============================"
       echo " Installing Cached UCX"
@@ -313,10 +315,13 @@ else
       echo ""
 
       #install the cached version
-      echo "cached file is ${INSTALL_PATH}/CacheFiles/ucx-${UCX_VERSION}.tgz"
-      sudo tar -xzf ${INSTALL_PATH}/CacheFiles/ucx-${UCX_VERSION}.tgz
+      echo "cached file is ${CACHE_FILES}/ucx-${UCX_VERSION}.tgz"
+      cd ${INSTALL_PATH}
+      sudo tar -xzf ${CACHE_FILES}/ucx-${UCX_VERSION}.tgz
       sudo chown -R root:root "${INSTALL_PATH}"/ucx-${UCX_VERSION}
-      sudo rm "${INSTALL_PATH}"/CacheFiles/ucx-${UCX_VERSION}.tgz
+      if [ "${USER}" != "sysadmin" ]; then
+         sudo rm "${CACHE_FILES}"/ucx-${UCX_VERSION}.tgz
+      fi
    else
 
       echo ""
@@ -400,7 +405,7 @@ else
    if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
       sudo rm -rf "${UCC_PATH}"
    fi
-   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${INSTALL_PATH}"/CacheFiles/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz ]]; then
+   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz ]]; then
       echo ""
       echo "============================"
       echo " Installing Cached UCC"
@@ -409,9 +414,11 @@ else
 
       #install the cached version
       cd "${INSTALL_PATH}"
-      sudo tar -xzf "${INSTALL_PATH}"/CacheFiles/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
+      sudo tar -xzf "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
       sudo chown -R root:root "${INSTALL_PATH}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}
-      sudo rm "${INSTALL_PATH}"/CacheFiles/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
+      if [ "${USER}" != "sysadmin" ]; then
+         sudo rm "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
+      fi
    else
 
       echo ""
@@ -494,7 +501,7 @@ else
    if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
       sudo rm -rf "${OPENMPI_PATH}"
    fi
-   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${INSTALL_PATH}"/CacheFiles/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz ]]; then
+   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz ]]; then
       echo ""
       echo "============================"
       echo " Installing Cached OpenMPI"
@@ -503,9 +510,11 @@ else
 
       #install the cached version
       cd "${INSTALL_PATH}"
-      sudo tar -xzf "${INSTALL_PATH}"/CacheFiles/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
+      sudo tar -xzf "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
       sudo chown -R root:root "${INSTALL_PATH}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}
-      sudo rm "${INSTALL_PATH}"/CacheFiles/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
+      if [ "${USER}" != "sysadmin" ]; then
+         sudo rm "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
+      fi
    else
 
       echo ""

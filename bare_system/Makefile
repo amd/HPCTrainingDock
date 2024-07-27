@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
 all: rocm openmpi omnitrace kokkos cupy
-.PHONY: baseospackages lmod rocm openmpi omnitrace cupy pytorch
+.PHONY: baseospackages lmod rocm openmpi omnitrace kokkos cupy pytorch
 
 baseospackages: baseospackages.timestamp
 lmod: lmod.timestamp
@@ -21,21 +21,29 @@ lmod.timestamp: baseospackages.timestamp
 	touch lmod.timestamp
 
 rocm.timestamp: baseospackages.timestamp lmod.timestamp
-	rocm/sources/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION}
+	rocm/sources/scripts/rocm_setup.sh \
+	   --rocm-version ${ROCM_VERSION}
 	touch rocm.timestamp
 
 openmpi.timestamp: rocm.timestamp
-	rocm/sources/scripts/openmpi_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
+	rocm/sources/scripts/openmpi_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
 	touch openmpi.timestamp
 
 
 # From Omnitrace layer
 miniconda3.timestamp:
-	omnitrace/sources/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --python-versions ${PYTHON_VERSIONS}
+	omnitrace/sources/scripts/miniconda3_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --python-versions ${PYTHON_VERSIONS}
 	touch miniconda3.timestamp
 
 omnitrace.timestamp: miniconda3.timestamp openmpi.timestamp
-	omnitrace/sources/scripts/omnitrace_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE}
+	omnitrace/sources/scripts/omnitrace_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
+	   --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE}
 	touch omnitrace.timestamp
 
 # From Omniperf layer
@@ -44,7 +52,8 @@ grafana.timestamp:
 	omniperf/sources/scripts/grafana_setup.sh
 
 omniperf.timestamp: rocm.timestamp
-	omniperf/sources/scripts/omniperf_setup.sh --rocm-version ${ROCM_VERSION}
+	omniperf/sources/scripts/omniperf_setup.sh \
+	   --rocm-version ${ROCM_VERSION}
 
 # From Training layer
 
@@ -55,14 +64,22 @@ apps_setup_basic.timestamp:
 	training/sources/scripts/apps_setup_basic.sh
 
 kokkos.timestamp: rocm.timestamp
-	training/sources/scripts/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-kokkos ${BUILD_KOKKOS}
+	training/sources/scripts/kokkos_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --build-kokkos ${BUILD_KOKKOS}
 
 cupy.timestamp: rocm.timestamp
-	training/sources/scripts/cupy_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-cupy ${BUILD_CUPY}
+	training/sources/scripts/cupy_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
+	   --build-cupy ${BUILD_CUPY}
 	touch cupy.timestamp
 
 pytorch.timestamp: rocm.timestamp apps_setup_basic.timestamp
-	training/sources/scripts/pytorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-pytorch ${BUILD_PYTORCH}
+	training/sources/scripts/pytorch_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
+	   --build-pytorch ${BUILD_PYTORCH}
 	touch pytorch.timestamp
 
 #training/sources/scripts/apps_setup.sh
@@ -93,6 +110,7 @@ rocm_package: rocm.timestamp
 	   cp -p /tmp/rocm-${ROCM_VERSION}.tgz /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
 	touch rocm_package.timestamp
 
+# not working yet -- may need helper script
 openmpi_package: openmpi.timestamp
 	cd /opt/rocmplus-${ROCM_VERSION} && OPENMPI_NAME=`ls openmpi*` && \
 	   tar -czvpf ${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/${OPENMPI_NAME}.tgz ${OPENMPI_NAME}
@@ -126,5 +144,4 @@ package_all:
 	      fi \
 	   done
 		   
-
 #all_package: rocm_package.timestamp openmpi_package.timestamp omnitrace_package.timestamp cupy_package.timestamp pytorch_package.timestamp

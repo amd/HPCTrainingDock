@@ -71,7 +71,8 @@ if [ "${BUILD_CUPY}" = "0" ]; then
 else 
    cd /tmp
 
-   if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/cupy.tgz ]; then
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+   if [ -f ${CACHE_FILES}/cupy.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached CuPy"
@@ -81,10 +82,12 @@ else
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
       sudo chmod u+w /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf CacheFiles/cupy.tgz
+      tar -xzf ${CACHE_FILES}/cupy.tgz
       chown -R root:root /opt/rocmplus-${ROCM_VERSION}/cupy
-      sudo rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/cupy.tgz
       sudo chmod u-w /opt/rocmplus-${ROCM_VERSION}
+      if [ "${USER}" != "sysadmin" ]; then
+         sudo rm ${CACHE_FILES}/cupy.tgz
+      fi
    else
       echo ""
       echo "============================"

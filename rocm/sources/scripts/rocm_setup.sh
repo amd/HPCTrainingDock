@@ -289,7 +289,9 @@ if [ "${DISTRO}" == "ubuntu" ]; then
          echo "cached file is ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz"
          sudo tar -xzf ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz
          sudo chown -R root:root "${INSTALL_PATH}"/rocm-${ROCM_VERSION}
-         #sudo rm "${INSTALL_PATH}"/CacheFiles/rocm-${ROCM_VERSION}.tgz
+	 if [ "${USER}" != "sysadmin" ]; then
+            sudo rm "${INSTALL_PATH}"/CacheFiles/rocm-${ROCM_VERSION}.tgz
+	 fi
       else
 
          #mkdir --parents --mode=0755 /etc/apt/keyrings
