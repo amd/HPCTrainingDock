@@ -28,6 +28,10 @@ WORKDIR /tmp
 RUN apt-get -q -y update
 RUN apt-get install -q -y vim sudo apt-utils make
 
+COPY rocm/sources/scripts/lmod_setup.sh /tmp/lmod_setup.sh
+
+RUN  /tmp/lmod_setup.sh && \
+     rm /tmp/lmod_setup.sh
 
 SHELL ["/bin/bash", "-c"]
 
@@ -39,6 +43,7 @@ RUN usermod -a -G video,render,renderalt,sudo sysadmin
 RUN chown -R sysadmin:sysadmin /home/sysadmin
 USER sysadmin
 ENV HOME=/home/sysadmin
+ENV USER=sysadmin
 WORKDIR /home/sysadmin
 
 #COPY rocm/sources/scripts/lmod_setup.sh /tmp/lmod_setup.sh

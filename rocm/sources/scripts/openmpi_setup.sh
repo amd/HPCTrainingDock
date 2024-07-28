@@ -316,9 +316,11 @@ else
 
       #install the cached version
       echo "cached file is ${CACHE_FILES}/ucx-${UCX_VERSION}.tgz"
+      sudo mkdir -p ${UCX_PATH}
       cd ${INSTALL_PATH}
-      sudo tar -xzf ${CACHE_FILES}/ucx-${UCX_VERSION}.tgz
-      sudo chown -R root:root "${INSTALL_PATH}"/ucx-${UCX_VERSION}
+      sudo tar -xpzf ${CACHE_FILES}/ucx-${UCX_VERSION}.tgz
+      #sudo chown -R root:root ${UCX_PATH}
+      echo "USER is $USER"
       if [ "${USER}" != "sysadmin" ]; then
          sudo rm "${CACHE_FILES}"/ucx-${UCX_VERSION}.tgz
       fi
@@ -413,9 +415,11 @@ else
       echo ""
 
       #install the cached version
+      echo "cached file is ${CACHE_FILES}/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz"
+      sudo mkdir -p ${UCC_PATH}
       cd "${INSTALL_PATH}"
       sudo tar -xzf "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
-      sudo chown -R root:root "${INSTALL_PATH}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}
+      sudo chown -R root:root ${UCC_PATH}
       if [ "${USER}" != "sysadmin" ]; then
          sudo rm "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
       fi
@@ -509,9 +513,11 @@ else
       echo ""
 
       #install the cached version
+      echo "cached file is ${CACHE_FILES}/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz"
+      sudo mkdir -p ${OPENMPI_PATH}
       cd "${INSTALL_PATH}"
       sudo tar -xzf "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
-      sudo chown -R root:root "${INSTALL_PATH}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}
+      sudo chown -R root:root ${OPENMPI_PATH}
       if [ "${USER}" != "sysadmin" ]; then
          sudo rm "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
       fi

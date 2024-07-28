@@ -4,13 +4,15 @@ all: rocm openmpi omnitrace kokkos cupy
 
 baseospackages: baseospackages.timestamp
 lmod: lmod.timestamp
+bashrc: bashrc.timestamp
 rocm: rocm.timestamp
 openmpi: openmpi.timestamp
+mvapich2: mvapich2.timestamp
+slurm: slurm.timestip
 omnitrace: omnitrace.timestamp
 kokkos: kokkos.timestamp
 cupy: cupy.timestamp
 pytorch: pytorch.timestamp
-HPCTrainingExamples: HPCTrainingExamples.timestamp
 openmpi_tests: openmpi_tests.timestamp
 kokkos_tests: kokkos_tests.timestamp
 cupy_tests: cupy_tests.timestamp
@@ -26,11 +28,15 @@ baseospackages.timestamp:
 	rocm/sources/scripts/baseospackages_setup.sh
 	touch baseospackages.timestamp
 
-lmod.timestamp: baseospackages.timestamp
-	rocm/sources/scripts/lmod_setup.sh
-	touch lmod.timestamp
+#lmod.timestamp: baseospackages.timestamp
+#	rocm/sources/scripts/lmod_setup.sh
+#	touch lmod.timestamp
 
-rocm.timestamp: baseospackages.timestamp lmod.timestamp
+bashrc.timestamp:
+	cat rocm/sources/lua/bash.bashrc >> /etc/bash.bashrc
+	touch bashrc.timestamp
+
+rocm.timestamp: baseospackages.timestamp # lmod.timestamp
 	rocm/sources/scripts/rocm_setup.sh \
 	   --rocm-version ${ROCM_VERSION}
 	touch rocm.timestamp
@@ -41,6 +47,15 @@ openmpi.timestamp: rocm.timestamp
 	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
 	touch openmpi.timestamp
 
+mvapich2.timestamp: rocm.timestamp
+	rocm/sources/scripts/mvapich2_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
+	touch mvapich2.timestamp
+
+slurm.timestamp:
+	rocm/sources/scripts/slurm_setup.sh
+	touch slurm.timestamp
 
 # From Omnitrace layer
 miniconda3.timestamp:
@@ -96,33 +111,34 @@ pytorch.timestamp: rocm.timestamp apps_setup_basic.timestamp
 
 
 # Testing support for builds
-HPCTrainingExamples.timestamp:
-	git clone https://github.com/AMD/HPCTrainingExamples 
+HPCTrainingExamples:
+	git clone https://github.com/AMD/HPCTrainingExamples
 	cd HPCTrainingExamples/tests && mkdir build && cd build && cmake ..
-	touch HPCTrainingExamples.timestamp
 
-openmpi_tests.timestamp: openmpi.timestamp HPCTrainingExamples.timestamp
-	source /etc/profile.d/lmod.sh && cd HPCTrainingExamples/tests/build && ctest -R OpenMPI
+openmpi_tests.timestamp: openmpi.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R OpenMPI
 	touch openmpi_tests.timestamp
 
-kokkos_tests.timestamp: kokkos.timestamp HPCTrainingExamples.timestamp
-	source /etc/profile.d/lmod.sh && cd HPCTrainingExamples/tests/build && ctest -R Kokkos
+kokkos_tests.timestamp: kokkos.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R Kokkos
 	touch kokkos_tests.timestamp
 
-cupy_tests.timestamp: cupy.timestamp HPCTrainingExamples.timestamp
-	source /etc/profile.d/lmod.sh && cd HPCTrainingExamples/tests/build && ctest -R Cupy
+cupy_tests.timestamp: cupy.timestamp HPCTrainingExamples
+	#source /etc/profile.d/lmod.sh && cd HPCTrainingExamples/tests/build && ctest -R Cupy
+	cd HPCTrainingExamples/tests/build && ctest -R Cupy
 	touch cupy_tests.timestamp
 
-pytorch_tests.timestamp: pytorch.timestamp HPCTrainingExamples.timestamp
-	source /etc/profile.d/lmod.sh && cd HPCTrainingExamples/tests/build && ctest -R Pytorch
+pytorch_tests.timestamp: pytorch.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R Pytorch
 	touch pytorch_tests.timestamp
 
 
 # Deploy targets create a compressed tar image of the directory for the package
 rocm_package.timestamp: rocm.timestamp
-	cd /opt && \
-	   tar -czpf /tmp/rocm-${ROCM_VERSION}.tgz \
-	      /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/rocm-${ROCM_VERSION} && \
+	#cd /opt && \
+	#   tar -czpf rocm-${ROCM_VERSION} \
+	#      /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/rocm-${ROCM_VERSION}.tgz
+	bare_system/deploy_package.sh --package-basedir /opt --selection-string rocm-${ROCM_VERSION}
 	touch rocm_package.timestamp
 
 openmpi_package.timestamp: openmpi.timestamp
