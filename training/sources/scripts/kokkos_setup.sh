@@ -36,7 +36,7 @@ if [ "${BUILD_KOKKOS}" = "0" ]; then
 
    echo "Kokkos will not be build, according to the specified value of BUILD_KOKKOS"
    echo "BUILD_KOKKOS: $BUILD_KOKKOS"
-   exit 1
+   exit 
 
 else
    if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/kokkos.tgz ]; then
