@@ -1,22 +1,27 @@
 SHELL:=/bin/bash
-all: rocm openmpi omnitrace kokkos cupy
-.PHONY: baseospackages lmod rocm openmpi omnitrace kokkos cupy pytorch
+all: rocm openmpi omnitrace omniperf kokkos cupy
+.PHONY: baseospackages rocm openmpi mvapich2 slurm omnitrace amd_gcc aomp kokkos apps_setup_basic cupy pytorch apps_setup
 
 baseospackages: baseospackages.timestamp
-lmod: lmod.timestamp
-bashrc: bashrc.timestamp
 rocm: rocm.timestamp
 openmpi: openmpi.timestamp
 mvapich2: mvapich2.timestamp
 slurm: slurm.timestip
 omnitrace: omnitrace.timestamp
+omniperf: omniperf.timestamp
+amd_gcc: amd_gcc.timestamp
+aomp: aomp.timestamp
 kokkos: kokkos.timestamp
+apps_setup_basic: apps_setup_basic.timestamp
 cupy: cupy.timestamp
 pytorch: pytorch.timestamp
+apps_setup: apps_setup.timestamp
+
 openmpi_tests: openmpi_tests.timestamp
 kokkos_tests: kokkos_tests.timestamp
 cupy_tests: cupy_tests.timestamp
 pytorch_tests: pytorch_tests.timestamp
+
 rocm_package: rocm_package.timestamp
 openmpi_package: openmpi_package.timestamp
 omnitrace_package: omnitrace_package.timestamp
@@ -27,14 +32,6 @@ all_packages: all_packages.timestamp
 baseospackages.timestamp:
 	rocm/sources/scripts/baseospackages_setup.sh
 	touch baseospackages.timestamp
-
-#lmod.timestamp: baseospackages.timestamp
-#	rocm/sources/scripts/lmod_setup.sh
-#	touch lmod.timestamp
-
-#bashrc.timestamp:
-#	cat rocm/sources/lua/bash.bashrc >> /etc/bash.bashrc
-#	touch bashrc.timestamp
 
 rocm.timestamp: baseospackages.timestamp # lmod.timestamp
 	rocm/sources/scripts/rocm_setup.sh \
@@ -84,14 +81,29 @@ omniperf.timestamp: rocm.timestamp
 
 compiler_setup.sh:
 	training/sources/scripts/compiler_setup.sh
+	touch compiler_setup.timestamp
 
-apps_setup_basic.timestamp:
-	training/sources/scripts/apps_setup_basic.sh
+amd_gcc.timestamp: amd_gcc.timestamp
+	training/sources/scripts/amd_gcc_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --build-gcc-latest ${BUILD_GCC_LATEST}
+	touch amd_gcc.timestamp
+
+aomp.timestamp: aomp.timestamp
+	training/sources/scripts/aomp_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --build-aomp-latest ${BUILD_AOMP_LATEST}
+	touch aomp.timestamp
 
 kokkos.timestamp: rocm.timestamp
 	training/sources/scripts/kokkos_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-kokkos ${BUILD_KOKKOS}
+	touch kokkos.timestamp
+
+apps_setup_basic.timestamp:
+	training/sources/scripts/apps_setup_basic.sh
+	touch apps_setup_basic.timestamp
 
 cupy.timestamp: rocm.timestamp
 	training/sources/scripts/cupy_setup.sh \
@@ -107,7 +119,9 @@ pytorch.timestamp: rocm.timestamp apps_setup_basic.timestamp
 	   --build-pytorch ${BUILD_PYTORCH}
 	touch pytorch.timestamp
 
-#training/sources/scripts/apps_setup.sh
+apps_setup.timestamp:
+	training/sources/scripts/apps_setup.sh
+	touch apps_basic.timestamp
 
 
 # Testing support for builds
