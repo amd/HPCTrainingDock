@@ -318,9 +318,11 @@ else
       echo "cached file is ${CACHE_FILES}/ucx-${UCX_VERSION}.tgz"
       sudo mkdir -p ${UCX_PATH}
       cd ${INSTALL_PATH}
-      sudo tar -xpzf ${CACHE_FILES}/ucx-${UCX_VERSION}.tgz
-      #sudo chown -R root:root ${UCX_PATH}
-      echo "USER is $USER"
+      sudo tar -xzpf ${CACHE_FILES}/ucx-${UCX_VERSION}.tgz
+      if [ "${USER}" != "root" ]; then
+         sudo find ${UCX_PATH} -type f -execdir chown root:root "{}" +
+         sudo find ${UCX_PATH} -type d -execdir chown root:root "{}" +
+      fi
       if [ "${USER}" != "sysadmin" ]; then
          sudo rm "${CACHE_FILES}"/ucx-${UCX_VERSION}.tgz
       fi
@@ -418,8 +420,11 @@ else
       echo "cached file is ${CACHE_FILES}/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz"
       sudo mkdir -p ${UCC_PATH}
       cd "${INSTALL_PATH}"
-      sudo tar -xzf "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
-      sudo chown -R root:root ${UCC_PATH}
+      sudo tar -xzpf "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
+      if [ "${USER}" != "root" ]; then
+         sudo find ${UCC_PATH} -type f -execdir chown root:root "{}" +
+         sudo find ${UCC_PATH} -type d -execdir chown root:root "{}" +
+      fi
       if [ "${USER}" != "sysadmin" ]; then
          sudo rm "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
       fi
@@ -516,8 +521,11 @@ else
       echo "cached file is ${CACHE_FILES}/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz"
       sudo mkdir -p ${OPENMPI_PATH}
       cd "${INSTALL_PATH}"
-      sudo tar -xzf "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
-      sudo chown -R root:root ${OPENMPI_PATH}
+      sudo tar -xzpf "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
+      if [ "${USER}" != "root" ]; then
+         sudo find ${OPENMPI_PATH} -type f -execdir chown root:root "{}" +
+         sudo find ${OPENMPI_PATH} -type d -execdir chown root:root "{}" +
+      fi
       if [ "${USER}" != "sysadmin" ]; then
          sudo rm "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
       fi

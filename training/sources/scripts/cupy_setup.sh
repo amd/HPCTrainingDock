@@ -119,12 +119,18 @@ else
       
       # install necessary packages in installation directory
       sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/cupy
-      sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}/cupy
+      if [[ "${USER}" != "root" ]]; then
+         sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}/cupy
+      fi
       pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/cupy pytest mock
       pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/cupy dist/cupy-13.0.0b1-cp310-cp310-linux_x86_64.whl
-      sudo -R chown root /opt/rocmplus-${ROCM_VERSION}/cupy
-      sudo -R chgrp root /opt/rocmplus-${ROCM_VERSION}/cupy
-      sudo chmod go-w /opt/rocmplus-${ROCM_VERSION}/cupy
+      if [[ "${USER}" != "root" ]]; then
+         sudo find /opt/rocmplus-${ROCM_VERSION}/cupy -type f -execdir chown root:root "{}" +
+         sudo find /opt/rocmplus-${ROCM_VERSION}/cupy -type d -execdir chown root:root "{}" +
+      fi
+      if [[ "${USER}" != "root" ]]; then
+         sudo chmod go-w /opt/rocmplus-${ROCM_VERSION}/cupy
+      fi
       
       # cleanup
       cd ..
