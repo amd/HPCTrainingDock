@@ -78,31 +78,15 @@ RUN /tmp/compiler_setup.sh && \
 RUN apt-get update && apt-get install -y gawk ninja-build generate-ninja ccache
 RUN pip3 install CppHeaderParser
 
-# Grab any cache files of compiler builds
-#COPY cache.list \
-#     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/gcc-13.2.0.* \
-#     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/aomp_19.0-0.* \
-#     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/llvm-latest.* \
-#     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/clacc-clang.* \
-#     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/og13.* \
-#     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/cupy.* \
-#     CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/pytorch.* \
-#     /opt/rocmplus-${ROCM_VERSION}/
-
 # Build the latest GCC for AMD compiler if requested
 COPY training/sources/scripts/amd_gcc_setup.sh /tmp/amd_gcc_setup.sh
 RUN /tmp/amd_gcc_setup.sh --build-gcc-latest ${BUILD_GCC_LATEST} --rocm-version ${ROCM_VERSION} && \
     rm /tmp/amd_gcc_setup.sh
 
-# Grab any cache files of compiler builds
-
 # install aomp
 COPY training/sources/scripts/aomp_setup.sh /tmp/aomp_setup.sh
 RUN /tmp/aomp_setup.sh --build-aomp-latest ${BUILD_AOMP_LATEST} --rocm-version ${ROCM_VERSION} && rm /tmp/aomp_setup.sh
  
-# Grab any cache files of compiler builds
-#COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/llvm-latest.tgz /opt/rocmplus-${ROCM_VERSION}/llvm-latest.tgz
-
 # install latest llvm
 COPY training/sources/scripts/llvm-build.sh /tmp/llvm-build.sh
 RUN /tmp/llvm-build.sh --build-llvm-latest ${BUILD_LLVM_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/llvm-build.sh
@@ -112,10 +96,6 @@ RUN /tmp/llvm-build.sh --build-llvm-latest ${BUILD_LLVM_LATEST} --rocm-version $
 # Build the clacc_clang compiler
 COPY training/sources/scripts/clacc_setup.sh /tmp/clacc_setup.sh
 RUN /tmp/clacc_setup.sh --build-clacc-latest ${BUILD_CLACC_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/clacc_setup.sh
-
-# Grab any cache files of compiler builds
-#COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/og13.tgz /opt/rocmplus-${ROCM_VERSION}/og13.tgz
-#COPY CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}/og13module.tgz /opt/rocmplus-${ROCM_VERSION}/og13module.tgz
 
 # Install the OpenMP GCC compiler latest drop
 COPY training/sources/scripts/og_setup.sh /tmp/og_setup.sh

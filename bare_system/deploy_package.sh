@@ -65,19 +65,23 @@ cd ${PACKAGE_BASEDIR}
 for package in `find . -maxdepth 1 -type d `; do
    package=`basename $package`
    if [[ "${package}" =~ "$SELECTION_STRING" ]]; then
-      echo "Packing up $package"
       CACHE_DIR=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
-      tar -czvpf ${CACHE_DIR}/${package}.tgz ${package}
-      echo "" > /tmp/InstallLog.txt
-      echo "Package $package built on " `date` >> /tmp/InstallLog.txt
-      PACKAGE_MD5SUM=`md5sum ${CACHE_DIR}/${package}.tgz`
-      echo "MD5SUM: ${PACKAGE_MD5SUM}" >> /tmp/InstallLog.txt
-      FILE_COUNT=`find $package -type f | wc -l`
-      echo "FILES in $package: $FILE_COUNT" >> /tmp/InstallLog.txt
-      PACKAGE_SIZE=`du -skh $package`
-      echo "SIZE of $package: $PACKAGE_SIZE" >> /tmp/InstallLog.txt
+      if [ ! -f "${CACHE_DIR}/${package}.tgz" ]; then
+         echo "Packing up $package"
+         tar -czvpf ${CACHE_DIR}/${package}.tgz ${package}
+         echo "" > /tmp/InstallLog.txt
+         echo "Package $package built on " `date` >> /tmp/InstallLog.txt
+         PACKAGE_MD5SUM=`md5sum ${CACHE_DIR}/${package}.tgz`
+         echo "MD5SUM: ${PACKAGE_MD5SUM}" >> /tmp/InstallLog.txt
+         FILE_COUNT=`find $package -type f | wc -l`
+         echo "FILES in $package: $FILE_COUNT" >> /tmp/InstallLog.txt
+         PACKAGE_SIZE=`du -skh $package`
+         echo "SIZE of $package: $PACKAGE_SIZE" >> /tmp/InstallLog.txt
 
-      cat /tmp/InstallLog.txt
-      cat /tmp/InstallLog.txt >> ${CACHE_DIR}/InstallLog.txt
+         cat /tmp/InstallLog.txt
+         cat /tmp/InstallLog.txt >> ${CACHE_DIR}/InstallLog.txt
+      else
+         echo "${CACHE_DIR}/${package}.tgz already exists"
+      fi
    fi
 done

@@ -1,5 +1,23 @@
 #!/bin/bash
 
+# Variables controlling setup process
+MODULE_PATH==/etc/lmod/modules/ROCmPlus-AMDResearchTools/omnitrace
+OMNITRACE_BUILD_FROM_SOURCE=0
+
+# Autodetect defaults
+AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
+usage()
+{
+   echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
+   echo "--help: this usage information"
+   echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/openmpi"
+   echo "--omnitrace-build-from-source [OMNITRACE_BUILD_FROM_SOURCE]"
+   echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+}
+
 send-error()
 {
     usage
@@ -13,32 +31,31 @@ reset-last()
     last() { send-error "Unsupported argument :: ${1}"; }
 }
 
-
-DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-OMNITRACE_BUILD_FROM_SOURCE=0
-
-reset-last
-
 n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
-      "--rocm-version")
-          shift
-          ROCM_VERSION=${1}
-          reset-last
-          ;;
       "--amdgpu-gfxmodel")
           shift
           AMDGPU_GFXMODEL=${1}
           reset-last
           ;;
+      "--help")
+          usage
+	  ;;
+      "--module-path")
+          shift
+          MODULE_PATH=${1}
+          reset-last
+          ;;
       "--omnitrace-build-from-source")
           shift
           OMNITRACE_BUILD_FROM_SOURCE=${1}
+          reset-last
+          ;;
+      "--rocm-version")
+          shift
+          ROCM_VERSION=${1}
           reset-last
           ;;
       *)

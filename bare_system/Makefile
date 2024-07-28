@@ -32,9 +32,9 @@ baseospackages.timestamp:
 #	rocm/sources/scripts/lmod_setup.sh
 #	touch lmod.timestamp
 
-bashrc.timestamp:
-	cat rocm/sources/lua/bash.bashrc >> /etc/bash.bashrc
-	touch bashrc.timestamp
+#bashrc.timestamp:
+#	cat rocm/sources/lua/bash.bashrc >> /etc/bash.bashrc
+#	touch bashrc.timestamp
 
 rocm.timestamp: baseospackages.timestamp # lmod.timestamp
 	rocm/sources/scripts/rocm_setup.sh \

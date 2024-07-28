@@ -33,6 +33,9 @@ COPY rocm/sources/scripts/lmod_setup.sh /tmp/lmod_setup.sh
 RUN  /tmp/lmod_setup.sh && \
      rm /tmp/lmod_setup.sh
 
+COPY rocm/sources/lua/bash.bashrc /tmp/bash.bashrc
+RUN cat /tmp/bash.bashrc >> /etc/bash.bashrc && rm -f /tmp/bash.bashrc
+
 SHELL ["/bin/bash", "-c"]
 
 RUN adduser --home /home/sysadmin --uid 20000 --shell /bin/bash --disabled-password --gecos '' sysadmin
