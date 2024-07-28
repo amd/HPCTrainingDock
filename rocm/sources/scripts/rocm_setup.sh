@@ -287,6 +287,7 @@ if [ "${DISTRO}" == "ubuntu" ]; then
 
          #install the cached version
          echo "cached file is ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz"
+	 cd /opt
          sudo tar -xzf ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz
          sudo chown -R root:root "${INSTALL_PATH}"/rocm-${ROCM_VERSION}
 	 if [ "${USER}" != "sysadmin" ]; then

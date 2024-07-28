@@ -10,6 +10,16 @@ omnitrace: omnitrace.timestamp
 kokkos: kokkos.timestamp
 cupy: cupy.timestamp
 pytorch: pytorch.timestamp
+HPCTrainingExamples: HPCTrainingExamples.timestamp
+openmpi_tests: openmpi_tests.timestamp
+kokkos_tests: kokkos_tests.timestamp
+cupy_tests: cupy_tests.timestamp
+pytorch_tests: pytorch_tests.timestamp
+rocm_package: rocm_package.timestamp
+openmpi_package: openmpi_package.timestamp
+omnitrace_package: omnitrace_package.timestamp
+cupy_package: cupy_package.timestamp
+all_packages: all_packages.timestamp
 
 # From base rocm layer
 baseospackages.timestamp:
@@ -86,62 +96,48 @@ pytorch.timestamp: rocm.timestamp apps_setup_basic.timestamp
 
 
 # Testing support for builds
-HPCTrainingExamples:
+HPCTrainingExamples.timestamp:
 	git clone https://github.com/AMD/HPCTrainingExamples 
 	cd HPCTrainingExamples/tests && mkdir build && cd build && cmake ..
+	touch HPCTrainingExamples.timestamp
 
-openmpi_tests: openmpi.timestamp HPCTrainingExamples
+openmpi_tests.timestamp: openmpi.timestamp HPCTrainingExamples.timestamp
 	source /etc/profile.d/lmod.sh && cd HPCTrainingExamples/tests/build && ctest -R OpenMPI
+	touch openmpi_tests.timestamp
 
-kokkos_tests: kokkos.timestamp HPCTrainingExamples
+kokkos_tests.timestamp: kokkos.timestamp HPCTrainingExamples.timestamp
 	source /etc/profile.d/lmod.sh && cd HPCTrainingExamples/tests/build && ctest -R Kokkos
+	touch kokkos_tests.timestamp
 
-cupy_tests: cupy.timestamp HPCTrainingExamples
+cupy_tests.timestamp: cupy.timestamp HPCTrainingExamples.timestamp
 	source /etc/profile.d/lmod.sh && cd HPCTrainingExamples/tests/build && ctest -R Cupy
+	touch cupy_tests.timestamp
 
-pytorch_tests: pytorch.timestamp HPCTrainingExamples
+pytorch_tests.timestamp: pytorch.timestamp HPCTrainingExamples.timestamp
 	source /etc/profile.d/lmod.sh && cd HPCTrainingExamples/tests/build && ctest -R Pytorch
+	touch pytorch_tests.timestamp
 
 
 # Deploy targets create a compressed tar image of the directory for the package
-rocm_package: rocm.timestamp
+rocm_package.timestamp: rocm.timestamp
 	cd /opt && \
-	   tar -czpf /tmp/rocm-${ROCM_VERSION}.tgz rocm-${ROCM_VERSION} && \
-	   cp -p /tmp/rocm-${ROCM_VERSION}.tgz /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+	   tar -czpf /tmp/rocm-${ROCM_VERSION}.tgz \
+	      /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/rocm-${ROCM_VERSION} && \
 	touch rocm_package.timestamp
 
-# not working yet -- may need helper script
-openmpi_package: openmpi.timestamp
-	cd /opt/rocmplus-${ROCM_VERSION} && OPENMPI_NAME=`ls openmpi*` && \
-	   tar -czvpf ${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/${OPENMPI_NAME}.tgz ${OPENMPI_NAME}
-	cd /opt/rocmplus-${ROCM_VERSION} && UCC_NAME=`ls ucc*` && \
-	   tar -czvpf ${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/${UCC_NAME}.tgz ${UCC_NAME}
-	cd /opt/rocmplus-${ROCM_VERSION} && UCX_NAME=`ls ucx*` && \
-	   tar -czvpf ${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/${UCX_NAME}.tgz ${UCX_NAME}
+openmpi_package.timestamp: openmpi.timestamp
+	bare_system/deploy_package.sh --selection-string ucx
+	bare_system/deploy_package.sh --selection-string ucc
+	bare_system/deploy_package.sh --selection-string openmpi
 	touch openmpi_package.timestamp
 
-omnitrace_package: omnitrace.timestamp
-	cd /opt/rocmplus-${ROCM_VERSION} && OMNITRACE_NAME=`ls omnitrace*` && \
-	   tar -czvpf ${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/${OMNITRACE_NAME}.tgz ${OMNITRACE_NAME}
+omnitrace_package.timestamp: omnitrace.timestamp
+	bare_system/deploy_package.sh --selection-string omnitrace
 	touch omnitrace_package.timestamp
 
-cupy_package: cupy.timestamp
-	cd /opt/rocmplus-${ROCM_VERSION} && \
-	   tar -czvpf /tmp/cupy.tgz cupy
-	   sudo cp /tmp/cupy.tgz /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+cupy_package.timestamp: cupy.timestamp
+	bare_system/deploy_package.sh --selection-string cupy
 	touch cupy_package.timestamp
 
-pytorch_package: pytorch.timestamp
-	cd /opt/rocmplus-${ROCM_VERSION} && PYTORCH_NAME=`ls cupy*` && \
-	   tar -czvpf ${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/${PYTORCH_NAME}.tgz ${PYTORCH_NAME}
-	touch pytorch_package.timestamp
-
-package_all:
-	cd /opt/rocmplus-${ROCM_VERSION} && \
-	   for package in `ls *`; do \
-	      if [ "${package}" =~ "cupy" ]; then \
-	         tar -czvpf ${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/${package}.tgz ${package} \
-	      fi \
-	   done
-		   
-#all_package: rocm_package.timestamp openmpi_package.timestamp omnitrace_package.timestamp cupy_package.timestamp pytorch_package.timestamp
+all_packages.timestamp: rocm_package.timestamp openmpi_package.timestamp omnitrace_package.timestamp cupy_package.timestamp
+	touch all_packages.timestamp
