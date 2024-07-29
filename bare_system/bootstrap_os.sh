@@ -11,3 +11,9 @@ if [ "${DISTRO}" = "rocky linux" ]; then
    yum update -y
    yum install -y sudo
 fi
+
+if [ "${DISTRO}" = "opensuse leap" ]; then
+   zypper update -y
+   zypper dist-upgrade -y
+   zypper --non-interactive in sudo vim
+fi

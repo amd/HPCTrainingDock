@@ -20,8 +20,8 @@ ENV BASH_ENV /etc/bash.bashrc
 ENV DEBIAN_FRONTEND noninteractive
 
 # Adding render group early to avoid something else grabbing it and causing problems for slurm
-RUN groupadd render -g 109
-RUN groupadd renderalt -g 110
+#RUN groupadd render -g 109
+#RUN groupadd renderalt -g 110
 
 WORKDIR /tmp
 
