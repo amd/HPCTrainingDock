@@ -38,10 +38,8 @@ RUN cat /tmp/bash.bashrc >> /etc/bash.bashrc && rm -f /tmp/bash.bashrc
 
 SHELL ["/bin/bash", "-c"]
 
-RUN adduser --home /home/sysadmin --uid 20000 --shell /bin/bash --disabled-password --gecos '' sysadmin
-RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
-#RUN usermod -a -G video,render,renderalt,sudo --password $(echo amdtest | openssl passwd -1 -stdin) sysadmin
-RUN usermod -a -G video,render,renderalt,sudo sysadmin
+COPY bare_system/adduser_os.sh /tmp/adduser_os.sh
+RUN /tmp/adduser_os.sh && rm /tmp/adduser_os.sh
 
 RUN chown -R sysadmin:sysadmin /home/sysadmin
 USER sysadmin
