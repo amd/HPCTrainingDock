@@ -12,5 +12,6 @@ fi
 if [ "${DISTRO}" = "rocky linux" ]; then
 # password is disable by default and option is not portable. Same with --gecos
    adduser --home /home/sysadmin --uid 20000 --shell /bin/bash sysadmin
+   echo '%wheel ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
    usermod -a -G video,render,renderalt,wheel sysadmin
 fi
