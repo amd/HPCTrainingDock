@@ -59,8 +59,8 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    # these are for slurm   :  libpmi2-0-dev 
    sudo apt-get update -y
    sudo apt-cache search libpmi*
-   sudo apt-get install -y libpmi2-0-dev
-   sudo apt-get  install -y slurmd slurmctld
+   sudo apt-get install -y libpmi2-0-dev \
+                           slurmd slurmctld
 
    apt-get -q clean && sudo rm -rf /var/lib/apt/lists/*
 

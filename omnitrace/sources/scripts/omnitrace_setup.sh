@@ -154,8 +154,6 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "1" ] ; then
 fi
 
 # In either case, create a module file for Omnitrace
-export MODULE_PATH=/etc/lmod/modules/ROCmPlus-AMDResearchTools/omnitrace
-
 sudo mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs

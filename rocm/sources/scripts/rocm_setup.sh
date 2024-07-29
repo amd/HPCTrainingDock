@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# Variables controlling setup process
 : ${ROCM_VERSION:="6.0"}
 USE_CACHE_BUILD=1
 REPLACE=0
@@ -22,6 +23,54 @@ usage()
    echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    exit 1
 }
+
+# Variables controlling setup process
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
+usage()
+{
+   echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+}
+
+send-error()
+{
+   usage
+   echo -e "\nError: ${@}"
+   exit 1
+}
+
+reset-last()
+{
+   last() { send-error "Unsupported argument :: ${1}"; }
+}
+
+n=0
+while [[ $# -gt 0 ]]
+do
+   case "${1}" in
+      "--help")
+         usage
+	 ;;
+      "--replace")
+          REPLACE=1
+          reset-last
+          ;;
+      "--rocm-version")
+          shift
+          ROCM_VERSION=${1}
+          reset-last
+          ;;
+      "--*")
+          send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
+          ;;
+      *)
+          last ${1}
+          ;;
+   esac
+   n=$((${n} + 1))
+   shift
+done
 
 version-set()
 {
@@ -181,54 +230,17 @@ opensuse-set()
 #  ROCM_DOCKER_OPTS="${ROCM_DOCKER_OPTS} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PERL_REPO=${PERL_REPO}"
 }
 
-send-error()
-{
-    usage
-    echo -e "\nError: ${@}"
-    exit 1
-}
-
-reset-last()
-{
-   last() { send-error "Unsupported argument :: ${1}"; }
-}
+if [ "${DISTRO}" == "rocky linux" ]; then
+   ROCM_REPO_DIST=${DISTRO_VERSION}
+else
+   ROCM_REPO_DIST=`lsb_release -c | cut -f2`
+fi
 
 #echo "After autodetection"
-#echo "ROCM_REPO_DIST is $ROCM_REPO_DIST" 
 #echo "DISTRO is $DISTRO" 
 #echo "DISTRO_VERSION is $DISTRO_VERSION" 
 #echo ""
 
-n=0
-while [[ $# -gt 0 ]]
-do
-   case "${1}" in
-      "--help")
-          usage
-          ;;
-      "--replace")
-          REPLACE=1
-          reset-last
-          ;;
-      "--rocm-version")
-          shift
-          ROCM_VERSION=${1}
-	  reset-last
-          ;;
-      "--*")
-          send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
-          ;;
-      *)
-         last ${1}
-         ;;
-   esac
-   n=$((${n} + 1))
-   shift
-done
-
-#echo "After input parsing"
-#echo "DISTRO is $DISTRO" 
-#echo "DISTRO_VERSION is $DISTRO_VERSION" 
 #echo "ROCM_VERSION is $ROCM_VERSION" 
 #echo ""
 #echo "ROCM_REPO_DIST is $ROCM_REPO_DIST" 
