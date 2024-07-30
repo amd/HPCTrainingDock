@@ -15,6 +15,9 @@ fi
 if [ "${DISTRO}" = "rocky linux" ]; then
    sudo yum -y install lmod
 fi
+if [ "${DISTRO}" = "opensuse leap" ]; then
+   zypper --non-interactive install lua-lmod
+fi
 
 sudo sed -i -e '1,$s!/etc/lmod/modules!/etc/lmod/modules/Linux\n/etc/lmod/modules/ROCm\n/etc/lmod/modules/ROCmPlus\n/etc/lmod/modules/ROCmPlus-MPI\n/etc/lmod/modules/ROCmPlus-AMDResearchTools\n/etc/lmod/modules/ROCmPlus-LatestCompilers\n/etc/lmod/modules/ROCmPlus-AI\n/etc/lmod/modules/misc!' /etc/lmod/modulespath
 cat /etc/lmod/modulespath

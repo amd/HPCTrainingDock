@@ -79,7 +79,13 @@ fi
 
 set -v
 
-docker build --no-cache --build-arg DISTRO=${DISTRO}  \
+ADD_OPTIONS=""
+if [[ "${PODMAN_DETECT}" -ge "1" ]]; then
+   ADD_OPTIONS="${ADD_OPTIONS} --format docker"
+fi
+
+docker build --no-cache ${ADD_OPTIONS} \
+             --build-arg DISTRO=${DISTRO}  \
              --build-arg DISTRO_VERSION=${DISTRO_VERSION} \
              --build-arg ROCM_VERSION=${ROCM_VERSION} \
              --build-arg ROCM_INSTALLPATH=${ROCM_INSTALLPATH} \
@@ -87,14 +93,14 @@ docker build --no-cache --build-arg DISTRO=${DISTRO}  \
              --build-arg USE_MAKEFILE=${USE_MAKEFILE} \
              -t bare -f bare_system/Dockerfile .
 
-if [ "${DISTRO}" = "ubuntu" ]; then
-   docker run -it --device=/dev/kfd --device=/dev/dri \
-              --group-add video --group-add render --group-add renderalt \
-	      -p 2222:22 --name Bare  --security-opt seccomp=unconfined \
-	      --rm -v $PWD/CacheFiles:/CacheFiles bare
-else
-   docker run -it --device=/dev/kfd --device=/dev/dri \
-              --group-add video --group-add render \
-	      -p 2222:22 --name Bare  --security-opt seccomp=unconfined \
-	      --rm -v $PWD/CacheFiles:/CacheFiles bare
+ADD_OPTIONS=""
+
+if [[ "${DISTRO}" == "ubuntu" ]]; then
+   ADD_OPTIONS="${ADD_OPTIONS} --group-add renderalt"
 fi
+
+
+docker run -it --device=/dev/kfd --device=/dev/dri \
+    --group-add video --group-add render ${ADD_OPTIONS} \
+    -p 2222:22 --name Bare  --security-opt seccomp=unconfined \
+    --rm -v $PWD/CacheFiles:/CacheFiles bare
