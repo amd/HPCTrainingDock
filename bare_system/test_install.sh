@@ -91,12 +91,10 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    docker run -it --device=/dev/kfd --device=/dev/dri \
               --group-add video --group-add render --group-add renderalt \
 	      -p 2222:22 --name Bare  --security-opt seccomp=unconfined \
-	      --rm -v $HOME/Class/training/hostdir:/hostdir \
-	      -v $PWD/CacheFiles:/CacheFiles bare
+	      --rm -v $PWD/CacheFiles:/CacheFiles bare
 else
    docker run -it --device=/dev/kfd --device=/dev/dri \
               --group-add video --group-add render \
 	      -p 2222:22 --name Bare  --security-opt seccomp=unconfined \
-	      --rm -v $HOME/Class/training/hostdir:/hostdir \
-	      -v $PWD/CacheFiles:/CacheFiles bare
+	      --rm -v $PWD/CacheFiles:/CacheFiles bare
 fi
