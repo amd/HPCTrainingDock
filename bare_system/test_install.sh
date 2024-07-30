@@ -98,6 +98,9 @@ ADD_OPTIONS=""
 if [[ "${DISTRO}" == "ubuntu" ]]; then
    ADD_OPTIONS="${ADD_OPTIONS} --group-add renderalt"
 fi
+if [[ "${DISTRO}" == "rocky linux" ]]; then
+   ADD_OPTIONS="${ADD_OPTIONS} --group-add renderalt"
+fi
 
 
 docker run -it --device=/dev/kfd --device=/dev/dri \

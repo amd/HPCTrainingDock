@@ -12,6 +12,8 @@ fi
 if [ "${DISTRO}" = "rocky linux" ]; then
    yum update -y
    yum install -y sudo
+   groupadd render -g 109
+   groupadd renderalt -g 110
 fi
 
 if [ "${DISTRO}" = "opensuse leap" ]; then
