@@ -264,6 +264,12 @@ TRAINING_DOCKER_OPTS="${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build
 
 TRAINING_DOCKER_OPTS="${TRAINING_DOCKER_OPTS} -f training/Dockerfile"
 
+ADD_OPTIONS=""
+PODMAN_DETECT=`docker |& grep "Emulate Docker CLI using podman" | wc -l`
+if [[ "${PODMAN_DETECT}" -ge "1" ]]; then
+   ADD_OPTIONS="${ADD_OPTIONS} --format docker"
+fi
+
 for ROCM_VERSION in ${ROCM_VERSIONS}
 do
     mkdir -p CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
@@ -272,7 +278,7 @@ do
        USE_CACHED_APPS=1
     fi
 
-    GENERAL_DOCKER_OPTS="--build-arg DISTRO=${DISTRO} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION}"
+    GENERAL_DOCKER_OPTS="${ADD_OPTIONS} --build-arg DISTRO=${DISTRO} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION}"
 
 # Building rocm docker
     verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${ROCM_DOCKER_OPTS} \

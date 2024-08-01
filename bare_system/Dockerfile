@@ -36,7 +36,7 @@ RUN  /tmp/lmod_setup.sh && \
 COPY rocm/sources/lua/bash.bashrc /tmp/bash.bashrc
 RUN cat /tmp/bash.bashrc >> /etc/bash.bashrc && rm -f /tmp/bash.bashrc
 
-#SHELL ["/bin/bash", "-c"]
+SHELL ["/bin/bash", "-c"]
 
 COPY bare_system/adduser_os.sh /tmp/adduser_os.sh
 RUN /tmp/adduser_os.sh && rm /tmp/adduser_os.sh

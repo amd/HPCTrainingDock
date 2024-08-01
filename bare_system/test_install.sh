@@ -80,6 +80,7 @@ fi
 set -v
 
 ADD_OPTIONS=""
+PODMAN_DETECT=`docker |& grep "Emulate Docker CLI using podman" | wc -l`
 if [[ "${PODMAN_DETECT}" -ge "1" ]]; then
    ADD_OPTIONS="${ADD_OPTIONS} --format docker"
 fi
