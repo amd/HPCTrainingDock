@@ -42,18 +42,18 @@ if [ "${DISTRO}" = "ubuntu" ]; then
 fi
 
 if [ "${DISTRO}" = "opensuse leap" ]; then
-   zypper update -y && \
-   zypper dist-upgrade -y && \
-   zypper install -y -t pattern devel_basis && \
-   zypper install -y python3-pip openmpi3-devel gcc-c++ git libnuma-devel dpkg-devel rpm-build wget curl binutils-gold
+   sudo zypper update -y && \
+   sudo zypper dist-upgrade -y && \
+   sudo zypper install -y -t pattern devel_basis && \
+   sudo zypper install -y python3-pip openmpi3-devel gcc-c++ git libnuma-devel dpkg-devel rpm-build wget curl binutils-gold
 fi
 
 if [ "${DISTRO}" = "rocky linux" ]; then
-   yum groupinstall -y "Development Tools"
-   yum install -y sudo
-   yum install -y epel-release
-   yum install -y --allowerasing curl dpkg-devel numactl-devel openmpi-devel papi-devel python3-pip wget zlib-devel 
-   yum clean all
+   sudo yum groupinstall -y "Development Tools"
+   sudo yum install -y sudo
+   sudo yum install -y epel-release
+   sudo yum install -y --allowerasing curl dpkg-devel numactl-devel openmpi-devel papi-devel python3-pip wget zlib-devel 
+   sudo yum clean all
 fi
 
 sudo python3 -m pip install 'cmake==3.28.3'

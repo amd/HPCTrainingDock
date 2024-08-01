@@ -1,11 +1,11 @@
 SHELL:=/bin/bash
 all: rocm openmpi omnitrace omniperf kokkos cupy
-.PHONY: baseospackages rocm openmpi mvapich2 slurm omnitrace amd_gcc aomp kokkos apps_setup_basic cupy pytorch apps_setup
+.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos apps_setup_basic cupy pytorch apps_setup
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
 openmpi: openmpi.timestamp
-mvapich2: mvapich2.timestamp
+mvapich: mvapich.timestamp
 slurm: slurm.timestip
 omnitrace: omnitrace.timestamp
 omniperf: omniperf.timestamp
@@ -44,11 +44,10 @@ openmpi.timestamp: rocm.timestamp
 	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
 	touch openmpi.timestamp
 
-mvapich2.timestamp: rocm.timestamp
-	rocm/sources/scripts/mvapich2_setup.sh \
-	   --rocm-version ${ROCM_VERSION} \
-	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
-	touch mvapich2.timestamp
+mvapich.timestamp: rocm.timestamp
+	rocm/sources/scripts/mvapich_setup.sh \
+	   --rocm-version ${ROCM_VERSION}
+	touch mvapich.timestamp
 
 slurm.timestamp:
 	rocm/sources/scripts/slurm_setup.sh

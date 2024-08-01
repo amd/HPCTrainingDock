@@ -65,10 +65,10 @@ RUN  /tmp/openmpi_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AM
 # Install mvapich
 #
 
-COPY rocm/sources/scripts/mvapich2_setup.sh /tmp/mvapich2_setup.sh
+COPY rocm/sources/scripts/mvapich_setup.sh /tmp/mvapich_setup.sh
 
-RUN  /tmp/mvapich2_setup.sh --rocm-version ${ROCM_VERSION} && \
-     rm /tmp/mvapich2_setup.sh
+RUN  /tmp/mvapich_setup.sh --rocm-version ${ROCM_VERSION} && \
+     rm /tmp/mvapich_setup.sh
 
 # 
 # add slurm 

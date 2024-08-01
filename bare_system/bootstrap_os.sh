@@ -11,7 +11,7 @@ fi
 
 if [ "${DISTRO}" = "rocky linux" ]; then
    yum update -y
-   yum install -y sudo
+   yum install -y sudo make
    groupadd render -g 109
    groupadd renderalt -g 110
 fi
@@ -19,5 +19,5 @@ fi
 if [ "${DISTRO}" = "opensuse leap" ]; then
    zypper update -y
    zypper dist-upgrade -y
-   zypper --non-interactive in sudo vim
+   zypper --non-interactive in sudo vim make
 fi

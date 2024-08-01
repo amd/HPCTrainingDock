@@ -47,13 +47,6 @@ ENV HOME=/home/sysadmin
 ENV USER=sysadmin
 WORKDIR /home/sysadmin
 
-ADD bare_system bare_system
-ADD bare_system/Makefile Makefile
-ADD rocm rocm
-ADD omnitrace omnitrace
-ADD omniperf omniperf
-ADD training training
-
 ENV ROCM_VERSION=$ROCM_VERSION
 ENV AMDGPU_GFXMODEL=$AMDGPU_GFXMODEL
 ENV BUILD_CUPY=1
@@ -61,6 +54,13 @@ ENV OMNITRACE_BUILD_FROM_SOURCE=1
 ENV BUILD_PYTORCH=1
 ENV DISTRO=${DISTRO}
 ENV DISTRO_VERSION=${DISTRO_VERSION}
+
+ADD bare_system bare_system
+ADD bare_system/Makefile Makefile
+ADD rocm rocm
+ADD omnitrace omnitrace
+ADD omniperf omniperf
+ADD training training
 
 RUN bare_system/main_setup.sh --rocm-version ${ROCM_VERSION} --rocm-install-path ${ROCM_INSTALLPATH} \
     --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --use-makefile ${USE_MAKEFILE}
