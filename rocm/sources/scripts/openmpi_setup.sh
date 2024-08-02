@@ -271,7 +271,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    echo "Install of libpmix-dev libhwloc-dev libevent-dev libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen packages"
    if [[ "${DRY_RUN}" == "0" ]]; then
       # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
-      sudo DEBIAN_FRONTEND=noninteractive apt-get update && \
+      sudo DEBIAN_FRONTEND=noninteractive apt-get update
       sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
          libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen
    fi
@@ -279,15 +279,10 @@ elif [ "${DISTRO}" = "rocky linux" ]; then
    echo "Install of pmix and hwloc packages"
    if [[ "${DRY_RUN}" == "0" ]]; then
       # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
-      yum update && \
-      yum install -y pmix hwloc
+      sudo yum update
+      sudo yum install -y pmix hwloc
    fi
 fi
-
-# omnitrace (omnitrace-avail) will throw this message using default values, so change default to 2
-# [omnitrace][116] /proc/sys/kernel/perf_event_paranoid has a value of 3. Disabling PAPI (requires a value <= 2)...
-# [omnitrace][116] In order to enable PAPI support, run 'echo N | sudo tee /proc/sys/kernel/perf_event_paranoid' where                   N is <= 2
-if (( `cat /proc/sys/kernel/perf_event_paranoid` > 0 )); then echo "Please do:  echo 0  | sudo tee /proc/sys/kernel/perf_event_paranoid"; fi
 
 if [[ "${DRY_RUN}" == "0" ]] && [[ ! -d ${INSTALL_PATH} ]] ; then
    mkdir -p "${INSTALL_PATH}"
