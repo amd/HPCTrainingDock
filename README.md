@@ -299,433 +299,12 @@ In the above display, (D) stands for "default". The modules are searched in the 
 ```bash
 module show <module>
 ``` 
-where `<module>` is the module you want to inspect.
+where `<module>` is the module you want to inspect. For example, `module show cupy` will show (in case ROCm 6.1.0 has been selected at build time):
 
-Module name: `clang/base`
-
-Modulefile location: `/etc/lmod/modules/Linux/clang`
-
-Modulefile content:
 ```bash
- whatis("Clang (LLVM) Base version 14 compiler")
- setenv("CC", "/usr/bin/clang")
- setenv("CXX", "/usr/bin/clang++")
- setenv("F77", "/usr/bin/flang")
- setenv("F90", "/usr/bin/flang")
- setenv("FC", "/usr/bin/flang")
- append_path("INCLUDE_PATH", "/usr/include")
- prepend_path("LIBRARY_PATH", "/usr/lib/llvm-14/lib")
- prepend_path("LD_LIBRARY_PATH", "/usr/lib/llvm-14/lib")
- family("compiler")
-```
-
-Module name: `clang/15`
-
-Modulefile location: `/etc/lmod/modules/Linux/clang`
-
-Modulefile content:
-```bash
- whatis("Clang (LLVM) Version 15 compiler")
- setenv("CC", "/usr/bin/clang-15")
- setenv("CXX", "/usr/bin/clang++-15")
- setenv("F77", "/usr/bin/flang-15")
- setenv("F90", "/usr/bin/flang-15")
- setenv("FC", "/usr/bin/flang-15")
- append_path("INCLUDE_PATH", "/usr/include")
- prepend_path("LIBRARY_PATH", "/usr/lib/llvm-15/lib")
- prepend_path("LD_LIBRARY_PATH", "/usr/lib/llvm-15/lib")
- family("compiler")
-```
-
-Module name: `gcc/base`
-
-Modulefile location: `/etc/lmod/modules/Linux/gcc`
-
-Modulefile content: 
-```bash
- whatis("GCC Version base version (11) compiler")
- setenv("CC", "/usr/bin/gcc")
- setenv("CXX", "/usr/bin/g++")
- setenv("F77", "/usr/bin/gfortran")
- setenv("F90", "/usr/bin/gfortran")
- setenv("FC", "/usr/bin/gfortran")
- append_path("INCLUDE_PATH", "/usr/include")
- prepend_path("LIBRARY_PATH", "/usr/lib/gcc/x86_64-linux-gnu/11")
- prepend_path("LD_LIBRARY_PATH", "/usr/lib/gcc/x86_64-linux-gnu/11")
- family("compiler")
-```
-
-Module name: `gccc/11`
-
-Modulefile location: `/etc/lmod/modules/Linux/gcc`
-
-Modulefile content:
-```bash
- whatis("GCC Version 11 compiler")
- setenv("CC", "/usr/bin/gcc-11")
- setenv("CXX", "/usr/bin/g++-11")
- setenv("F77", "/usr/bin/gfortran-11")
- setenv("F90", "/usr/bin/gfortran-11")
- setenv("FC", "/usr/bin/gfortran-11")
- append_path("INCLUDE_PATH", "/usr/include")
- prepend_path("LIBRARY_PATH", "/usr/lib/gcc/x86_64-linux-gnu/11")
- prepend_path("LD_LIBRARY_PATH", "/usr/lib/gcc/x86_64-linux-gnu/11")
- family("compiler")
-```
-
-Module name: `miniconda/23.11.0`
-
-Modulefile location: `/etc/lmod/modules/Linux/miniconda3`
-
-Modulefile content:
-```bash
- local root = "/opt/miniconda3"
-setenv("ANACONDA3ROOT", root)
-setenv("PYTHONROOT", root)
-local python_version = capture(root .. "/bin/python -V | awk '{print $2}'")
-local conda_version = capture(root .. "/bin/conda --version | awk '{print $2}'")
-function trim(s)
-  return (s:gsub("^%s*(.-)%s*$", "%1"))
-end
-conda_version = trim(conda_version)
-help([[ Loads the Miniconda environment supporting Community-Collections. ]])
-whatis("Sets the environment to use the Community-Collections Miniconda.")
-local myShell = myShellName()
-if (myShell == "bash") then
-  cmd = "source " .. root .. "/etc/profile.d/conda.sh"
-else
-  cmd = "source " .. root .. "/etc/profile.d/conda.csh"
-end
-execute{cmd=cmd, modeA = {"load"}}
-prepend_path("PATH", "/opt/miniconda3/bin")
-
-load("rocm/6.1.0")
-```
-
-Module name: `amdclang/17.0-6.1.0`
-
-Modulefile location: `/etc/lmod/modules/ROCm/amdclang`
-
-Modulefile content:
-```bash
-whatis("Name: AMDCLANG")
-whatis("Version: 6.1.0")
-whatis("Category: AMD")
-whatis("AMDCLANG")
-
-local base = "/opt/rocm-6.1.0/llvm"
-local mbase = "/etc/lmod/modules/ROCm/amdclang"
-
-setenv("CC", pathJoin(base, "bin/amdclang"))
-setenv("CXX", pathJoin(base, "bin/amdclang++"))
-setenv("FC", pathJoin(base, "bin/amdflang"))
-setenv("F77", pathJoin(base, "bin/amdflang"))
-setenv("F90", pathJoin(base, "bin/amdflang"))
-prepend_path("PATH", pathJoin(base, "bin"))
-prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-prepend_path("LD_RUN_PATH", pathJoin(base, "lib"))
-prepend_path("CPATH", pathJoin(base, "include"))
-load("rocm/6.1.0")
-family("compiler")
-```
-
-Module name: `hipfort/6.1.0`
-
-Modulefile location: `/etc/lmod/modules/ROCm/hipfort`
-
-Modulefile content:
-```bash
-whatis("Name: ROCm HIPFort")
-whatis("Version: 6.1.0")
-
-setenv("HIPFORT_HOME", "/opt/rocm-6.1.0")
-append_path("LD_LIBRARY_PATH", "/opt/rocm-6.1.0/lib")
-setenv("LIBS", "-L/opt/rocm-6.1.0/lib -lhipfort-amdgcn.a")
-load("rocm/6.1.0")
-```
-
-Module name: `opencl/6.1.0`
-
-Modulefile location: `/etc/lmod/modules/ROCm/opencl`
-
-Modulefile content:
-```bash
-whatis("Name: ROCm OpenCL")
-whatis("Version: 6.1.0")
-whatis("Category: AMD")
-whatis("ROCm OpenCL")
-
-local base = "/opt/rocm-6.1.0/opencl"
-local mbase = " /etc/lmod/modules/ROCm/opencl"
-
-prepend_path("PATH", pathJoin(base, "bin"))
-family("OpenCL")
-```
-
-Module name: `rocm/6.1.0`
-
-Modulefile location: `/etc/lmod/modules/ROCm/rocm`
-
-Modulefile content: 
-```bash
-whatis("Name: ROCm")
-whatis("Version: 6.1.0")
-whatis("Category: AMD")
-whatis("ROCm")
-
-local base = "/opt/rocm-6.1.0/"
-local mbase = " /etc/lmod/modules/ROCm/rocm"
-
-prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib64"))
-prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
-prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-prepend_path("CPATH", pathJoin(base, "include"))
-prepend_path("PATH", pathJoin(base, "bin"))
-prepend_path("INCLUDE", pathJoin(base, "include"))
-setenv("ROCM_PATH", base)
-family("GPUSDK")
-```
-
-Module name: `mvapich2/2.3.7 `
-
-Modulefile location: `/etc/lmod/modules/ROCmPlus-MPI/mvapich2`
-
-Modulefile content: 
-```bash
-whatis("Name: GPU-aware mvapich")
-whatis("Version: 2.3.7")
-whatis("Description: An open source Message Passing Interface implementation")
-whatis(" This is a GPU-aware version of Mvapich")
-
-local base = "/opt/rocmplus-6.1.0/mvapich2/gdr/2.3.7/no-mcast/no-openacc/rocm5.1/mofed5.0/mpirun/gnu10.3.1"
-local mbase = "/etc/lmod/modules/ROCmPlus-MPI"
-
-prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
-prepend_path("C_INCLUDE_PATH",pathJoin(base, "include"))
-prepend_path("CPLUS_INCLUDE_PATH",pathJoin(base, "include"))
-prepend_path("PATH",pathJoin(base, "bin"))
-load("rocm/6.1.0")
-family("MPI")
-```
-
-Module name: `openmpi/5.0.3`
-
-Modulefile location: `/etc/lmod/modules/ROCmPlus-MPI/openmpi`
-
-Modulefile content:
-```bash
-whatis("Name: GPU-aware openmpi")
-whatis("Version: 5.0.3")
-whatis("Description: An open source Message Passing Interface implementation")
-whatis(" This is a GPU-Aware version of OpenMPI")
-whatis("URL: https://github.com/open-mpi/ompi.git")
-
-local base = "/opt/rocmplus-6.1.0/openmpi"
-
-prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
-prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-prepend_path("PATH", pathJoin(base, "bin"))
-load("rocm/6.1.0")
-family("MPI")
-```
-
-Module name: `omniperf/2.0.0`
-
-Modulefile location: `/etc/lmod/modules/ROCmPlus-AMDResearchTools/omniperf`
-
-Modulefile content:
-```bash 
-local help_message = [[
-
-Omniperf is an open-source performance analysis tool for profiling
-machine learning/HPC workloads running on AMD MI GPUs.
-
-Version 2.0.0
-]]
-
-help(help_message,"\n")
-
-whatis("Name: omniperf")
-whatis("Version: 2.0.0")
-whatis("Keywords: Profiling, Performance, GPU")
-whatis("Description: tool for GPU performance profiling")
-whatis("URL: https://github.com/AMDResearch/omniperf")
-
--- Export environmental variables
-local topDir="/opt/rocmplus-6.1.0/omniperf-2.0.0"
-local binDir="/opt/rocmplus-6.1.0/omniperf-2.0.0/bin"
-local shareDir="/opt/rocmplus-6.1.0/omniperf-2.0.0/share"
-local pythonDeps="/opt/rocmplus-6.1.0/omniperf-2.0.0/python-libs"
-local roofline="/opt/rocmplus-6.1.0/omniperf-2.0.0/bin/utils/rooflines/roofline-ubuntu20_04-mi200-rocm5"
-
-setenv("OMNIPERF_DIR",topDir)
-setenv("OMNIPERF_BIN",binDir)
-setenv("OMNIPERF_SHARE",shareDir)
-setenv("ROOFLINE_BIN",roofline)
-
--- Update relevant PATH variables
-prepend_path("PATH",binDir)
-if ( pythonDeps  ~= "" ) then
-   prepend_path("PYTHONPATH",pythonDeps)
-end
-
--- Site-specific additions
--- depends_on "python"
--- depends_on "rocm"
-prereq(atleast("rocm","6.1.0"))
---  prereq("mongodb-tools")
-local home = os.getenv("HOME")
-setenv("MPLCONFIGDIR",pathJoin(home,".matplotlib"))
-```
-
-Module name: `omnitrace/1.11.2`
-
-Modulefile location: `/etc/lmod/modules/ROCmPlus-AMDResearchTools/omnitrace`
-
-Modulefile content:
-```bash
-whatis("Name: omnitrace")
-whatis("Version: 1.11.2")
-whatis("Category: AMD")
-whatis("omnitrace")
-
-local base = "/opt/rocmplus-6.1.0/omnitrace/"
-
-prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
-prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-prepend_path("CPATH", pathJoin(base, "include"))
-prepend_path("PATH", pathJoin(base, "bin"))
-prepend_path("INCLUDE", pathJoin(base, "include"))
-setenv("OMNITRACE_PATH", base)
-load("rocm/6.1.0")
-setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
-```
-
-Module name: `cupy/13.0.0b1`
-
-Modulefile location: `/etc/lmod/modules/ROCmPlus-AI/cupy`
-
-Modulefile content:
-```bash
-whatis("HIP version of cuPY or hipPY")
+whatis("HIP version of CuPy")
 load("rocm/6.1.0")
 prepend_path("PYTHONPATH","/opt/rocmplus-6.1.0/cupy")
-```
-
-Module name: `pytorch/2.2`
-
-Modulefile location: `/etc/lmod/modules/ROCmPlus-AI/pytorch`
-
-Modulefile content:
-```bash
-whatis("HIP version of pytorch")
-load("rocm/6.1.0")
-conflict("miniconda3")
-prepend_path("PYTHONPATH","/opt/rocmplus-6.1.0/vision/lib/python3.10/site-packages/torchvision-0.20.0a0+bf01bab-py3.10-linux-x86_64.egg")
-prepend_path("PYTHONPATH","/opt/rocmplus-6.1.0/vision/lib/python3.10/site-packages/pillow-10.3.0-py3.10-linux-x86_64.egg")
-prepend_path("PYTHONPATH","/opt/rocmplus-6.1.0/audio/lib/python3.10/site-packages/torchaudio-2.4.0a0+7f6209b-py3.10-linux-x86_64.egg")
-prepend_path("PYTHONPATH","/opt/rocmplus-6.1.0/pytorch/lib/python3.10/site-packages")
-```
-
-Module name: `Core/lmod/6.6`
-
-Modulefile location: `/usr/share/lmod/lmod/modulefiles/Core/lmod`
-
-Modulefile content:
-```bash
--- -*- lua -*-
-whatis("Description: Lmod: An Environment Module System")
-prepend_path('PATH','/usr/share/lmod/lmod/libexec')
-```
-
-Module name: `Core/settarg/6.6`
-
-Modulefile location: `/usr/share/lmod/lmod/modulefiles/Core/settarg`
-
-Modulefile content:
-```bash
-local base        = "/usr/share/lmod/lmod/settarg"
-local settarg_cmd = pathJoin(base, "settarg_cmd")
-
-prepend_path("PATH",base)
-pushenv("LMOD_SETTARG_CMD", settarg_cmd)
-set_shell_function("settarg", 'eval $($LMOD_SETTARG_CMD -s sh "$@")',
-                              'eval `$LMOD_SETTARG_CMD  -s csh $*`' )
-
-set_shell_function("gettargdir",  'builtin echo $TARG', 'echo $TARG')
-
-local respect = "true"
-setenv("SETTARG_TAG1", "OBJ", respect )
-setenv("SETTARG_TAG2", "_"  , respect )
-
-if ((os.getenv("LMOD_FULL_SETTARG_SUPPORT") or "no"):lower() ~= "no") then
-   set_alias("cdt", "cd $TARG")
-   set_shell_function("targ",  'builtin echo $TARG', 'echo $TARG')
-   set_shell_function("dbg",   'settarg "$@" dbg',   'settarg $* dbg')
-   set_shell_function("empty", 'settarg "$@" empty', 'settarg $* empty')
-   set_shell_function("opt",   'settarg "$@" opt',   'settarg $* opt')
-   set_shell_function("mdbg",  'settarg "$@" mdbg',  'settarg $* mdbg')
-end
-
-local myShell = myShellName()
-local cmd     = "eval `" .. settarg_cmd .. " -s " .. myShell .. " --destroy`"
-execute{cmd=cmd, modeA = {"unload"}}
-
-
-local helpMsg = [[
-The settarg module dynamically and automatically updates "$TARG" and a
-host of other environment variables. These new environment variables
-encapsulate the state of the modules loaded.
-
-For example, if you have the settarg module and gcc/4.7.2 module loaded
-then the following variables are defined in your environment:
-
-   TARG=OBJ/_x86_64_06_1a_gcc-4.7.3
-   TARG_COMPILER=gcc-4.7.3
-   TARG_COMPILER_FAMILY=gcc
-   TARG_MACH=x86_64_06_1a
-   TARG_SUMMARY=x86_64_06_1a_gcc-4.7.3
-
-If you change your compiler to intel/13.1.0, these variables change to:
-
-   TARG=OBJ/_x86_64_06_1a_intel-13.1.0
-   TARG_COMPILER=intel-13.1.0
-   TARG_COMPILER_FAMILY=intel
-   TARG_MACH=x86_64_06_1a
-   TARG_SUMMARY=x86_64_06_1a_intel-13.1.0
-
-If you then load mpich/3.0.4 module the following variables automatically
-change to:
-
-   TARG=OBJ/_x86_64_06_1a_intel-13.1.0_mpich-3.0.4
-   TARG_COMPILER=intel-13.1.0
-   TARG_COMPILER_FAMILY=intel
-   TARG_MACH=x86_64_06_1a
-   TARG_MPI=mpich-3.0.4
-   TARG_MPI_FAMILY=mpich
-   TARG_SUMMARY=x86_64_06_1a_dbg_intel-13.1.0_mpich-3.0.4
-
-You also get some TARG_* variables that always available, independent
-of what modules you have loaded:
-
-   TARG_MACH=x86_64_06_1a
-   TARG_MACH_DESCRIPT=...
-   TARG_HOST=...
-   TARG_OS=Linux-3.8.0-27-generic
-   TARG_OS_FAMILY=Linux
-
-One way that these variables can be used is part of a build system where
-the executables and object files are placed in $TARG.  You can also use
-$TARG_COMPILER_FAMILY to know which compiler you are using so that you
-can set the appropriate compiler flags.
-
-Settarg can do more.  Please see the Lmod website for more details.
-]]
-
-help(helpMsg)
 ```
 
 # 4. Adding Your Own Modules
@@ -789,15 +368,56 @@ Now, `module avail` will show this additional module:
 
 # 5. Testing the Installation
 
-You can check that your Docker container installation works as intended by testing it with examples from the HPCTrainingExamples repository:
+A test suite to test the installation of the software is available at: https://github.com/amd/HPCTrainingExamples.git
+There are currently two ways to test the success of the installation:
+1. Directly: clone the repo and run the test suiteThis option can be used both with the training container and with the bare system install scripts, with either the `main_setup.sh` (when performing the actual installation) or with the `test_install.sh` (when testing the installation before deployment).
+2. With the Makefile build of the test installation: run `make <package>` followed by `make <package_tests>`. Note that this option only applies when doing a test installation using `test_install.sh` and specifying the `--use-makefile` input flag when launching the script.
+
+## 5.1 Testing the Installation Directly
+
+To test the installation directly, do:
 
 ```bash
-git clone https://github.com/amd/HPCTrainingExamples && \
-cd HPCTrainingExamples/tests && \
-./runTests.sh
-```                                                                      
+git clone https://github.com/amd/HPCTrainingExamples.gitcd HPCTrainingExample/tests
+./runTests.sh --test
+```
 
-# 6. Feedback
+If no `--test` is specified, all tests will be run. For example, to run OpenMPI tests do:
 
-We very much welcome user experience and feedback, please feel free to reach out to us by creating pull requests of opening issues if you consider it necessary.
-We will get back to you as soon as possible. For information on licenses, please see the `LICENSE.md` file.
+```bash
+./runTests.sh --openmpi 
+```
+
+## 5.2 Testing the Installation with Makefile
+
+To test the installation using the Makefile run:
+
+```bash
+git clone https://github.com/AMD/HPCTrainingDock 
+cd HPCTrainingDock 
+./bare_system/test_install.sh --use-makefile
+```
+***NOTE***: If `--distro` and `--distro-versions` are left out, the test install script will detect the current distro and distro version on the system where the script is being run and use that. If `--rocm-version` is left out, the script also tries to detect the current ROCm version on your system and use that as default.As explained, the above script will automatically get you into a container as sysdamin.Once in the container do:
+
+```bash
+make <package>
+make <package_tests>
+```
+
+For instance, for CuPy: `make cupy`, followed by `make cupy_tests`.
+
+# 6. Create a Pre-built Binary Distribution of ROCm
+
+It is possible to create a binary distribution of ROCm by taring up the `rocm-<rocm-version>` directory. Then, the next build will restore from the tar file. This can reduce the build time for the subsequent test installs. For example, considering the 6.1.2 version of ROCm as an example, do:
+
+```bash
+git clone https://github.com/AMD/HPCTrainingDock
+cd HPCTrainingDock
+bare_system/test_install.sh --distro ubuntu --distro-versions 22.04 --rocm-version 6.1.2 --use-makefile
+make rocm_package
+```
+This make command tars up the `rocm-6.1.2` directory and then the next build it will restore from the tar file.
+
+# 7. Feedback and Contributions
+
+We very much welcome user experience and feedback, please feel free to reach out to us by creating pull requests of opening issues if you consider it necessary. We will get back to you as soon as possible. For information on licenses, please see the `LICENSE.md` file.
