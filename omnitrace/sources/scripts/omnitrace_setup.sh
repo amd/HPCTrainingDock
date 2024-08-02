@@ -121,7 +121,7 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "1" ] ; then
    # Fixing error "mv: cannot stat 't-es.gmo': No such file or directory: (language support) due to missing gettext
    if [ ! -x /usr/bin/gettext ]; then
       sudo apt-get update
-      sudo apt-get install -y gettext
+      sudo apt-get install -y gettext autopoint
    fi
 
    git clone --depth 1 https://github.com/AMDResearch/omnitrace.git omnitrace-source --recurse-submodules && \
