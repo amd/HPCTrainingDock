@@ -397,7 +397,7 @@ git clone https://github.com/AMD/HPCTrainingDock
 cd HPCTrainingDock 
 ./bare_system/test_install.sh --use-makefile
 ```
-***NOTE***: If `--distro` and `--distro-versions` are left out, the test install script will detect the current distro and distro version on the system where the script is being run and use that. If `--rocm-version` is left out, the script also tries to detect the current ROCm version on your system and use that as default.As explained, the above script will automatically get you into a container as sysdamin.Once in the container do:
+**NOTE**: If `--distro` and `--distro-versions` are left out, the test install script will detect the current distro and distro version on the system where the script is being run and use that. If `--rocm-version` is left out, the script also tries to detect the current ROCm version on your system and use that as default. As explained, the above script will automatically get you into a container as `sysdamin`. Once in the container do:
 
 ```bash
 make <package>
