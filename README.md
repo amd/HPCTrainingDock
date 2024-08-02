@@ -16,33 +16,34 @@ Data Center GPUs, Workstation GPUs and Desktop GPUs are currently supported.
 
 Data Center GPUs (necessary for multi-node scaling as well as more GPU muscle): `AMD Instinct MI300A, MI250X, MI250, MI210, MI100, MI50, MI25`
 
-Workstation GPUs (May give usable single GPU performance) : `AMD Radeon Pro W6800, V620, VII`
+Workstation GPUs (may give usable single GPU performance) : `AMD Radeon Pro W6800, V620, VII`
 
-Desktop GPUs (More limited in memory): `AMD Radeon VII`
+Desktop GPUs (more limited in memory): `AMD Radeon VII`
 
-**NOTE**: others not listed may work, but have limited support. A list of AMD GPUs in LLVM docs may help identify compiler support: https://llvm.org/docs/AMDGPUUsage.html#processors
+**NOTE**: others not listed may work, but have limited support. A [list]( https://llvm.org/docs/AMDGPUUsage.html#processors)
+of AMD GPUs in LLVM docs may help identify compiler support.
 
 # 2. Model Installation Setup Instructions
 
-We currently provide two options for the setup of the software: a Docker container, and a bare system install. The latter can be tested with a Docker container before deployment.  
+We currently provide two options for the setup of the software: a container (based on Docker), and a bare system install. The latter can be tested with a container before deployment.  
 
 ## 2.1 Training Docker Container Build Steps
 
 These instructions will setup a container on `localhost` and assume that:
-1. Docker is installed.
-2. Your userid is part of the Docker group.
-3. You can issue Docker commands without `sudo`.
+1. Docker or Podman are installed.
+2. For Docker, your userid is part of the Docker group.
+3. For Docker, you can issue Docker commands without `sudo`.
  
 <!-- If you need to use `sudo`, you will need to modify the command below to look for Docker images that start with ***root*** instead of a userid (such as amdtrain).-->
 
 ### 2.1.1  Building the Four Images of the Container 
-The Docker container is set up to use Ubuntu 22.04 as OS, and will build four different images called `rocm`, `omnitrace`,  `omniperf` and `training`. 
-Here is a flowchart of the Docker installation process
+The container is set up to use Ubuntu 22.04 as OS, and will build four different images called `rocm`, `omnitrace`,  `omniperf` and `training`. 
+Here is a flowchart of the container installation process
 <p>
 <img src="figures/container_flowchart.png" \>
 </p>
 
-This documentation considers version 6.1.0 of ROCm. The ROCm version can be specified at build time as an input flag. Several compilers and other dependencies will be built as part of the images setup (more on this later). First, clone this repo and go into the folder where the Docker build script lives: 
+This documentation considers version 6.1.0 of ROCm as an example. The ROCm version can be specified at build time as an input flag. Several compilers and other dependencies will be built as part of the images setup (more on this later). First, clone this repo and go into the folder where the Docker build script lives: 
 
 ```bash
 git clone --recursive git@github.com:amd/HPCTrainingDock.git
@@ -250,6 +251,9 @@ training/sources/scripts/pytorch_setup.sh
 // install additional libs and apps such as valgrind, boost, parmetis, openssl, etc.
 training/sources/scripts/apps_setup.sh
 
+// install Kokkos
+training/sources/scripts/kokkos_setup.sh
+
 ```
 
 **NOTE**: As mentioned before, those scripts are the same used by the Docker containers (either the actual Training Docker Container or the Test Docker Container run by `test_install.sh`). The reason why the script work for both installations (bare system and Docker) is because the commands are executed at the `sudo` level. Since Docker is already at the `sudo` level, the instructions in the scripts work in both contexts.
@@ -270,26 +274,25 @@ If the argument `--rocm-install-path` is specified, installation scripts will fi
 
 # 3. Inspecting the Model Installation Environment
 
-The training environment comes with a variety of modules installed, with their necessary dependencies. To inspect the modules available, run `module avail`, which will show you this output (assuming the installation has been performed with ROCm 6.1.0):
+The training environment comes with a variety of modules installed, with their necessary dependencies. To inspect the modules available, run `module avail`, which will show you this output (assuming the installation has been performed with ROCm 6.1.2):
 
 ```bash
----------------------------------------------------------------------------------------- /etc/lmod/modules/Linux -----------------------------------------------------------------------------------------
-   clang/base    clang/14    clang/15 (D)    gcc/base    gcc/11 (D)    gcc/12    gcc/13    miniconda3/23.11.0
-
------------------------------------------------------------------------------------------ /etc/lmod/modules/ROCm -----------------------------------------------------------------------------------------
-   amdclang/17.0-6.1.0    hipfort/6.1.0    opencl/6.1.0    rocm/6.1.0
-
-------------------------------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-MPI -------------------------------------------------------------------------------------
-   mvapich2/2.3.7    openmpi/5.0.3
-
------------------------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-AMDResearchTools -------------------------------------------------------------------------------
-   omniperf/2.0.0    omnitrace/1.11.2
-
-------------------------------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-AI --------------------------------------------------------------------------------------
-   cupy/13.0.0b1    pytorch/2.2
-
------------------------------------------------------------------------------------- /usr/share/lmod/lmod/modulefiles ------------------------------------------------------------------------------------
-   Core/lmod/6.6    Core/settarg/6.6
+------------------------------------------------------------------ /etc/lmod/modules/Linux -------------------------------------------------------------------
+clang/base clang/14 (D) clang/15 gcc/base gcc/11 (D) gcc/12 gcc/13 miniconda3/23.11.0
+------------------------------------------------------------------- /etc/lmod/modules/ROCm -------------------------------------------------------------------
+amdclang/17.0-6.1.2 hipfort/6.1.2 opencl/6.1.2 rocm/6.1.2
+--------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-MPI ---------------------------------------------------------------
+openmpi/5.0.5-ucc1.3.0-ucx1.17.0
+-------------------------------------------------------- /etc/lmod/modules/ROCmPlus-AMDResearchTools ---------------------------------------------------------
+omniperf/2.0.0 omnitrace/1.11.2
+--------------------------------------------------------- /etc/lmod/modules/ROCmPlus-LatestCompilers ---------------------------------------------------------
+amd-gcc/13.2.0 aomp/amdclang-19.0
+--------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-AI ----------------------------------------------------------------
+cupy/13.0.0b1 pytorch/2.2
+------------------------------------------------------------------- /etc/lmod/modules/misc -------------------------------------------------------------------
+kokkos/4.3.1
+-------------------------------------------------------------- /usr/share/lmod/lmod/modulefiles --------------------------------------------------------------
+Core/lmod/6.6 Core/settarg/6.6
 ```
 
 In the above display, (D) stands for "default". The modules are searched in the `MODULEPATH` environment variable, which is set during the images creation. Below, we report details on most of the modules displayed above. Note that the same information reported here can be displayed by using the command:
