@@ -1,14 +1,29 @@
 # 1. Synopsis
+
 Welcome to AMD's model installation repo!
 
-Here, you will have the option to build and run a Docker container on which you will find a rich variety of AMD GPU software for you to test and experiment with.
-Alternative to the Docker container, we also provide the option to install the aforementioned AMD GPU software on a bare system, through a series of installation scripts. Currently, we are only supporting an Ubuntu operating system (OS), but work is underway to add support for other operating systems as well. Note that we provide the option to test the bare system install before you deploy it, using a Docker container. Details are provided next.
+In this repo, we provide two options to test the installation of a variety of AMD GPU software and frameworks that support running on AMD GPUs:
+1. Container Installation (based on Docker)
+2. Bare Metal Installation
 
 **NOTE**: if `Podman` is installed on your system instead of Docker, currently it is necessary to append the `--format docker` flag to the `docker build` commands present in our scripts. Additionally, in some OS cases, the  `--distro` option also needs to be specified (otherwise Podman might complain with "7 arguments instead of 1" type of errors).
 
-This version of the model installation is for workstations and data center GPUs. Specifically, it has been tested on Radeon 6800XT graphics card and MI200 series and MI300A data center GPUs.
+Currently, we are only supporting an Ubuntu operating system (OS), but work is underway to add support for Red Hat, Suse and Debian.
+
+## 1.1 Supported Hardware
+
+Data Center GPUs, Workstation GPUs and Desktop GPUs are currently supported.
+
+Data Center GPUs (necessary for multi-node scaling as well as more GPU muscle): `AMD Instinct MI300A, MI250X, MI250, MI210, MI100, MI50, MI25`
+
+Workstation GPUs (May give usable single GPU performance) : `AMD Radeon Pro W6800, V620, VII`
+
+Desktop GPUs (More limited in memory): `AMD Radeon VII`
+
+**NOTE**: others not listed may work, but have limited support. A list of AMD GPUs in LLVM docs may help identify compiler support: https://llvm.org/docs/AMDGPUUsage.html#processors
 
 # 2. Model Installation Setup Instructions
+
 We currently provide two options for the setup of the software: a Docker container, and a bare system install. The latter can be tested with a Docker container before deployment.  
 
 ## 2.1 Training Docker Container Build Steps
@@ -22,7 +37,12 @@ These instructions will setup a container on `localhost` and assume that:
 
 ### 2.1.1  Building the Four Images of the Container 
 The Docker container is set up to use Ubuntu 22.04 as OS, and will build four different images called `rocm`, `omnitrace`,  `omniperf` and `training`. 
-The version of ROCm is 6.1.0, and several compilers and other dependencies will be built as part of the images setup (more on this later). First, clone this repo and go into the folder where the Docker build script lives: 
+Here is a flowchart of the Docker installation process
+<p>
+<img src="container_flowchart.png" \>
+</p>
+
+This documentation considers version 6.1.0 of ROCm. The ROCm version can be specified at build time as an input flag. Several compilers and other dependencies will be built as part of the images setup (more on this later). First, clone this repo and go into the folder where the Docker build script lives: 
 
 ```bash
 git clone --recursive git@github.com:amd/HPCTrainingDock.git
@@ -35,7 +55,9 @@ To build the four images, run the following command (note that `<admin>` is set 
    ./build-docker.sh --rocm-versions 6.1.0 --distro ubuntu --distro-versions 22.04 --admin-username <admin> --admin-password <password>
 ```
 
-You can build for many other recent ROCm versions if you prefer. To show more docker build output, add this option to the build command above:
+To visualize all the input flags that can be provided to the script, run: `./build-docker.sh --help`.
+
+To show more docker build output, add this option to the build command above:
 
 ```bash
 --output-verbosity 
@@ -165,8 +187,14 @@ cd HPCTrainingDock && \
 ./bare_system/test_install.sh --rocm-version <rocm-version>
 ```
 
-The above command sequence will clone this repo and then execute the `test_install.sh` script. This script calls a the `main_install.sh` which is what you would execute to perform the actual installation on your system. The `test_install.sh` sets up a Docker container where you can test the installation of the software before proceeding to deploy it on your actual system by running `main_install.sh`. The `test_install.sh` script automatically runs the Docker container after it is built, and you can inspect it as `student`.
+The above command sequence will clone this repo and then execute the `test_install.sh` script. This script calls a the `main_install.sh` which is what you would execute to perform the actual installation on your system. The `test_install.sh` sets up a Docker container where you can test the installation of the software before proceeding to deploy it on your actual system by running `main_install.sh`. The `test_install.sh` script automatically runs the Docker container after it is built, and you can inspect it as `sysadmin`. Here is a flowchart of the process initiated by the script:
 
+<p>
+<img src="script_flowchart.png" \>
+</p>
+
+As seen form the image above, the `--use-makefile` option will bypass the installation of the scripts and automatically get you on the container, on which packages can be installed with `make <package>` and then tested with `make <package_tests>`.
+To visualize all the input flags that can be provided to the script, run: `./bare_system/test_install.sh --help`.
 
 If you are satisfied with the test installation, you can proceed with the actual installation on your systemr by doing:
 
@@ -176,7 +204,8 @@ cd HPCTrainingDock && \
 ./bare_system/main_install.sh --rocm-version <rocm-version>
 ```
 
-The above command will execute the `main_install.sh` script on your system that will proceed with the installation for you. Note that you need to be able to run `sudo` on your system for things to work. The `main_install.sh` script calls a series of other scripts to install the software (these are given several runtime flags that are not reported here for simplicity):
+The above command will execute the `main_install.sh` script on your system that will proceed with the installation for you. Note that you need to be able to run `sudo` on your system for things to work.  To visualize all the input flags that can be provided to the script, run: `./bare_system/main_setup.sh --help`.
+The `main_install.sh` script calls a series of other scripts to install the software (these are given several runtime flags that are not reported here for simplicity):
 
 ```bash
  // install linux software such as cmake and system compilers
