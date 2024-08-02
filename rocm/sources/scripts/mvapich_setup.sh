@@ -1,20 +1,77 @@
 #!/bin/bash
 
+# Variables controlling setup process
+MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/mvapich
+ROCM_VERSION=`cat /opt/rocm*/.info/version | head -1 | cut -f1 -d'-' `
+ROCM_PATH=/opt/rocm-${ROCM_VERSION}
+REPLACE=0
+DRY_RUN=0
+
+# Autodetect defaults
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
+usage()
+{
+   echo "--dry-run default off"
+   echo "--help: this usage information"
+   echo "--install-path [ INSTALL_PATH ] default /opt/rocmplus-<ROCM_VERSION>/mvapich"
+   echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/mvapich"
+   echo "--replace default off"
+   echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "--rocm-path [ ROCM_PATH ] default /opt/rocm-$ROCM_VERSION"
+   exit 1
+}
+
+send-error()
+{
+    usage
+    echo -e "\nError: ${@}"
+    exit 1
+}
+
 reset-last()
 {
     last() { send-error "Unsupported argument :: ${1}"; }
 }
 
-ROCM_VERSION=6.0
-
 n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
+      "--dry-run")
+          DRY_RUN=1
+          reset-last
+          ;;
+      "--help")
+          usage
+          ;;
+      "--install-path")
+          shift
+          INSTALL_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--module-path")
+          shift
+          MODULE_PATH=${1}
+          reset-last
+          ;;
+      "--replace")
+          REPLACE=1
+          reset-last
+          ;;
+      "--rocm-path")
+          shift
+          ROCM_PATH_INPUT=${1}
+          reset-last
+          ;;
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
           reset-last
+          ;;
+      "--*")
+          send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
       *)
          last ${1}
@@ -24,8 +81,11 @@ do
    shift
 done
 
-DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+if [ "${INSTALL_PATH_INPUT}" != "" ]; then
+   INSTALL_PATH="${INSTALL_PATH_INPUT}"
+else
+   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/mvapich
+fi
 
 echo ""
 echo "============================"
@@ -47,8 +107,10 @@ if [ "${DISTRO}" = "rocky linux" ]; then
    cd /tmp
    # install the GPU aware version of mvapich using an rpm (MVPlus3.0)
    wget -q ${MVAPICH_DOWNLOAD_URL}/${MVAPICH_RPM_NAME}
-   sudo rpm --prefix /opt/rocmplus-${ROCM_VERSION}/mvapich -Uvh --nodeps ${MVAPICH_RPM_NAME}
-   /opt/rocmplus-${ROCM_VERSION}/mvapich/bin/mpicc -show
+   if [[ "${DRY_RUN}" == "0" ]]; then
+      sudo rpm --prefix ${INSTALL_PATH} -Uvh --nodeps ${MVAPICH_RPM_NAME}
+      ${INSTALL_PATH}/mvapich/bin/mpicc -show
+   fi
    rm ${MVAPICH_RPM_NAME}
 fi
 if [ "${DISTRO}" = "ubuntu" ]; then
