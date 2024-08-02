@@ -39,7 +39,7 @@ These instructions will setup a container on `localhost` and assume that:
 The Docker container is set up to use Ubuntu 22.04 as OS, and will build four different images called `rocm`, `omnitrace`,  `omniperf` and `training`. 
 Here is a flowchart of the Docker installation process
 <p>
-<img src="container_flowchart.png" \>
+<img src="figures/container_flowchart.png" \>
 </p>
 
 This documentation considers version 6.1.0 of ROCm. The ROCm version can be specified at build time as an input flag. Several compilers and other dependencies will be built as part of the images setup (more on this later). First, clone this repo and go into the folder where the Docker build script lives: 
@@ -190,7 +190,7 @@ cd HPCTrainingDock && \
 The above command sequence will clone this repo and then execute the `test_install.sh` script. This script calls a the `main_install.sh` which is what you would execute to perform the actual installation on your system. The `test_install.sh` sets up a Docker container where you can test the installation of the software before proceeding to deploy it on your actual system by running `main_install.sh`. The `test_install.sh` script automatically runs the Docker container after it is built, and you can inspect it as `sysadmin`. Here is a flowchart of the process initiated by the script:
 
 <p>
-<img src="script_flowchart.png" \>
+<img src="figures/script_flowchart.png" \>
 </p>
 
 As seen form the image above, the `--use-makefile` option will bypass the installation of the scripts and automatically get you on the container, on which packages can be installed with `make <package>` and then tested with `make <package_tests>`.
