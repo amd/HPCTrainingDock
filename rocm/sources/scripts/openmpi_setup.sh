@@ -662,7 +662,7 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("PATH", pathJoin(base, "bin"))
-	prepend_path("PYTHONPATH", ${MPI4PY}/mpi4py/include)
+	prepend_path("PYTHONPATH", "${MPI4PY_PATH}/mpi4py/include")
 	load("rocm/${ROCM_VERSION}")
 	family("MPI")
 EOF
