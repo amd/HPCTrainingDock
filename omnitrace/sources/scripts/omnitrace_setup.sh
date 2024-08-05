@@ -97,7 +97,7 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "0" ] ; then
          sudo rm ${CACHE_FILES}/omnitrace.tgz
       fi
    else
-      if  wget -q https://github.com/AMDResearch/omnitrace/releases/download/v1.11.1/omnitrace-install.py && \
+      if  wget -q https://github.com/AMDResearch/omnitrace/releases/download/v1.11.3/omnitrace-install.py && \
           python3 ./omnitrace-install.py --prefix /opt/rocmplus-${ROCM_VERSION}/omnitrace --rocm "${ROCM_VERSION}" -d ubuntu -v "${DISTRO_VERSION}"; then
          OMNITRACE_PREBUILT_DOWNLOADED=1
       else
@@ -162,9 +162,9 @@ fi
 sudo mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | sudo tee ${MODULE_PATH}/1.11.2.lua
+cat <<-EOF | sudo tee ${MODULE_PATH}/1.11.3.lua
 	whatis("Name: omnitrace")
-	whatis("Version: 1.11.2")
+	whatis("Version: 1.11.3")
 	whatis("Category: AMD")
 	whatis("omnitrace")
 
