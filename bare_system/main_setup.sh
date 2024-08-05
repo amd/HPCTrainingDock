@@ -58,7 +58,7 @@ do
           ;;
       "--use-makefile")
           shift
-          USE_MAKEFILE=1
+          USE_MAKEFILE=${1}
           reset-last
           ;;
       "--help")

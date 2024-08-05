@@ -194,7 +194,7 @@ The above command sequence will clone this repo and then execute the `test_insta
 <img src="figures/script_flowchart.png" \>
 </p>
 
-As seen form the image above, the `--use-makefile` option will bypass the installation of the scripts and automatically get you on the container, on which packages can be installed with `make <package>` and then tested with `make <package_tests>`.
+As seen form the image above, setting `--use-makefile 1` option will bypass the installation of the scripts and automatically get you on the container, on which packages can be installed with `make <package>` and then tested with `make <package_tests>`.
 To visualize all the input flags that can be provided to the script, run: `./bare_system/test_install.sh --help`.
 
 If you are satisfied with the test installation, you can proceed with the actual installation on your systemr by doing:
@@ -371,7 +371,7 @@ Now, `module avail` will show this additional module:
 A test suite to test the installation of the software is available at: https://github.com/amd/HPCTrainingExamples.git
 There are currently two ways to test the success of the installation:
 1. Directly: clone the repo and run the test suiteThis option can be used both with the training container and with the bare system install scripts, with either the `main_setup.sh` (when performing the actual installation) or with the `test_install.sh` (when testing the installation before deployment).
-2. With the Makefile build of the test installation: run `make <package>` followed by `make <package_tests>`. Note that this option only applies when doing a test installation using `test_install.sh` and specifying the `--use-makefile` input flag when launching the script.
+2. With the Makefile build of the test installation: run `make <package>` followed by `make <package_tests>`. Note that this option only applies when doing a test installation using `test_install.sh` and specifying `--use-makefile 1` when launching the script.
 
 ## 5.1 Testing the Installation Directly
 
@@ -395,7 +395,7 @@ To test the installation using the Makefile run:
 ```bash
 git clone https://github.com/AMD/HPCTrainingDock 
 cd HPCTrainingDock 
-./bare_system/test_install.sh --use-makefile
+./bare_system/test_install.sh --use-makefile 1
 ```
 **NOTE**: If `--distro` and `--distro-versions` are left out, the test install script will detect the current distro and distro version on the system where the script is being run and use that. If `--rocm-version` is left out, the script also tries to detect the current ROCm version on your system and use that as default. As explained, the above script will automatically get you into a container as `sysdamin`. Once in the container do:
 
@@ -413,7 +413,7 @@ It is possible to create a binary distribution of ROCm by taring up the `rocm-<r
 ```bash
 git clone https://github.com/AMD/HPCTrainingDock
 cd HPCTrainingDock
-bare_system/test_install.sh --distro ubuntu --distro-versions 22.04 --rocm-version 6.1.2 --use-makefile
+bare_system/test_install.sh --distro ubuntu --distro-versions 22.04 --rocm-version 6.1.2 --use-makefile 1
 make rocm_package
 ```
 This make command tars up the `rocm-6.1.2` directory and then the next build it will restore from the tar file.
