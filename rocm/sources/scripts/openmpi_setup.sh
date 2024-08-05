@@ -19,6 +19,7 @@ MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/openmpi
 INSTALL_PATH_INPUT=""
 UCX_PATH_INPUT=""
 UCC_PATH_INPUT=""
+MPI4PY_PATH_INPUT=""
 OPENMPI_PATH_INPUT=""
 USE_CACHE_BUILD=1
 UCX_VERSION=1.17.0
@@ -30,7 +31,7 @@ OPENMPI_MD5CHECKSUM=4dcea38dcfa6710a7ed2922fa609e41e
 C_COMPILER=gcc
 CXX_COMPILER=g++
 FC_COMPILER=gfortran
-MPI4PY=0
+MPI4PY=1
 
 # Autodetect defaults
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
@@ -59,7 +60,8 @@ usage()
     echo "--ucx-path default <INSTALL_PATH>/ucx"
     echo "--ucx-version [VERSION] default $UCX_VERSION"
     echo "--ucx-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
-    echo "--mpy4py default is 0, build MPI for Python"
+    echo "--mpi4py-path default <INSTALL_PATH>/mpi4py"
+    echo "--build-mpi4py default is 1, build MPI for Python"
     exit 1
 }
 
@@ -184,11 +186,16 @@ do
           fi
           reset-last
           ;;
-      "--mpi4py")
+      "--build-mpi4py")
          shift
-         MPI4PY=1
+         MPI4PY=${1}
          reset-last
 	 ;;
+      "--mpi4py-path")
+          shift
+          MPI4PY_PATH_INPUT=${1}
+          reset-last
+          ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
@@ -264,6 +271,12 @@ if [ "${OPENMPI_PATH_INPUT}" != "" ]; then
    OPENMPI_PATH="${OPENMPI_PATH_INPUT}"
 else
    OPENMPI_PATH="${INSTALL_PATH}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}
+fi
+
+if [ "${MPI4PY_PATH_INPUT}" != "" ]; then
+   MPI4PY_PATH="${MPI4PY_PATH_INPUT}"
+else
+   MPI4PY_PATH="${INSTALL_PATH}"/mpi4py
 fi
 
 echo ""
@@ -623,7 +636,8 @@ if [[ "${MPI4PY}" == "1" ]]; then
       echo "============================"
       echo ""
 
-      export MPI4PY_BUILD_BACKEND=scikit-build-core
+      export MPI4PY_BUILD_BACKEND=setuptools
+      sudo python3 -m pip install --target=${MPI4PY_PATH}
 
 fi
 
@@ -648,6 +662,7 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("PATH", pathJoin(base, "bin"))
+	prepend_path("PYTHONPATH", ${MPI4PY}/mpi4py/include)
 	load("rocm/${ROCM_VERSION}")
 	family("MPI")
 EOF
