@@ -13,7 +13,11 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    sudo DEBIAN_FRONTEND=noninteractive apt-get -qqy install lmod
 fi
 if [ "${DISTRO}" = "rocky linux" ]; then
-   sudo yum -y install lmod
+   sudo yum -y install epel-release
+   sudo yum repolist
+   sudo yum update
+   sudo yum upgrade
+   sudo dnf -y install Lmod
 fi
 if [ "${DISTRO}" = "opensuse leap" ]; then
    zypper --non-interactive install lua-lmod
