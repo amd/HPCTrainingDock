@@ -131,12 +131,11 @@ WORKDIR /app
 # Install pytorch
 #
 
-#COPY training/sources/scripts/pytorch_setup.sh /tmp/pytorch_setup.sh
+COPY training/sources/scripts/pytorch_setup.sh /tmp/pytorch_setup.sh
 
-#RUN /tmp/pytorch_setup.sh --build-pytorch ${BUILD_PYTORCH} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} |& tee /app/build.out; rm /tmp/pytorch_setup.sh
-#RUN /tmp/pytorch_setup.sh --build-pytorch ${BUILD_PYTORCH} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} ; rm /tmp/pytorch_setup.sh
+RUN /tmp/pytorch_setup.sh --build-pytorch ${BUILD_PYTORCH} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/pytorch_setup.sh
 
-WORKDIR /tmp 
+WORKDIR /app
 
 #
 # Install any additional apps or libs that are needed 

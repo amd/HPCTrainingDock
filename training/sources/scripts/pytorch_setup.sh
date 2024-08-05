@@ -42,7 +42,7 @@ if [ "${BUILD_PYTORCH}" = "0" ]; then
    echo "BUILD_PYTORCH: $BUILD_PYTORCH"
    exit
 
-else 
+else
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
    if [ -f ${CACHE_FILES}/pytorch.tgz ]; then
       echo ""
@@ -79,7 +79,7 @@ else
       unset BUILD_OG_LATEST
       unset USE_CACHED_APPS
       
-      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages
+      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages:$PYTHONPATH
       
       # Install of pre-built pytorch for reference
       #sudo pip3 install --target=/opt/rocmplus-${ROCM_VERSION}/pytorch torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.0
@@ -94,58 +94,73 @@ else
       
       git clone --recursive https://github.com/pytorch/pytorch
       cd pytorch
+      git reset --hard d990dad # PyTorch 2.4, Python 3.12
       git submodule sync
       git submodule update --init --recursive
       sudo pip3 install mkl-static mkl-include
       sudo pip3 install -r requirements.txt
       
-      sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/pytorch
-      sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}/pytorch
-      python3 tools/amd_build/build_amd.py >& /dev/null
+      sudo mkdir /opt/rocmplus-${ROCM_VERSION}/pytorch
+      sudo python3 tools/amd_build/build_amd.py >& /dev/null
       
       echo ""
       echo "===================="
       echo "Starting setup.py install"
       echo "===================="
       echo ""
-      python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch
+      sudo python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch
       echo ""
       echo "===================="
       echo "Finished setup.py install"
       echo "===================="
       echo ""
     
-      #echo 'Defaults:%sudo env_keep += "PYTHONPATH"' | sudo EDITOR='tee -a' visudo
+      cd /tmp
 
+      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages
+      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages/torchvision-0.19.0a0+48b1edf-py3.10-linux-x86_64.egg:$PYTHONPATH
+      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages/pillow-10.4.0-py3.10-linux-x86_64.egg:$PYTHONPATH
+      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/audio/lib/python3.10/site-packages/torchaudio-2.4.0a0+69d4077-py3.10-linux-x86_64.egg:$PYTHONPATH
       export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages:$PYTHONPATH
-      pip3 uninstall torchvision
-      sudo mkdir /opt/rocmplus-${ROCM_VERSION}/vision
-      sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}/vision
-      cd ..
+      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/audio/lib/python3.10/site-packages:$PYTHONPATH
+
+      # install necessary packages in installation directory
+      sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/vision
+      sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/audio
+
+      if [[ "${USER}" != "root" ]]; then
+         sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}/vision
+         sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}/audio
+      fi
+
       git clone --recursive https://github.com/pytorch/vision
       cd vision
-      git reset --hard bf01bab
+      git reset --hard 48b1edf # Torchvision 0.19
       python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/vision
-
-      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/audio/lib/python3.10/site-packages:$PYTHONPATH
-      pip3 uninstall torchaudio
-      sudo mkdir /opt/rocmplus-${ROCM_VERSION}/audio
-      sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}/audio
       cd ..
+
       git clone --recursive https://github.com/pytorch/audio
       cd audio
-      git reset --hard 7f6209b
+      git reset --hard 69d4077 # TorhcAudio 2.4.0
       python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/audio
-      
-      cd ..
-      sudo chown root:root /opt/rocmplus-${ROCM_VERSION}/pytorch
-      sudo chmod og-w /opt/rocmplus-${ROCM_VERSION}/pytorch
-      sudo chown root:root /opt/rocmplus-${ROCM_VERSION}/vision
-      sudo chmod og-w /opt/rocmplus-${ROCM_VERSION}/vision
-      sudo chown root:root /opt/rocmplus-${ROCM_VERSION}/audio
-      sudo chmod og-w /opt/rocmplus-${ROCM_VERSION}/audio
 
-      rm -rf pytorch vision audio
+      if [[ "${USER}" != "root" ]]; then
+         sudo find /opt/rocmplus-${ROCM_VERSION}/vision -type f -execdir chown root:root "{}" +
+         sudo find /opt/rocmplus-${ROCM_VERSION}/vision -type d -execdir chown root:root "{}" +
+         sudo find /opt/rocmplus-${ROCM_VERSION}/audio -type f -execdir chown root:root "{}" +
+         sudo find /opt/rocmplus-${ROCM_VERSION}/audio -type d -execdir chown root:root "{}" +
+      fi
+
+      if [[ "${USER}" != "root" ]]; then
+         sudo chmod go-w /opt/rocmplus-${ROCM_VERSION}/vision
+         sudo chmod go-w /opt/rocmplus-${ROCM_VERSION}/audio
+      fi
+
+      # cleanup
+      cd ..
+      rm -rf vision audio
+      sudo rm -rf pytorch
+
    fi
 fi
 
@@ -156,18 +171,15 @@ sudo mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
 cat <<-EOF | sudo tee ${MODULE_PATH}/2.3.1.lua
-	whatis("HIP version of PyTorch")
+        whatis("HIP version of PyTorch")
 
-	load("rocm/${ROCM_VERSION}")
-	conflict("miniconda3")
-	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages")
-	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/audio/lib/python3.10/site-packages")
-	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages")
+        load("rocm/${ROCM_VERSION}")
+        conflict("miniconda3")
+	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages/torchvision-0.19.0a0+48b1edf-py3.10-linux-x86_64.egg")
+	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages/pillow-10.4.0-py3.10-linux-x86_64.egg")
+	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/audio/lib/python3.10/site-packages/torchaudio-2.4.0a0+69d4077-py3.10-linux-x86_64.egg")
+        prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages")
 EOF
-	#prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages/torchvision-0.20.0a0+bf01bab-py3.10-linux-x86_64.egg")
-	#prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages/pillow-10.4.0-py3.10-linux-x86_64.egg")
-	#prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/audio/lib/python3.10/site-packages/torchaudio-2.4.0a0+7f6209b-py3.10-linux-x86_64.egg")
-        #prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages")
 
 #pip download --only-binary :all: --dest /opt/wheel_files_6.0/pytorch-rocm --no-cache --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/rocm6.0
 #cat > /opt/wheel_files_6.0/README_pytorch <<-EOF

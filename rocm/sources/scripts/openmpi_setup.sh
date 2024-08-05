@@ -30,6 +30,7 @@ OPENMPI_MD5CHECKSUM=4dcea38dcfa6710a7ed2922fa609e41e
 C_COMPILER=gcc
 CXX_COMPILER=g++
 FC_COMPILER=gfortran
+MPI4PY=0
 
 # Autodetect defaults
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
@@ -58,6 +59,7 @@ usage()
     echo "--ucx-path default <INSTALL_PATH>/ucx"
     echo "--ucx-version [VERSION] default $UCX_VERSION"
     echo "--ucx-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
+    echo "--mpy4py default is 0, build MPI for Python"
     exit 1
 }
 
@@ -182,6 +184,11 @@ do
           fi
           reset-last
           ;;
+      "--mpi4py")
+         shift
+         MPI4PY=1
+         reset-last
+	 ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
@@ -606,6 +613,18 @@ else
       ls -l "${OPENMPI_PATH}"
       exit 1
    fi
+fi
+
+if [[ "${MPI4PY}" == "1" ]]; then
+
+      echo ""
+      echo "============================"
+      echo " Building MPI4PY"
+      echo "============================"
+      echo ""
+
+      export MPI4PY_BUILD_BACKEND=scikit-build-core
+
 fi
 
 module unload rocm/${ROCM_VERSION}
