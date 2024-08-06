@@ -486,9 +486,10 @@ EOF
 
 result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
 if [[ "${result}" ]]; then
-   sudo mkdir -p /opt/rocm-${ROCM_VERSION}/omnitrace/
+   export MODULE_PATH=/etc/lmod/modules/ROCm/omnitrace
+   sudo mkdir -p ${MODULE_PATH}
    # The - option suppresses tabs
-   cat <<-EOF | sudo tee /opt/rocm-${ROCM_VERSION}/omnitrace/6.2.0.lua
+   cat <<-EOF | sudo tee ${MODULE_PATH}/6.2.0.lua
 	whatis("Name: omnitrace")
 	whatis("Version: 6.2.0")
 	whatis("Category: AMD")
@@ -507,9 +508,10 @@ if [[ "${result}" ]]; then
 	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
 EOF
 
-   sudo mkdir -p /opt/rocm-${ROCM_VERSION}/omniperf/
+   export MODULE_PATH=/etc/lmod/modules/ROCm/omniperf
+   sudo mkdir -p ${MODULE_PATH}
    # The - option suppresses tabs
-   cat <<-EOF | sudo tee /opt/rocm-${ROCM_VERSION}/omniperf/6.2.0.lua
+   cat <<-EOF | sudo tee ${MODULE_PATH}/6.2.0.lua
 	local help_message = [[
 
 	Omniperf is an open-source performance analysis tool for profiling
