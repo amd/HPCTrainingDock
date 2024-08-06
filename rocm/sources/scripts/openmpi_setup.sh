@@ -636,8 +636,25 @@ if [[ "${MPI4PY}" == "1" ]]; then
       echo "============================"
       echo ""
 
+      cd /tmp
+
       export MPI4PY_BUILD_BACKEND=setuptools
-      sudo python3 -m pip install --target=${MPI4PY_PATH}
+      export MPI4PY_BUILD_MPICC=${OPENMPI_PATH}/bin/mpicc
+      sudo mkdir -p ${MPI4PY_PATH}
+      if [[ "${USER}" != "root" ]]; then
+         sudo chmod a+w ${MPI4PY_PATH}
+      fi
+
+      python3 -m pip install --target=${MPI4PY_PATH} mpi4py
+
+      if [[ "${USER}" != "root" ]]; then
+         sudo find ${MPI4PY_PATH} -type f -execdir chown root:root "{}" +
+         sudo find ${MPI4PY_PATH} -type d -execdir chown root:root "{}" +
+      fi
+
+      if [[ "${USER}" != "root" ]]; then
+         sudo chmod go-w ${MPI4PY_PATH}
+      fi
 
 fi
 
