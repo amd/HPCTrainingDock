@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Variables controlling setup process
-MODULE_PATH==/etc/lmod/modules/ROCmPlus-AMDResearchTools/omnitrace
+MODULE_PATH=/etc/lmod/modules/ROCmPlus-AMDResearchTools/omnitrace
 OMNITRACE_BUILD_FROM_SOURCE=0
 
 # Autodetect defaults
@@ -97,7 +97,7 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "0" ] ; then
          sudo rm ${CACHE_FILES}/omnitrace.tgz
       fi
    else
-      if  wget -q https://github.com/AMDResearch/omnitrace/releases/download/v1.11.3/omnitrace-install.py && \
+      if  wget -q https://github.com/AMDResearch/omnitrace/releases/download/v1.11.1/omnitrace-install.py && \
           python3 ./omnitrace-install.py --prefix /opt/rocmplus-${ROCM_VERSION}/omnitrace --rocm "${ROCM_VERSION}" -d ubuntu -v "${DISTRO_VERSION}"; then
          OMNITRACE_PREBUILT_DOWNLOADED=1
       else

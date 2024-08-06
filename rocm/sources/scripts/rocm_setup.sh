@@ -484,7 +484,8 @@ cat <<-EOF | sudo tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	family("OpenCL")
 EOF
 
-if [[ "${ROCM_VERSION}" -ge "6.2.0" ]]; then
+result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
+if [[ "${result}" ]]; then
    sudo mkdir -p /opt/rocm-${ROCM_VERSION}/omnitrace/
    # The - option suppresses tabs
    cat <<-EOF | sudo tee /opt/rocm-${ROCM_VERSION}/omnitrace/6.2.0.lua
