@@ -65,7 +65,6 @@ else
       echo "============================"
       echo ""
 
-      cd /tmp
 
       source /etc/profile.d/lmod.sh
       module load rocm
@@ -80,7 +79,7 @@ else
       unset BUILD_OG_LATEST
       unset USE_CACHED_APPS
       
-      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages
+      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages:$PYTHONPATH
       
       # Install of pre-built pytorch for reference
       #sudo pip3 install --target=/opt/rocmplus-${ROCM_VERSION}/pytorch torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.0
@@ -93,12 +92,6 @@ else
       export USE_MPI=0
       export PYTORCH_ROCM_ARCH="${AMDGPU_GFXMODEL}"
       
-      sudo mkdir /opt/rocmplus-${ROCM_VERSION}/pytorch
-      if [[ "${USER}" != "root" ]]; then
-         sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}/pytorch
-         sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}/pytorch
-      fi
-
       git clone --recursive https://github.com/pytorch/pytorch
       cd pytorch
       git reset --hard d990dad # PyTorch 2.4, Python 3.12
@@ -107,6 +100,7 @@ else
       sudo pip3 install mkl-static mkl-include
       sudo pip3 install -r requirements.txt
       
+      sudo mkdir /opt/rocmplus-${ROCM_VERSION}/pytorch
       sudo python3 tools/amd_build/build_amd.py >& /dev/null
       
       echo ""
@@ -121,8 +115,9 @@ else
       echo "===================="
       echo ""
     
-      cd ..
+      cd /tmp
 
+      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages
       export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages/torchvision-0.19.0a0+48b1edf-py3.10-linux-x86_64.egg:$PYTHONPATH
       export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages/pillow-10.4.0-py3.10-linux-x86_64.egg:$PYTHONPATH
       export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/audio/lib/python3.10/site-packages/torchaudio-2.4.0a0+69d4077-py3.10-linux-x86_64.egg:$PYTHONPATH
@@ -150,8 +145,6 @@ else
       python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/audio
 
       if [[ "${USER}" != "root" ]]; then
-         sudo find /opt/rocmplus-${ROCM_VERSION}/pytorch -type f -execdir chown root:root "{}" +
-         sudo find /opt/rocmplus-${ROCM_VERSION}/pytorch -type d -execdir chown root:root "{}" +
          sudo find /opt/rocmplus-${ROCM_VERSION}/vision -type f -execdir chown root:root "{}" +
          sudo find /opt/rocmplus-${ROCM_VERSION}/vision -type d -execdir chown root:root "{}" +
          sudo find /opt/rocmplus-${ROCM_VERSION}/audio -type f -execdir chown root:root "{}" +
@@ -159,14 +152,14 @@ else
       fi
 
       if [[ "${USER}" != "root" ]]; then
-         sudo chmod go-w /opt/rocmplus-${ROCM_VERSION}/pytorch
          sudo chmod go-w /opt/rocmplus-${ROCM_VERSION}/vision
          sudo chmod go-w /opt/rocmplus-${ROCM_VERSION}/audio
       fi
 
       # cleanup
       cd ..
-      rm -rf pytorch vision audio
+      rm -rf vision audio
+      sudo rm -rf pytorch
       sudo rm -rf /tmp/amd_triton_kernel*
 
    fi
