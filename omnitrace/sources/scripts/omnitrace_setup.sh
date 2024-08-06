@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Variables controlling setup process
-MODULE_PATH==/etc/lmod/modules/ROCmPlus-AMDResearchTools/omnitrace
+MODULE_PATH=/etc/lmod/modules/ROCmPlus-AMDResearchTools/omnitrace
 OMNITRACE_BUILD_FROM_SOURCE=0
 
 # Autodetect defaults
@@ -162,9 +162,9 @@ fi
 sudo mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | sudo tee ${MODULE_PATH}/1.11.2.lua
+cat <<-EOF | sudo tee ${MODULE_PATH}/1.11.3.lua
 	whatis("Name: omnitrace")
-	whatis("Version: 1.11.2")
+	whatis("Version: 1.11.3")
 	whatis("Category: AMD")
 	whatis("omnitrace")
 

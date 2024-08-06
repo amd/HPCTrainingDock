@@ -160,6 +160,7 @@ else
       cd ..
       rm -rf vision audio
       sudo rm -rf pytorch
+      sudo rm -rf /tmp/amd_triton_kernel*
 
    fi
 fi
