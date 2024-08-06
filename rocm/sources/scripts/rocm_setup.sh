@@ -343,6 +343,7 @@ if [ "${DISTRO}" == "ubuntu" ]; then
 	 else
             DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,openmpsdk,mlsdk,asan --no-dkms
 	 fi
+	 sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y omnitrace omniperf
 
          # Required by DeepSpeed
          sudo ln -s /opt/rocm-${ROCM_VERSION}/.info/version /opt/rocm-${ROCM_VERSION}/.info/version-dev
@@ -485,7 +486,7 @@ cat <<-EOF | sudo tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 EOF
 
 result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
-if [[ "${result}" ]]; then
+if [[ "${result}" ]] && [[ -f /opt/rocm-${ROCM_VERSION}/bin/omnitrace ]] ; then
    export MODULE_PATH=/etc/lmod/modules/ROCm/omnitrace
    sudo mkdir -p ${MODULE_PATH}
    # The - option suppresses tabs
@@ -508,6 +509,9 @@ if [[ "${result}" ]]; then
 	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
 EOF
 
+fi
+
+if [[ "${result}" ]] && [[ -f /opt/rocm-${ROCM_VERSION}/bin/omniperf ]] ; then
    export MODULE_PATH=/etc/lmod/modules/ROCm/omniperf
    sudo mkdir -p ${MODULE_PATH}
    # The - option suppresses tabs

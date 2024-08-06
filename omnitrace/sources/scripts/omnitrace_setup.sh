@@ -170,6 +170,7 @@ cat <<-EOF | sudo tee ${MODULE_PATH}/1.11.3.lua
 
 	local base = "/opt/rocmplus-${ROCM_VERSION}/omnitrace/"
 
+	load("rocm/${ROCM_VERSION}")
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
@@ -177,7 +178,6 @@ cat <<-EOF | sudo tee ${MODULE_PATH}/1.11.3.lua
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("INCLUDE", pathJoin(base, "include"))
 	setenv("OMNITRACE_PATH", base)
-	load("rocm/${ROCM_VERSION}")
 	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
 EOF
 
