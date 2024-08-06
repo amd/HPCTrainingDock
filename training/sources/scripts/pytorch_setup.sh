@@ -100,7 +100,7 @@ else
       sudo pip3 install mkl-static mkl-include
       sudo pip3 install -r requirements.txt
       
-      sudo mkdir /opt/rocmplus-${ROCM_VERSION}/pytorch
+      sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/pytorch
       sudo python3 tools/amd_build/build_amd.py >& /dev/null
       
       echo ""
