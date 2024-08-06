@@ -87,6 +87,8 @@ RUN /tmp/amd_gcc_setup.sh --build-gcc-latest ${BUILD_GCC_LATEST} --rocm-version 
 COPY training/sources/scripts/aomp_setup.sh /tmp/aomp_setup.sh
 RUN /tmp/aomp_setup.sh --build-aomp-latest ${BUILD_AOMP_LATEST} --rocm-version ${ROCM_VERSION} && rm /tmp/aomp_setup.sh
  
+RUN echo "At end of aomp install" && cd /app && ls -l && cd /tmp && ls -l && cd && ls -l
+
 # install latest llvm
 COPY training/sources/scripts/llvm-build.sh /tmp/llvm-build.sh
 RUN /tmp/llvm-build.sh --build-llvm-latest ${BUILD_LLVM_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/llvm-build.sh
@@ -135,6 +137,7 @@ COPY training/sources/scripts/pytorch_setup.sh /tmp/pytorch_setup.sh
 
 RUN /tmp/pytorch_setup.sh --build-pytorch ${BUILD_PYTORCH} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/pytorch_setup.sh
 
+RUN echo "At end of pytorch install" && cd /app && ls -l && cd /tmp && ls -l && cd && ls -l
 WORKDIR /app
 
 #
@@ -144,6 +147,8 @@ COPY training/sources/scripts/apps_setup.sh /tmp/apps_setup.sh
 
 RUN  chmod u+x /tmp/apps_setup.sh && \
      /tmp/apps_setup.sh; rm /tmp/apps_setup.sh
+
+RUN echo "At end of training level" && cd /app && ls -l && cd /tmp && ls -l && cd && ls -l
 
 #
 # create a default .bashrc  (based on Ubuntu 22 /etc/skel/.bashrc )

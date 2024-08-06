@@ -72,8 +72,7 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
       make
 
       cd ..
-      rm -rf aomp-${AOMP_VERSION_NUMBER}.tar.gz
-# aomp${AOMP_VERSION_SHORT}
+      rm -rf aomp-${AOMP_VERSION_NUMBER}.tar.gz aomp${AOMP_VERSION_SHORT}
 
       chmod a-w /opt
    fi

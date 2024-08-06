@@ -33,8 +33,8 @@ COPY omnitrace/sources/scripts/miniconda3_setup.sh /tmp/miniconda3_setup.sh
 
 RUN /tmp/miniconda3_setup.sh \
         --rocm-version ${ROCM_VERSION} \
-        --python-versions "${PYTHON_VERSIONS}" \
-    rm /tmp/miniconda3_setup.sh
+        --python-versions "${PYTHON_VERSIONS}" && \
+    rm -f /tmp/miniconda3_setup.sh
 
 #   conda init && \
 

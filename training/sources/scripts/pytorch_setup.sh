@@ -159,8 +159,8 @@ else
       # cleanup
       cd ..
       rm -rf vision audio
-      sudo rm -rf pytorch
-      sudo rm -rf /tmp/amd_triton_kernel*
+      sudo rm -rf /app/pytorch
+      sudo rm -rf /tmp/amd_triton_kernel* /tmp/can*
 
    fi
 fi

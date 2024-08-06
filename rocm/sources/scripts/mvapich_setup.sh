@@ -122,6 +122,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    ls -l ${MVAPICH_RPM_NAME}
    sudo apt-get install -y alien ${MVAPICH_RPM_NAME}
    /opt/rocmplus-${ROCM_VERSION}/mvapich/bin/mpicc --show
+   rm -rf ${MVAPICH_RPM_NAME}
 fi
 if [ "${DISTRO}" = "opensuse leap" ]; then
    echo "Mvapich install on Suse not working yet"

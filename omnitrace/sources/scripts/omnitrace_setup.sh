@@ -155,7 +155,7 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "1" ] ; then
 
    cmake --build omnitrace-build --target all --parallel 16
    sudo cmake --build omnitrace-build --target install
-   rm -rf omnitrace-source
+   rm -rf omnitrace-source omnitrace-build omnitrace-install.py omnitrace-install*
 fi
 
 # In either case, create a module file for Omnitrace
