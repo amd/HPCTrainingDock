@@ -341,10 +341,10 @@ if [ "${DISTRO}" == "ubuntu" ]; then
          result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
 	 if [[ "${result}" ]]; then
             DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,openmpsdk,mlsdk,asan --no-dkms
+	    sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y omnitrace omniperf
 	 else
             DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms
 	 fi
-	 sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y omnitrace omniperf
 
          # Required by DeepSpeed
          sudo ln -s /opt/rocm-${ROCM_VERSION}/.info/version /opt/rocm-${ROCM_VERSION}/.info/version-dev
