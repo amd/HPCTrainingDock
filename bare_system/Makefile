@@ -133,23 +133,24 @@ HPCTrainingExamples:
 	git clone https://github.com/AMD/HPCTrainingExamples
 	cd HPCTrainingExamples/tests && mkdir build && cd build && cmake ..
 
-hip_tests.timestep: rocm.timestamp HPCTrainingExamples
-	cd HPCTrainingExamples/tests/build && ctest -R HIP_Vector -R HIP_Jacobi -R HIP_Stream -R HIP_Saxpy
-	touch rocprof_tests.timestamp
+hip_tests.timestamp: rocm.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R "HIP_Vector|HIP_Jacobi|^HIP_Stream|HIP_Saxpy"
+	touch hip_tests.timestamp
 
-rocprof_tests.timestep: rocm.timestamp HPCTrainingExamples
+rocprof_tests.timestamp: rocm.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Rocprof
 	touch rocprof_tests.timestamp
 
-openmp_tests.timestep: rocm.timestamp HPCTrainingExamples
+openmp_tests.timestamp: rocm.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R "^OpenMP_"
 	touch openmp_tests.timestamp
 
-hipstdpar_tests.timestep: rocm.timestamp HPCTrainingExamples
+hipstdpar_tests.timestamp: rocm.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R HIPStdPar
 	touch hipstdpar_tests.timestamp
 
-rocm_tests.timestamp: hip_tests.timestep rocprof_tests.timestep openmp_tests.timestep hipstdpar_tests.timestep
+rocm_tests.timestamp: rocm.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R "HIP_Vector|HIP_Jacobi|^HIP_Stream|HIP_Saxpy|Rocprof|^OpenMP_|HIPStdPar"
 	touch rocm_tests.timestamp
 
 openmpi_tests.timestamp: openmpi.timestamp HPCTrainingExamples

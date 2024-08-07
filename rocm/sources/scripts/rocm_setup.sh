@@ -340,7 +340,7 @@ if [ "${DISTRO}" == "ubuntu" ]; then
          sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
          result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
 	 if [[ "${result}" ]]; then
-            DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,openmpsdk,mlsdk,asan --no-dkms
+            DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk,asan --no-dkms
 	    sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y omnitrace omniperf
 	 else
             DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms

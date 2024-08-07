@@ -104,7 +104,22 @@ if [[ "${DISTRO}" == "rocky linux" ]]; then
 fi
 
 
+NAMEBASE=Bare
+NAME=$NAMEBASE
+NUMBER=0
+while [ `docker inspect --format='{{.Name}}' $NAME |& grep /$NAME | wc -l` != "0" ]; do
+   NUMBER=$((NUMBER+1))
+   NAME=$NAMEBASE$NUMBER
+done
+PORT_NUMBER=2222
+while [ `docker ps | grep -w "${PORT_NUMBER}" | wc -l` != "0" ]; do
+   PORT_NUMBER=$((PORT_NUMBER+1))
+done
+
+echo "NAME is ${NAME}"
+echo "PORT_NUMBER is ${PORT_NUMBER}"
+
 docker run -it --device=/dev/kfd --device=/dev/dri \
     --group-add video --group-add render ${ADD_OPTIONS} \
-    -p 2222:22 --name Bare  --security-opt seccomp=unconfined \
+    -p ${PORT_NUMBER}:22 --name ${NAME}  --security-opt seccomp=unconfined \
     --rm -v $PWD/CacheFiles:/CacheFiles bare
