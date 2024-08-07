@@ -636,25 +636,17 @@ if [[ "${MPI4PY}" == "1" ]]; then
       echo "============================"
       echo ""
 
-      cd /tmp
-
-      export MPI4PY_BUILD_BACKEND=setuptools
-      export MPI4PY_BUILD_MPICC=${OPENMPI_PATH}/bin/mpicc
       sudo mkdir -p ${MPI4PY_PATH}
-      if [[ "${USER}" != "root" ]]; then
-         sudo chmod a+w ${MPI4PY_PATH}
-      fi
 
-      python3 -m pip install --target=${MPI4PY_PATH} mpi4py
+      git clone https://github.com/mpi4py/mpi4py.git
+      cd mpi4py
+      echo "mpi_dir              = ${OPENMPI_PATH}" >> mpi.cfg
+      echo "mpicc                = ${OPENMPI_PATH}"/bin/mpicc >> mpi.cfg
 
-      if [[ "${USER}" != "root" ]]; then
-         sudo find ${MPI4PY_PATH} -type f -execdir chown root:root "{}" +
-         sudo find ${MPI4PY_PATH} -type d -execdir chown root:root "{}" +
-      fi
+      sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py build --mpi=${OPENMPI_PATH}
+      sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py bdist_wheel
 
-      if [[ "${USER}" != "root" ]]; then
-         sudo chmod go-w ${MPI4PY_PATH}
-      fi
+      sudo pip3 install -v --target=${MPI4PY_PATH} dist/mpi4py-*.whl
 
 fi
 
