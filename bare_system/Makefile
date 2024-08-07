@@ -17,6 +17,11 @@ cupy: cupy.timestamp
 pytorch: pytorch.timestamp
 apps_setup: apps_setup.timestamp
 
+hip_tests: hip_tests.timestamp
+rocprof_tests: rocprof_tests.timestamp
+openmp_tests: openmp_tests.timestamp
+hipstdpar_tests: hipstdpar_tests.timestamp
+rocm_tests: rocm_tests.timestamp
 openmpi_tests: openmpi_tests.timestamp
 kokkos_tests: kokkos_tests.timestamp
 cupy_tests: cupy_tests.timestamp
@@ -128,6 +133,25 @@ HPCTrainingExamples:
 	git clone https://github.com/AMD/HPCTrainingExamples
 	cd HPCTrainingExamples/tests && mkdir build && cd build && cmake ..
 
+hip_tests.timestep: rocm.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R HIP_Vector -R HIP_Jacobi -R HIP_Stream -R HIP_Saxpy
+	touch rocprof_tests.timestamp
+
+rocprof_tests.timestep: rocm.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R Rocprof
+	touch rocprof_tests.timestamp
+
+openmp_tests.timestep: rocm.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R "^OpenMP_"
+	touch openmp_tests.timestamp
+
+hipstdpar_tests.timestep: rocm.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R HIPStdPar
+	touch hipstdpar_tests.timestamp
+
+rocm_tests.timestamp: hip_tests.timestep rocprof_tests.timestep openmp_tests.timestep hipstdpar_tests.timestep
+	touch rocm_tests.timestamp
+
 openmpi_tests.timestamp: openmpi.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R OpenMPI
 	touch openmpi_tests.timestamp
@@ -137,7 +161,6 @@ kokkos_tests.timestamp: kokkos.timestamp HPCTrainingExamples
 	touch kokkos_tests.timestamp
 
 cupy_tests.timestamp: cupy.timestamp HPCTrainingExamples
-	#source /etc/profile.d/lmod.sh && cd HPCTrainingExamples/tests/build && ctest -R Cupy
 	cd HPCTrainingExamples/tests/build && ctest -R Cupy
 	touch cupy_tests.timestamp
 
@@ -148,9 +171,6 @@ pytorch_tests.timestamp: pytorch.timestamp HPCTrainingExamples
 
 # Deploy targets create a compressed tar image of the directory for the package
 rocm_package.timestamp: rocm.timestamp
-	#cd /opt && \
-	#   tar -czpf rocm-${ROCM_VERSION} \
-	#      /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/rocm-${ROCM_VERSION}.tgz
 	bare_system/deploy_package.sh --package-basedir /opt --selection-string rocm-${ROCM_VERSION}
 	touch rocm_package.timestamp
 
