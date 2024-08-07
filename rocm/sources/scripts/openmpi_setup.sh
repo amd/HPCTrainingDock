@@ -640,10 +640,15 @@ if [[ "${MPI4PY}" == "1" ]]; then
 
       git clone https://github.com/mpi4py/mpi4py.git
       cd mpi4py
+
+      echo "[model]              = ${OPENMPI_PATH}" >> mpi.cfg
       echo "mpi_dir              = ${OPENMPI_PATH}" >> mpi.cfg
       echo "mpicc                = ${OPENMPI_PATH}"/bin/mpicc >> mpi.cfg
+      echo "mpic++                = ${OPENMPI_PATH}"/bin/mpic++ >> mpi.cfg
+      echo "library_dirs         = %(mpi_dir)s/lib" >> mpi.cfg
+      echo "include_dirs         = %(mpi_dir)s/include" >> mpi.cfg
 
-      sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py build --mpi=${OPENMPI_PATH}
+      sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py build --mpi=model
       sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py bdist_wheel
 
       sudo pip3 install -v --target=${MPI4PY_PATH} dist/mpi4py-*.whl
