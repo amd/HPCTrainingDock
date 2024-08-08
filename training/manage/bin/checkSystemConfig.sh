@@ -18,19 +18,23 @@ if [[ "${MI300A_COUNT}" -ge 0 ]]; then
    echo "Checking Grub settings"
    echo "======================"
    echo "GRUB_CMDLINE_LINUX should have pci=realloc=off"
-   if [[ `grep GRUB_CMDLINE_LINUX /etc/default/grub | grep "pci=realloc=off" | wc -l` != 1 ]]; then
-      echo "WARNING: pci realloc setting is missing"
-      echo "   RECOMMENDATION: it is recommended that pci realloc be set to off"
-      echo "   FIX: Add pci=realloc=off to GRUB_CMDLINE_LINUX"
-      GRUB_UPDATE_NEEDED=1
+   if [[ -f /etc/default/grub ]]; then
+      if [[ `grep GRUB_CMDLINE_LINUX /etc/default/grub | grep "pci=realloc=off" | wc -l` != 1 ]]; then
+         echo "WARNING: pci realloc setting is missing"
+         echo "   RECOMMENDATION: it is recommended that pci realloc be set to off"
+         echo "   FIX: Add pci=realloc=off to GRUB_CMDLINE_LINUX"
+         GRUB_UPDATE_NEEDED=1
+      fi
+      if [[ "${GRUB_UPDATE_NEEDED}" == 1 ]]; then
+         echo "        sudo grub2-mkconfig -o /boot/grub2/grub.cfg, or"
+         echo "        sudo grub-mkconfig -o /boot/grub/grub.cfg"
+         echo "        check for version with grub-mkconfig -version"
+      fi
+      echo "Current setting for GRUB_COMMAND_LINE is"
+      grep GRUB_CMDLINE_LINUX /etc/default/grub
+   else
+      echo "/etc/default/grub not found. Check with your system provider"
    fi
-   if [[ "${GRUB_UPDATE_NEEDED}" == 1 ]]; then
-      echo "        sudo grub2-mkconfig -o /boot/grub2/grub.cfg, or"
-      echo "        sudo grub-mkconfig -o /boot/grub/grub.cfg"
-      echo "        check for version with grub-mkconfig -version"
-   fi
-   echo "Current setting for GRUB_COMMAND_LINE is"
-   grep GRUB_CMDLINE_LINUX /etc/default/grub
    echo "======================"
    echo ""
 
@@ -57,19 +61,25 @@ elif [[ "${MI300X_COUNT}" -gt 0 ]]; then
    echo "Checking Grub settings"
    echo "======================"
    echo "GRUB_CMDLINE_LINUX should have pci=realloc=off"
-   if [[ `grep GRUB_CMDLINE_LINUX /etc/default/grub | grep "pci=realloc=off" | wc -l` != 1 ]]; then
-      echo "WARNING: pci realloc setting is missing"
-      echo "   RECOMMENDATION: it is recommended that pci realloc be set to off"
-      echo "   FIX: Add pci=realloc=off to GRUB_CMDLINE_LINUX"
-      GRUB_UPDATE_NEEDED=1
+   if [[ -f /etc/default/grub ]]; then
+      if [[ `grep GRUB_CMDLINE_LINUX /etc/default/grub | grep "pci=realloc=off" | wc -l` != 1 ]]; then
+         echo "WARNING: pci realloc setting is missing"
+         echo "   RECOMMENDATION: it is recommended that pci realloc be set to off"
+         echo "   FIX: Add pci=realloc=off to GRUB_CMDLINE_LINUX"
+         GRUB_UPDATE_NEEDED=1
+      fi
    fi
    echo "GRUB_CMDLINE_LINUX should have iommu=on"
-   if [[ `grep GRUB_CMDLINE_LINUX /etc/default/grub | grep "iommu=on" | wc -l` != 1 ]]; then
-      echo "WARNING: iommu=on setting is missing"
-      echo "   RECOMMENDATION: it is recommended that iommu be set to on"
-      echo "   FIX: Add amd_iommu=on iommu=pt to GRUB_CMDLINE_LINUX, or"
-      echo "            intel_iommu=on iommu=pt to GRUB_CMDLINE_LINUX"
-      GRUB_UPDATE_NEEDED=1
+   if [[ -f /etc/default/grub ]]; then
+      if [[ `grep GRUB_CMDLINE_LINUX /etc/default/grub | grep "iommu=on" | wc -l` != 1 ]]; then
+         echo "WARNING: iommu=on setting is missing"
+         echo "   RECOMMENDATION: it is recommended that iommu be set to on"
+         echo "   FIX: Add amd_iommu=on iommu=pt to GRUB_CMDLINE_LINUX, or"
+         echo "            intel_iommu=on iommu=pt to GRUB_CMDLINE_LINUX"
+         GRUB_UPDATE_NEEDED=1
+      fi
+   else
+      echo "/etc/default/grub not found. Check with your system provider"
    fi
    if [[ "${GRUB_UPDATE_NEEDED}" == 1 ]]; then
       echo "        sudo grub2-mkconfig -o /boot/grub2/grub.cfg, or"

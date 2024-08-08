@@ -43,6 +43,16 @@ RUN  /tmp/rocm_setup.sh --rocm-version ${ROCM_VERSION} && \
 COPY rocm/sources/lua/bash.bashrc /tmp/bash.bashrc
 RUN cat /tmp/bash.bashrc >> /etc/bash.bashrc && rm -f /tmp/bash.bashrc
 
+COPY rocm/sources/scripts/rocm_omnitrace_setup.sh /tmp/rocm_omnitrace_setup.sh
+
+RUN  /tmp/rocm_omnitrace_setup.sh --rocm-version ${ROCM_VERSION} && \
+     rm /tmp/rocm_omnitrace_setup.sh
+
+COPY rocm/sources/scripts/rocm_omniperf_setup.sh /tmp/rocm_omniperf_setup.sh
+
+RUN  /tmp/rocm_omniperf_setup.sh --rocm-version ${ROCM_VERSION} && \
+     rm /tmp/rocm_omniperf_setup.sh
+
 USER root
 
 # using /app rather than /tmp because prte encodes the HLD and removing /tmp files may cause problems

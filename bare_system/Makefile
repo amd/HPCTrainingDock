@@ -17,6 +17,9 @@ cupy: cupy.timestamp
 pytorch: pytorch.timestamp
 apps_setup: apps_setup.timestamp
 
+checkSystemConfig: checkSystemConfig.timestamp
+env_check: env_check.timestamp
+rocm_bandwidth_test: rocm_bandwidth_test.timestamp
 hip_tests: hip_tests.timestamp
 rocprof_tests: rocprof_tests.timestamp
 openmp_tests: openmp_tests.timestamp
@@ -132,6 +135,18 @@ apps_setup.timestamp:
 HPCTrainingExamples:
 	git clone https://github.com/AMD/HPCTrainingExamples
 	cd HPCTrainingExamples/tests && mkdir build && cd build && cmake ..
+
+checkSystemConfig.timestamp: rocm.timestamp
+	training/manage/bin/checkSystemConfig.sh
+	touch checkSystemConfig.timestamp
+
+env_check.timestamp: rocm.timestamp
+	training/manage/bin/env_check.sh check
+	touch env_check.timestamp
+
+rocm_bandwidth_test.timestamp: rocm.timestamp
+	rocm_bandwidth_test
+	touch rocm_bandwidth_test.timestamp
 
 hip_tests.timestamp: rocm.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R "HIP_Vector|HIP_Jacobi|^HIP_Stream|HIP_Saxpy"

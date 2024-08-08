@@ -293,7 +293,7 @@ if [ "${DISTRO}" == "ubuntu" ]; then
       echo "There is a previous installation and the replace flag is false"
       echo "  use --replace to request replacing the current installation"
    else
-      if [[ -d "/opt/${ROCM_VERSION}" ]] && [[ "${REPLACE}" != "0" ]] ; then
+      if [[ -d "/opt/rocm-${ROCM_VERSION}" ]] && [[ "${REPLACE}" != "0" ]] ; then
          sudo rm -rf "/opt/${ROCM_VERSION}"
       fi
       if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz ]]; then
@@ -332,8 +332,7 @@ if [ "${DISTRO}" == "ubuntu" ]; then
          result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
 	 if [[ "${result}" ]]; then
             DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk,asan --no-dkms
-	    sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y omnitrace omniperf
-	    sudo python3 -m pip install -t /opt/rocm-${ROCM_VERSION}/libexec/omniperf/python-libs -r /opt/rocm-${ROCM_VERSION}/libexec/omniperf/requirements.txt
+	    sudo apt-get install rocm_bandwidth_test
 	 else
             DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms
 	 fi
@@ -477,72 +476,3 @@ cat <<-EOF | sudo tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	prepend_path("PATH", pathJoin(base, "bin"))
 	family("OpenCL")
 EOF
-
-result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
-if [[ "${result}" ]] && [[ -f /opt/rocm-${ROCM_VERSION}/bin/omnitrace ]] ; then
-   export MODULE_PATH=/etc/lmod/modules/ROCm/omnitrace
-   sudo mkdir -p ${MODULE_PATH}
-   # The - option suppresses tabs
-   cat <<-EOF | sudo tee ${MODULE_PATH}/6.2.0.lua
-	whatis("Name: omnitrace")
-	whatis("Version: 6.2.0")
-	whatis("Category: AMD")
-	whatis("omnitrace")
-
-	local base = "/opt/rocm-${ROCM_VERSION}"
-
-	setenv("OMNITRACE_PATH", base)
-	load("rocm/${ROCM_VERSION}")
-	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
-EOF
-
-fi
-
-if [[ "${result}" ]] && [[ -f /opt/rocm-${ROCM_VERSION}/bin/omniperf ]] ; then
-   export MODULE_PATH=/etc/lmod/modules/ROCm/omniperf
-   sudo mkdir -p ${MODULE_PATH}
-   # The - option suppresses tabs
-   cat <<-EOF | sudo tee ${MODULE_PATH}/6.2.0.lua
-	local help_message = [[
-
-	Omniperf is an open-source performance analysis tool for profiling
-	machine learning/HPC workloads running on AMD MI GPUs.
-
-	Version 6.2.0
-	]]
-
-	help(help_message,"\n")
-
-	whatis("Name: omniperf")
-	whatis("Version: 2.0.0")
-	whatis("Keywords: Profiling, Performance, GPU")
-	whatis("Description: tool for GPU performance profiling")
-	whatis("URL: https://github.com/AMDResearch/omniperf")
-
-	-- Export environmental variables
-	local topDir="/opt/rocm-${ROCM_VERSION}"
-	local binDir="/opt/rocm-${ROCM_VERSION}/bin"
-	local shareDir="/opt/rocm-${ROCM_VERSION}/share/omniperf"
-	local pythonDeps="/opt/rocm-${ROCM_VERSION}/libexec/omniperf/python-libs"
-	local roofline="/opt/rocm-${ROCM_VERSION}/libexec/omniperf/bin/utils/rooflines/roofline-ubuntu20_04-mi200-rocm5"
-
-	setenv("OMNIPERF_DIR",topDir)
-	setenv("OMNIPERF_BIN",binDir)
-	setenv("OMNIPERF_SHARE",shareDir)
-	setenv("ROOFLINE_BIN",roofline)
-
-	-- Update relevant PATH variables
-	prepend_path("PATH",binDir)
-	if ( pythonDeps  ~= "" ) then
-	prepend_path("PYTHONPATH",pythonDeps)
-	end
-
-	-- Site-specific additions
-	-- depends_on "python"
-	-- depends_on "rocm"
-	prereq(atleast("rocm","${ROCM_VERSION}"))
-	--  prereq("mongodb-tools")
-	local home = os.getenv("HOME")
-	setenv("MPLCONFIGDIR",pathJoin(home,".matplotlib"))
-EOF
-fi
