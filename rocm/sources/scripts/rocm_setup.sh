@@ -288,60 +288,61 @@ fi
 
 CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
 
+if [[ -d "/opt/rocm-${ROCM_VERSION}" ]] && [[ "${REPLACE}" == "0" ]] ; then
+   echo "There is a previous installation and the replace flag is false"
+   echo "  use --replace to request replacing the current installation"
+   exit
+fi
+
 if [ "${DISTRO}" == "ubuntu" ]; then
-   if [[ -d "/opt/rocm-${ROCM_VERSION}" ]] && [[ "${REPLACE}" == "0" ]] ; then
-      echo "There is a previous installation and the replace flag is false"
-      echo "  use --replace to request replacing the current installation"
+   if [[ -d "/opt/rocm-${ROCM_VERSION}" ]] && [[ "${REPLACE}" != "0" ]] ; then
+      sudo rm -rf "/opt/${ROCM_VERSION}"
+   fi
+   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz ]]; then
+      echo ""
+      echo "============================"
+      echo " Installing Cached ROCm"
+      echo "============================"
+      echo ""
+
+      #install the cached version
+      echo "cached file is ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz"
+      cd /opt
+      sudo tar -xzf ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz
+      sudo chown -R root:root "${INSTALL_PATH}"/rocm-${ROCM_VERSION}
+      if [ "${USER}" != "sysadmin" ]; then
+         sudo rm "${INSTALL_PATH}"/CacheFiles/rocm-${ROCM_VERSION}.tgz
+      fi
    else
-      if [[ -d "/opt/rocm-${ROCM_VERSION}" ]] && [[ "${REPLACE}" != "0" ]] ; then
-         sudo rm -rf "/opt/${ROCM_VERSION}"
-      fi
-      if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz ]]; then
-         echo ""
-         echo "============================"
-         echo " Installing Cached ROCm"
-         echo "============================"
-         echo ""
 
-         #install the cached version
-         echo "cached file is ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz"
-	 cd /opt
-         sudo tar -xzf ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz
-         sudo chown -R root:root "${INSTALL_PATH}"/rocm-${ROCM_VERSION}
-	 if [ "${USER}" != "sysadmin" ]; then
-            sudo rm "${INSTALL_PATH}"/CacheFiles/rocm-${ROCM_VERSION}.tgz
-	 fi
+      #mkdir --parents --mode=0755 /etc/apt/keyrings
+      #sudo mkdir --parents --mode=0755 /etc/apt/keyrings
+
+      # The installation below makes use of an AMD provided install script
+
+      # Get the key for the ROCm software
+      wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+
+      # Update package list
+      sudo DEBIAN_FRONTEND=noninteractive apt-get update
+
+      # Get the amdgpu-install script
+      wget -q https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/${DISTRO}/${ROCM_REPO_DIST}/amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+
+      # Run the amdgpu-install script. We have already installed the kernel driver, so use we use --no-dkms
+      sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+      result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
+      if [[ "${result}" ]]; then
+         DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk,asan --no-dkms
+         sudo apt-get install rocm_bandwidth_test
       else
-
-         #mkdir --parents --mode=0755 /etc/apt/keyrings
-         #sudo mkdir --parents --mode=0755 /etc/apt/keyrings
-
-         # The installation below makes use of an AMD provided install script
-
-         # Get the key for the ROCm software
-         wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
-
-         # Update package list
-         sudo DEBIAN_FRONTEND=noninteractive apt-get update
-
-         # Get the amdgpu-install script
-         wget -q https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/${DISTRO}/${ROCM_REPO_DIST}/amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
-
-         # Run the amdgpu-install script. We have already installed the kernel driver, so use we use --no-dkms
-         sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
-         result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
-	 if [[ "${result}" ]]; then
-            DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk,asan --no-dkms
-	    sudo apt-get install rocm_bandwidth_test
-	 else
-            DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms
-	 fi
-
-         # Required by DeepSpeed
-         sudo ln -s /opt/rocm-${ROCM_VERSION}/.info/version /opt/rocm-${ROCM_VERSION}/.info/version-dev
-
-         rm -rf amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+         DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms
       fi
+
+      # Required by DeepSpeed
+      sudo ln -s /opt/rocm-${ROCM_VERSION}/.info/version /opt/rocm-${ROCM_VERSION}/.info/version-dev
+
+      rm -rf amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
    fi
 fi
 
