@@ -24,15 +24,6 @@ usage()
    exit 1
 }
 
-# Variables controlling setup process
-DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-
-usage()
-{
-   echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-}
-
 send-error()
 {
    usage
@@ -342,6 +333,7 @@ if [ "${DISTRO}" == "ubuntu" ]; then
 	 if [[ "${result}" ]]; then
             DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk,asan --no-dkms
 	    sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y omnitrace omniperf
+	    sudo python3 -m pip install -t /opt/rocm-${ROCM_VERSION}/libexec/omniperf/python-libs -r /opt/rocm-${ROCM_VERSION}/libexec/omniperf/requirements.txt
 	 else
             DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms
 	 fi
@@ -499,12 +491,6 @@ if [[ "${result}" ]] && [[ -f /opt/rocm-${ROCM_VERSION}/bin/omnitrace ]] ; then
 
 	local base = "/opt/rocm-${ROCM_VERSION}"
 
-	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
-	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-	prepend_path("CPATH", pathJoin(base, "include"))
-	prepend_path("PATH", pathJoin(base, "bin"))
-	prepend_path("INCLUDE", pathJoin(base, "include"))
 	setenv("OMNITRACE_PATH", base)
 	load("rocm/${ROCM_VERSION}")
 	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
@@ -536,9 +522,9 @@ if [[ "${result}" ]] && [[ -f /opt/rocm-${ROCM_VERSION}/bin/omniperf ]] ; then
 	-- Export environmental variables
 	local topDir="/opt/rocm-${ROCM_VERSION}"
 	local binDir="/opt/rocm-${ROCM_VERSION}/bin"
-	local shareDir="/opt/rocmplus-${ROCM_VERSION}/share"
-	local pythonDeps="/opt/rocmplus-${ROCM_VERSION}/python-libs"
-	local roofline="/opt/rocmplus-${ROCM_VERSION}/bin/utils/rooflines/roofline-ubuntu20_04-mi200-rocm5"
+	local shareDir="/opt/rocm-${ROCM_VERSION}/share/omniperf"
+	local pythonDeps="/opt/rocm-${ROCM_VERSION}/libexec/omniperf/python-libs"
+	local roofline="/opt/rocm-${ROCM_VERSION}/libexec/omniperf/bin/utils/rooflines/roofline-ubuntu20_04-mi200-rocm5"
 
 	setenv("OMNIPERF_DIR",topDir)
 	setenv("OMNIPERF_BIN",binDir)
