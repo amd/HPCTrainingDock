@@ -1,20 +1,59 @@
 #!/bin/bash
 
+# Variables controlling setup process
+export AOMP_VERSION_NUMBER=19.0-3
+export AOMP_VERSION_SHORT=19.0
+export MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/aomp
 
+# Autodetect defaults
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
+usage()
+{
+   echo "--build-aomp-latest "
+   echo "--help: this usage information"
+   echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-LatestCompilers/aomp"
+   echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   exit 1
+}
+
+send-error()
+{
+    usage
+    echo -e "\nError: ${@}"
+    exit 1
+}
+
+reset-last()
+{
+   last() { send-error "Unsupported argument :: ${1}"; }
+}
 
 n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
-      "--rocm-version")
-          shift
-          ROCM_VERSION=${1}
-          ;;
       "--build-aomp-latest")
           shift
           BUILD_AOMP_LATEST=${1}
+          reset-last
+          ;;
+      "--help")
+          usage
+          ;;
+      "--module-path")
+          shift
+          MODULE_PATH=${1}
+          reset-last
+          ;;
+      "--rocm-version")
+          shift
+          ROCM_VERSION=${1}
+          reset-last
+          ;;
+      "--*")
+          send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
       *)  
          last ${1}
@@ -24,8 +63,6 @@ do
    shift
 done
 
-export AOMP_VERSION_NUMBER=19.0-0
-export AOMP_VERSION_SHORT=19.0
 
 echo ""
 echo "==================================="
@@ -78,8 +115,6 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
    fi
 
    # In either case, create a module file for AOMP compiler
-   export MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/aomp
-
    sudo mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs

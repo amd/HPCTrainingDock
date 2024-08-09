@@ -3,6 +3,7 @@
 # Variables controlling setup process
 ROCM_VERSION=6.0
 BUILD_CUPY=0
+MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/cupy
 
 # Autodetect defaults
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
@@ -10,8 +11,10 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 usage()
 {
    echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
-   echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "--build-cupy"
+   echo "--help: this usage information"
+   echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/openmpi"
+   echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
 }
 
 send-error()
@@ -30,11 +33,6 @@ n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
-      "--rocm-version")
-          shift
-          ROCM_VERSION=${1}
-	  reset-last
-          ;;
       "--amdgpu-gfxmodel")
           shift
           AMDGPU_GFXMODEL=${1}
@@ -44,6 +42,22 @@ do
           shift
           BUILD_CUPY=${1}
 	  reset-last
+          ;;
+      "--help")
+          usage
+          ;;
+      "--module-path")
+          shift
+          MODULE_PATH=${1}
+          reset-last
+          ;;
+      "--rocm-version")
+          shift
+          ROCM_VERSION=${1}
+	  reset-last
+          ;;
+      "--*")
+          send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
       *)  
          last ${1}
@@ -139,7 +153,6 @@ else
    fi
       
    # Create a module file for cupy
-   export MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/cupy
    
    sudo mkdir -p ${MODULE_PATH}
    

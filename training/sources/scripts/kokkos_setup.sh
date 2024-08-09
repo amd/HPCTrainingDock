@@ -1,20 +1,54 @@
 #/bin/bash
 
-ROCM_VERSION=6.0
+# Variables controlling setup process
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 BUILD_KOKKOS=0
+ROCM_VERSION=6.0
+
+usage()
+{
+   echo "--help: this usage information"
+   echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/openmpi"
+   echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   exit 1
+}
+
+send-error()
+{
+    usage
+    echo -e "\nError: ${@}"
+    exit 1
+}
+
+reset-last()
+{
+   last() { send-error "Unsupported argument :: ${1}"; }
+}
 
 n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
-      "--rocm-version")
-          shift
-          ROCM_VERSION=${1}
-          ;;
       "--build-kokkos")
           shift
           BUILD_KOKKOS=${1}
+          reset-last
+          ;;
+      "--help")
+          usage
+          ;;
+      "--module-path")
+          shift
+          MODULE_PATH=${1}
+          reset-last
+          ;;
+      "--rocm-version")
+          shift
+          ROCM_VERSION=${1}
+          reset-last
+          ;;
+      "--*")
+          send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
       *)
          last ${1}
@@ -71,11 +105,11 @@ else
       cd build
 
       sudo cmake -DCMAKE_INSTALL_PREFIX=/opt/rocmplus-${ROCM_VERSION}/kokkos \
-	         -DCMAKE_PREFIX_PATH=/opt/rocm-${ROCM_VERSION} \
+                 -DCMAKE_PREFIX_PATH=/opt/rocm-${ROCM_VERSION} \
                  -DKokkos_ENABLE_SERIAL=ON \
                  -DKokkos_ENABLE_HIP=ON \
                  -DKokkos_ARCH_ZEN=ON \
-	         -DKokkos_ARCH_VEGA90A=ON \
+                 -DKokkos_ARCH_VEGA90A=ON \
                  -DCMAKE_CXX_COMPILER=hipcc ..
 
       sudo make -j
