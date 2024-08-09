@@ -57,8 +57,10 @@ echo "AMDGPU_INSTALL_VERSION: $AMDGPU_INSTALL_VERSION"
 echo "=================================="
 echo ""
 
-result=`echo $ROCM_VERSION | awk '$1<6.2.0'` && echo $result
-if [[ "${result}" ]]; then
+# if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
+# if ROCM_VERSION is less than or equalt to 6.1.2, the awk command result will be blank
+result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
+if [[ "${result}" == "" ]]; then
    echo "ROCm built-in Omnitrace version cannot be installed on ROCm versions before 6.2.0"
    exit
 fi

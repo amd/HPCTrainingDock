@@ -331,6 +331,8 @@ if [ "${DISTRO}" == "ubuntu" ]; then
 
       # Run the amdgpu-install script. We have already installed the kernel driver, so use we use --no-dkms
       sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+# if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
+# if ROCM_VERSION is less than or equalt to 6.1.2, the awk command result will be blank
       result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
       if [[ "${result}" ]]; then
          DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk,asan --no-dkms
