@@ -6,7 +6,7 @@ In this repo, we provide two options to test the installation of a variety of AM
 1. Container Installation (based on Docker)
 2. Bare Metal Installation
 
-**NOTE**: if `Podman` is installed on your system instead of Docker, currently it is necessary to append the `--format docker` flag to the `docker build` commands present in our scripts. Additionally, in some OS cases, the  `--distro` option also needs to be specified (otherwise Podman might complain with "7 arguments instead of 1" type of errors).
+**NOTE**: if `Podman` is installed on your system instead of Docker, the scripts will detect it and automatically include the `--format docker` flag in the `docker build` commands present in our scripts. 
 
 Currently, we are only supporting an Ubuntu operating system (OS), but work is underway to add support for Red Hat, Suse and Debian.
 
@@ -34,8 +34,6 @@ These instructions will setup a container on `localhost` and assume that:
 2. For Docker, your userid is part of the Docker group.
 3. For Docker, you can issue Docker commands without `sudo`.
  
-<!-- If you need to use `sudo`, you will need to modify the command below to look for Docker images that start with ***root*** instead of a userid (such as amdtrain).-->
-
 ### 2.1.1  Building the Four Images of the Container 
 The container is set up to use Ubuntu 22.04 as OS, and will build four different images called `rocm`, `omnitrace`,  `omniperf` and `training`. 
 Here is a flowchart of the container installation process
@@ -43,7 +41,15 @@ Here is a flowchart of the container installation process
 <img src="figures/container_flowchart.png" \>
 </p>
 
-This documentation considers version 6.1.0 of ROCm as an example. The ROCm version can be specified at build time as an input flag. Several compilers and other dependencies will be built as part of the images setup (more on this later). First, clone this repo and go into the folder where the Docker build script lives: 
+This documentation considers version 6.1.0 of ROCm as an example. The ROCm version can be specified at build time as an input flag. 
+
+**NOTE**: with the release of ROCm [6.2](https://github.com/ROCm/ROCm/releases), `Omnitrace` and `Omniperf` are included in the ROCm stack. In the container installation, if `--rocm-versions` includes 6.2, the Omnitrace and Omniperf versions installed are:
+
+1. The built-in versions included in the ROCm 6.2 software stack. These can be used by loading: `module load omnitrace/6.2.0`, `module load omniperf/6.2.0`.
+
+2. The latest versions from AMD Research that would be used for ROCm releases < 6.2. These can be used by loading: `module load omnitrace/1.11.3`, `module load omniperf/2.0.0`.
+
+Several compilers and other dependencies will be built as part of the images setup (more on this later). First, clone this repo and go into the folder where the Docker build script lives: 
 
 ```bash
 git clone --recursive git@github.com:amd/HPCTrainingDock.git
@@ -57,6 +63,8 @@ To build the four images, run the following command (note that `<admin>` is set 
 ```
 
 To visualize all the input flags that can be provided to the script, run: `./build-docker.sh --help`.
+
+**NOTE**: in some OS cases, when launching the installation scripts it may be necessary to explictly include the  `--distro` option to avoid "7 arguments instead of 1" type of errors.
 
 To show more docker build output, add this option to the build command above:
 

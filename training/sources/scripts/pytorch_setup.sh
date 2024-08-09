@@ -171,7 +171,7 @@ export MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/pytorch
 sudo mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | sudo tee ${MODULE_PATH}/2.3.1.lua
+cat <<-EOF | sudo tee ${MODULE_PATH}/2.4.lua
         whatis("HIP version of PyTorch")
 
         load("rocm/${ROCM_VERSION}")
