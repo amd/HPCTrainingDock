@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Variables controlling setup process
-export AOMP_VERSION_NUMBER=19.0-0
+export AOMP_VERSION_NUMBER=19.0-3
 export AOMP_VERSION_SHORT=19.0
 export MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/aomp
 
