@@ -140,10 +140,10 @@ else
 
 	load("rocm/${ROCM_VERSION}")
         setenv("HPCTOOLKIT_PATH", base)
-        prepend_path("PATH",pathJoin(base, "hpcrun"))
-        prepend_path("PATH",pathJoin(base, "hpcstruct"))
-        prepend_path("PATH",pathJoin(base, "hpcprof"))
-        prepend_path("PATH",pathJoin(base, "hpcviewer"))
+        prepend_path("PATH",pathJoin(base, "src/hpcrun"))
+        prepend_path("PATH",pathJoin(base, "src/hpcstruct"))
+        prepend_path("PATH",pathJoin(base, "src/hpcprof"))
+        prepend_path("PATH",pathJoin(base, "src/hpcviewer"))
 EOF
 
 fi
