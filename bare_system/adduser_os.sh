@@ -1,8 +1,15 @@
 #!/bin/bash
 
+# Autodetect defaults
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 if [ "${DISTRO}" = "ubuntu" ]; then
+   result=`which adduser |& grep -v "not found" | wc -l`
+   if [[ "${result}" == "0" ]]; then
+      sudo apt-get update
+      sudo apt-get install -y adduser
+   fi
    adduser --home /home/sysadmin --uid 20000 --shell /bin/bash --disabled-password --gecos '' sysadmin
    echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
    usermod -a -G video,render,renderalt,sudo sysadmin

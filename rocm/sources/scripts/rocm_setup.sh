@@ -15,6 +15,7 @@ if [ "${DISTRO}" == "rocky linux" ]; then
 else
    ROCM_REPO_DIST=`lsb_release -c | cut -f2`
 fi
+DISTRO_CODENAME=`cat /etc/os-release | grep '^VERSION_CODENAME' | sed -e 's/VERSION_CODENAME=//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 usage()
 {
@@ -335,14 +336,23 @@ if [ "${DISTRO}" == "ubuntu" ]; then
 # if ROCM_VERSION is less than or equalt to 6.1.2, the awk command result will be blank
       result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
       if [[ "${result}" ]]; then
-         DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk,asan --no-dkms
-         sudo apt-get install rocm_bandwidth_test
+         result=`echo $DISTRO_VERSION | awk '$1>24.00'` && echo $result
+         if [[ "${result}" ]]; then
+            # rocm-asan not available in Ubuntu 24.04
+            DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk --no-dkms
+	 else
+            DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk,asan --no-dkms
+            sudo apt-get install rocm_bandwidth_test
+	 fi
       else
          DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms
       fi
 
-      # Required by DeepSpeed
-      sudo ln -s /opt/rocm-${ROCM_VERSION}/.info/version /opt/rocm-${ROCM_VERSION}/.info/version-dev
+      if [[ ! -f /opt/rocm-${ROCM_VERSION}/.info/version-dev ]]; then
+         # Required by DeepSpeed
+	 #   Exists in Ubuntu 24.04 and not 22.04
+         sudo ln -s /opt/rocm-${ROCM_VERSION}/.info/version /opt/rocm-${ROCM_VERSION}/.info/version-dev
+      fi
 
       rm -rf amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
    fi
