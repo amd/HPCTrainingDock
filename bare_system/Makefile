@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
-all: rocm openmpi omnitrace omniperf kokkos cupy
-.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos apps_setup_basic cupy pytorch apps_setup
+all: rocm openmpi omnitrace omniperf kokkos cupy pytorch hpctoolkit
+.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos apps_setup_basic cupy pytorch apps_setup hpctoolkit
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
@@ -12,6 +12,7 @@ omniperf: omniperf.timestamp
 amd_gcc: amd_gcc.timestamp
 aomp: aomp.timestamp
 kokkos: kokkos.timestamp
+hpctoolkit: hpctoolkit.timestamp
 apps_setup_basic: apps_setup_basic.timestamp
 cupy: cupy.timestamp
 pytorch: pytorch.timestamp
@@ -27,6 +28,7 @@ hipstdpar_tests: hipstdpar_tests.timestamp
 rocm_tests: rocm_tests.timestamp
 openmpi_tests: openmpi_tests.timestamp
 kokkos_tests: kokkos_tests.timestamp
+hpctoolkit_tests: hpctoolkit_tests.timestamp
 cupy_tests: cupy_tests.timestamp
 pytorch_tests: pytorch_tests.timestamp
 
@@ -108,6 +110,12 @@ kokkos.timestamp: rocm.timestamp
 	   --build-kokkos ${BUILD_KOKKOS}
 	touch kokkos.timestamp
 
+hpctoolkit.timestamp: hpctoolkit.timestamp
+	training/sources/scripts/hpctoolkit_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --build-hpctoolkit ${BUILD_HPCTOOLKIT}
+	touch hpctoolkit.timestamp
+
 apps_setup_basic.timestamp:
 	training/sources/scripts/apps_setup_basic.sh
 	touch apps_setup_basic.timestamp
@@ -175,6 +183,10 @@ openmpi_tests.timestamp: openmpi.timestamp HPCTrainingExamples
 kokkos_tests.timestamp: kokkos.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Kokkos
 	touch kokkos_tests.timestamp
+
+hpctoolkit_tests.timestamp: hpctoolkit.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R HPCToolkit
+	touch hpctoolkit_tests.timestamp
 
 cupy_tests.timestamp: cupy.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Cupy

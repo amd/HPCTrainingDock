@@ -2,13 +2,14 @@
 
 # Variables controlling setup process
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+MODULE_PATH=/etc/lmod/modules/misc/kokkos
 BUILD_KOKKOS=0
 ROCM_VERSION=6.0
 
 usage()
 {
    echo "--help: this usage information"
-   echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/openmpi"
+   echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/misc/kokkos" 
    echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    exit 1
 }
@@ -121,9 +122,8 @@ else
       module unload rocm/${ROCM_VERSION}
 
    fi
-   # Create a module file for kokoks
-   export MODULE_PATH=/etc/lmod/modules/misc/kokkos
 
+   # Create a module file for kokkos
    sudo mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs

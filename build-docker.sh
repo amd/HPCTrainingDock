@@ -15,6 +15,7 @@
 : ${BUILD_PYTORCH:="0"}
 : ${BUILD_CUPY:="0"}
 : ${BUILD_KOKKOS:="0"}
+: ${BUILD_HPCTOOLKIT:="0"}
 : ${BUILD_ALL_LATEST:="0"}
 : ${RETRY:=3}
 : ${NO_CACHE:=""}
@@ -101,6 +102,7 @@ usage()
     print_default_option build-pytorch -- "flag to build the latest version of pytorch" "not included"
     print_default_option build-cupy -- "flag to build the latest version of cupy" "not included"
     print_default_option build-kokkos -- "flag to build the latest version of kokkos" "not included"
+    print_default_option build-hpctoolkit -- "flag to build the latest version of hpctoolkit" "not included"
     print_default_option build-all-latest -- "flag to build all the additional libraries that need a flag to be built" "not included"
     print_default_option use_cached-apps -- "flag to use pre-built gcc and aomp located in CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} directory" "not included"
     print_default_option omnitrace-build-from-source -- "flag to build omnitrace from source instead of using pre-built versions" "not included"
@@ -221,6 +223,10 @@ do
             BUILD_KOKKOS="1"
             reset-last
             ;;
+        "--build-hpctoolkit")
+            BUILD_HPCTOOLKIT="1"
+            reset-last
+            ;;
         "--build-all-latest")
             BUILD_AOMP_LATEST="1"
             #BUILD_LLVM_LATEST="1"
@@ -230,6 +236,7 @@ do
             BUILD_PYTORCH="1"
             BUILD_CUPY="1"
 	    BUILD_KOKKOS="1"
+	    BUILD_HPCTOOLKIT="1"
             reset-last
             ;;
         "--use-cached-apps")
@@ -308,6 +315,7 @@ do
        --build-arg BUILD_PYTORCH=${BUILD_PYTORCH} \
        --build-arg BUILD_CUPY=${BUILD_CUPY} \
        --build-arg BUILD_KOKKOS=${BUILD_KOKKOS} \
+       --build-arg BUILD_HPCTOOLKIT=${BUILD_HPCTOOLKIT} \
        --build-arg USE_CACHED_APPS=${USE_CACHED_APPS} \
        -t ${DOCKER_USER}/training:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        -t training \

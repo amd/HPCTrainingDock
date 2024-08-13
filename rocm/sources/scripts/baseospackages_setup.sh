@@ -30,7 +30,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
       python3-pip lsb-release libpapi-dev libpfm4-dev libudev1 rpm librpm-dev curl apt-utils vim tmux rsync sudo \
       bison flex texinfo  libnuma-dev pkg-config  libibverbs-dev  rdmacm-utils ssh locales \
       python3-dev python3-venv \
-      gcc g++ gfortran
+      gcc g++ gfortran ninja-build pipx libboost-all-dev 
 
    sudo DEBIAN_FRONTEND=noninteractive localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
 
