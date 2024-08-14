@@ -143,7 +143,8 @@ else
         prepend_path("PATH",pathJoin(base, "src/hpcrun"))
         prepend_path("PATH",pathJoin(base, "src/hpcstruct"))
         prepend_path("PATH",pathJoin(base, "src/hpcprof"))
-        prepend_path("PATH",pathJoin(base, "src/hpcviewer"))
+        prepend_path("LD_LIBRARY_PATH",pathJoin(base, "src/hpcrun"))
+        prepend_path("LD_LIBRARY_PATH",pathJoin(base, "src/hpcstruct"))
 EOF
 
 fi
