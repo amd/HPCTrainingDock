@@ -74,9 +74,9 @@ RUN /tmp/compiler_setup.sh && \
 #COPY  training/sources/lua/gcc/*          /etc/lmod/modules/Linux/gcc/
 #COPY  training/sources/lua/clang/*        /etc/lmod/modules/Linux/clang/
 
-# Build the latest AMD OpenMP compiler if requested
-RUN apt-get update && apt-get install -y gawk ninja-build generate-ninja ccache
-RUN pip3 install CppHeaderParser
+# Build the latest AMD OpenMP compiler if requested -- moved to aomp_setup.sh
+#RUN apt-get update && apt-get install -y gawk ninja-build generate-ninja ccache
+#RUN pip3 install CppHeaderParser
 
 # Build the latest GCC for AMD compiler if requested
 COPY training/sources/scripts/amd_gcc_setup.sh /tmp/amd_gcc_setup.sh

@@ -8,7 +8,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    result=`which adduser |& grep -v "not found" | wc -l`
    if [[ "${result}" == "0" ]]; then
       sudo apt-get update
-      sudo apt-get install -y adduser
+      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y adduser
    fi
    adduser --home /home/sysadmin --uid 20000 --shell /bin/bash --disabled-password --gecos '' sysadmin
    echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers

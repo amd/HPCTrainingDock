@@ -102,6 +102,9 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
 # Installs aomp from .deb package but then we can't specify where to install it
 #     wget -q https://github.com/ROCm/aomp/releases/download/rel_19.0-0/aomp_Ubuntu2204_19.0-0_amd64.deb
 #     apt-get install ./aomp_Ubuntu2204_19.0-0_amd64.deb
+
+      sudo apt-get update && apt-get install -y gawk ninja-build generate-ninja ccache
+      pip3 install CppHeaderParser
       
       wget -q https://github.com/ROCm-Developer-Tools/aomp/releases/download/rel_${AOMP_VERSION_NUMBER}/aomp-${AOMP_VERSION_NUMBER}.tar.gz
       tar -xzf aomp-${AOMP_VERSION_NUMBER}.tar.gz
