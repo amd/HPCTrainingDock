@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
-all: rocm openmpi omnitrace omniperf kokkos cupy pytorch hpctoolkit
-.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos apps_setup_basic cupy pytorch apps_setup hpctoolkit
+all: rocm openmpi omnitrace omniperf kokkos cupy pytorch hpctoolkit mpi4py
+.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos apps_setup_basic cupy pytorch apps_setup hpctoolkit mpi4py
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
@@ -12,6 +12,7 @@ omniperf: omniperf.timestamp
 amd_gcc: amd_gcc.timestamp
 aomp: aomp.timestamp
 kokkos: kokkos.timestamp
+mpi4py: mpi4py.timestamp
 hpctoolkit: hpctoolkit.timestamp
 apps_setup_basic: apps_setup_basic.timestamp
 cupy: cupy.timestamp
@@ -28,6 +29,7 @@ hipstdpar_tests: hipstdpar_tests.timestamp
 rocm_tests: rocm_tests.timestamp
 openmpi_tests: openmpi_tests.timestamp
 kokkos_tests: kokkos_tests.timestamp
+mpi4py_tests: mpi4py_tests.timestamp
 hpctoolkit_tests: hpctoolkit_tests.timestamp
 cupy_tests: cupy_tests.timestamp
 pytorch_tests: pytorch_tests.timestamp
@@ -104,11 +106,17 @@ aomp.timestamp: aomp.timestamp
 	   --build-aomp-latest ${BUILD_AOMP_LATEST}
 	touch aomp.timestamp
 
-kokkos.timestamp: rocm.timestamp
+kokkos.timestamp: kokkos.timestamp
 	training/sources/scripts/kokkos_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-kokkos ${BUILD_KOKKOS}
 	touch kokkos.timestamp
+
+mpi4py.timestamp: mpi4py.timestamp
+	rocm/sources/scripts/mpip4y_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --build-mpi4py ${BUILD_MPI4PY}
+	touch mpi4py.timestamp
 
 hpctoolkit.timestamp: hpctoolkit.timestamp
 	training/sources/scripts/hpctoolkit_setup.sh \
@@ -183,6 +191,10 @@ openmpi_tests.timestamp: openmpi.timestamp HPCTrainingExamples
 kokkos_tests.timestamp: kokkos.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Kokkos
 	touch kokkos_tests.timestamp
+
+mpi4py_tests.timestamp: mpi4py.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R MPI4PY
+	touch mpi4py_tests.timestamp
 
 hpctoolkit_tests.timestamp: hpctoolkit.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R HPCToolkit

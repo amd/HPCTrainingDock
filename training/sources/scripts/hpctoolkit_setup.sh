@@ -111,9 +111,10 @@ else
       git clone https://gitlab.com/hpctoolkit/hpctoolkit.git
       cd hpctoolkit
       export CMAKE_PREFIX_PATH=$ROCM_PATH:$CMAKE_PREFIX_PATH
-      meson setup -Drocm=enabled -Dextended_tests=enabled  ${HPCTOOLKIT_PATH}
-      cd  ${HPCTOOLKIT_PATH}
+      meson setup -Drocm=enabled -Dextended_tests=enabled  --prefix=${HPCTOOLKIT_PATH} --libdir=${HPCTOOLKIT_PATH}/lib build
+      cd  build
       meson compile
+      meson install
 
       if [[ "${USER}" != "root" ]]; then
          sudo find ${HPCTOOLKIT_PATH} -type f -execdir chown root:root "{}" +
@@ -124,7 +125,8 @@ else
          sudo chmod go-w ${HPCTOOLKIT_PATH}
       fi
 
-      rm -rf /tmp/hpctoolkit
+      cd ../..
+      rm -rf hpctoolkit
       module unload rocm/${ROCM_VERSION}
 
    fi
@@ -140,10 +142,9 @@ else
 
 	load("rocm/${ROCM_VERSION}")
         setenv("HPCTOOLKIT_PATH", base)
-        prepend_path("PATH",pathJoin(base, "src/hpcrun"))
-        prepend_path("PATH",pathJoin(base, "src/hpcstruct"))
-        prepend_path("PATH",pathJoin(base, "src/hpcprof"))
-        prepend_path("LD_LIBRARY_PATH",pathJoin(base, "src/hpcrun"))
+        prepend_path("PATH",pathJoin(base, "bin"))
+        prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
+        prepend_path("LD_LIBRARY_PATH","/usr/lib")
 EOF
 
 fi
