@@ -122,7 +122,7 @@ else
 	               -cc=amdclang -prefix=${TAU_PATH} \
 	               -openmp -ompt -rocm=${ROCM_PATH} \
 		       -mpi -rocmsmi=${ROCM_PATH}/bin \
-		       -rocprofiler=${ROCM_PATH} -rocprofv2 -rocprofv3
+		       -rocprofiler=${ROCM_PATH} 
 
       sudo make install
 
@@ -139,7 +139,7 @@ else
    cat <<-EOF | sudo tee ${MODULE_PATH}/dev.lua
 	whatis(" TAU - portable profiling and tracing toolkit ") 
 
-	prepend_path("PATH","/opt/rocmplus-${ROCM_VERSION}/tau")
+	prepend_path("PATH","/opt/rocmplus-${ROCM_VERSION}/tau/x86_64/bin")
 EOF
 
 fi
