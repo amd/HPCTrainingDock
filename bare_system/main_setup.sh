@@ -6,6 +6,7 @@
 : ${BUILD_CUPY:="1"}
 : ${BUILD_KOKKOS:="1"}
 : ${BUILD_HPCTOOLKIT:="1"}
+: ${BUILD_MPI4PY:="1"}
 : ${USE_MAKEFILE:="0"}
 
 OMNITRACE_BUILD_FROM_SOURCE=0
@@ -97,6 +98,8 @@ source ~/.bashrc
 rocm/sources/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION}
 
 rocm/sources/scripts/openmpi_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
+
+rocm/sources/scripts/mpi4py_setup.sh --rocm-version ${ROCM_VERSION} --build-mpi4py ${BUILD_MPI4PY}
 
 rocm/sources/scripts/mvapich2_setup.sh --rocm-version ${ROCM_VERSION}
 

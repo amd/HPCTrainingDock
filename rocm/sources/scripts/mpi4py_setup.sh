@@ -5,14 +5,15 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/mpi4py
 BUILD_MPI4PY=0
 ROCM_VERSION=6.0
-MPI_PATH=""
+MPI_PATH="/usr"
 
 usage()
 {
    echo "--help: this usage information"
+   echo "--build-mpi4py: default is 0"
    echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/mpi4py"
    echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "--mpi-path [MPI_PATH] not set by default, need to specify it as input"
+   echo "--mpi-path [MPI_PATH] default is /usr"
    exit 1
 }
 
