@@ -116,13 +116,28 @@ else
       TAU_PATH=/opt/rocmplus-${ROCM_VERSION}/tau
       sudo mkdir -p ${TAU_PATH}
 
+      # cloning the latest version of TAU
       git clone https://github.com/UO-OACISS/tau2.git
       cd tau2
-      sudo ./configure -c++=amdclang++ -fortran=amdflang \
-	               -cc=amdclang -prefix=${TAU_PATH} \
-	               -openmp -ompt -rocm=${ROCM_PATH} \
-		       -mpi -rocmsmi=${ROCM_PATH}/bin \
-		       -rocprofiler=${ROCM_PATH} 
+
+      result=`echo ${ROCM_VERSION} | awk '$1<=6.1.2'` && echo $result
+
+      # the latest version of TAU needs ROCm 6.2 to find rocprofiler
+      if [[ "${result}" ]]; then
+
+         sudo ./configure -c++=amdclang++ -fortran=amdflang \
+	                  -cc=amdclang -prefix=${TAU_PATH} \
+	                  -openmp -ompt -rocm=${ROCM_PATH} \
+	   	          -mpi -rocmsmi=${ROCM_PATH}/bin \
+      else 
+
+         sudo ./configure -c++=amdclang++ -fortran=amdflang \
+	                  -cc=amdclang -prefix=${TAU_PATH} \
+	                  -openmp -ompt -rocm=${ROCM_PATH} \
+	   	          -mpi -rocmsmi=${ROCM_PATH}/bin \
+	   	          -rocprofiler=${ROCM_PATH} 
+
+      fi
 
       sudo make install
 
