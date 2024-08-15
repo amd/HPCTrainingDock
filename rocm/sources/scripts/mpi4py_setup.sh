@@ -108,7 +108,8 @@ else
          source /etc/profile.d/lmod.sh
          module load rocm/${ROCM_VERSION}
 
-         sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/mpi4py
+	 MPI4PY_PATH=/opt/rocmplus-${ROCM_VERSION}/mpi4py
+         sudo mkdir -p ${MPI4PY_PATH}
 
          git clone https://github.com/mpi4py/mpi4py.git
          cd mpi4py
