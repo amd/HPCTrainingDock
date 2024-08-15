@@ -115,7 +115,7 @@ kokkos.timestamp: kokkos.timestamp
 mpi4py.timestamp: mpi4py.timestamp
 	rocm/sources/scripts/mpi4py_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-	   --build-mpi4py ${BUILD_MPI4PY} \
+	   --build-mpi4py ${BUILD_MPI4PY}
 	touch mpi4py.timestamp
 
 hpctoolkit.timestamp: hpctoolkit.timestamp
