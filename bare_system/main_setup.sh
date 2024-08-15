@@ -7,6 +7,7 @@
 : ${BUILD_KOKKOS:="1"}
 : ${BUILD_HPCTOOLKIT:="1"}
 : ${BUILD_MPI4PY:="1"}
+: ${BUILD_TAU:="1"}
 : ${USE_MAKEFILE:="0"}
 
 OMNITRACE_BUILD_FROM_SOURCE=0
@@ -123,7 +124,9 @@ training/sources/scripts/apps_setup.sh
 
 training/sources/scripts/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-kokkos ${BUILD_KOKKOS}
 
-training/sources/scripts/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_HPCTOOLKIT}
+training/sources/scripts/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_HPCTOOLKIT}
+
+training/sources/scripts/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_TAU}
 
 #If ROCm should be installed in a different location
 if [ "${ROCM_INSTALLPATH}" != "/opt/" ]; then

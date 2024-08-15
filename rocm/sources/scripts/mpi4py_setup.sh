@@ -148,6 +148,7 @@ else
 	whatis(" MPI4PY - provides Python bindings for MPI")
 
         prepend_path("PYTHONPATH", "${MPI4PY_PATH}")
+        conflict("openmpi")
 EOF
 
 fi

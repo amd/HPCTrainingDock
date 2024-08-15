@@ -15,6 +15,7 @@
 : ${BUILD_PYTORCH:="0"}
 : ${BUILD_CUPY:="0"}
 : ${BUILD_KOKKOS:="0"}
+: ${BUILD_TAU:="0"}
 : ${BUILD_MPI4PY:="0"}
 : ${BUILD_HPCTOOLKIT:="0"}
 : ${BUILD_ALL_LATEST:="0"}
@@ -224,6 +225,10 @@ do
             BUILD_KOKKOS="1"
             reset-last
             ;;
+        "--build-tau")
+            BUILD_TAU="1"
+            reset-last
+            ;;
         "--build-mpi4py")
             BUILD_MPI4PY="1"
             reset-last
@@ -241,6 +246,7 @@ do
             BUILD_PYTORCH="1"
             BUILD_CUPY="1"
 	    BUILD_KOKKOS="1"
+	    BUILD_TAU="1"
 	    BUILD_MPI4PY="1"
 	    BUILD_HPCTOOLKIT="1"
             reset-last
@@ -321,6 +327,7 @@ do
        --build-arg BUILD_PYTORCH=${BUILD_PYTORCH} \
        --build-arg BUILD_CUPY=${BUILD_CUPY} \
        --build-arg BUILD_KOKKOS=${BUILD_KOKKOS} \
+       --build-arg BUILD_TAU=${BUILD_TAU} \
        --build-arg BUILD_MPI4PY=${BUILD_MPI4PY} \
        --build-arg BUILD_HPCTOOLKIT=${BUILD_HPCTOOLKIT} \
        --build-arg USE_CACHED_APPS=${USE_CACHED_APPS} \

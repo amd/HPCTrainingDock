@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
-all: rocm openmpi omnitrace omniperf kokkos cupy pytorch hpctoolkit mpi4py
-.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos apps_setup_basic cupy pytorch apps_setup hpctoolkit mpi4py
+all: rocm openmpi omnitrace omniperf kokkos cupy pytorch hpctoolkit mpi4py tau
+.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos apps_setup_basic cupy pytorch apps_setup hpctoolkit mpi4py tau
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
@@ -12,6 +12,7 @@ omniperf: omniperf.timestamp
 amd_gcc: amd_gcc.timestamp
 aomp: aomp.timestamp
 kokkos: kokkos.timestamp
+tau: tau.timestamp
 mpi4py: mpi4py.timestamp
 hpctoolkit: hpctoolkit.timestamp
 apps_setup_basic: apps_setup_basic.timestamp
@@ -28,7 +29,7 @@ openmp_tests: openmp_tests.timestamp
 hipstdpar_tests: hipstdpar_tests.timestamp
 rocm_tests: rocm_tests.timestamp
 openmpi_tests: openmpi_tests.timestamp
-kokkos_tests: kokkos_tests.timestamp
+tau_tests: tau_tests.timestamp
 mpi4py_tests: mpi4py_tests.timestamp
 hpctoolkit_tests: hpctoolkit_tests.timestamp
 cupy_tests: cupy_tests.timestamp
@@ -106,11 +107,11 @@ aomp.timestamp: aomp.timestamp
 	   --build-aomp-latest ${BUILD_AOMP_LATEST}
 	touch aomp.timestamp
 
-kokkos.timestamp: kokkos.timestamp
-	training/sources/scripts/kokkos_setup.sh \
+tau.timestamp: tau.timestamp
+	training/sources/scripts/tau_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-	   --build-kokkos ${BUILD_KOKKOS}
-	touch kokkos.timestamp
+	   --build-tau ${BUILD_TAU}
+	touch tau.timestamp
 
 mpi4py.timestamp: mpi4py.timestamp
 	rocm/sources/scripts/mpi4py_setup.sh \
@@ -188,9 +189,9 @@ openmpi_tests.timestamp: openmpi.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R OpenMPI
 	touch openmpi_tests.timestamp
 
-kokkos_tests.timestamp: kokkos.timestamp HPCTrainingExamples
-	cd HPCTrainingExamples/tests/build && ctest -R Kokkos
-	touch kokkos_tests.timestamp
+tau_tests.timestamp: tau.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R TAU
+	touch tau_tests.timestamp
 
 mpi4py_tests.timestamp: mpi4py.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R MPI4PY

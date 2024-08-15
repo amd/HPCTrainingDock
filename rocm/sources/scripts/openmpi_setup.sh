@@ -678,6 +678,7 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("PYTHONPATH", "${MPI4PY_PATH}")
 	load("rocm/${ROCM_VERSION}")
+        conflict("mpi4py")
 	family("MPI")
 EOF
 
