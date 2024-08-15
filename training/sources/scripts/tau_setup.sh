@@ -118,7 +118,7 @@ else
 
       git clone https://github.com/UO-OACISS/tau2.git
       cd tau2
-      sudo ./configure -c++=amdclang++ \
+      sudo ./configure -c++=amdclang++ -fortran=amdflang \
 	               -cc=amdclang -prefix=${TAU_PATH} \
 	               -openmp -ompt -rocm=${ROCM_PATH} \
 		       -mpi -rocmsmi=${ROCM_PATH}/bin \
