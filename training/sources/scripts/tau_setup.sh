@@ -118,10 +118,11 @@ else
 
       git clone https://github.com/UO-OACISS/tau2.git
       cd tau2
-      ./configure -c++=amdclang++ \
-	          -cc=amdclang -prefix=${TAU_PATH} \
-		  -mpi -openmp -ompt -rocm=${ROCM_PATH} \
-		  -rocprofv2 -rocprofv3 -rocmsmi=${ROCM_PATH}/bin
+      sudo ./configure -c++=amdclang++ \
+	               -cc=amdclang -prefix=${TAU_PATH} \
+	               -openmp -ompt -rocm=${ROCM_PATH} \
+		       -mpi -rocmsmi=${ROCM_PATH}/bin \
+		       -rocprofiler=${ROCM_PATH} -rocprofv2 -rocprofv3
 
       sudo make install
 
