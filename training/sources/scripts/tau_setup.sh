@@ -128,7 +128,7 @@ else
          sudo ./configure -c++=amdclang++ -fortran=amdflang \
 	                  -cc=amdclang -prefix=${TAU_PATH} \
 	                  -openmp -ompt -rocm=${ROCM_PATH} \
-	   	          -mpi -rocmsmi=${ROCM_PATH}/bin \
+	   	          -mpi -rocmsmi=${ROCM_PATH}/bin 
       else 
 
          sudo ./configure -c++=amdclang++ -fortran=amdflang \
