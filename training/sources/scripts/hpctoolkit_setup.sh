@@ -100,11 +100,16 @@ else
       cd /tmp
 
       export HPCTOOLKIT_PATH=/opt/rocmplus-${ROCM_VERSION}/hpctoolkit
+      export HPCVIEWER_PATH=/opt/rocmplus-${ROCM_VERSION}/hpcviewer
       sudo mkdir -p ${HPCTOOLKIT_PATH}
+      sudo mkdir -p ${HPCVIEWER_PATH}
 
       if [[ "${USER}" != "root" ]]; then
          sudo chmod a+w ${HPCTOOLKIT_PATH} 
+         sudo chmod a+w ${HPCVIEWER_PATH}
       fi
+
+      # ------------ Installing HPCToolkit
 
       pipx install 'meson>=1.3.2'
       export PATH=$HOME/.local/bin:$PATH
@@ -127,6 +132,40 @@ else
 
       cd ../..
       rm -rf hpctoolkit
+
+      # ------------ Installing HPCViewer
+
+      git clone https://github.com/spack/spack.git
+
+      # load spack environment
+      source spack/share/spack/setup-env.sh
+
+      # find already installed libs for spack
+      spack external find
+
+      # change spack install dir for PDT
+      sudo sed -i 's|$spack/opt/spack|'"${HPCVIEWER_PATH}"'|g' spack/etc/spack/defaults/config.yaml
+
+      # open permissions to use spack to install hpcviewer
+      if [[ "${USER}" != "root" ]]; then
+         sudo chmod -R a+rwX ${HPCVIEWER_PATH}
+      fi
+
+      # install hpcviewer with spack
+      spack install hpcviewer
+
+      # get hpcviewer install dir created by spack
+      HPCVIEWER_PATH=`spack find -p hpcviewer | awk '{print $2}' | grep opt`
+
+      sudo rm -rf spack
+
+      if [[ "${USER}" != "root" ]]; then
+         sudo find ${HPCVIEWER_PATH} -type f -execdir chown root:root "{}" +
+      fi
+      if [[ "${USER}" != "root" ]]; then
+         sudo chmod go-w ${HPCVIEWER_PATH}
+      fi
+
       module unload rocm/${ROCM_VERSION}
 
    fi
@@ -138,11 +177,12 @@ else
    cat <<-EOF | sudo tee ${MODULE_PATH}/dev.lua
 	whatis("HPCToolkit - integrated suite of tools for measurement and analysis of program performance")
 
-        local base = "/opt/rocmplus-${ROCM_VERSION}/hpctoolkit"
+        local base = "${HPCTOOLKIT_PATH}"
 
 	load("rocm/${ROCM_VERSION}")
         setenv("HPCTOOLKIT_PATH", base)
         prepend_path("PATH",pathJoin(base, "bin"))
+        prepend_path("PATH","${HPCVIEWER_PATH}/bin")
         prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
         prepend_path("LD_LIBRARY_PATH","/usr/lib")
 EOF
