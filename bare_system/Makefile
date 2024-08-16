@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
-all: rocm openmpi omnitrace omniperf kokkos cupy pytorch hpctoolkit mpi4py tau
-.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos apps_setup_basic cupy pytorch apps_setup hpctoolkit mpi4py tau
+all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau
+.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
@@ -15,7 +15,6 @@ kokkos: kokkos.timestamp
 tau: tau.timestamp
 mpi4py: mpi4py.timestamp
 hpctoolkit: hpctoolkit.timestamp
-apps_setup_basic: apps_setup_basic.timestamp
 cupy: cupy.timestamp
 pytorch: pytorch.timestamp
 apps_setup: apps_setup.timestamp
@@ -30,6 +29,8 @@ hipstdpar_tests: hipstdpar_tests.timestamp
 rocm_tests: rocm_tests.timestamp
 openmpi_tests: openmpi_tests.timestamp
 tau_tests: tau_tests.timestamp
+aomp_tests: aomp_tests.timestamp
+kokkos_tests: kokkos_tests.timestamp
 mpi4py_tests: mpi4py_tests.timestamp
 hpctoolkit_tests: hpctoolkit_tests.timestamp
 cupy_tests: cupy_tests.timestamp
@@ -95,39 +96,39 @@ compiler_setup.sh:
 	training/sources/scripts/compiler_setup.sh
 	touch compiler_setup.timestamp
 
-amd_gcc.timestamp: amd_gcc.timestamp
+amd_gcc.timestamp: rocm.timestamp
 	training/sources/scripts/amd_gcc_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-gcc-latest ${BUILD_GCC_LATEST}
 	touch amd_gcc.timestamp
 
-aomp.timestamp: aomp.timestamp
+aomp.timestamp: rocm.timestamp
 	training/sources/scripts/aomp_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-aomp-latest ${BUILD_AOMP_LATEST}
 	touch aomp.timestamp
 
+
 tau.timestamp: tau.timestamp
 	training/sources/scripts/tau_setup.sh \
+
+kokkos.timestamp: rocm.timestamp openmpi.timestamstamp
+	training/sources/scripts/kokkos_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-tau ${BUILD_TAU}
 	touch tau.timestamp
 
-mpi4py.timestamp: mpi4py.timestamp
+mpi4py.timestamp: openmpi.timestamp
 	rocm/sources/scripts/mpi4py_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-mpi4py ${BUILD_MPI4PY}
 	touch mpi4py.timestamp
 
-hpctoolkit.timestamp: hpctoolkit.timestamp
+hpctoolkit.timestamp:
 	training/sources/scripts/hpctoolkit_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-hpctoolkit ${BUILD_HPCTOOLKIT}
 	touch hpctoolkit.timestamp
-
-apps_setup_basic.timestamp:
-	training/sources/scripts/apps_setup_basic.sh
-	touch apps_setup_basic.timestamp
 
 cupy.timestamp: rocm.timestamp
 	training/sources/scripts/cupy_setup.sh \
@@ -136,7 +137,7 @@ cupy.timestamp: rocm.timestamp
 	   --build-cupy ${BUILD_CUPY}
 	touch cupy.timestamp
 
-pytorch.timestamp: rocm.timestamp apps_setup_basic.timestamp
+pytorch.timestamp: rocm.timestamp
 	training/sources/scripts/pytorch_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
@@ -200,6 +201,10 @@ mpi4py_tests.timestamp: mpi4py.timestamp HPCTrainingExamples
 hpctoolkit_tests.timestamp: hpctoolkit.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R HPCToolkit
 	touch hpctoolkit_tests.timestamp
+
+aomp_tests.timestamp: aomp.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R AOMP
+	touch aomp_tests.timestamp
 
 cupy_tests.timestamp: cupy.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Cupy
