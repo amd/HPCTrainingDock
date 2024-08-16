@@ -114,7 +114,31 @@ else
       module load rocm/${ROCM_VERSION}
 
       TAU_PATH=/opt/rocmplus-${ROCM_VERSION}/tau
+      PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
       sudo mkdir -p ${TAU_PATH}
+      sudo mkdir -p ${PDT_PATH}
+
+      git clone https://github.com/spack/spack.git
+
+      # load spack environment
+      source spack/share/spack/setup-env.sh
+
+      # find already installed libs for spack
+      spack external find
+
+      # change spack install dir for PDT
+      sudo sed -i 's|$spack/opt/spack|/opt/rocmplus-'"${ROCM_VERSION}"'/pdt|g' spack/etc/spack/defaults/config.yaml
+
+      # open permissions to use spack to install PDT
+      if [[ "${USER}" != "root" ]]; then
+	 sudo chmod -R a+rwX /opt/rocmplus-${ROCM_VERSION}/pdt
+      fi
+
+      # install PDT with spack
+      spack install pdt
+
+      # get PDT install dir created by spack
+      PDT_PATH=`spack find -p pdt | awk '{print $2}' | grep opt`
 
       # cloning the latest version of TAU
       git clone https://github.com/UO-OACISS/tau2.git
@@ -125,17 +149,11 @@ else
       # the latest version of TAU needs ROCm 6.2 to find rocprofiler
       if [[ "${result}" ]]; then
 
-         sudo ./configure -c++=amdclang++ -fortran=amdflang \
-	                  -cc=amdclang -prefix=${TAU_PATH} \
-	                  -openmp -ompt -rocm=${ROCM_PATH} \
-	   	          -mpi -rocmsmi=${ROCM_PATH}/bin 
+         sudo ./configure -c++=amdclang++ -fortran=amdflang -cc=amdclang -prefix=${TAU_PATH} -openmp -ompt -rocm=${ROCM_PATH} -mpi -rocmsmi=${ROCM_PATH}/bin -zlib=download -otf=download -unwind=download -bfd=download -prefix=${TAU_PATH} -pdt=${PDT_PATH} -rocprofiler=${ROCM_PATH}/bin -roctracer=${ROCM_PATH} -hip=${ROCM_PATH}
+
       else 
 
-         sudo ./configure -c++=amdclang++ -fortran=amdflang \
-	                  -cc=amdclang -prefix=${TAU_PATH} \
-	                  -openmp -ompt -rocm=${ROCM_PATH} \
-	   	          -mpi -rocmsmi=${ROCM_PATH}/bin \
-	   	          -rocprofiler=${ROCM_PATH} 
+         sudo ./configure -c++=amdclang++ -fortran=amdflang -cc=amdclang -prefix=${TAU_PATH} -openmp -ompt -rocm=${ROCM_PATH} -mpi -rocmsmi=${ROCM_PATH}/bin -zlib=download -otf=download -unwind=download -bfd=download -prefix=${TAU_PATH} -pdt=${PDT_PATH} -rocprofiler=${ROCM_PATH}/bin -roctracer=${ROCM_PATH} -hip=${ROCM_PATH}
 
       fi
 
@@ -143,6 +161,15 @@ else
 
       cd ..
       sudo rm -rf tau2
+      sudo rm -rf spack
+
+      if [[ "${USER}" != "root" ]]; then
+         sudo find /opt/rocmplus-${ROCM_VERSION}/pdt -type f -execdir chown root:root "{}" +
+      fi
+      if [[ "${USER}" != "root" ]]; then
+         sudo chmod go-w /opt/rocmplus-${ROCM_VERSION}/pdt
+      fi
+
       module unload rocm/${ROCM_VERSION}
 
    fi   
