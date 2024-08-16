@@ -96,25 +96,34 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
       echo "============================"
       echo ""
 
+      echo "What directory for AOMP build?"
+      pwd
+      echo "====================================="
       export AOMP=/opt/rocmplus-${ROCM_VERSION}/aomp
-      chmod a+w /opt
+      sudo chmod a+w /opt
 
 # Installs aomp from .deb package but then we can't specify where to install it
 #     wget -q https://github.com/ROCm/aomp/releases/download/rel_19.0-0/aomp_Ubuntu2204_19.0-0_amd64.deb
 #     apt-get install ./aomp_Ubuntu2204_19.0-0_amd64.deb
 
-      sudo apt-get update && apt-get install -y gawk ninja-build generate-ninja ccache
+      sudo apt-get update
+      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y gawk ninja-build generate-ninja ccache libssl-dev \
+	      libgmp-dev libmpfr-dev libbabeltrace-dev
       pip3 install CppHeaderParser
       
       wget -q https://github.com/ROCm-Developer-Tools/aomp/releases/download/rel_${AOMP_VERSION_NUMBER}/aomp-${AOMP_VERSION_NUMBER}.tar.gz
       tar -xzf aomp-${AOMP_VERSION_NUMBER}.tar.gz
       cd aomp${AOMP_VERSION_SHORT}
+      echo "What directory for AOMP make?"
+      pwd
+      echo "====================================="
       make
+      echo "====================================="
 
       cd ..
       rm -rf aomp-${AOMP_VERSION_NUMBER}.tar.gz aomp${AOMP_VERSION_SHORT}
 
-      chmod a-w /opt
+      sudo chmod a-w /opt
    fi
 
    # In either case, create a module file for AOMP compiler
@@ -122,9 +131,9 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
 
    # The - option suppresses tabs
    cat <<-EOF | sudo tee ${MODULE_PATH}/amdclang-${AOMP_VERSION_SHORT}.lua
-	whatis("AMD OpenMP Compiler version 19.0-0 based on LLVM")
+	whatis("AMD OpenMP Compiler version 19.0-3 based on LLVM")
 	
-	local base = "/opt/rocmplus-${ROCM_VERSION}/aomp_19.0-0"
+	local base = "/opt/rocmplus-${ROCM_VERSION}/aomp_19.0-3"
 
 	prepend_path("PATH", pathJoin(base, "bin"))
 	setenv("CC", pathJoin(base, "bin/amdclang"))
