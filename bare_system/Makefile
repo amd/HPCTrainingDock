@@ -108,17 +108,19 @@ aomp.timestamp: rocm.timestamp
 	   --build-aomp-latest ${BUILD_AOMP_LATEST}
 	touch aomp.timestamp
 
+kokkos.timestamp:
+	training/sources/scripts/kokoks_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --build-kokkos ${BUILD_KOKKOS}
+	touch kokkos.timestamp
 
-tau.timestamp: tau.timestamp
+tau.timestamp: rocm.timestamp
 	training/sources/scripts/tau_setup.sh \
-
-kokkos.timestamp: rocm.timestamp openmpi.timestamstamp
-	training/sources/scripts/kokkos_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-tau ${BUILD_TAU}
 	touch tau.timestamp
 
-mpi4py.timestamp: openmpi.timestamp
+mpi4py.timestamp: rocm.timestep
 	rocm/sources/scripts/mpi4py_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-mpi4py ${BUILD_MPI4PY}
