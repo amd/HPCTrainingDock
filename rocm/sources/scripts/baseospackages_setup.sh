@@ -32,7 +32,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y build-essential cmake libnuma1 wget gnupg2 m4 bash-completion git-core autoconf libtool autotools-dev \
       lsb-release libpapi-dev libpfm4-dev libudev1 rpm librpm-dev curl apt-utils vim tmux rsync sudo \
       bison flex texinfo libnuma-dev pkg-config libibverbs-dev rdmacm-utils ssh locales gpg ca-certificates \
-      gcc g++ gfortran ninja-build pipx libboost-all-dev liblzma-dev libgtk-3-dev
+      gcc g++ gfortran ninja-build
 
 # openmpi library being installed as dependency of libboost-all-dev
 

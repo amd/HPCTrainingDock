@@ -634,14 +634,13 @@ fi
 
    sudo update-alternatives \
       --install /usr/bin/mpirun    mpirun  ${OPENMPI_PATH}/bin/mpirun 80 \
-      --slave   /usr/bin/mpiexec   mpiexec ${OPENMPI_PATH}/bin/mpiexec 
-#     --slave   /usr/share/man/man1/mpiexec.1.gz  mpiexec.1.gz ${OPENMPI_PATH}/share/man/man1/mpiexec.1.gz  \
-#     --slave   /usr/share/man/man1/mpirun.1.gz   mpirun.1.gz ${OPENMPI_PATH}/share/man/man1/mpirun.1.gz
+      --slave   /usr/bin/mpiexec   mpiexec ${OPENMPI_PATH}/bin/mpiexec \
+      --slave   /usr/share/man/man1/mpirun.1.gz   mpirun.1.gz ${OPENMPI_PATH}/share/man/man1/mpirun.1.gz
 
    sudo update-alternatives \
       --install /usr/bin/mpi       mpi     ${OPENMPI_PATH}/bin/mpicc  80 \
-      --slave   /usr/bin/mpic++    mpic++  ${OPENMPI_PATH}/bin/mpic++    \
       --slave   /usr/bin/mpicc     mpicc   ${OPENMPI_PATH}/bin/mpicc     \
+      --slave   /usr/bin/mpic++    mpic++  ${OPENMPI_PATH}/bin/mpic++    \
       --slave   /usr/bin/mpiCC     mpiCC   ${OPENMPI_PATH}/bin/mpiCC     \
       --slave   /usr/bin/mpicxx    mpicxx  ${OPENMPI_PATH}/bin/mpicxx    \
       --slave   /usr/bin/mpif77    mpif77  ${OPENMPI_PATH}/bin/mpif77    \
