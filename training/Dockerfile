@@ -135,7 +135,7 @@ WORKDIR /app
 
 COPY training/sources/scripts/pytorch_setup.sh /tmp/pytorch_setup.sh
 
-RUN /tmp/pytorch_setup.sh --build-pytorch ${BUILD_PYTORCH} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/pytorch_setup.sh
+RUN /tmp/pytorch_setup.sh --build-pytorch ${BUILD_PYTORCH} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} |& tee /app/pytorch_build.out && rm /tmp/pytorch_setup.sh
 
 RUN echo "At end of pytorch install" && cd /app && ls -l && cd /tmp && ls -l && cd && ls -l
 WORKDIR /app

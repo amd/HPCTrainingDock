@@ -613,6 +613,10 @@ else
 
       if [[ "${DRY_RUN}" == "0" ]]; then
          sudo make install
+	 for file in ${OPENMPI_PATH}/share/man/man1/*
+         do
+            gzip $file
+         done
       fi
       # make ucx the default point-to-point
       echo "pml = ucx" | sudo tee -a "${OMPI_PATH}"/etc/openmpi-mca-params.conf
@@ -627,6 +631,28 @@ else
       exit 1
    fi
 fi
+
+   sudo update-alternatives \
+      --install /usr/bin/mpirun    mpirun  ${OPENMPI_PATH}/bin/mpirun 80 \
+      --slave   /usr/bin/mpiexec   mpiexec ${OPENMPI_PATH}/bin/mpiexec 
+#     --slave   /usr/share/man/man1/mpiexec.1.gz  mpiexec.1.gz ${OPENMPI_PATH}/share/man/man1/mpiexec.1.gz  \
+#     --slave   /usr/share/man/man1/mpirun.1.gz   mpirun.1.gz ${OPENMPI_PATH}/share/man/man1/mpirun.1.gz
+
+   sudo update-alternatives \
+      --install /usr/bin/mpi       mpi     ${OPENMPI_PATH}/bin/mpicc  80 \
+      --slave   /usr/bin/mpic++    mpic++  ${OPENMPI_PATH}/bin/mpic++    \
+      --slave   /usr/bin/mpicc     mpicc   ${OPENMPI_PATH}/bin/mpicc     \
+      --slave   /usr/bin/mpiCC     mpiCC   ${OPENMPI_PATH}/bin/mpiCC     \
+      --slave   /usr/bin/mpicxx    mpicxx  ${OPENMPI_PATH}/bin/mpicxx    \
+      --slave   /usr/bin/mpif77    mpif77  ${OPENMPI_PATH}/bin/mpif77    \
+      --slave   /usr/bin/mpif90    mpif90  ${OPENMPI_PATH}/bin/mpif90    \
+      --slave   /usr/bin/mpifort   mpifort ${OPENMPI_PATH}/bin/mpifort   \
+      --slave   /usr/share/man/man1/mpic++.1.gz   mpic++.1.gz ${OPENMPI_PATH}/share/man/man1/mpic++.1.gz    \
+      --slave   /usr/share/man/man1/mpicc.1.gz    mpicc.1.gz ${OPENMPI_PATH}/share/man/man1/mpicc.1.gz      \
+      --slave   /usr/share/man/man1/mpicxx.1.gz   mpicxx.1.gz ${OPENMPI_PATH}/share/man/man1/mpicxx.1.gz    \
+      --slave   /usr/share/man/man1/mpif77.1.gz   mpif77.1.gz ${OPENMPI_PATH}/share/man/man1/mpif77.1.gz    \
+      --slave   /usr/share/man/man1/mpif90.1.gz   mpif90.1.gz ${OPENMPI_PATH}/share/man/man1/mpif90.1.gz    \
+      --slave   /usr/share/man/man1/mpifort.1.gz  mpifort.1.gz ${OPENMPI_PATH}/share/man/man1/mpifort.1.gz
 
 if [[ "${MPI4PY}" == "1" ]]; then
 

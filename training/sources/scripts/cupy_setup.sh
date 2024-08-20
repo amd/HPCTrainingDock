@@ -4,9 +4,9 @@
 ROCM_VERSION=6.0
 BUILD_CUPY=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/cupy
+AMDGPU_GFXMODEL_INPUT=""
 
 # Autodetect defaults
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 
 usage()
 {
@@ -35,7 +35,7 @@ do
    case "${1}" in
       "--amdgpu-gfxmodel")
           shift
-          AMDGPU_GFXMODEL=${1}
+          AMDGPU_GFXMODEL_INPUT=${1}
 	  reset-last
           ;;
       "--build-cupy")
@@ -67,6 +67,15 @@ do
    shift
 done
 
+# Load the ROCm version for this CuPy build
+source /etc/profile.d/lmod.sh
+module load rocm/${ROCM_VERSION}
+if [[ "$AMDGPU_GFXMODEL_INPUT" != "" ]]; then
+   AMDGPU_GFXMODEL=$AMDGPU_GFXMODEL_INPUT
+else
+   AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+fi
+
 echo ""
 echo "==================================="
 echo "Starting Cupy Install with"
@@ -86,7 +95,6 @@ else
    cd /tmp
 
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
-   ls -l ${CACHE_FILES}/cupy.tgz
    if [ -f ${CACHE_FILES}/cupy.tgz ]; then
       echo ""
       echo "============================"
@@ -111,9 +119,6 @@ else
       echo "============================"
       echo ""
 
-      # Load the ROCm version for this CuPy build
-      source /etc/profile.d/lmod.sh
-      module load rocm/${ROCM_VERSION}
       
       # Load the ROCm version for this CuPy build -- use hip compiler, path to ROCm and the GPU model
       export CUPY_INSTALL_USE_HIP=1

@@ -97,6 +97,9 @@ else
       source /etc/profile.d/lmod.sh
       module load rocm/${ROCM_VERSION}
 
+      # openmpi library being installed as dependency of libboost-all-dev
+      sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y libboost-all-dev liblzma-dev libgtk-3-dev
+
       cd /tmp
 
       export HPCTOOLKIT_PATH=/opt/rocmplus-${ROCM_VERSION}/hpctoolkit
