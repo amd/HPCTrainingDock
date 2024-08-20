@@ -144,7 +144,9 @@ else
       git clone https://github.com/UO-OACISS/tau2.git
       cd tau2
 
-         sudo ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -openmp -ompt -rocm=${ROCM_PATH} -mpi -rocmsmi=${ROCM_PATH} -zlib=/usr/lib -otf=download -unwind=download -bfd=download -prefix=${TAU_PATH} -pdt=${PDT_PATH} -rocprofiler=${ROCM_PATH} -roctracer=${ROCM_PATH} -hip=${ROCM_PATH}
+      # note: roctracer and pdt are currently excluded because they make the installation break
+      sudo ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=/usr/lib -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -mpi -ompt -openmp -no_pthread_create -rocmsmi=$ROCM_PATH -pthread
+
 
       sudo make install
 
