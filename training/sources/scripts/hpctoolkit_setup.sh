@@ -95,6 +95,7 @@ else
       echo ""
 
       source /etc/profile.d/lmod.sh
+      source /etc/profile.d/z01_lmod.sh
       module load rocm/${ROCM_VERSION}
 
       # openmpi library being installed as dependency of libboost-all-dev

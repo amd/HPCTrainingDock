@@ -302,12 +302,14 @@ do
 # Building rocm docker
     verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${ROCM_DOCKER_OPTS} \
        --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
+       --build-arg USE_CACHED_APPS=${USE_CACHED_APPS} \
        --tag ${DOCKER_USER}/rocm:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        .
 
 # Building omnitrace docker
     verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${OMNITRACE_DOCKER_OPTS} \
        --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
+       --build-arg USE_CACHED_APPS=${USE_CACHED_APPS} \
        -t ${DOCKER_USER}/omnitrace:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        .
 

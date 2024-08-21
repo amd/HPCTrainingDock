@@ -35,6 +35,10 @@ COPY rocm/sources/scripts/lmod_setup.sh /tmp/lmod_setup.sh
 RUN  /tmp/lmod_setup.sh && \
      rm /tmp/lmod_setup.sh
 
+# Grab any cached files of MPI builds and place them in /opt/rocmplus-VERSION
+ADD CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL} \
+   /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+
 COPY rocm/sources/scripts/rocm_setup.sh /tmp/rocm_setup.sh
 
 RUN  /tmp/rocm_setup.sh --rocm-version ${ROCM_VERSION} && \
@@ -61,10 +65,6 @@ WORKDIR /app
 #
 # install OpenMPI and UCX 
 #
-
-# Grab any cached files of MPI builds and place them in /opt/rocmplus-VERSION
-ADD CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL} \
-   /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
 
 COPY rocm/sources/scripts/openmpi_setup.sh /tmp/openmpi_setup.sh
 

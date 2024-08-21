@@ -67,6 +67,7 @@ else
 
 
       source /etc/profile.d/lmod.sh
+      source /etc/profile.d/z01_lmod.sh
       module load rocm
       # Build with GPU aware MPI not working yet
       #module load openmpi

@@ -34,8 +34,6 @@ if [ "${DISTRO}" = "ubuntu" ]; then
       bison flex texinfo libnuma-dev pkg-config libibverbs-dev rdmacm-utils ssh locales gpg ca-certificates \
       gcc g++ gfortran ninja-build
 
-# openmpi library being installed as dependency of libboost-all-dev
-
 # Install python packages
    sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y python3-pip python3-dev python3-venv
 

@@ -95,6 +95,7 @@ else
       echo ""
 
       source /etc/profile.d/lmod.sh
+      source /etc/profile.d/z01_lmod.sh
       module load rocm/${ROCM_VERSION}
 
       sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/kokkos

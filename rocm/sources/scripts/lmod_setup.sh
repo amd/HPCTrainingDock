@@ -58,8 +58,8 @@ fi
 if test -f /etc/profile.d/z01_StdEnv.sh; then
    echo "File /etc/profile.d/z01_lmod.sh already exists"
 else
-  echo "File /etc/profile.d/z00_lmod.sh does not exist"
-  echo "Creating /etc/profile.d/z00_lmod.sh file"
+  echo "File /etc/profile.d/z01_lmod.sh does not exist"
+  echo "Creating /etc/profile.d/z01_lmod.sh file"
   #default is /etc/lmod/modules:/usr/share/lmod/lmod/modulefiles/
   echo "MODULEPATH=/etc/lmod/modules/Linux:/etc/lmod/modules/ROCm:/etc/lmod/modules/ROCmPlus:/etc/lmod/modules/ROCmPlus-MPI:/etc/lmod/modules/ROCmPlus-AMDResearchTools:/etc/lmod/modules/ROCmPlus-LatestCompilers:/etc/lmod/modules/ROCmPlus-AI:/etc/lmod/modules/misc" > /etc/profile.d/z01_lmod.sh
 fi
@@ -80,7 +80,7 @@ fi
 if test -f /etc/profile.d/z01_StdEnv.csh; then
    echo "File /etc/profile.d/z01_lmod.csh already exists"
 else
-  echo "File /etc/profile.d/z00_lmod.csh does not exist"
-  echo "Creating /etc/profile.d/z00_lmod.csh file"
+  echo "File /etc/profile.d/z01_lmod.csh does not exist"
+  echo "Creating /etc/profile.d/z01_lmod.csh file"
   echo "MODULEPATH=/etc/lmod/modules/Linux:/etc/lmod/modules/ROCm:/etc/lmod/modules/ROCmPlus:/etc/lmod/modules/ROCmPlus-MPI:/etc/lmod/modules/ROCmPlus-AMDResearchTools:/etc/lmod/modules/ROCmPlus-LatestCompilers:/etc/lmod/modules/ROCmPlus-AI:/etc/lmod/modules/misc" > /etc/profile.d/z01_lmod.csh
 fi

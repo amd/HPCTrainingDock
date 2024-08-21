@@ -295,9 +295,11 @@ if [[ -d "/opt/rocm-${ROCM_VERSION}" ]] && [[ "${REPLACE}" == "0" ]] ; then
    exit
 fi
 
+INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
+
 if [ "${DISTRO}" == "ubuntu" ]; then
-   if [[ -d "/opt/rocm-${ROCM_VERSION}" ]] && [[ "${REPLACE}" != "0" ]] ; then
-      sudo rm -rf "/opt/${ROCM_VERSION}"
+   if [[ -d "${INSTALL_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
+      sudo rm -rf ${INSTALL_PATH}
    fi
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz ]]; then
       echo ""
@@ -310,9 +312,9 @@ if [ "${DISTRO}" == "ubuntu" ]; then
       echo "cached file is ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz"
       cd /opt
       sudo tar -xzf ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz
-      sudo chown -R root:root "${INSTALL_PATH}"/rocm-${ROCM_VERSION}
+      sudo chown -R root:root ${INSTALL_PATH}
       if [ "${USER}" != "sysadmin" ]; then
-         sudo rm "${INSTALL_PATH}"/CacheFiles/rocm-${ROCM_VERSION}.tgz
+         sudo rm ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz
       fi
    else
 
@@ -342,7 +344,7 @@ if [ "${DISTRO}" == "ubuntu" ]; then
             DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk --no-dkms
 	 else
             DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk,asan --no-dkms
-            sudo apt-get install rocm_bandwidth_test
+            #sudo apt-get install rocm_bandwidth_test
 	 fi
       else
          DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms

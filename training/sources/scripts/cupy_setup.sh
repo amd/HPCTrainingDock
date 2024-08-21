@@ -69,6 +69,7 @@ done
 
 # Load the ROCm version for this CuPy build
 source /etc/profile.d/lmod.sh
+source /etc/profile.d/z01_lmod.sh
 module load rocm/${ROCM_VERSION}
 if [[ "$AMDGPU_GFXMODEL_INPUT" != "" ]]; then
    AMDGPU_GFXMODEL=$AMDGPU_GFXMODEL_INPUT
