@@ -122,4 +122,6 @@ echo "PORT_NUMBER is ${PORT_NUMBER}"
 docker run -it --device=/dev/kfd --device=/dev/dri \
     --group-add video --group-add render ${ADD_OPTIONS} \
     -p ${PORT_NUMBER}:22 --name ${NAME}  --security-opt seccomp=unconfined \
+               -e DISPLAY=$DISPLAY \
+           -v /tmp/.X11-unix:/tmp/.X11-unix \
     --rm -v $PWD/CacheFiles:/CacheFiles bare
