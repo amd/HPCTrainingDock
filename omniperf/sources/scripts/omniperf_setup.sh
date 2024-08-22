@@ -29,6 +29,7 @@ INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0
 wget -q https://github.com/AMDResearch/omniperf/releases/download/v2.0.0-RC1/omniperf-2.0.0-RC1.tar.gz && \
      sudo tar xfz omniperf-2.0.0-RC1.tar.gz && \
      cd ./omniperf-2.0.0-RC1\
+     && sudo sed -i '152i \                                            .astype(str)' src/utils/tty.py \
      && sudo python3 -m pip install -t ${INSTALL_DIR}/python-libs -r requirements.txt --upgrade \
      && sudo python3 -m pip install -t ${INSTALL_DIR}/python-libs pytest --upgrade \
      && sudo mkdir build \
