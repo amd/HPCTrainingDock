@@ -654,32 +654,32 @@ sudo update-alternatives \
    --slave   /usr/share/man/man1/mpif90.1.gz   mpif90.1.gz ${OPENMPI_PATH}/share/man/man1/mpif90.1.gz    \
    --slave   /usr/share/man/man1/mpifort.1.gz  mpifort.1.gz ${OPENMPI_PATH}/share/man/man1/mpifort.1.gz
 
-if [[ "${MPI4PY}" == "1" ]]; then
-
-      echo ""
-      echo "============================"
-      echo " Building MPI4PY"
-      echo "============================"
-      echo ""
-
-      sudo mkdir -p ${MPI4PY_PATH}
-
-      git clone https://github.com/mpi4py/mpi4py.git
-      cd mpi4py
-
-      echo "[model]              = ${OPENMPI_PATH}" >> mpi.cfg
-      echo "mpi_dir              = ${OPENMPI_PATH}" >> mpi.cfg
-      echo "mpicc                = ${OPENMPI_PATH}"/bin/mpicc >> mpi.cfg
-      echo "mpic++                = ${OPENMPI_PATH}"/bin/mpic++ >> mpi.cfg
-      echo "library_dirs         = %(mpi_dir)s/lib" >> mpi.cfg
-      echo "include_dirs         = %(mpi_dir)s/include" >> mpi.cfg
-
-      sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py build --mpi=model
-      sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py bdist_wheel
-
-      sudo pip3 install -v --target=${MPI4PY_PATH} dist/mpi4py-*.whl
-
-fi
+#if [[ "${MPI4PY}" == "1" ]]; then
+#
+#      echo ""
+#      echo "============================"
+#      echo " Building MPI4PY"
+#      echo "============================"
+#      echo ""
+#
+#      sudo mkdir -p ${MPI4PY_PATH}
+#
+#      git clone https://github.com/mpi4py/mpi4py.git
+#      cd mpi4py
+#
+#      echo "[model]              = ${OPENMPI_PATH}" >> mpi.cfg
+#      echo "mpi_dir              = ${OPENMPI_PATH}" >> mpi.cfg
+#      echo "mpicc                = ${OPENMPI_PATH}"/bin/mpicc >> mpi.cfg
+#      echo "mpic++                = ${OPENMPI_PATH}"/bin/mpic++ >> mpi.cfg
+#      echo "library_dirs         = %(mpi_dir)s/lib" >> mpi.cfg
+#      echo "include_dirs         = %(mpi_dir)s/include" >> mpi.cfg
+#
+#      sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py build --mpi=model
+#      sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py bdist_wheel
+#
+#      sudo pip3 install -v --target=${MPI4PY_PATH} dist/mpi4py-*.whl
+#
+#fi
 
 module unload rocm/${ROCM_VERSION}
 
@@ -702,10 +702,10 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("PATH", pathJoin(base, "bin"))
-	prepend_path("PYTHONPATH", "${MPI4PY_PATH}")
+	setenv("MPI_PATH","${OPENMPI_PATH}")
 	load("rocm/${ROCM_VERSION}")
-        conflict("mpi4py")
 	family("MPI")
 EOF
+	#prepend_path("PYTHONPATH", "${MPI4PY_PATH}")
 
 fi

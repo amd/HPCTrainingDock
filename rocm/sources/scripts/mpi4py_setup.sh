@@ -97,45 +97,38 @@ else
 
    else
 
-      if [ "${MPI_PATH}" != "" ]; then	   
+      echo ""
+      echo "============================"
+      echo " Building MPI4PY"
+      echo "============================"
+      echo ""
 
-         echo ""
-         echo "============================"
-         echo " Building MPI4PY"
-         echo "============================"
-         echo ""
+      source /etc/profile.d/lmod.sh
+      source /etc/profile.d/z01_lmod.sh
+      module load openmpi
+      module load rocm/${ROCM_VERSION}
 
-         source /etc/profile.d/lmod.sh
-         module load rocm/${ROCM_VERSION}
+      MPI4PY_PATH=/opt/rocmplus-${ROCM_VERSION}/mpi4py
+      sudo mkdir -p ${MPI4PY_PATH}
 
-	 MPI4PY_PATH=/opt/rocmplus-${ROCM_VERSION}/mpi4py
-         sudo mkdir -p ${MPI4PY_PATH}
+      git clone https://github.com/mpi4py/mpi4py.git
+      cd mpi4py
 
-         git clone https://github.com/mpi4py/mpi4py.git
-         cd mpi4py
+      echo "[model]              = ${MPI_PATH}" >> mpi.cfg
+      echo "mpi_dir              = ${MPI_PATH}" >> mpi.cfg
+      echo "mpicc                = ${MPI_PATH}"/bin/mpicc >> mpi.cfg
+      echo "mpic++                = ${MPI_PATH}"/bin/mpic++ >> mpi.cfg
+      echo "library_dirs         = %(mpi_dir)s/lib" >> mpi.cfg
+      echo "include_dirs         = %(mpi_dir)s/include" >> mpi.cfg
 
-         echo "[model]              = ${MPI_PATH}" >> mpi.cfg
-         echo "mpi_dir              = ${MPI_PATH}" >> mpi.cfg
-         echo "mpicc                = ${MPI_PATH}"/bin/mpicc >> mpi.cfg
-         echo "mpic++                = ${MPI_PATH}"/bin/mpic++ >> mpi.cfg
-         echo "library_dirs         = %(mpi_dir)s/lib" >> mpi.cfg
-         echo "include_dirs         = %(mpi_dir)s/include" >> mpi.cfg
+      sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py build --mpi=model
+      sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py bdist_wheel
 
-         sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py build --mpi=model
-         sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py bdist_wheel
+      sudo pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/mpi4py dist/mpi4py-*.whl
 
-         sudo pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/mpi4py dist/mpi4py-*.whl
-
-	 cd ..
-	 sudo rm -rf mpi4py
-	 module unload rocm/${ROCM_VERSION}
-
-      else 	 
-
-         echo "MPI4PY will not be build, because MPI_PATH is not set. Use --mpi-path to set it" 
-         exit
-
-      fi
+      cd ..
+      sudo rm -rf mpi4py
+      module unload rocm/${ROCM_VERSION}
 
    fi   
 
@@ -148,8 +141,9 @@ else
 	whatis(" MPI4PY - provides Python bindings for MPI")
 
         prepend_path("PYTHONPATH", "${MPI4PY_PATH}")
-        conflict("openmpi")
+	load("openmpi")
 EOF
+        #conflict("openmpi")
 
 fi
 
