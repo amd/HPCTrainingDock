@@ -13,6 +13,7 @@ ARG DOCKER_USER
 # which is the omnitrace image built before this one
 FROM ${DOCKER_USER}/omnitrace:release-base-ubuntu-${DISTRO_VERSION}-rocm-${ROCM_VERSION}
 ARG ROCM_VERSION
+ARG INSTALL_GRAFANA=0
 
 LABEL maintainer="bob.robey@amd.com"
 
@@ -35,7 +36,7 @@ RUN chmod 1777 /tmp
 
 COPY omniperf/sources/scripts/grafana_setup.sh /tmp/grafana_setup.sh
 
-RUN  /tmp/grafana_setup.sh && \
+RUN  /tmp/grafana_setup.sh --install-grafana ${INSTALL_GRAFANA} && \
      rm /tmp/grafana_setup.sh
 
 ENV PATH=$HOME/.yarn/bin:$HOME/.config/yarn/global/node_modules/.bin:$PATH
@@ -51,10 +52,6 @@ RUN  /tmp/omniperf_setup.sh --rocm-version ${ROCM_VERSION} && \
 
 # Overwrite grafana ini file
 COPY omniperf/docker/grafana.ini /etc/grafana
-
-# switch Grafana port to 4000
-RUN sed -i "s/^;http_port = 3000/http_port = 4000/" /etc/grafana/grafana.ini && \
-    sed -i "s/^http_port = 3000/http_port = 4000/" /usr/share/grafana/conf/defaults.ini
 
 # clean up /tmp
 RUN rm -rf /tmp/*

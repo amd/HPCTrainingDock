@@ -63,7 +63,7 @@ USER root
 WORKDIR /app 
 
 #
-# install OpenMPI and UCX 
+# install OpenMPI, UCC, and UCX
 #
 
 COPY rocm/sources/scripts/openmpi_setup.sh /tmp/openmpi_setup.sh
@@ -79,6 +79,15 @@ COPY rocm/sources/scripts/mvapich_setup.sh /tmp/mvapich_setup.sh
 
 RUN  /tmp/mvapich_setup.sh --rocm-version ${ROCM_VERSION} && \
      rm /tmp/mvapich_setup.sh
+
+#
+# install MPI4PY
+#
+
+COPY rocm/sources/scripts/mpi4py_setup.sh /tmp/mpi4py_setup.sh
+
+RUN  /tmp/mpi4py_setup.sh --rocm-version ${ROCM_VERSION} --build-mpi4py 1 && \
+     rm /tmp/mpi4py_setup.sh
 
 # 
 # add slurm 

@@ -12,14 +12,16 @@ if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
 fi
 
+LOAD_MODULE="openmpi"
 
 usage()
 {
    echo "--help: this usage information"
    echo "--build-mpi4py: default is 0"
+   echo "--load-module [ LOAD_MODULE ] default is ""openmpi"" module"
    echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/mpi4py"
    echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "--mpi-path [MPI_PATH] default is /usr"
+   echo "--mpi-path [MPI_PATH] default is from MPI module"
    exit 1
 }
 
@@ -46,6 +48,11 @@ do
           ;;
       "--help")
           usage
+          ;;
+      "--load-module")
+          shift
+          LOAD_MODULE=${1}
+          reset-last
           ;;
       "--module-path")
           shift
@@ -88,6 +95,7 @@ if [ "${BUILD_MPI4PY}" = "0" ]; then
    exit 
 
 else
+   MPI4PY_PATH=/opt/rocmplus-${ROCM_VERSION}/mpi4py
    if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/mpi4py.tgz ]; then
       echo ""
       echo "============================"
@@ -98,50 +106,53 @@ else
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
       tar -xzf CacheFiles/mpi4py.tgz
-      chown -R root:root /opt/rocmplus-${ROCM_VERSION}/mpi4py
-      ${SUDO} rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/mpi4py.tgz
+      chown -R root:root ${MPI4PY_PATH}
+      sudo rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/mpi4py.tgz
 
    else
 
-      if [ "${MPI_PATH}" != "" ]; then	   
+      echo ""
+      echo "============================"
+      echo " Building MPI4PY"
+      echo "============================"
+      echo ""
 
-         echo ""
-         echo "============================"
-         echo " Building MPI4PY"
-         echo "============================"
-         echo ""
+      source /etc/profile.d/lmod.sh
+      source /etc/profile.d/z01_lmod.sh
+      module load ${LOAD_MODULE}
+      module load rocm/${ROCM_VERSION}
 
-         source /etc/profile.d/lmod.sh
-         module load rocm/${ROCM_VERSION}
-
-	 MPI4PY_PATH=/opt/rocmplus-${ROCM_VERSION}/mpi4py
-         ${SUDO} mkdir -p ${MPI4PY_PATH}
-
-         git clone https://github.com/mpi4py/mpi4py.git
-         cd mpi4py
-
-         echo "[model]              = ${MPI_PATH}" >> mpi.cfg
-         echo "mpi_dir              = ${MPI_PATH}" >> mpi.cfg
-         echo "mpicc                = ${MPI_PATH}"/bin/mpicc >> mpi.cfg
-         echo "mpic++                = ${MPI_PATH}"/bin/mpic++ >> mpi.cfg
-         echo "library_dirs         = %(mpi_dir)s/lib" >> mpi.cfg
-         echo "include_dirs         = %(mpi_dir)s/include" >> mpi.cfg
-
-         ${SUDO} CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py build --mpi=model
-         ${SUDO} CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py bdist_wheel
-
-	 ${SUDO} pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/mpi4py dist/mpi4py-*.whl
-
-	 cd ..
-	 ${SUDO} rm -rf mpi4py
-	 module unload rocm/${ROCM_VERSION}
-
-      else 	 
-
-         echo "MPI4PY will not be build, because MPI_PATH is not set. Use --mpi-path to set it" 
-         exit
-
+      sudo mkdir -p ${MPI4PY_PATH}
+      if [[ "${USER}" != "root" ]]; then
+         sudo chmod a+w ${MPI4PY_PATH}
       fi
+
+      git clone https://github.com/mpi4py/mpi4py.git
+      cd mpi4py
+
+      echo "[model]              = ${MPI_PATH}" >> mpi.cfg
+      echo "mpi_dir              = ${MPI_PATH}" >> mpi.cfg
+      echo "mpicc                = ${MPI_PATH}"/bin/mpicc >> mpi.cfg
+      echo "mpic++               = ${MPI_PATH}"/bin/mpic++ >> mpi.cfg
+      echo "library_dirs         = %(mpi_dir)s/lib" >> mpi.cfg
+      echo "include_dirs         = %(mpi_dir)s/include" >> mpi.cfg
+
+      CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py build --mpi=model
+      CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py bdist_wheel
+
+      pip3 install -v --target=${MPI4PY_PATH} dist/mpi4py-*.whl
+
+      if [[ "${USER}" != "root" ]]; then
+         sudo find ${MPI4PY_PATH} -type f -execdir chown root:root "{}" +
+         sudo find ${MPI4PY_PATH} -type d -execdir chown root:root "{}" +
+
+	 sudo chmod go-w ${MPI4PY_PATH}
+      fi
+
+      # cleanup
+      cd ..
+      sudo rm -rf mpi4py
+      module unload rocm/${ROCM_VERSION}
 
    fi   
 
@@ -154,7 +165,7 @@ else
 	whatis(" MPI4PY - provides Python bindings for MPI")
 
         prepend_path("PYTHONPATH", "${MPI4PY_PATH}")
-        conflict("openmpi")
+	load("${LOAD_MODULE}")
 EOF
 
 fi

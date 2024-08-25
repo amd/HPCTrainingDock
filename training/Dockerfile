@@ -48,7 +48,8 @@ ENV TZ "US/Chicago"
 # install a few extra things for the training classes 
 # for og13 -- libgmp-dev libmpfr-dev
 #
-RUN apt-get install -y  hwloc numactl libnuma-dev  libpci-dev \
+RUN apt-get update && \
+    apt-get install -y  hwloc numactl libnuma-dev  libpci-dev \
     lshw emacs htop pandoc ffmpeg cgdb && \
     apt-get install -y --no-install-recommends gedit dos2unix && \
     apt-get install -qy libgmp-dev libmpfr-dev liblzma-dev libbabeltrace-dev
@@ -68,11 +69,6 @@ COPY training/sources/scripts/compiler_setup.sh /tmp/compiler_setup.sh
 
 RUN /tmp/compiler_setup.sh && \
     rm /tmp/compiler_setup.sh
-
-# install module files
-
-#COPY  training/sources/lua/gcc/*          /etc/lmod/modules/Linux/gcc/
-#COPY  training/sources/lua/clang/*        /etc/lmod/modules/Linux/clang/
 
 # Build the latest AMD OpenMP compiler if requested -- moved to aomp_setup.sh
 #RUN apt-get update && apt-get install -y gawk ninja-build generate-ninja ccache
@@ -134,6 +130,8 @@ WORKDIR /app
 #
 
 COPY training/sources/scripts/pytorch_setup.sh /tmp/pytorch_setup.sh
+COPY training/sources/scripts/build_triton_wheel.py /tmp/build_triton_wheel.py
+COPY training/sources/scripts/pytorch_build_triton_wheel_py.patch /tmp/pytorch_build_triton_wheel_py.patch
 
 RUN /tmp/pytorch_setup.sh --build-pytorch ${BUILD_PYTORCH} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} |& tee /app/pytorch_build.out && rm /tmp/pytorch_setup.sh
 

@@ -13,6 +13,8 @@ echo ""
 echo "############# Compiler Setup script ################"
 echo ""
 
+${SUDO} apt-get update
+${SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common
 ${SUDO} DEBIAN_FRONTEND=noninteractive add-apt-repository -y ppa:ubuntu-toolchain-r/test
 
 #${SUDO} apt-get -qq update && ${SUDO} apt-get -qqy install gcc-9 g++-9 gfortran-9
