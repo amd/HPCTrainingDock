@@ -71,6 +71,9 @@ else
       module load rocm
       # Build with GPU aware MPI not working yet
       #module load openmpi
+
+      sudo apt-get install python-is-python3
+      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libopenmpi-dev
       
       # unset environment variables that are not needed for pytorch
       unset BUILD_AOMP_LATEST
@@ -79,6 +82,9 @@ else
       unset BUILD_LLVM_LATEST
       unset BUILD_OG_LATEST
       unset USE_CACHED_APPS
+      unset BUILD_CUPY
+      unset BUILD_PYTORCH
+      unset BUILD_KOKKOS
       
       export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages:$PYTHONPATH
       
@@ -90,32 +96,57 @@ else
       export USE_ROCM=1
       export USE_CUDA=0
       export MAX_JOBS=20
-      export USE_MPI=0
+      export USE_MPI=1
+      #export USE_KINETO=OFF
       export PYTORCH_ROCM_ARCH="${AMDGPU_GFXMODEL}"
       
-      git clone --recursive https://github.com/pytorch/pytorch
+      export PYTORCH_INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/pytorch
+
+      sudo mkdir -p ${PYTORCH_INSTALL_DIR}
+      sudo chmod a+w ${PYTORCH_INSTALL_DIR}
+
+      # PyTorch 2.4, Python 3.12
+      #!/bin/bash
+
+      RETRIES=6
+      DELAY=30
+      COUNT=1
+      while [ $COUNT -lt $RETRIES ]; do
+        git clone --recursive --depth 1 --branch v2.4.0 https://github.com/pytorch/pytorch
+        if [ $? -eq 0 ]; then
+          RETRIES=0
+          break
+        fi
+        let COUNT=$COUNT+1
+        sleep $DELAY
+      done
+
       cd pytorch
-      git reset --hard d990dad # PyTorch 2.4, Python 3.12
-      git submodule sync
-      git submodule update --init --recursive
-      sudo pip3 install mkl-static mkl-include
-      sudo pip3 install -r requirements.txt
+      patch .github/scripts/build_triton_wheel.py < /tmp/pytorch_build_triton_wheel_py.patch
+      sed -i -e 's/case cuda/\/\/case cuda/' torch/csrc/jit/ir/ir.cpp
+      pip3 install mkl-static mkl-include 
+      pip3 install -r requirements.txt
       
-      sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/pytorch
-      sudo python3 tools/amd_build/build_amd.py >& /dev/null
+      python3 tools/amd_build/build_amd.py >& /dev/null
       
       echo ""
       echo "===================="
       echo "Starting setup.py install"
       echo "===================="
       echo ""
-      sudo python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch
+      #export CMAKE_PREFIX_PATH=${PYTORCH_INSTALL_DIR}
+      python setup.py install --prefix=${PYTORCH_INSTALL_DIR}
+      #python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch
       echo ""
       echo "===================="
       echo "Finished setup.py install"
       echo "===================="
       echo ""
-    
+
+      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages
+      echo "PYTHONPATH is ${PYTHONPATH}"
+      python3 -c 'import torch' 2> /dev/null && echo 'Success' || echo 'Failure'
+
       cd /tmp
 
       export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages
@@ -126,35 +157,38 @@ else
       export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/audio/lib/python3.10/site-packages:$PYTHONPATH
 
       # install necessary packages in installation directory
-      sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/vision
-      sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/audio
+      export TORCHVISION_INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/vision
+      export TORCHAUDIO_INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/audio
+      sudo mkdir -p ${TORCHVISION_INSTALL_DIR}
+      sudo mkdir -p ${TORCHAUDIO_INSTALL_DIR}
 
       if [[ "${USER}" != "root" ]]; then
-         sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}/vision
-         sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}/audio
+         sudo chmod a+w ${TORCHVISION_INSTALL_DIR}
+         sudo chmod a+w ${TORCHAUDIO_INSTALL_DIR}
       fi
 
-      git clone --recursive https://github.com/pytorch/vision
+      git clone --recursive --depth 1 --branch v0.19.0 https://github.com/pytorch/vision
       cd vision
-      git reset --hard 48b1edf # Torchvision 0.19
-      python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/vision
+      python3 setup.py install --prefix=${TORCHVISION_INSTALL_DIR}
       cd ..
 
-      git clone --recursive https://github.com/pytorch/audio
+      git clone --recursive --depth 1 --branch v2.4.0 https://github.com/pytorch/audio
       cd audio
-      git reset --hard 69d4077 # TorhcAudio 2.4.0
-      python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/audio
+      python3 setup.py install --prefix=${TORCHAUDIO_INSTALL_DIR}
 
       if [[ "${USER}" != "root" ]]; then
-         sudo find /opt/rocmplus-${ROCM_VERSION}/vision -type f -execdir chown root:root "{}" +
-         sudo find /opt/rocmplus-${ROCM_VERSION}/vision -type d -execdir chown root:root "{}" +
-         sudo find /opt/rocmplus-${ROCM_VERSION}/audio -type f -execdir chown root:root "{}" +
-         sudo find /opt/rocmplus-${ROCM_VERSION}/audio -type d -execdir chown root:root "{}" +
+         sudo find ${PYTORCH_INSTALL_DIR} -type f -execdir chown root:root "{}" +
+         sudo find ${PYTORCH_INSTALL_DIR} -type d -execdir chown root:root "{}" +
+         sudo find ${TORCHVISION_INSTALL_DIR} -type f -execdir chown root:root "{}" +
+         sudo find ${TORCHVISION_INSTALL_DIR} -type d -execdir chown root:root "{}" +
+         sudo find ${TORCHAUDIO_INSTALL_DIR} -type f -execdir chown root:root "{}" +
+         sudo find ${TORCHAUDIO_INSTALL_DIR} -type d -execdir chown root:root "{}" +
       fi
 
       if [[ "${USER}" != "root" ]]; then
-         sudo chmod go-w /opt/rocmplus-${ROCM_VERSION}/vision
-         sudo chmod go-w /opt/rocmplus-${ROCM_VERSION}/audio
+         sudo chmod go-w ${PYTORCH_INSTALL_DIR}
+         sudo chmod go-w ${TORCHVISION_INSTALL_DIR}
+         sudo chmod go-w ${TORCHAUDIO_INSTALL_DIR}
       fi
 
       # cleanup

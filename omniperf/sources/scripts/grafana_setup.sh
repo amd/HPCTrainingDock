@@ -1,14 +1,14 @@
 #!/bin/bash
 
-GRAFANA_INSTALL_FROM_SOURCE=0
+INSTALL_GRAFANA=0
 
 n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
-      "--grafana_install_from_source")
+      "--install-grafana")
           shift
-          GRAFANA_INSTALL_FROM_SOURCE=1
+          INSTALL_GRAFANA=${1}
           ;;
       *)
          last ${1}
@@ -21,9 +21,13 @@ done
 echo ""
 echo "====================================="
 echo "Installing Grafana:"
-echo "GRAFANA_INSTALL_FROM_SOURCE is $GRAFANA_INSTALL_FROM_SOURCE"
+echo "INSTALL_GRAFANA is $INSTALL_GRAFANA"
 echo "====================================="
 echo ""
+
+if [[ "$INSTALL_GRAFANA" == "0" ]];then
+   exit
+fi
 
 # fix the nodejs install if broken
 pushd /etc/apt/sources.list.d
@@ -71,3 +75,7 @@ touch /var/lib/grafana/grafana.lib
 chown grafana:grafana /var/lib/grafana/grafana.lib
 popd
 rm grafana-enterprise_8.3.4_amd64.deb server-6.0.asc
+
+# switch Grafana port to 4000
+sed -i "s/^;http_port = 3000/http_port = 4000/" /etc/grafana/grafana.ini
+sed -i "s/^http_port = 3000/http_port = 4000/" /usr/share/grafana/conf/defaults.ini

@@ -26,6 +26,7 @@
 : ${ADMIN_PASSWORD:=""}
 : ${USE_CACHED_APPS:=0}
 : ${AMDGPU_GFXMODEL:=""}
+: ${INSTALL_GRAFANA:=0}
 
 tolower()
 {
@@ -105,6 +106,7 @@ usage()
     print_default_option build-cupy -- "flag to build the latest version of cupy" "not included"
     print_default_option build-kokkos -- "flag to build the latest version of kokkos" "not included"
     print_default_option build-hpctoolkit -- "flag to build the latest version of hpctoolkit" "not included"
+    print_default_option install-grafana -- "flag to install grafana" "not included"
     print_default_option build-all-latest -- "flag to build all the additional libraries that need a flag to be built" "not included"
     print_default_option use_cached-apps -- "flag to use pre-built gcc and aomp located in CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} directory" "not included"
     print_default_option omnitrace-build-from-source -- "flag to build omnitrace from source instead of using pre-built versions" "not included"
@@ -237,6 +239,10 @@ do
             BUILD_HPCTOOLKIT="1"
             reset-last
             ;;
+        "--install-grafana")
+            INSTALL_GRAFANA="1"
+            reset-last
+            ;;
         "--build-all-latest")
             BUILD_AOMP_LATEST="1"
             #BUILD_LLVM_LATEST="1"
@@ -315,6 +321,7 @@ do
 
 # Building omniperf docker
     verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${OMNIPERF_DOCKER_OPTS} \
+       --build-arg INSTALL_GRAFANA="${INSTALL_GRAFANA}" \
        -t ${DOCKER_USER}/omniperf:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        .
 

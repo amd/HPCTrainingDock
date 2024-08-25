@@ -633,53 +633,26 @@ else
    fi
 fi
 
-sudo update-alternatives \
-   --install /usr/bin/mpirun    mpirun  ${OPENMPI_PATH}/bin/mpirun 80 \
-   --slave   /usr/bin/mpiexec   mpiexec ${OPENMPI_PATH}/bin/mpiexec \
-   --slave   /usr/share/man/man1/mpirun.1.gz   mpirun.1.gz ${OPENMPI_PATH}/share/man/man1/mpirun.1.gz
-
-sudo update-alternatives \
-   --install /usr/bin/mpi       mpi     ${OPENMPI_PATH}/bin/mpicc  80 \
-   --slave   /usr/bin/mpicc     mpicc   ${OPENMPI_PATH}/bin/mpicc     \
-   --slave   /usr/bin/mpic++    mpic++  ${OPENMPI_PATH}/bin/mpic++    \
-   --slave   /usr/bin/mpiCC     mpiCC   ${OPENMPI_PATH}/bin/mpiCC     \
-   --slave   /usr/bin/mpicxx    mpicxx  ${OPENMPI_PATH}/bin/mpicxx    \
-   --slave   /usr/bin/mpif77    mpif77  ${OPENMPI_PATH}/bin/mpif77    \
-   --slave   /usr/bin/mpif90    mpif90  ${OPENMPI_PATH}/bin/mpif90    \
-   --slave   /usr/bin/mpifort   mpifort ${OPENMPI_PATH}/bin/mpifort   \
-   --slave   /usr/share/man/man1/mpic++.1.gz   mpic++.1.gz ${OPENMPI_PATH}/share/man/man1/mpic++.1.gz    \
-   --slave   /usr/share/man/man1/mpicc.1.gz    mpicc.1.gz ${OPENMPI_PATH}/share/man/man1/mpicc.1.gz      \
-   --slave   /usr/share/man/man1/mpicxx.1.gz   mpicxx.1.gz ${OPENMPI_PATH}/share/man/man1/mpicxx.1.gz    \
-   --slave   /usr/share/man/man1/mpif77.1.gz   mpif77.1.gz ${OPENMPI_PATH}/share/man/man1/mpif77.1.gz    \
-   --slave   /usr/share/man/man1/mpif90.1.gz   mpif90.1.gz ${OPENMPI_PATH}/share/man/man1/mpif90.1.gz    \
-   --slave   /usr/share/man/man1/mpifort.1.gz  mpifort.1.gz ${OPENMPI_PATH}/share/man/man1/mpifort.1.gz
-
-#if [[ "${MPI4PY}" == "1" ]]; then
+#sudo update-alternatives \
+#   --install /usr/bin/mpirun    mpirun  ${OPENMPI_PATH}/bin/mpirun 80 \
+#   --slave   /usr/bin/mpiexec   mpiexec ${OPENMPI_PATH}/bin/mpiexec \
+#   --slave   /usr/share/man/man1/mpirun.1.gz   mpirun.1.gz ${OPENMPI_PATH}/share/man/man1/mpirun.1.gz
 #
-#      echo ""
-#      echo "============================"
-#      echo " Building MPI4PY"
-#      echo "============================"
-#      echo ""
-#
-#      sudo mkdir -p ${MPI4PY_PATH}
-#
-#      git clone https://github.com/mpi4py/mpi4py.git
-#      cd mpi4py
-#
-#      echo "[model]              = ${OPENMPI_PATH}" >> mpi.cfg
-#      echo "mpi_dir              = ${OPENMPI_PATH}" >> mpi.cfg
-#      echo "mpicc                = ${OPENMPI_PATH}"/bin/mpicc >> mpi.cfg
-#      echo "mpic++                = ${OPENMPI_PATH}"/bin/mpic++ >> mpi.cfg
-#      echo "library_dirs         = %(mpi_dir)s/lib" >> mpi.cfg
-#      echo "include_dirs         = %(mpi_dir)s/include" >> mpi.cfg
-#
-#      sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py build --mpi=model
-#      sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py bdist_wheel
-#
-#      sudo pip3 install -v --target=${MPI4PY_PATH} dist/mpi4py-*.whl
-#
-#fi
+#sudo update-alternatives \
+#   --install /usr/bin/mpi       mpi     ${OPENMPI_PATH}/bin/mpicc  80 \
+#   --slave   /usr/bin/mpicc     mpicc   ${OPENMPI_PATH}/bin/mpicc     \
+#   --slave   /usr/bin/mpic++    mpic++  ${OPENMPI_PATH}/bin/mpic++    \
+#   --slave   /usr/bin/mpiCC     mpiCC   ${OPENMPI_PATH}/bin/mpiCC     \
+#   --slave   /usr/bin/mpicxx    mpicxx  ${OPENMPI_PATH}/bin/mpicxx    \
+#   --slave   /usr/bin/mpif77    mpif77  ${OPENMPI_PATH}/bin/mpif77    \
+#   --slave   /usr/bin/mpif90    mpif90  ${OPENMPI_PATH}/bin/mpif90    \
+#   --slave   /usr/bin/mpifort   mpifort ${OPENMPI_PATH}/bin/mpifort   \
+#   --slave   /usr/share/man/man1/mpic++.1.gz   mpic++.1.gz ${OPENMPI_PATH}/share/man/man1/mpic++.1.gz    \
+#   --slave   /usr/share/man/man1/mpicc.1.gz    mpicc.1.gz ${OPENMPI_PATH}/share/man/man1/mpicc.1.gz      \
+#   --slave   /usr/share/man/man1/mpicxx.1.gz   mpicxx.1.gz ${OPENMPI_PATH}/share/man/man1/mpicxx.1.gz    \
+#   --slave   /usr/share/man/man1/mpif77.1.gz   mpif77.1.gz ${OPENMPI_PATH}/share/man/man1/mpif77.1.gz    \
+#   --slave   /usr/share/man/man1/mpif90.1.gz   mpif90.1.gz ${OPENMPI_PATH}/share/man/man1/mpif90.1.gz    \
+#   --slave   /usr/share/man/man1/mpifort.1.gz  mpifort.1.gz ${OPENMPI_PATH}/share/man/man1/mpifort.1.gz
 
 module unload rocm/${ROCM_VERSION}
 
@@ -706,6 +679,5 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 	load("rocm/${ROCM_VERSION}")
 	family("MPI")
 EOF
-	#prepend_path("PYTHONPATH", "${MPI4PY_PATH}")
 
 fi

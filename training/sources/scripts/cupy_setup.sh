@@ -147,8 +147,7 @@ else
       if [[ "${USER}" != "root" ]]; then
          sudo find /opt/rocmplus-${ROCM_VERSION}/cupy -type f -execdir chown root:root "{}" +
          sudo find /opt/rocmplus-${ROCM_VERSION}/cupy -type d -execdir chown root:root "{}" +
-      fi
-      if [[ "${USER}" != "root" ]]; then
+
          sudo chmod go-w /opt/rocmplus-${ROCM_VERSION}/cupy
       fi
       
