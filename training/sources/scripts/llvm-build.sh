@@ -4,6 +4,11 @@ DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | t
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
 
 n=0
 while [[ $# -gt 0 ]]
@@ -91,10 +96,10 @@ if [ "${BUILD_LLVM_LATEST}" = "1" ]; then
    # In either case, create a module file for llvm-latest compiler
    export MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/llvm-latest
 
-   sudo mkdir -p ${MODULE_PATH}
+   ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | sudo tee ${MODULE_PATH}/gcc11_hipstdpar.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/gcc11_hipstdpar.lua
 	whatis("LLVM latest compiler version with stdpar patch applied")
 
 	local base = "/opt/rocmplus-${ROCM_VERSION}/llvm-latest"

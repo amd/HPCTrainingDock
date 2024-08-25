@@ -6,6 +6,12 @@ ROCM_VERSION=`cat /opt/rocm*/.info/version | head -1 | cut -f1 -d'-' `
 ROCM_PATH=/opt/rocm-${ROCM_VERSION}
 REPLACE=0
 DRY_RUN=0
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
+
 
 # Autodetect defaults
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -102,25 +108,25 @@ MVAPICH_RPM_NAME=mvapich-plus-rocm5.6.0.multiarch.ucx.gnu8.5.0-3.0-1.el8.x86_64.
 MVAPICH_DOWNLOAD_URL=https://mvapich.cse.ohio-state.edu/download/mvapich/plus/3.0/rocm/UCX/mofed5.0
 
 if [ "${DISTRO}" = "rocky linux" ]; then
-   sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/mvapich
+   ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/mvapich
 
    cd /tmp
    # install the GPU aware version of mvapich using an rpm (MVPlus3.0)
    wget -q ${MVAPICH_DOWNLOAD_URL}/${MVAPICH_RPM_NAME}
    if [[ "${DRY_RUN}" == "0" ]]; then
-      sudo rpm --prefix ${INSTALL_PATH} -Uvh --nodeps ${MVAPICH_RPM_NAME}
+      ${SUDO} rpm --prefix ${INSTALL_PATH} -Uvh --nodeps ${MVAPICH_RPM_NAME}
       ${INSTALL_PATH}/mvapich/bin/mpicc -show
    fi
    rm ${MVAPICH_RPM_NAME}
 fi
 if [ "${DISTRO}" = "ubuntu" ]; then
-   sudo DEBIAN_FRONTEND=noninteractive apt-get -qqy install alien
-   sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/mvapich
+   ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get -qqy install alien
+   ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/mvapich
 
    # install the GPU aware version of mvapich using an rpm (MVPlus3.0)
-   sudo wget -q ${MVAPICH_DOWNLOAD_URL}/${MVAPICH_RPM_NAME}
+   ${SUDO} wget -q ${MVAPICH_DOWNLOAD_URL}/${MVAPICH_RPM_NAME}
    ls -l ${MVAPICH_RPM_NAME}
-   sudo apt-get install -y alien ${MVAPICH_RPM_NAME}
+   ${SUDO} apt-get install -y alien ${MVAPICH_RPM_NAME}
    /opt/rocmplus-${ROCM_VERSION}/mvapich/bin/mpicc --show
    rm -rf ${MVAPICH_RPM_NAME}
 fi
@@ -132,10 +138,10 @@ fi
 # Create a module file for Mvapich
 export MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/mvapich
 
-sudo mkdir -p ${MODULE_PATH}
+${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | sudo tee ${MODULE_PATH}/3.0.lua
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/3.0.lua
         whatis("Name: GPU-aware mvapich")
         whatis("Version: 3.0.0")
         whatis("Description: An open source Message Passing Interface implementation")

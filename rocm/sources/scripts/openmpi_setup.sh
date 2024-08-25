@@ -37,6 +37,12 @@ MPI4PY=1
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
+
 
 usage()
 {
@@ -292,16 +298,16 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    echo "Install of libpmix-dev libhwloc-dev libevent-dev libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen packages"
    if [[ "${DRY_RUN}" == "0" ]]; then
       # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
-      sudo DEBIAN_FRONTEND=noninteractive apt-get update
-      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
+      ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get update
+      ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
          libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen
    fi
 elif [ "${DISTRO}" = "rocky linux" ]; then
    echo "Install of pmix and hwloc packages"
    if [[ "${DRY_RUN}" == "0" ]]; then
       # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
-      sudo yum update
-      sudo yum install -y pmix hwloc
+      ${SUDO} yum update
+      ${SUDO} yum install -y pmix hwloc
    fi
 fi
 
@@ -321,7 +327,7 @@ if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
    echo "  use --replace to request replacing the current installation"
 else
    if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
-      sudo rm -rf "${UCX_PATH}"
+      ${SUDO} rm -rf "${UCX_PATH}"
    fi
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${CACHE_FILES}/ucx-${UCX_VERSION}.tgz ]]; then
       echo ""
@@ -332,15 +338,15 @@ else
 
       #install the cached version
       echo "cached file is ${CACHE_FILES}/ucx-${UCX_VERSION}.tgz"
-      sudo mkdir -p ${UCX_PATH}
+      ${SUDO} mkdir -p ${UCX_PATH}
       cd ${INSTALL_PATH}
-      sudo tar -xzpf ${CACHE_FILES}/ucx-${UCX_VERSION}.tgz
+      ${SUDO} tar -xzpf ${CACHE_FILES}/ucx-${UCX_VERSION}.tgz
       if [ "${USER}" != "root" ]; then
-         sudo find ${UCX_PATH} -type f -execdir chown root:root "{}" +
-         sudo find ${UCX_PATH} -type d -execdir chown root:root "{}" +
+         ${SUDO} find ${UCX_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${UCX_PATH} -type d -execdir chown root:root "{}" +
       fi
       if [ "${USER}" != "sysadmin" ]; then
-         sudo rm "${CACHE_FILES}"/ucx-${UCX_VERSION}.tgz
+         ${SUDO} rm "${CACHE_FILES}"/ucx-${UCX_VERSION}.tgz
       fi
    else
 
@@ -399,7 +405,7 @@ else
 
       make -j 16
       if [[ "${DRY_RUN}" == "0" ]]; then
-         sudo make install
+         ${SUDO} make install
       fi
 
       cd ../..
@@ -423,7 +429,7 @@ if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
    echo "  use --replace to request replacing the current installation"
 else
    if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
-      sudo rm -rf "${UCC_PATH}"
+      ${SUDO} rm -rf "${UCC_PATH}"
    fi
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz ]]; then
       echo ""
@@ -434,15 +440,15 @@ else
 
       #install the cached version
       echo "cached file is ${CACHE_FILES}/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz"
-      sudo mkdir -p ${UCC_PATH}
+      ${SUDO} mkdir -p ${UCC_PATH}
       cd "${INSTALL_PATH}"
-      sudo tar -xzpf "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
+      ${SUDO} tar -xzpf "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
       if [ "${USER}" != "root" ]; then
-         sudo find ${UCC_PATH} -type f -execdir chown root:root "{}" +
-         sudo find ${UCC_PATH} -type d -execdir chown root:root "{}" +
+         ${SUDO} find ${UCC_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${UCC_PATH} -type d -execdir chown root:root "{}" +
       fi
       if [ "${USER}" != "sysadmin" ]; then
-         sudo rm "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
+         ${SUDO} rm "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
       fi
    else
 
@@ -476,12 +482,12 @@ else
       cd ucc-${UCC_VERSION}
 
       export AMDGPU_GFXMODEL_UCC=${AMDGPU_GFXMODEL}
-      echo 'Defaults:%sudo env_keep += "AMDGPU_GFXMODEL_UCC"' | sudo EDITOR='tee -a' visudo
+      echo 'Defaults:%sudo env_keep += "AMDGPU_GFXMODEL_UCC"' | ${SUDO} EDITOR='tee -a' visudo
 
-      sudo sed -i '31i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu --offload-arch='"${AMDGPU_GFXMODEL_UCC}"' ${@:5} -fPIC -O3 -o ${pic_filepath}"' cuda_lt.sh
-      sudo sed -i '32d' cuda_lt.sh
-      sudo sed -i '41i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu --offload-arch='"${AMDGPU_GFXMODEL_UCC}"' ${@:5} -O3 -o ${npic_filepath}"' cuda_lt.sh
-      sudo sed -i '42d' cuda_lt.sh
+      ${SUDO} sed -i '31i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu --offload-arch='"${AMDGPU_GFXMODEL_UCC}"' ${@:5} -fPIC -O3 -o ${pic_filepath}"' cuda_lt.sh
+      ${SUDO} sed -i '32d' cuda_lt.sh
+      ${SUDO} sed -i '41i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu --offload-arch='"${AMDGPU_GFXMODEL_UCC}"' ${@:5} -O3 -o ${npic_filepath}"' cuda_lt.sh
+      ${SUDO} sed -i '42d' cuda_lt.sh
 
       ./autogen.sh
 
@@ -500,7 +506,7 @@ else
       make -j 16
 
       if [[ "${DRY_RUN}" == "0" ]]; then
-         sudo make install
+         ${SUDO} make install
       fi
 
       cd ..
@@ -524,7 +530,7 @@ if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
    echo "  use --replace to request replacing the current installation"
 else
    if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
-      sudo rm -rf "${OPENMPI_PATH}"
+      ${SUDO} rm -rf "${OPENMPI_PATH}"
    fi
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz ]]; then
       echo ""
@@ -535,15 +541,15 @@ else
 
       #install the cached version
       echo "cached file is ${CACHE_FILES}/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz"
-      sudo mkdir -p ${OPENMPI_PATH}
+      ${SUDO} mkdir -p ${OPENMPI_PATH}
       cd "${INSTALL_PATH}"
-      sudo tar -xzpf "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
+      ${SUDO} tar -xzpf "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
       if [ "${USER}" != "root" ]; then
-         sudo find ${OPENMPI_PATH} -type f -execdir chown root:root "{}" +
-         sudo find ${OPENMPI_PATH} -type d -execdir chown root:root "{}" +
+         ${SUDO} find ${OPENMPI_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${OPENMPI_PATH} -type d -execdir chown root:root "{}" +
       fi
       if [ "${USER}" != "sysadmin" ]; then
-         sudo rm "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
+         ${SUDO} rm "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
       fi
    else
 
@@ -613,14 +619,14 @@ else
       make -j 16
 
       if [[ "${DRY_RUN}" == "0" ]]; then
-         sudo make install
+         ${SUDO} make install
 	 for file in ${OPENMPI_PATH}/share/man/man1/*
          do
             gzip $file
          done
       fi
       # make ucx the default point-to-point
-      echo "pml = ucx" | sudo tee -a "${OMPI_PATH}"/etc/openmpi-mca-params.conf
+      echo "pml = ucx" | ${SUDO} tee -a "${OMPI_PATH}"/etc/openmpi-mca-params.conf
       cd ../..
       rm -rf openmpi-${OPENMPI_VERSION} openmpi-${OPENMPI_VERSION}.tar.bz2
    fi
@@ -633,12 +639,12 @@ else
    fi
 fi
 
-sudo update-alternatives \
+${SUDO} update-alternatives \
    --install /usr/bin/mpirun    mpirun  ${OPENMPI_PATH}/bin/mpirun 80 \
    --slave   /usr/bin/mpiexec   mpiexec ${OPENMPI_PATH}/bin/mpiexec \
    --slave   /usr/share/man/man1/mpirun.1.gz   mpirun.1.gz ${OPENMPI_PATH}/share/man/man1/mpirun.1.gz
 
-sudo update-alternatives \
+${SUDO} update-alternatives \
    --install /usr/bin/mpi       mpi     ${OPENMPI_PATH}/bin/mpicc  80 \
    --slave   /usr/bin/mpicc     mpicc   ${OPENMPI_PATH}/bin/mpicc     \
    --slave   /usr/bin/mpic++    mpic++  ${OPENMPI_PATH}/bin/mpic++    \
@@ -662,7 +668,7 @@ if [[ "${MPI4PY}" == "1" ]]; then
       echo "============================"
       echo ""
 
-      sudo mkdir -p ${MPI4PY_PATH}
+      ${SUDO} mkdir -p ${MPI4PY_PATH}
 
       git clone https://github.com/mpi4py/mpi4py.git
       cd mpi4py
@@ -674,10 +680,10 @@ if [[ "${MPI4PY}" == "1" ]]; then
       echo "library_dirs         = %(mpi_dir)s/lib" >> mpi.cfg
       echo "include_dirs         = %(mpi_dir)s/include" >> mpi.cfg
 
-      sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py build --mpi=model
-      sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py bdist_wheel
+      ${SUDO} CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py build --mpi=model
+      ${SUDO} CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py bdist_wheel
 
-      sudo pip3 install -v --target=${MPI4PY_PATH} dist/mpi4py-*.whl
+      ${SUDO} pip3 install -v --target=${MPI4PY_PATH} dist/mpi4py-*.whl
 
 fi
 
@@ -686,10 +692,10 @@ module unload rocm/${ROCM_VERSION}
 # In either case of Cache or Build from source, create a module file for OpenMPI
 
 if [[ "${DRY_RUN}" == "0" ]]; then
-   sudo mkdir -p ${MODULE_PATH}
+   ${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-   cat <<-EOF | sudo tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}.lua
 	whatis("Name: GPU-aware openmpi")
 	whatis("Version: openmpi-${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}")
 	whatis("Description: An open source Message Passing Interface implementation")

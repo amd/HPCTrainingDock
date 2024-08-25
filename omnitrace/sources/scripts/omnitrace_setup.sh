@@ -68,8 +68,8 @@ done
 
 # omnitrace (omnitrace-avail) will throw this message using default values, so change default to 2
 # [omnitrace][116] /proc/sys/kernel/perf_event_paranoid has a value of 3. Disabling PAPI (requires a value <= 2)...
-# [omnitrace][116] In order to enable PAPI support, run 'echo N | sudo tee /proc/sys/kernel/perf_event_paranoid' where                   N is <= 2
-if (( `cat /proc/sys/kernel/perf_event_paranoid` > 0 )); then echo "Please do:  echo 0  | sudo tee /proc/sys/kernel/perf_event_paranoid"; fi
+# [omnitrace][116] In order to enable PAPI support, run 'echo N | ${SUDO} tee /proc/sys/kernel/perf_event_paranoid' where                   N is <= 2
+if (( `cat /proc/sys/kernel/perf_event_paranoid` > 0 )); then echo "Please do:  echo 0  | ${SUDO} tee /proc/sys/kernel/perf_event_paranoid"; fi
 
 echo ""
 echo "============================"
@@ -91,10 +91,10 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "0" ] ; then
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      sudo tar -xzf ${CACHE_FILES}/omnitrace.tgz
-      sudo chown -R root:root /opt/rocmplus-${ROCM_VERSION}/omnitrace
+      ${SUDO} tar -xzf ${CACHE_FILES}/omnitrace.tgz
+      ${SUDO} chown -R root:root /opt/rocmplus-${ROCM_VERSION}/omnitrace
       if [ "${USER}" != "sysadmin" ]; then
-         sudo rm ${CACHE_FILES}/omnitrace.tgz
+         ${SUDO} rm ${CACHE_FILES}/omnitrace.tgz
       fi
    else
       if  wget -q https://github.com/AMDResearch/omnitrace/releases/download/v1.11.1/omnitrace-install.py && \
@@ -126,8 +126,8 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "1" ] ; then
 
    # Fixing error "mv: cannot stat 't-es.gmo': No such file or directory: (language support) due to missing gettext
    if [ ! -x /usr/bin/gettext ]; then
-      sudo apt-get update
-      sudo apt-get install -y gettext autopoint
+      ${SUDO} apt-get update
+      ${SUDO} apt-get install -y gettext autopoint
    fi
 
    git clone --depth 1 https://github.com/AMDResearch/omnitrace.git omnitrace-source --recurse-submodules && \
@@ -155,15 +155,15 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "1" ] ; then
           omnitrace-source
 
    cmake --build omnitrace-build --target all --parallel 16
-   sudo cmake --build omnitrace-build --target install
+   ${SUDO} cmake --build omnitrace-build --target install
    rm -rf omnitrace-source omnitrace-build omnitrace-install.py omnitrace-install*
 fi
 
 # In either case, create a module file for Omnitrace
-sudo mkdir -p ${MODULE_PATH}
+${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | sudo tee ${MODULE_PATH}/1.11.3.lua
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/1.11.3.lua
 	whatis("Name: omnitrace")
 	whatis("Version: 1.11.3")
 	whatis("Category: AMD")

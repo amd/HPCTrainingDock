@@ -3,6 +3,12 @@
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
+
 n=0
 while [[ $# -gt 0 ]]
 do
@@ -85,10 +91,10 @@ if [ "${BUILD_CLACC_LATEST}" = "1" ]; then
    # In either case, create a module file for CLACC compiler
    export MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/clacc
 
-   sudo mkdir -p ${MODULE_PATH}
+   ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | sudo tee ${MODULE_PATH}/clang-17.0.0.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/clang-17.0.0.lua
 	whatis("Clang OpenMP Compiler with CLACC version 17.0-0 based on LLVM")
 
 	local base = "/opt/rocmplus-${ROCM_VERSION}/clacc_clang"

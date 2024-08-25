@@ -6,6 +6,12 @@ MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/mpi4py
 BUILD_MPI4PY=0
 ROCM_VERSION=6.0
 MPI_PATH="/usr"
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
+
 
 usage()
 {
@@ -93,7 +99,7 @@ else
       cd /opt/rocmplus-${ROCM_VERSION}
       tar -xzf CacheFiles/mpi4py.tgz
       chown -R root:root /opt/rocmplus-${ROCM_VERSION}/mpi4py
-      sudo rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/mpi4py.tgz
+      ${SUDO} rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/mpi4py.tgz
 
    else
 
@@ -109,7 +115,7 @@ else
          module load rocm/${ROCM_VERSION}
 
 	 MPI4PY_PATH=/opt/rocmplus-${ROCM_VERSION}/mpi4py
-         sudo mkdir -p ${MPI4PY_PATH}
+         ${SUDO} mkdir -p ${MPI4PY_PATH}
 
          git clone https://github.com/mpi4py/mpi4py.git
          cd mpi4py
@@ -121,13 +127,13 @@ else
          echo "library_dirs         = %(mpi_dir)s/lib" >> mpi.cfg
          echo "include_dirs         = %(mpi_dir)s/include" >> mpi.cfg
 
-         sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py build --mpi=model
-         sudo CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py bdist_wheel
+         ${SUDO} CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py build --mpi=model
+         ${SUDO} CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py bdist_wheel
 
-         sudo pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/mpi4py dist/mpi4py-*.whl
+	 ${SUDO} pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/mpi4py dist/mpi4py-*.whl
 
 	 cd ..
-	 sudo rm -rf mpi4py
+	 ${SUDO} rm -rf mpi4py
 	 module unload rocm/${ROCM_VERSION}
 
       else 	 
@@ -141,10 +147,10 @@ else
 
 
    # Create a module file for mpi4py
-   sudo mkdir -p ${MODULE_PATH}
+   ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | sudo tee ${MODULE_PATH}/dev.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/dev.lua
 	whatis(" MPI4PY - provides Python bindings for MPI")
 
         prepend_path("PYTHONPATH", "${MPI4PY_PATH}")

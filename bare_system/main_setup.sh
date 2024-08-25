@@ -12,6 +12,11 @@
 
 OMNITRACE_BUILD_FROM_SOURCE=0
 PYTHON_VERSIONS="9 10"
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
 
 reset-last()
 {
@@ -81,9 +86,9 @@ fi
 
 # Not available until docker run command
 #ls -l /CacheFiles
-#sudo chmod a+w /CacheFiles/
-#sudo mkdir /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/
-#sudo chmod a+w /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/
+#${SUDO} chmod a+w /CacheFiles/
+#${SUDO} mkdir /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/
+#${SUDO} chmod a+w /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/
 
 if [ "${USE_MAKEFILE}" == 1 ]; then
    exit
@@ -130,9 +135,9 @@ training/sources/scripts/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-hpc
 
 #If ROCm should be installed in a different location
 if [ "${ROCM_INSTALLPATH}" != "/opt/" ]; then
-   sudo mv /opt/rocm-${ROCM_VERSION}/ ${ROCM_INSTALLPATH}
-   sudo ln -sfn ${ROCM_INSTALLPATH}/rocm-${ROCM_VERSION} /etc/alternatives/rocm
-   sudo sed -i "s|\/opt\/|${ROCM_INSTALLPATH}|" /etc/lmod/modules/ROCm/*/*.lua
+   ${SUDO} mv /opt/rocm-${ROCM_VERSION}/ ${ROCM_INSTALLPATH}
+   ${SUDO} ln -sfn ${ROCM_INSTALLPATH}/rocm-${ROCM_VERSION} /etc/alternatives/rocm
+   ${SUDO} sed -i "s|\/opt\/|${ROCM_INSTALLPATH}|" /etc/lmod/modules/ROCm/*/*.lua
 fi
 
 git clone https://github.com/AMD/HPCTrainingExamples.git

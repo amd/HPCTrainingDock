@@ -3,6 +3,12 @@
 # Autodetect defaults
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
+
 
 usage()
 {
@@ -68,15 +74,15 @@ if [[ -f /opt/rocm-${ROCM_VERSION}/bin/omniperf ]] ; then
 fi
 
 if [ "${DISTRO}" == "ubuntu" ]; then
-   sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y omniperf
-   sudo python3 -m pip install -t /opt/rocm-${ROCM_VERSION}/libexec/omniperf/python-libs -r /opt/rocm-${ROCM_VERSION}/libexec/omniperf/requirements.txt
+   ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y omniperf
+   ${SUDO} python3 -m pip install -t /opt/rocm-${ROCM_VERSION}/libexec/omniperf/python-libs -r /opt/rocm-${ROCM_VERSION}/libexec/omniperf/requirements.txt
 fi
 
 if [[ -f /opt/rocm-${ROCM_VERSION}/bin/omniperf ]] ; then
    export MODULE_PATH=/etc/lmod/modules/ROCm/omniperf
-   sudo mkdir -p ${MODULE_PATH}
+   ${SUDO} mkdir -p ${MODULE_PATH}
    # The - option suppresses tabs
-   cat <<-EOF | sudo tee ${MODULE_PATH}/${ROCM_VERSION}.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	local help_message = [[
 
 	Omniperf is an open-source performance analysis tool for profiling

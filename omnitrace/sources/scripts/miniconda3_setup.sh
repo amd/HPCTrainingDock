@@ -2,6 +2,12 @@
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
+
 
 n=0
 while [[ $# -gt 0 ]]
@@ -36,7 +42,7 @@ echo ""
 if [ "${DISTRO}" = "ubuntu" ] ; then
     wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda-installer.sh 
     chmod +x /tmp/miniconda-installer.sh
-    sudo /tmp/miniconda-installer.sh -b -p /opt/miniconda3 
+    ${SUDO} /tmp/miniconda-installer.sh -b -p /opt/miniconda3 
     export PATH="/opt/miniconda3/bin:${PATH}" 
     conda config --set always_yes yes --set changeps1 no 
     conda update -c defaults -n base conda 
@@ -49,10 +55,10 @@ fi
 ## Create a module file for miniconda3
 export MODULE_PATH=/etc/lmod/modules/Linux/miniconda3/
 
-sudo mkdir -p ${MODULE_PATH}
+${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | sudo tee ${MODULE_PATH}/23.11.0.lua
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/23.11.0.lua
 	local root = "/opt/miniconda3"
 	setenv("ANACONDA3ROOT", root)
 	setenv("PYTHONROOT", root)

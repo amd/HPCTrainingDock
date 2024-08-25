@@ -5,6 +5,12 @@ export AOMP_VERSION_NUMBER=19.0-3
 export AOMP_VERSION_SHORT=19.0
 export MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/aomp
 
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
+
 # Autodetect defaults
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -84,10 +90,10 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      sudo tar -xzf ${CACHE_FILES}/aomp_${AOMP_VERSION_NUMBER}.tgz
-      sudo chown -R root:root /opt/rocmplus-${ROCM_VERSION}/aomp_${AOMP_VERSION_NUMBER}
+      ${SUDO} tar -xzf ${CACHE_FILES}/aomp_${AOMP_VERSION_NUMBER}.tgz
+      ${SUDO} chown -R root:root /opt/rocmplus-${ROCM_VERSION}/aomp_${AOMP_VERSION_NUMBER}
       if [ "${USER}" != "sysadmin" ]; then
-         sudo rm ${CACHE_FILES}/aomp_${AOMP_VERSION_NUMBER}.tgz
+         ${SUDO} rm ${CACHE_FILES}/aomp_${AOMP_VERSION_NUMBER}.tgz
       fi
    else
       echo ""
@@ -100,14 +106,14 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
       pwd
       echo "====================================="
       export AOMP=/opt/rocmplus-${ROCM_VERSION}/aomp
-      sudo chmod a+w /opt
+      ${SUDO} chmod a+w /opt
 
 # Installs aomp from .deb package but then we can't specify where to install it
 #     wget -q https://github.com/ROCm/aomp/releases/download/rel_19.0-0/aomp_Ubuntu2204_19.0-0_amd64.deb
 #     apt-get install ./aomp_Ubuntu2204_19.0-0_amd64.deb
 
-      sudo apt-get update
-      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y gawk ninja-build generate-ninja ccache libssl-dev \
+      ${SUDO} apt-get update
+      ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y gawk ninja-build generate-ninja ccache libssl-dev \
 	      libgmp-dev libmpfr-dev libbabeltrace-dev
       pip3 install CppHeaderParser
       
@@ -123,14 +129,14 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
       cd ..
       rm -rf aomp-${AOMP_VERSION_NUMBER}.tar.gz aomp${AOMP_VERSION_SHORT}
 
-      sudo chmod a-w /opt
+      ${SUDO} chmod a-w /opt
    fi
 
    # In either case, create a module file for AOMP compiler
-   sudo mkdir -p ${MODULE_PATH}
+   ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | sudo tee ${MODULE_PATH}/amdclang-${AOMP_VERSION_SHORT}.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/amdclang-${AOMP_VERSION_SHORT}.lua
 	whatis("AMD OpenMP Compiler version 19.0-3 based on LLVM")
 	
 	local base = "/opt/rocmplus-${ROCM_VERSION}/aomp_19.0-3"

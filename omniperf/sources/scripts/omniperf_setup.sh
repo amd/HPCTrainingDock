@@ -1,6 +1,12 @@
 #!/bin/bash
 
 ROCM_VERSION=6.0
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
+
 
 n=0
 while [[ $# -gt 0 ]]
@@ -27,29 +33,29 @@ echo ""
 
 INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0
 wget -q https://github.com/AMDResearch/omniperf/releases/download/v2.0.0-RC1/omniperf-2.0.0-RC1.tar.gz && \
-     sudo tar xfz omniperf-2.0.0-RC1.tar.gz && \
+     ${SUDO} tar xfz omniperf-2.0.0-RC1.tar.gz && \
      cd ./omniperf-2.0.0-RC1\
-     && sudo sed -i '152i \                                            .astype(str)' src/utils/tty.py \
-     && sudo python3 -m pip install -t ${INSTALL_DIR}/python-libs -r requirements.txt --upgrade \
-     && sudo python3 -m pip install -t ${INSTALL_DIR}/python-libs pytest --upgrade \
-     && sudo mkdir build \
+     && ${SUDO} sed -i '152i \                                            .astype(str)' src/utils/tty.py \
+     && ${SUDO} python3 -m pip install -t ${INSTALL_DIR}/python-libs -r requirements.txt --upgrade \
+     && ${SUDO} python3 -m pip install -t ${INSTALL_DIR}/python-libs pytest --upgrade \
+     && ${SUDO} mkdir build \
      && cd build  \
-     &&  sudo cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}/ \
+     &&  ${SUDO} cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}/ \
         -DCMAKE_BUILD_TYPE=Release \
         -DPYTHON_DEPS=${INSTALL_DIR}/python-libs \
         -DMOD_INSTALL_PATH=${INSTALL_DIR}/modulefiles .. \
-     && sudo make install
-cd ../.. && sudo rm -rf omniperf-2.0.0-RC1 omniperf-2.0.0-RC1.tar.gz
+     && ${SUDO} make install
+cd ../.. && ${SUDO} rm -rf omniperf-2.0.0-RC1 omniperf-2.0.0-RC1.tar.gz
 
-sudo sed -i -e 's/ascii/utf-8/' /opt/rocmplus-*/omniperf-*/bin/utils/specs.py
+${SUDO} sed -i -e 's/ascii/utf-8/' /opt/rocmplus-*/omniperf-*/bin/utils/specs.py
 
 # Create a module file for Mvapich
 export MODULE_PATH=/etc/lmod/modules/ROCmPlus-AMDResearchTools/omniperf
 
-sudo mkdir -p ${MODULE_PATH}
+${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | sudo tee ${MODULE_PATH}/2.0.0.lua
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/2.0.0.lua
 	local help_message = [[
 
 	Omniperf is an open-source performance analysis tool for profiling

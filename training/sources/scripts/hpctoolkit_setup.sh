@@ -5,6 +5,11 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 MODULE_PATH=/etc/lmod/modules/misc/hpctoolkit
 BUILD_HPCTOOLKIT=0
 ROCM_VERSION=6.0
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
 
 usage()
 {
@@ -85,7 +90,7 @@ else
       cd /opt/rocmplus-${ROCM_VERSION}
       tar -xzf CacheFiles/hpctoolkit.tgz
       chown -R root:root /opt/rocmplus-${ROCM_VERSION}/hpctoolkit
-      sudo rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/hpctoolkit.tgz
+      ${SUDO} rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/hpctoolkit.tgz
 
    else
       echo ""
@@ -99,18 +104,18 @@ else
       module load rocm/${ROCM_VERSION}
 
       # openmpi library being installed as dependency of libboost-all-dev
-      sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y pipx libboost-all-dev liblzma-dev libgtk-3-dev
+      ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y pipx libboost-all-dev liblzma-dev libgtk-3-dev
 
       cd /tmp
 
       export HPCTOOLKIT_PATH=/opt/rocmplus-${ROCM_VERSION}/hpctoolkit
       export HPCVIEWER_PATH=/opt/rocmplus-${ROCM_VERSION}/hpcviewer
-      sudo mkdir -p ${HPCTOOLKIT_PATH}
-      sudo mkdir -p ${HPCVIEWER_PATH}
+      ${SUDO} mkdir -p ${HPCTOOLKIT_PATH}
+      ${SUDO} mkdir -p ${HPCVIEWER_PATH}
 
       if [[ "${USER}" != "root" ]]; then
-         sudo chmod a+w ${HPCTOOLKIT_PATH} 
-         sudo chmod a+w ${HPCVIEWER_PATH}
+         ${SUDO} chmod a+w ${HPCTOOLKIT_PATH} 
+         ${SUDO} chmod a+w ${HPCVIEWER_PATH}
       fi
 
       # ------------ Installing HPCToolkit
@@ -126,12 +131,12 @@ else
       meson install
 
       if [[ "${USER}" != "root" ]]; then
-         sudo find ${HPCTOOLKIT_PATH} -type f -execdir chown root:root "{}" +
-         sudo find ${HPCTOOLKIT_PATH} -type d -execdir chown root:root "{}" +
+         ${SUDO} find ${HPCTOOLKIT_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${HPCTOOLKIT_PATH} -type d -execdir chown root:root "{}" +
       fi
 
       if [[ "${USER}" != "root" ]]; then
-         sudo chmod go-w ${HPCTOOLKIT_PATH}
+         ${SUDO} chmod go-w ${HPCTOOLKIT_PATH}
       fi
 
       cd ../..
@@ -148,11 +153,11 @@ else
       spack external find
 
       # change spack install dir for PDT
-      sudo sed -i 's|$spack/opt/spack|'"${HPCVIEWER_PATH}"'|g' spack/etc/spack/defaults/config.yaml
+      ${SUDO} sed -i 's|$spack/opt/spack|'"${HPCVIEWER_PATH}"'|g' spack/etc/spack/defaults/config.yaml
 
       # open permissions to use spack to install hpcviewer
       if [[ "${USER}" != "root" ]]; then
-         sudo chmod -R a+rwX ${HPCVIEWER_PATH}
+         ${SUDO} chmod -R a+rwX ${HPCVIEWER_PATH}
       fi
 
       # install hpcviewer with spack
@@ -161,13 +166,13 @@ else
       # get hpcviewer install dir created by spack
       HPCVIEWER_PATH=`spack find -p hpcviewer | awk '{print $2}' | grep opt`
 
-      sudo rm -rf spack
+      ${SUDO} rm -rf spack
 
       if [[ "${USER}" != "root" ]]; then
-         sudo find ${HPCVIEWER_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${HPCVIEWER_PATH} -type f -execdir chown root:root "{}" +
       fi
       if [[ "${USER}" != "root" ]]; then
-         sudo chmod go-w ${HPCVIEWER_PATH}
+         ${SUDO} chmod go-w ${HPCVIEWER_PATH}
       fi
 
       module unload rocm/${ROCM_VERSION}
@@ -175,10 +180,10 @@ else
    fi
 
    # Create a module file for hpctoolkit
-   sudo mkdir -p ${MODULE_PATH}
+   ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | sudo tee ${MODULE_PATH}/dev.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/dev.lua
 	whatis("HPCToolkit - integrated suite of tools for measurement and analysis of program performance")
 
         local base = "${HPCTOOLKIT_PATH}"

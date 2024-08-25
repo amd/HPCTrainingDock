@@ -6,6 +6,12 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 ROCM_VERSION=6.1.0
 BUILD_GCC_LATEST=0
 
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
+
 n=0
 while [[ $# -gt 0 ]]
 do
@@ -49,10 +55,10 @@ if [ "${BUILD_GCC_LATEST}" = "1" ] ; then
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      sudo tar -xzf ${CACHE_FILES}/${GCC_VERSION}.tgz
-      sudo chown -R root:root /opt/rocmplus-${ROCM_VERSION}/${GCC_VERSION}
+      ${SUDO} tar -xzf ${CACHE_FILES}/${GCC_VERSION}.tgz
+      ${SUDO} chown -R root:root /opt/rocmplus-${ROCM_VERSION}/${GCC_VERSION}
       if [ "${USER}" != "sysadmin" ]; then
-         sudo rm ${CACHE_FILES}/${GCC_VERSION}.tgz
+         ${SUDO} rm ${CACHE_FILES}/${GCC_VERSION}.tgz
       fi
    else
       echo ""
@@ -67,7 +73,7 @@ if [ "${BUILD_GCC_LATEST}" = "1" ] ; then
       # Set install directory
       export DEST=/opt/rocmplus-${ROCM_VERSION}/${GCC_VERSION}
       chmod a+w /opt
-      sudo mkdir $DEST
+      ${SUDO} mkdir $DEST
 
       # modules
       source /etc/profile.d/lmod.sh
@@ -116,7 +122,7 @@ if [ "${BUILD_GCC_LATEST}" = "1" ] ; then
       --enable-offload-targets=amdgcn-amdhsa=$DEST/amdgcn-amdhsa --disable-bootstrap
 
       make -j 16
-      sudo make install
+      ${SUDO} make install
       cd ..
 
       rm -rf build buildhost
@@ -131,7 +137,7 @@ if [ "${BUILD_GCC_LATEST}" = "1" ] ; then
    mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | sudo tee ${MODULE_PATH}/13.2.0.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/13.2.0.lua
 	whatis("Custom built GCC Version 13.2.0 compiler")
 	whatis("This version enables offloading to AMD GPUs")
 

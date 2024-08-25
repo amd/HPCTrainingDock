@@ -2,6 +2,11 @@
 
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 BUILD_PYTORCH=0
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
 
 n=0
 while [[ $# -gt 0 ]]
@@ -83,7 +88,7 @@ else
       export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages:$PYTHONPATH
       
       # Install of pre-built pytorch for reference
-      #sudo pip3 install --target=/opt/rocmplus-${ROCM_VERSION}/pytorch torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.0
+      #${SUDO} pip3 install --target=/opt/rocmplus-${ROCM_VERSION}/pytorch torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.0
       
       export _GLIBCXX_USE_CXX11_ABI=1
       export ROCM_HOME=${ROCM_PATH}
@@ -98,18 +103,18 @@ else
       git reset --hard d990dad # PyTorch 2.4, Python 3.12
       git submodule sync
       git submodule update --init --recursive
-      sudo pip3 install mkl-static mkl-include
-      sudo pip3 install -r requirements.txt
+      ${SUDO} pip3 install mkl-static mkl-include
+      ${SUDO} pip3 install -r requirements.txt
       
-      sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/pytorch
-      sudo python3 tools/amd_build/build_amd.py >& /dev/null
+      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/pytorch
+      ${SUDO} python3 tools/amd_build/build_amd.py >& /dev/null
       
       echo ""
       echo "===================="
       echo "Starting setup.py install"
       echo "===================="
       echo ""
-      sudo python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch
+      ${SUDO} python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch
       echo ""
       echo "===================="
       echo "Finished setup.py install"
@@ -126,12 +131,12 @@ else
       export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/audio/lib/python3.10/site-packages:$PYTHONPATH
 
       # install necessary packages in installation directory
-      sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/vision
-      sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/audio
+      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/vision
+      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/audio
 
       if [[ "${USER}" != "root" ]]; then
-         sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}/vision
-         sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}/audio
+         ${SUDO} chmod a+w /opt/rocmplus-${ROCM_VERSION}/vision
+         ${SUDO} chmod a+w /opt/rocmplus-${ROCM_VERSION}/audio
       fi
 
       git clone --recursive https://github.com/pytorch/vision
@@ -146,22 +151,22 @@ else
       python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/audio
 
       if [[ "${USER}" != "root" ]]; then
-         sudo find /opt/rocmplus-${ROCM_VERSION}/vision -type f -execdir chown root:root "{}" +
-         sudo find /opt/rocmplus-${ROCM_VERSION}/vision -type d -execdir chown root:root "{}" +
-         sudo find /opt/rocmplus-${ROCM_VERSION}/audio -type f -execdir chown root:root "{}" +
-         sudo find /opt/rocmplus-${ROCM_VERSION}/audio -type d -execdir chown root:root "{}" +
+         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/vision -type f -execdir chown root:root "{}" +
+         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/vision -type d -execdir chown root:root "{}" +
+         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/audio -type f -execdir chown root:root "{}" +
+         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/audio -type d -execdir chown root:root "{}" +
       fi
 
       if [[ "${USER}" != "root" ]]; then
-         sudo chmod go-w /opt/rocmplus-${ROCM_VERSION}/vision
-         sudo chmod go-w /opt/rocmplus-${ROCM_VERSION}/audio
+         ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}/vision
+         ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}/audio
       fi
 
       # cleanup
       cd ..
       rm -rf vision audio
-      sudo rm -rf /app/pytorch
-      sudo rm -rf /tmp/amd_triton_kernel* /tmp/can*
+      ${SUDO} rm -rf /app/pytorch
+      ${SUDO} rm -rf /tmp/amd_triton_kernel* /tmp/can*
 
    fi
 fi
@@ -169,10 +174,10 @@ fi
 # Create a module file for Pytorch
 export MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/pytorch
 
-sudo mkdir -p ${MODULE_PATH}
+${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | sudo tee ${MODULE_PATH}/2.4.lua
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/2.4.lua
         whatis("HIP version of PyTorch")
 
         load("rocm/${ROCM_VERSION}")

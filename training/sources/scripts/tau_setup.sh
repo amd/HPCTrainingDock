@@ -7,6 +7,11 @@ BUILD_TAU=0
 MPI_INCLUDE=""
 MPI_LIB=""
 ROCM_VERSION=6.0
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
 
 usage()
 {
@@ -100,7 +105,7 @@ else
       cd /opt/rocmplus-${ROCM_VERSION}
       tar -xzf CacheFiles/tau.tgz
       chown -R root:root /opt/rocmplus-${ROCM_VERSION}/tau
-      sudo rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/tau.tgz
+      ${SUDO} rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/tau.tgz
 
    else
 
@@ -115,8 +120,8 @@ else
 
       TAU_PATH=/opt/rocmplus-${ROCM_VERSION}/tau
       PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
-      sudo mkdir -p ${TAU_PATH}
-      sudo mkdir -p ${PDT_PATH}
+      ${SUDO} mkdir -p ${TAU_PATH}
+      ${SUDO} mkdir -p ${PDT_PATH}
 
       git clone https://github.com/spack/spack.git
 
@@ -127,11 +132,11 @@ else
       spack external find
 
       # change spack install dir for PDT
-      sudo sed -i 's|$spack/opt/spack|/opt/rocmplus-'"${ROCM_VERSION}"'/pdt|g' spack/etc/spack/defaults/config.yaml
+      ${SUDO} sed -i 's|$spack/opt/spack|/opt/rocmplus-'"${ROCM_VERSION}"'/pdt|g' spack/etc/spack/defaults/config.yaml
 
       # open permissions to use spack to install PDT
       if [[ "${USER}" != "root" ]]; then
-	 sudo chmod -R a+rwX /opt/rocmplus-${ROCM_VERSION}/pdt
+	 ${SUDO} chmod -R a+rwX /opt/rocmplus-${ROCM_VERSION}/pdt
       fi
 
       # install PDT with spack
@@ -145,19 +150,19 @@ else
       cd tau2
 
       # note: roctracer and pdt are currently excluded because they make the installation break
-      sudo ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=/usr/lib -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -mpi -ompt -openmp -no_pthread_create -rocmsmi=$ROCM_PATH
+      ${SUDO} ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=/usr/lib -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -mpi -ompt -openmp -no_pthread_create -rocmsmi=$ROCM_PATH
 
-      sudo make install
+      ${SUDO} make install
 
       cd ..
-      sudo rm -rf tau2
-      sudo rm -rf spack
+      ${SUDO} rm -rf tau2
+      ${SUDO} rm -rf spack
 
       if [[ "${USER}" != "root" ]]; then
-         sudo find /opt/rocmplus-${ROCM_VERSION}/pdt -type f -execdir chown root:root "{}" +
+         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/pdt -type f -execdir chown root:root "{}" +
       fi
       if [[ "${USER}" != "root" ]]; then
-         sudo chmod go-w /opt/rocmplus-${ROCM_VERSION}/pdt
+         ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}/pdt
       fi
 
       module unload rocm/${ROCM_VERSION}
@@ -165,10 +170,10 @@ else
    fi   
 
    # Create a module file for mpi4py
-   sudo mkdir -p ${MODULE_PATH}
+   ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | sudo tee ${MODULE_PATH}/dev.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/dev.lua
 	whatis(" TAU - portable profiling and tracing toolkit ") 
 
 	prepend_path("PATH","/opt/rocmplus-${ROCM_VERSION}/tau/x86_64/bin")

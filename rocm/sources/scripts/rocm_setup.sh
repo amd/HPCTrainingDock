@@ -17,6 +17,13 @@ else
 fi
 DISTRO_CODENAME=`cat /etc/os-release | grep '^VERSION_CODENAME' | sed -e 's/VERSION_CODENAME=//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
+
+
 usage()
 {
    echo "--help: this usage information"
@@ -299,7 +306,7 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
 
 if [ "${DISTRO}" == "ubuntu" ]; then
    if [[ -d "${INSTALL_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
-      sudo rm -rf ${INSTALL_PATH}
+      ${SUDO} rm -rf ${INSTALL_PATH}
    fi
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz ]]; then
       echo ""
@@ -311,29 +318,29 @@ if [ "${DISTRO}" == "ubuntu" ]; then
       #install the cached version
       echo "cached file is ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz"
       cd /opt
-      sudo tar -xzf ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz
-      sudo chown -R root:root ${INSTALL_PATH}
+      ${SUDO} tar -xzf ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz
+      ${SUDO} chown -R root:root ${INSTALL_PATH}
       if [ "${USER}" != "sysadmin" ]; then
-         sudo rm ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz
+         ${SUDO} rm ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz
       fi
    else
 
       #mkdir --parents --mode=0755 /etc/apt/keyrings
-      #sudo mkdir --parents --mode=0755 /etc/apt/keyrings
+      #${SUDO} mkdir --parents --mode=0755 /etc/apt/keyrings
 
       # The installation below makes use of an AMD provided install script
 
       # Get the key for the ROCm software
-      wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+      wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | ${SUDO} tee /etc/apt/keyrings/rocm.gpg > /dev/null
 
       # Update package list
-      sudo DEBIAN_FRONTEND=noninteractive apt-get update
+      ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get update
 
       # Get the amdgpu-install script
       wget -q https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/${DISTRO}/${ROCM_REPO_DIST}/amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
 
       # Run the amdgpu-install script. We have already installed the kernel driver, so use we use --no-dkms
-      sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+      ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
 # if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
 # if ROCM_VERSION is less than or equalt to 6.1.2, the awk command result will be blank
       result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
@@ -344,7 +351,7 @@ if [ "${DISTRO}" == "ubuntu" ]; then
             DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk --no-dkms
 	 else
             DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk,asan --no-dkms
-            #sudo apt-get install rocm_bandwidth_test
+            #${SUDO} apt-get install rocm_bandwidth_test
 	 fi
       else
          DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms
@@ -353,7 +360,7 @@ if [ "${DISTRO}" == "ubuntu" ]; then
       if [[ ! -f /opt/rocm-${ROCM_VERSION}/.info/version-dev ]]; then
          # Required by DeepSpeed
 	 #   Exists in Ubuntu 24.04 and not 22.04
-         sudo ln -s /opt/rocm-${ROCM_VERSION}/.info/version /opt/rocm-${ROCM_VERSION}/.info/version-dev
+         ${SUDO} ln -s /opt/rocm-${ROCM_VERSION}/.info/version /opt/rocm-${ROCM_VERSION}/.info/version-dev
       fi
 
       rm -rf amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
@@ -406,10 +413,10 @@ fi
 # Create a module file for rocm sdk
 export MODULE_PATH=/etc/lmod/modules/ROCm/rocm
 
-sudo mkdir -p ${MODULE_PATH}
+${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | sudo tee ${MODULE_PATH}/${ROCM_VERSION}.lua
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ROCm")
 	whatis("Version: ${ROCM_VERSION}")
 	whatis("Category: AMD")
@@ -432,10 +439,10 @@ EOF
 # Create a module file for amdclang compiler
 export MODULE_PATH=/etc/lmod/modules/ROCm/amdclang
 
-sudo mkdir -p ${MODULE_PATH}
+${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | sudo tee ${MODULE_PATH}/17.0-${ROCM_VERSION}.lua
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/17.0-${ROCM_VERSION}.lua
 	whatis("Name: AMDCLANG")
 	whatis("Version: ${ROCM_VERSION}")
 	whatis("Category: AMD")
@@ -460,10 +467,10 @@ EOF
 # Create a module file for hipfort package
 export MODULE_PATH=/etc/lmod/modules/ROCm/hipfort
 
-sudo mkdir -p ${MODULE_PATH}
+${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | sudo tee ${MODULE_PATH}/${ROCM_VERSION}.lua
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ROCm HIPFort")
 	whatis("Version: ${ROCM_VERSION}")
 
@@ -476,10 +483,10 @@ EOF
 # Create a module file for opencl compiler
 export MODULE_PATH=/etc/lmod/modules/ROCm/opencl
 
-sudo mkdir -p ${MODULE_PATH}
+${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | sudo tee ${MODULE_PATH}/${ROCM_VERSION}.lua
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ROCm OpenCL")
 	whatis("Version: ${ROCM_VERSION}")
 	whatis("Category: AMD")

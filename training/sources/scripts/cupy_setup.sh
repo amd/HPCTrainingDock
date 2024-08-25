@@ -6,6 +6,12 @@ BUILD_CUPY=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/cupy
 AMDGPU_GFXMODEL_INPUT=""
 
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
+
 # Autodetect defaults
 
 usage()
@@ -104,14 +110,14 @@ else
       echo ""
 
       #install the cached version
-      sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/cupy
+      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/cupy
       cd /opt/rocmplus-${ROCM_VERSION}
-      #sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}
-      sudo tar -xzpf ${CACHE_FILES}/cupy.tgz
+      #${SUDO} chmod a+w /opt/rocmplus-${ROCM_VERSION}
+      ${SUDO} tar -xzpf ${CACHE_FILES}/cupy.tgz
       #chown -R root:root /opt/rocmplus-${ROCM_VERSION}/cupy
-      #sudo chmod og-w /opt/rocmplus-${ROCM_VERSION}
+      #${SUDO} chmod og-w /opt/rocmplus-${ROCM_VERSION}
       if [ "${USER}" != "sysadmin" ]; then
-         sudo rm ${CACHE_FILES}/cupy.tgz
+         ${SUDO} rm ${CACHE_FILES}/cupy.tgz
       fi
    else
       echo ""
@@ -138,18 +144,18 @@ else
       python3 setup.py -q bdist_wheel
       
       # install necessary packages in installation directory
-      sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/cupy
+      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/cupy
       if [[ "${USER}" != "root" ]]; then
-         sudo chmod a+w /opt/rocmplus-${ROCM_VERSION}/cupy
+         ${SUDO} chmod a+w /opt/rocmplus-${ROCM_VERSION}/cupy
       fi
       pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/cupy pytest mock
       pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/cupy dist/cupy-13.0.0b1-cp310-cp310-linux_x86_64.whl
       if [[ "${USER}" != "root" ]]; then
-         sudo find /opt/rocmplus-${ROCM_VERSION}/cupy -type f -execdir chown root:root "{}" +
-         sudo find /opt/rocmplus-${ROCM_VERSION}/cupy -type d -execdir chown root:root "{}" +
+         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/cupy -type f -execdir chown root:root "{}" +
+         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/cupy -type d -execdir chown root:root "{}" +
       fi
       if [[ "${USER}" != "root" ]]; then
-         sudo chmod go-w /opt/rocmplus-${ROCM_VERSION}/cupy
+         ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}/cupy
       fi
       
       # cleanup
@@ -160,10 +166,10 @@ else
       
    # Create a module file for cupy
    
-   sudo mkdir -p ${MODULE_PATH}
+   ${SUDO} mkdir -p ${MODULE_PATH}
    
    # The - option suppresses tabs
-   cat <<-EOF | sudo tee ${MODULE_PATH}/13.0.0b1.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/13.0.0b1.lua
 	whatis("HIP version of CuPy")
 
 	load("rocm/${ROCM_VERSION}")

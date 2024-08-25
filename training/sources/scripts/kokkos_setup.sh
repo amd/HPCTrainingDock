@@ -6,6 +6,12 @@ MODULE_PATH=/etc/lmod/modules/misc/kokkos
 BUILD_KOKKOS=0
 ROCM_VERSION=6.0
 
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
+
 usage()
 {
    echo "--help: this usage information"
@@ -85,7 +91,7 @@ else
       cd /opt/rocmplus-${ROCM_VERSION}
       tar -xzf CacheFiles/kokkos.tgz
       chown -R root:root /opt/rocmplus-${ROCM_VERSION}/kokkos
-      sudo rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/kokkos.tgz
+      ${SUDO} rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/kokkos.tgz
 
    else
       echo ""
@@ -98,15 +104,15 @@ else
       source /etc/profile.d/z01_lmod.sh
       module load rocm/${ROCM_VERSION}
 
-      sudo mkdir -p /opt/rocmplus-${ROCM_VERSION}/kokkos
+      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/kokkos
 
       git clone https://github.com/kokkos/kokkos
       cd kokkos
 
-      sudo mkdir build
+      ${SUDO} mkdir build
       cd build
 
-      sudo cmake -DCMAKE_INSTALL_PREFIX=/opt/rocmplus-${ROCM_VERSION}/kokkos \
+      ${SUDO} cmake -DCMAKE_INSTALL_PREFIX=/opt/rocmplus-${ROCM_VERSION}/kokkos \
                  -DCMAKE_PREFIX_PATH=/opt/rocm-${ROCM_VERSION} \
                  -DKokkos_ENABLE_SERIAL=ON \
                  -DKokkos_ENABLE_HIP=ON \
@@ -114,21 +120,21 @@ else
                  -DKokkos_ARCH_VEGA90A=ON \
                  -DCMAKE_CXX_COMPILER=hipcc ..
 
-      sudo make -j
-      sudo make install
+      ${SUDO} make -j
+      ${SUDO} make install
 
       cd ../..
-      sudo rm -rf kokkos
+      ${SUDO} rm -rf kokkos
 
       module unload rocm/${ROCM_VERSION}
 
    fi
 
    # Create a module file for kokkos
-   sudo mkdir -p ${MODULE_PATH}
+   ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | sudo tee ${MODULE_PATH}/4.3.1.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/4.3.1.lua
 	whatis("Kokkos - Performance Portability Language")
 
 	load("rocm/${ROCM_VERSION}")

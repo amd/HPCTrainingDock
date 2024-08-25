@@ -21,6 +21,11 @@ reset-last()
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
 
 n=0
 while [[ $# -gt 0 ]]
@@ -57,20 +62,20 @@ echo ""
 
 if [ "${DISTRO}" = "ubuntu" ]; then
    # these are for slurm   :  libpmi2-0-dev 
-   sudo apt-get update -y
-   sudo apt-cache search libpmi*
-   sudo apt-get install -y libpmi2-0-dev \
+   ${SUDO} apt-get update -y
+   ${SUDO} apt-cache search libpmi*
+   ${SUDO} apt-get install -y libpmi2-0-dev \
                            slurmd slurmctld
 
-   apt-get -q clean && sudo rm -rf /var/lib/apt/lists/*
+   apt-get -q clean && ${SUDO} rm -rf /var/lib/apt/lists/*
 
-   sudo cp /tmp/slurm.conf /etc/slurm/slurm.conf
-   sudo cp /tmp/gres.conf /etc/slurm/gres.conf
+   ${SUDO} cp /tmp/slurm.conf /etc/slurm/slurm.conf
+   ${SUDO} cp /tmp/gres.conf /etc/slurm/gres.conf
 
-   sudo chown slurm /etc/slurm/slurm.conf
-   sudo chgrp slurm /etc/slurm/slurm.conf
-   sudo chmod 777 /etc/slurm
+   ${SUDO} chown slurm /etc/slurm/slurm.conf
+   ${SUDO} chgrp slurm /etc/slurm/slurm.conf
+   ${SUDO} chmod 777 /etc/slurm
 
-   sudo echo "OPTIONS=\"--force --key-file /etc/munge/munge.key --num-threads 10\"" > /etc/default/munge
+   ${SUDO} echo "OPTIONS=\"--force --key-file /etc/munge/munge.key --num-threads 10\"" > /etc/default/munge
 fi
 

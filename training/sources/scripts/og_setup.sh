@@ -2,6 +2,11 @@
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
 
 n=0
 while [[ $# -gt 0 ]]
@@ -72,10 +77,10 @@ if [ "${BUILD_OG_LATEST}" = "1" ] ; then
       #  For cached version, use a cached module file
       export MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/og
 
-      sudo mkdir -p ${MODULE_PATH}
+      ${SUDO} mkdir -p ${MODULE_PATH}
 
       # The - option suppresses tabs
-      cat <<-EOF | sudo tee ${MODULE_PATH}/gcc-develop-SCRIPT_OG_BUILD_DATE.lua
+      cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/gcc-develop-SCRIPT_OG_BUILD_DATE.lua
 	whatis("GCC Development Version SCRIPT_OG_BUILD_DATE compiler")
 
 	local base = "/opt/rocmplus-${ROCM_VERSION}/og13-SCRIPT_OG_BUILD_DATE"
