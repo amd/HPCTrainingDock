@@ -13,7 +13,7 @@ ARG DOCKER_USER
 
 # This image will be built on top of the image below
 # which is the omniperf image built before this one
-FROM ${DOCKER_USER}/omniperf:release-base-ubuntu-${DISTRO_VERSION}-rocm-${ROCM_VERSION}
+FROM ${DOCKER_USER}/tools:release-base-ubuntu-${DISTRO_VERSION}-rocm-${ROCM_VERSION}
 ARG DISTRO
 ARG DISTRO_VERSION
 ARG ROCM_VERSION

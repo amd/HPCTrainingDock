@@ -16,8 +16,6 @@ FROM ${DOCKER_USER}/rocm:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VE
 ARG DISTRO
 ARG DISTRO_VERSION
 ARG ROCM_VERSION
-ARG OMNITRACE_BUILD_FROM_SOURCE
-ARG PYTHON_VERSIONS
 ARG AMDGPU_GFXMODEL
 
 LABEL maintainer="bob.robey@amd.com"
@@ -29,22 +27,32 @@ USER root
 ENV DEBIAN_FRONTEND noninteractive
 ENV TZ "US/Chicago"
 
-COPY omnitrace/sources/scripts/miniconda3_setup.sh /tmp/miniconda3_setup.sh
+#
+# install OpenMPI, UCC, and UCX
+#
 
-RUN /tmp/miniconda3_setup.sh \
-        --rocm-version ${ROCM_VERSION} \
-        --python-versions "${PYTHON_VERSIONS}" && \
-    rm -f /tmp/miniconda3_setup.sh
+COPY comm/sources/scripts/openmpi_setup.sh /tmp/openmpi_setup.sh
 
-#   conda init && \
+RUN  /tmp/openmpi_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+     rm /tmp/openmpi_setup.sh
 
-COPY omnitrace/sources/scripts/omnitrace_setup.sh /tmp/omnitrace_setup.sh
+#
+# Install mvapich
+#
 
-RUN /tmp/omnitrace_setup.sh \
-       --rocm-version ${ROCM_VERSION} \
-       --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
-       --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE} && \
-    rm /tmp/omnitrace_setup.sh
+COPY comm/sources/scripts/mvapich_setup.sh /tmp/mvapich_setup.sh
+
+RUN  /tmp/mvapich_setup.sh --rocm-version ${ROCM_VERSION} && \
+     rm /tmp/mvapich_setup.sh
+
+#
+# install MPI4PY
+#
+
+COPY comm/sources/scripts/mpi4py_setup.sh /tmp/mpi4py_setup.sh
+
+RUN  /tmp/mpi4py_setup.sh --rocm-version ${ROCM_VERSION} --build-mpi4py 1 && \
+     rm /tmp/mpi4py_setup.sh
 
 ENV LC_ALL C.UTF-8
 

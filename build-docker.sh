@@ -281,9 +281,9 @@ fi
 
 ROCM_DOCKER_OPTS="${PULL} -f rocm/Dockerfile ${NO_CACHE}"
 
-OMNITRACE_DOCKER_OPTS="-f omnitrace/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg OMNITRACE_BUILD_FROM_SOURCE=\"${OMNITRACE_BUILD_FROM_SOURCE}\" --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL}"
+OMNITRACE_DOCKER_OPTS="-f comm/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg OMNITRACE_BUILD_FROM_SOURCE=\"${OMNITRACE_BUILD_FROM_SOURCE}\" --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL}"
 
-OMNIPERF_DOCKER_OPTS="-f omniperf/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER}"
+OMNIPERF_DOCKER_OPTS="-f tools/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER}"
 
 TRAINING_DOCKER_OPTS="${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg BUILD_DATE=$(date +'%Y-%m-%dT%H:%M:%SZ') --build-arg OG_BUILD_DATE=$(date -u +'%y-%m-%d') --build-arg BUILD_VERSION=1.1 --build-arg DISTRO=${DISTRO} --build-arg ADMIN_USERNAME=${ADMIN_USERNAME} --build-arg ADMIN_PASSWORD=${ADMIN_PASSWORD}"
 
@@ -312,17 +312,17 @@ do
        --tag ${DOCKER_USER}/rocm:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        .
 
-# Building omnitrace docker
+# Building comm docker
     verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${OMNITRACE_DOCKER_OPTS} \
        --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
        --build-arg USE_CACHED_APPS=${USE_CACHED_APPS} \
-       -t ${DOCKER_USER}/omnitrace:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
+       -t ${DOCKER_USER}/comm:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        .
 
-# Building omniperf docker
+# Building tools docker
     verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${OMNIPERF_DOCKER_OPTS} \
        --build-arg INSTALL_GRAFANA="${INSTALL_GRAFANA}" \
-       -t ${DOCKER_USER}/omniperf:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
+       -t ${DOCKER_USER}/tools:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        .
 
 # Building training docker
