@@ -78,4 +78,22 @@ RUN rm -rf /tmp/*
 COPY tools/docker/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod a+x /docker-entrypoint.sh
 
+#
+# Install HPCToolkit
+#
+COPY tools/sources/scripts/hpctoolkit_setup.sh /tmp/hpctoolkit_setup.sh
+
+RUN  /tmp/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} && \
+     rm /tmp/hpctoolkit_setup.sh
+
+
+#
+# Install TAU
+#
+COPY tools/sources/scripts/tau_setup.sh /tmp/tau_setup.sh
+
+RUN  /tmp/tau_setup.sh --rocm-version ${ROCM_VERSION} && \
+     rm /tmp/tau_setup.sh
+
+
 ENTRYPOINT [ "/docker-entrypoint.sh" ]

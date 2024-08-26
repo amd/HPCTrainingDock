@@ -63,13 +63,13 @@ rocm_omniperf.timestamp: baseospackages.timestamp rocm.timestamp
 	touch rocm_omniperf.timestamp
 
 openmpi.timestamp: rocm.timestamp
-	rocm/sources/scripts/openmpi_setup.sh \
+	comm/sources/scripts/openmpi_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
 	touch openmpi.timestamp
 
 mvapich.timestamp: rocm.timestamp
-	rocm/sources/scripts/mvapich_setup.sh \
+	comm/sources/scripts/mvapich_setup.sh \
 	   --rocm-version ${ROCM_VERSION}
 	touch mvapich.timestamp
 
@@ -79,13 +79,13 @@ slurm.timestamp:
 
 # From Omnitrace layer
 miniconda3.timestamp:
-	omnitrace/sources/scripts/miniconda3_setup.sh \
+	tools/sources/scripts/miniconda3_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --python-versions ${PYTHON_VERSIONS}
 	touch miniconda3.timestamp
 
 omnitrace.timestamp: miniconda3.timestamp openmpi.timestamp
-	omnitrace/sources/scripts/omnitrace_setup.sh \
+	tools/sources/scripts/omnitrace_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
 	   --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE}
@@ -94,10 +94,10 @@ omnitrace.timestamp: miniconda3.timestamp openmpi.timestamp
 # From Omniperf layer
 
 grafana.timestamp:
-	omniperf/sources/scripts/grafana_setup.sh
+	tools/sources/scripts/grafana_setup.sh
 
 omniperf.timestamp: rocm.timestamp
-	omniperf/sources/scripts/omniperf_setup.sh \
+	tools/sources/scripts/omniperf_setup.sh \
 	   --rocm-version ${ROCM_VERSION}
 
 # From Training layer
@@ -125,19 +125,19 @@ kokkos.timestamp:
 	touch kokkos.timestamp
 
 tau.timestamp: rocm.timestamp
-	training/sources/scripts/tau_setup.sh \
+	tools/sources/scripts/tau_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-tau ${BUILD_TAU}
 	touch tau.timestamp
 
 mpi4py.timestamp: rocm.timestamp
-	rocm/sources/scripts/mpi4py_setup.sh \
+	comm/sources/scripts/mpi4py_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-mpi4py ${BUILD_MPI4PY}
 	touch mpi4py.timestamp
 
 hpctoolkit.timestamp: rocm.timestamp
-	training/sources/scripts/hpctoolkit_setup.sh \
+	tools/sources/scripts/hpctoolkit_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-hpctoolkit ${BUILD_HPCTOOLKIT}
 	touch hpctoolkit.timestamp
