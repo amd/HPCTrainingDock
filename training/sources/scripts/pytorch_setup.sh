@@ -140,10 +140,10 @@ else
       # https://github.com/pytorch/pytorch/issues/103312
       # We comment out the lines within the USE_ROCM block in the torch/csrc/jit/ir/ir.cpp file
       sed -i -e 's/case cuda/\/\/case cuda/' torch/csrc/jit/ir/ir.cpp
-      pip3 install mkl-static mkl-include 
-      pip3 install -r requirements.txt
+      ${SUDO} pip3 install mkl-static mkl-include 
+      ${SUDO} pip3 install -r requirements.txt
       
-      python3 tools/amd_build/build_amd.py >& /dev/null
+      ${SUDO} python3 tools/amd_build/build_amd.py >& /dev/null
       
       echo ""
       echo "===================="
@@ -151,7 +151,7 @@ else
       echo "===================="
       echo ""
       #export CMAKE_PREFIX_PATH=${PYTORCH_INSTALL_DIR}
-      python setup.py install --prefix=${PYTORCH_INSTALL_DIR}
+      ${SUDO} python setup.py install --prefix=${PYTORCH_INSTALL_DIR}
       #python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch
       echo ""
       echo "===================="
@@ -163,6 +163,8 @@ else
       echo "PYTHONPATH is ${PYTHONPATH}"
       python3 -c 'import torch' 2> /dev/null && echo 'Success' || echo 'Failure'
 
+      cd ..
+      ${SUDO} rm -rf pytorch
       cd /tmp
 
       export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages
@@ -210,7 +212,6 @@ else
       # cleanup
       cd ..
       rm -rf vision audio
-      ${SUDO} rm -rf /app/pytorch
       ${SUDO} rm -rf /tmp/amd_triton_kernel* /tmp/can*
 
    fi
