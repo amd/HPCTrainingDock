@@ -75,9 +75,12 @@ else
       source /etc/profile.d/z01_lmod.sh
       module load rocm
       # Build with GPU aware MPI not working yet
+      # Need to use the update-alternatives in openmpi setup to get
+      # GPU aware MPI
       #module load openmpi
 
-      sudo apt-get install python-is-python3
+      sudo DEBIAN_FRONTEND=noninteractive apt-get update
+      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python-is-python3
       sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libopenmpi-dev
       
       # unset environment variables that are not needed for pytorch
@@ -102,7 +105,6 @@ else
       export USE_CUDA=0
       export MAX_JOBS=20
       export USE_MPI=1
-      #export USE_KINETO=OFF
       export PYTORCH_ROCM_ARCH="${AMDGPU_GFXMODEL}"
       
       export PYTORCH_INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/pytorch
@@ -111,8 +113,8 @@ else
       sudo chmod a+w ${PYTORCH_INSTALL_DIR}
 
       # PyTorch 2.4, Python 3.12
-      #!/bin/bash
 
+      # This block of code is to retry if git clone fails.
       RETRIES=6
       DELAY=30
       COUNT=1
@@ -127,7 +129,16 @@ else
       done
 
       cd pytorch
+      # Pytorch 2.4 needs some patches to build for ROCm
+      # Fix triton build failure due to tritonlang.blob.core.windows.net not available
+      # The download from https://tritonlang.blob.core.windows.net/llvm-builds/ has been
+      # blocked and made private. We substitute https://oaitriton.blob.core.windows.net/public/llvm-builds/
+      # The pytorch head already has this change, but the pytorch 2.4 does not
+      # Patch documentation is at https://github.com/pytorch/pytorch/pull/133694/files
       patch .github/scripts/build_triton_wheel.py < /tmp/pytorch_build_triton_wheel_py.patch
+      # The next fix is a ROCm fix. The USE_ROCM define is not passed to the CAFFE2 build
+      # https://github.com/pytorch/pytorch/issues/103312
+      # We comment out the lines within the USE_ROCM block in the torch/csrc/jit/ir/ir.cpp file
       sed -i -e 's/case cuda/\/\/case cuda/' torch/csrc/jit/ir/ir.cpp
       pip3 install mkl-static mkl-include 
       pip3 install -r requirements.txt
