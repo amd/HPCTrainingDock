@@ -1,5 +1,11 @@
 #!/bin/bash
 
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
+
 function print_usage {
 	echo "    Usage: env_check.sh set/reset/check"
 	echo "                      set: configure the settings in this script"
@@ -10,15 +16,15 @@ function print_usage {
 function set_env {
 	export HIP_FORCE_DEV_KERNARG=1
 	rocm-smi --setperfdeterminism 1900
-	sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing
-    sudo cpupower frequency-set -r -g performance
-    sudo cpupower idle-set -d 1
+	${SUDO} sh -c echo 0 > /proc/sys/kernel/numa_balancing
+    ${SUDO} cpupower frequency-set -r -g performance
+    ${SUDO} cpupower idle-set -d 1
 }
 
 function reset_env {
 	unset HIP_FORCE_DEV_KERNARG
 	rocm-smi -r
-	sudo sh -c echo 1 > /proc/sys/kernel/numa_balancing
+	${SUDO} sh -c echo 1 > /proc/sys/kernel/numa_balancing
 }
 
 function check_env {

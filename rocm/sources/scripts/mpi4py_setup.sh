@@ -107,7 +107,7 @@ else
       cd /opt/rocmplus-${ROCM_VERSION}
       tar -xzf CacheFiles/mpi4py.tgz
       chown -R root:root ${MPI4PY_PATH}
-      sudo rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/mpi4py.tgz
+      ${SUDO} rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/mpi4py.tgz
 
    else
 
@@ -122,9 +122,9 @@ else
       module load ${LOAD_MODULE}
       module load rocm/${ROCM_VERSION}
 
-      sudo mkdir -p ${MPI4PY_PATH}
+      ${SUDO} mkdir -p ${MPI4PY_PATH}
       if [[ "${USER}" != "root" ]]; then
-         sudo chmod a+w ${MPI4PY_PATH}
+         ${SUDO} chmod a+w ${MPI4PY_PATH}
       fi
 
       git clone https://github.com/mpi4py/mpi4py.git
@@ -143,15 +143,15 @@ else
       pip3 install -v --target=${MPI4PY_PATH} dist/mpi4py-*.whl
 
       if [[ "${USER}" != "root" ]]; then
-         sudo find ${MPI4PY_PATH} -type f -execdir chown root:root "{}" +
-         sudo find ${MPI4PY_PATH} -type d -execdir chown root:root "{}" +
+         ${SUDO} find ${MPI4PY_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${MPI4PY_PATH} -type d -execdir chown root:root "{}" +
 
-	 sudo chmod go-w ${MPI4PY_PATH}
+	 ${SUDO} chmod go-w ${MPI4PY_PATH}
       fi
 
       # cleanup
       cd ..
-      sudo rm -rf mpi4py
+      ${SUDO} rm -rf mpi4py
       module unload rocm/${ROCM_VERSION}
 
    fi   
