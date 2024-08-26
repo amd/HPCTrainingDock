@@ -62,6 +62,11 @@ rocm_omniperf.timestamp: baseospackages.timestamp rocm.timestamp
 	   --rocm-version ${ROCM_VERSION}
 	touch rocm_omniperf.timestamp
 
+slurm.timestamp:
+	rocm/sources/scripts/slurm_setup.sh
+	touch slurm.timestamp
+
+# From Comm layer
 openmpi.timestamp: rocm.timestamp
 	comm/sources/scripts/openmpi_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
@@ -73,11 +78,8 @@ mvapich.timestamp: rocm.timestamp
 	   --rocm-version ${ROCM_VERSION}
 	touch mvapich.timestamp
 
-slurm.timestamp:
-	rocm/sources/scripts/slurm_setup.sh
-	touch slurm.timestamp
+# From Tools layer
 
-# From Omnitrace layer
 miniconda3.timestamp:
 	tools/sources/scripts/miniconda3_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
@@ -90,8 +92,6 @@ omnitrace.timestamp: miniconda3.timestamp openmpi.timestamp
 	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
 	   --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE}
 	touch omnitrace.timestamp
-
-# From Omniperf layer
 
 grafana.timestamp:
 	tools/sources/scripts/grafana_setup.sh
