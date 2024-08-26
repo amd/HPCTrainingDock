@@ -150,7 +150,7 @@ else
       cd tau2
 
       # note: roctracer and pdt are currently excluded because they make the installation break
-      ${SUDO} ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=/usr/lib -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -mpi -ompt -openmp -no_pthread_create -rocmsmi=$ROCM_PATH
+      ${SUDO} ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=/usr/lib -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -mpi -ompt -openmp -rocmsmi=$ROCM_PATH
 
       ${SUDO} make install
 

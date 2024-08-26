@@ -18,7 +18,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    fi
    adduser --home /home/sysadmin --uid 20000 --shell /bin/bash --disabled-password --gecos '' sysadmin
    echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
-   usermod -a -G video,render,renderalt,${SUDO} sysadmin
+   usermod -a -G video,render,renderalt,sudo sysadmin
 fi
 
 if [ "${DISTRO}" = "rocky linux" ]; then
