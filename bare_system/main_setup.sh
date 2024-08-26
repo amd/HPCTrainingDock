@@ -103,6 +103,10 @@ source ~/.bashrc
 
 rocm/sources/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION}
 
+rocm/sources/scripts/rocm_omnitrace_setup.sh --rocm-version ${ROCM_VERSION}
+
+rocm/sources/scripts/rocm_omniperf_setup.sh --rocm-version ${ROCM_VERSION}
+
 rocm/sources/scripts/openmpi_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
 
 rocm/sources/scripts/mpi4py_setup.sh --rocm-version ${ROCM_VERSION} --build-mpi4py ${BUILD_MPI4PY}
