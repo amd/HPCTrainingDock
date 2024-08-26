@@ -78,6 +78,12 @@ mvapich.timestamp: rocm.timestamp
 	   --rocm-version ${ROCM_VERSION}
 	touch mvapich.timestamp
 
+mpi4py.timestamp: rocm.timestamp
+	comm/sources/scripts/mpi4py_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --build-mpi4py ${BUILD_MPI4PY}
+	touch mpi4py.timestamp
+
 # From Tools layer
 
 miniconda3.timestamp:
@@ -99,6 +105,18 @@ grafana.timestamp:
 omniperf.timestamp: rocm.timestamp
 	tools/sources/scripts/omniperf_setup.sh \
 	   --rocm-version ${ROCM_VERSION}
+
+tau.timestamp: rocm.timestamp
+	tools/sources/scripts/tau_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --build-tau ${BUILD_TAU}
+	touch tau.timestamp
+
+hpctoolkit.timestamp: rocm.timestamp
+	tools/sources/scripts/hpctoolkit_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --build-hpctoolkit ${BUILD_HPCTOOLKIT}
+	touch hpctoolkit.timestamp
 
 # From Training layer
 
@@ -123,24 +141,6 @@ kokkos.timestamp:
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-kokkos ${BUILD_KOKKOS}
 	touch kokkos.timestamp
-
-tau.timestamp: rocm.timestamp
-	tools/sources/scripts/tau_setup.sh \
-	   --rocm-version ${ROCM_VERSION} \
-	   --build-tau ${BUILD_TAU}
-	touch tau.timestamp
-
-mpi4py.timestamp: rocm.timestamp
-	comm/sources/scripts/mpi4py_setup.sh \
-	   --rocm-version ${ROCM_VERSION} \
-	   --build-mpi4py ${BUILD_MPI4PY}
-	touch mpi4py.timestamp
-
-hpctoolkit.timestamp: rocm.timestamp
-	tools/sources/scripts/hpctoolkit_setup.sh \
-	   --rocm-version ${ROCM_VERSION} \
-	   --build-hpctoolkit ${BUILD_HPCTOOLKIT}
-	touch hpctoolkit.timestamp
 
 cupy.timestamp: rocm.timestamp
 	training/sources/scripts/cupy_setup.sh \
