@@ -109,12 +109,13 @@ COPY training/sources/scripts/kokkos_setup.sh /tmp/kokkos_setup.sh
 RUN /tmp/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-kokkos ${BUILD_KOKKOS} && rm /tmp/kokkos_setup.sh
 
 #
+# Moved into scripts that need these
 # Install any additional apps or libs that are needed 
 #
-COPY training/sources/scripts/apps_setup_basic.sh /tmp/apps_setup_basic.sh
-
-RUN  chmod u+x /tmp/apps_setup_basic.sh && \
-     /tmp/apps_setup_basic.sh; rm /tmp/apps_setup_basic.sh
+#COPY training/sources/scripts/apps_setup_basic.sh /tmp/apps_setup_basic.sh
+#
+#RUN  chmod u+x /tmp/apps_setup_basic.sh && \
+#     /tmp/apps_setup_basic.sh; rm /tmp/apps_setup_basic.sh
 
 #
 # Install cupy 
