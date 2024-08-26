@@ -52,6 +52,16 @@ rocm.timestamp: baseospackages.timestamp # lmod.timestamp
 	   --rocm-version ${ROCM_VERSION}
 	touch rocm.timestamp
 
+rocm_omnitrace.timestamp: baseospackages.timestamp rocm.timestamp
+	rocm/sources/scripts/rocm_omnitrace_setup.sh \
+	   --rocm-version ${ROCM_VERSION}
+	touch rocm_omnitrace.timestamp
+
+rocm_omniperf.timestamp: baseospackages.timestamp rocm.timestamp
+	rocm/sources/scripts/rocm_omniperf_setup.sh \
+	   --rocm-version ${ROCM_VERSION}
+	touch rocm_omniperf.timestamp
+
 openmpi.timestamp: rocm.timestamp
 	rocm/sources/scripts/openmpi_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
