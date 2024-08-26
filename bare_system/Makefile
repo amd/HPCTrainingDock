@@ -130,13 +130,13 @@ tau.timestamp: rocm.timestamp
 	   --build-tau ${BUILD_TAU}
 	touch tau.timestamp
 
-mpi4py.timestamp: rocm.timestep
+mpi4py.timestamp: rocm.timestamp
 	rocm/sources/scripts/mpi4py_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-mpi4py ${BUILD_MPI4PY}
 	touch mpi4py.timestamp
 
-hpctoolkit.timestamp:
+hpctoolkit.timestamp: rocm.timestamp
 	training/sources/scripts/hpctoolkit_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-hpctoolkit ${BUILD_HPCTOOLKIT}
