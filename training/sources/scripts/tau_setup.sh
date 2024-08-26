@@ -154,6 +154,11 @@ else
 
       ${SUDO} make install
 
+      # the configure flag -no_pthread_create
+      # still creates linking options for the pthread wrapper
+      # that are breaking the instrumentation tests in C and C++
+      ${SUDO} rm ${TAU_PATH}/x86_64/lib/wrappers/pthread_wrapper/link_options.tau
+
       cd ..
       ${SUDO} rm -rf tau2
       ${SUDO} rm -rf spack
@@ -169,14 +174,14 @@ else
 
    fi   
 
-   # Create a module file for mpi4py
+   # Create a module file for TAU
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/dev.lua
 	whatis(" TAU - portable profiling and tracing toolkit ") 
 
-	prepend_path("PATH","/opt/rocmplus-${ROCM_VERSION}/tau/x86_64/bin")
+	prepend_path("PATH","${TAU_PATH}/x86_64/bin")
 EOF
 
 fi
