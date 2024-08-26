@@ -79,9 +79,9 @@ else
       # GPU aware MPI
       #module load openmpi
 
-      sudo DEBIAN_FRONTEND=noninteractive apt-get update
-      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python-is-python3
-      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libopenmpi-dev
+      ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get update
+      ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y python-is-python3
+      ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y libopenmpi-dev
       
       # unset environment variables that are not needed for pytorch
       unset BUILD_AOMP_LATEST
@@ -109,8 +109,8 @@ else
       
       export PYTORCH_INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/pytorch
 
-      sudo mkdir -p ${PYTORCH_INSTALL_DIR}
-      sudo chmod a+w ${PYTORCH_INSTALL_DIR}
+      ${SUDO} mkdir -p ${PYTORCH_INSTALL_DIR}
+      ${SUDO} chmod a+w ${PYTORCH_INSTALL_DIR}
 
       # PyTorch 2.4, Python 3.12
 
@@ -175,7 +175,7 @@ else
       # install necessary packages in installation directory
       export TORCHVISION_INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/vision
       export TORCHAUDIO_INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/audio
-      ${SUDO} sudo mkdir -p ${TORCHVISION_INSTALL_DIR}
+      ${SUDO} mkdir -p ${TORCHVISION_INSTALL_DIR}
       ${SUDO} mkdir -p ${TORCHAUDIO_INSTALL_DIR}
 
       if [[ "${USER}" != "root" ]]; then
