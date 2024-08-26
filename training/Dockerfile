@@ -131,7 +131,6 @@ WORKDIR /app
 #
 
 COPY training/sources/scripts/pytorch_setup.sh /tmp/pytorch_setup.sh
-COPY training/sources/scripts/build_triton_wheel.py /tmp/build_triton_wheel.py
 COPY training/sources/scripts/pytorch_build_triton_wheel_py.patch /tmp/pytorch_build_triton_wheel_py.patch
 
 RUN /tmp/pytorch_setup.sh --build-pytorch ${BUILD_PYTORCH} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} |& tee /app/pytorch_build.out && rm /tmp/pytorch_setup.sh
