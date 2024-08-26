@@ -65,7 +65,7 @@ These instructions will setup a container on `localhost` and assume that:
 3. For Docker, you can issue Docker commands without `sudo`.
  
 ### 2.1.1  Building the Four Images of the Container 
-The container is set up to use Ubuntu 22.04 as OS, and will build four different images called `rocm`, `omnitrace`,  `omniperf` and `training`. 
+The container is set up to use Ubuntu 22.04 as OS, and will build four different images called `rocm`, `comm`,  `tools` and `training`. 
 Here is a flowchart of the container installation process
 <p>
 <img src="figures/container_flowchart.png" \>
@@ -111,7 +111,7 @@ To show more docker build output, add this option to the build command above:
 For the MI200 series, the value to specify is `gfx90a`, for the MI300 series, the value is `gfx942`. Note that you can also build the images on a machine that does not have any GPU hardware (such as your laptop) provided you specify a target hardware with the flag above.
 
 Omnitrace will by default download a pre-built version. You can also build from source,
-which is useful if the right version of omnitrace is not available as pre-build. To build omnitrace from source, append the following to the build command above:
+which is useful if the right version of omnitrace is not available as pre-built. To build omnitrace from source, append the following to the build command above:
 
 ```
 --omnitrace-build-from-source
@@ -152,8 +152,8 @@ which will have an output similar to this one:
 ```bash
  REPOSITORY           TAG                                    IMAGE ID       CREATED          SIZE
  training             latest                                 fe63d37c10f4   40 minutes ago   27GB
- <admin>/omniperf    release-base-ubuntu-22.04-rocm-6.1.0   4ecc6b7a80f2   44 minutes ago   18.7GB
- <admin>/omnitrace   release-base-ubuntu-22.04-rocm-6.1.0   37a84bef709a   47 minutes ago   16.1GB
+ <admin>/tools       release-base-ubuntu-22.04-rocm-6.1.0   4ecc6b7a80f2   44 minutes ago   18.7GB
+ <admin>/comm        release-base-ubuntu-22.04-rocm-6.1.0   37a84bef709a   47 minutes ago   16.1GB
  <admin>/rocm        release-base-ubuntu-22.04-rocm-6.1.0   bd8ca598d8a0   48 minutes ago   16.1GB
 ```
 You can also display the operating system running on the container by doing:
@@ -257,22 +257,22 @@ rocm/sources/scripts/lmod_setup.sh
 rocm/sources/scripts/rocm_setup.sh 
 
 // install OpenMPI and create OpenMPI module
-rocm/sources/scripts/openmpi_setup.sh 
+comm/sources/scripts/openmpi_setup.sh 
 
 // install MVAPICH2 and create MVAPICH2 module
-rocm/sources/scripts/mvapich2_setup.sh 
+comm/sources/scripts/mvapich2_setup.sh 
 
 // install Miniconda3 and create Miniconda3 module
-omnitrace/sources/scripts/miniconda3_setup.sh 
+yools/sources/scripts/miniconda3_setup.sh 
 
 // install Omnitrace and create Omnitrace module
-omnitrace/sources/scripts/omnitrace_setup.sh 
+tools/sources/scripts/omnitrace_setup.sh 
 
 // install Grafana (needed for Omniperf)
-omniperf/sources/scripts/grafana_setup.sh
+tools/sources/scripts/grafana_setup.sh
 
 // install Omniperf and create Omniperf module
-omniperf/sources/scripts/omniperf_setup.sh 
+tools/sources/scripts/omniperf_setup.sh 
 
 // install clang/14  clang/15  gcc/11  gcc/12  gcc/13 and create modules
 training/sources/scripts/compiler_setup.sh
