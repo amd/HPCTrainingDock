@@ -3,10 +3,40 @@
 Welcome to AMD's model installation repo!
 
 In this repo, we provide two options to test the installation of a variety of AMD GPU software and frameworks that support running on AMD GPUs:
-1. Container Installation (based on Docker)
+1. Container Installation (based on **Docker**)
 2. Bare Metal Installation
 
-**NOTE**: if `Podman` is installed on your system instead of Docker, the scripts will detect it and automatically include the `--format docker` flag in the `docker build` commands present in our scripts. 
+## 1.2 Podman
+
+If `Podman` is installed on your system instead of Docker, the scripts will detect it and automatically include the `--format docker` flag in the `docker build` commands present in our scripts.
+
+## 1.3 Singularity
+
+If Singularity is installed in your system, it is possible to create a Singularity image using the installation scripts in this repo. First, make a new directory from which the Singularity image will be built, and record the location of this directory:
+
+```bash
+mkdir singularity_dir
+export SINGULARITY_DIR_PATH=$PWD
+```
+
+Note that the location where you created the above directory needs ot have enough storage space available. Then, start up a Singularity image with the `--sandbox` option, pulling from a plain Docker image for Ubuntu 22.04 (for instance):
+
+```bash
+singularity build --sandbox container docker://ubuntu:22.04
+```
+
+The next step is to install software in the directory:
+
+```bash
+singularity shell -e --writable --fakeroot  -H $PWD:/home ${SINGULARITY_DIR_PATH}/singularity_dir
+```
+
+The above command will take care of several things: the `shell` command allows us to run shell scripts in the `singularity_dir`. The input flag `--fakeroot` will make the use of `sudo` not necessary, and the `-e` flag will clear your environment from anything coming from the host (i.e. the system from which you ae running Singularity commands) before getting on the `singularity_dir` directory. Finally the `-H` options make your current directory your home directory once in `singularity_dir`.
+Once this command has completed, run `bare_metal/main_setup.sh +options` as will be explained in [Section 2.2](#2.2-training-enviroment-install-on-bare-system).
+
+The final step is to create a Singularity image from the `singularity_dir` directory:
+
+## 1.4 Operative System Info
 
 Currently, we are only supporting an Ubuntu operating system (OS), but work is underway to add support for Red Hat, Suse and Debian.
 
