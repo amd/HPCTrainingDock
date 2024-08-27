@@ -17,6 +17,8 @@ ARG OMNITRACE_BUILD_FROM_SOURCE
 ARG AMDGPU_GFXMODEL
 ARG PYTHON_VERSIONS
 ARG INSTALL_GRAFANA=0
+ARG BUILD_HPCTOOLKIT
+ARG BUILD_TAU
 
 LABEL maintainer="bob.robey@amd.com"
 
@@ -84,7 +86,7 @@ RUN chmod a+x /docker-entrypoint.sh
 #
 COPY tools/sources/scripts/hpctoolkit_setup.sh /tmp/hpctoolkit_setup.sh
 
-RUN  /tmp/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} && \
+RUN  /tmp/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_HPCTOOLKIT} && \
      rm /tmp/hpctoolkit_setup.sh
 
 
@@ -93,7 +95,7 @@ RUN  /tmp/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} && \
 #
 COPY tools/sources/scripts/tau_setup.sh /tmp/tau_setup.sh
 
-RUN  /tmp/tau_setup.sh --rocm-version ${ROCM_VERSION} && \
+RUN  /tmp/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_TAU} && \
      rm /tmp/tau_setup.sh
 
 
