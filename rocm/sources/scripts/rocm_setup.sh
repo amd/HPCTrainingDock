@@ -18,9 +18,11 @@ fi
 DISTRO_CODENAME=`cat /etc/os-release | grep '^VERSION_CODENAME' | sed -e 's/VERSION_CODENAME=//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 SUDO="sudo"
+DEBIAN_FRONTEND_MODE="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
+   DEBIAN_FRONTEND_MODE=""
 fi
 
 
@@ -334,13 +336,13 @@ if [ "${DISTRO}" == "ubuntu" ]; then
       wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | ${SUDO} tee /etc/apt/keyrings/rocm.gpg > /dev/null
 
       # Update package list
-      ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get update
+      ${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get update
 
       # Get the amdgpu-install script
       wget -q https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/${DISTRO}/${ROCM_REPO_DIST}/amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
 
       # Run the amdgpu-install script. We have already installed the kernel driver, so use we use --no-dkms
-      ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+      ${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get install -q -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
 # if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
 # if ROCM_VERSION is less than or equalt to 6.1.2, the awk command result will be blank
       result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
@@ -348,13 +350,13 @@ if [ "${DISTRO}" == "ubuntu" ]; then
          result=`echo $DISTRO_VERSION | awk '$1>24.00'` && echo $result
          if [[ "${result}" ]]; then
             # rocm-asan not available in Ubuntu 24.04
-            DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk --no-dkms
+            ${DEBIAN_FRONTEND_MODE} amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk --no-dkms
 	 else
-            DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk,asan --no-dkms
+            ${DEBIAN_FRONTEND_MODE} amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk,asan --no-dkms
             #${SUDO} apt-get install rocm_bandwidth_test
 	 fi
       else
-         DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms
+         ${DEBIAN_FRONTEND_MODE} amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms
       fi
 
       if [[ ! -f /opt/rocm-${ROCM_VERSION}/.info/version-dev ]]; then

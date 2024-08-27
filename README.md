@@ -32,9 +32,22 @@ singularity shell -e --writable --fakeroot  -H $PWD:/home ${SINGULARITY_DIR_PATH
 ```
 
 The above command will take care of several things: the `shell` command allows us to run shell scripts in the `singularity_dir`. The input flag `--fakeroot` will make the use of `sudo` not necessary, and the `-e` flag will clear your environment from anything coming from the host (i.e. the system from which you ae running Singularity commands) before getting on the `singularity_dir` directory. Finally the `-H` options make your current directory your home directory once in `singularity_dir`.
+**NOTE**: changes made to host directories modified while on using Singularity  will reflect once exited.
 Once this command has completed, run `bare_metal/main_setup.sh +options` as will be explained in [Section 2.2](#2.2-training-enviroment-install-on-bare-system).
 
-The final step is to create a Singularity image from the `singularity_dir` directory:
+The final step is to create a Singularity image `singularity_image` from the `singularity_dir` directory:
+
+```bash
+singularity build ${SINGULARITY_DIR_PATH}/singularity_dir ${SINGULARITY_DIR_PATH}/singularity_image.sif
+```
+
+The above command will create the image `singularity_image.sif` and place it in SINGULARITY_DIR_PATH. To run the image do:
+
+```bash
+singularity run -e ${SINGULARITY_DIR_PATH}/singularity_image.sif
+```
+
+**NOTE**: once again, note that changes made while on the image to the directories from the host that are mirrored to the image will reflect once you exit the image.
 
 ## 1.4 Operative System Info
 

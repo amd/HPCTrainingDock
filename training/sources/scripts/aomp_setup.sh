@@ -6,9 +6,11 @@ export AOMP_VERSION_SHORT=19.0
 export MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/aomp
 
 SUDO="sudo"
+DEBIAN_FRONTEND_MODE="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
+   DEBIAN_FRONTEND_MODE=""
 fi
 
 # Autodetect defaults
@@ -113,7 +115,7 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
 #     apt-get install ./aomp_Ubuntu2204_19.0-0_amd64.deb
 
       ${SUDO} apt-get update
-      ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y gawk ninja-build generate-ninja ccache libssl-dev \
+      ${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get install -y gawk ninja-build generate-ninja ccache libssl-dev \
 	      libgmp-dev libmpfr-dev libbabeltrace-dev
       pip3 install CppHeaderParser
       

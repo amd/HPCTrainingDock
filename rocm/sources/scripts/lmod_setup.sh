@@ -4,9 +4,11 @@
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 SUDO="sudo"
+DEBIAN_FRONTEND_MODE="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
+   DEBIAN_FRONTEND_MODE=""
 fi
 
 
@@ -15,8 +17,8 @@ echo "############# Lmod Setup script ################"
 echo ""
 
 if [ "${DISTRO}" = "ubuntu" ]; then
-   ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get -qq update
-   ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get -qqy install lmod
+   ${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get -qq update
+   ${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get -qqy install lmod
    #${SUDO}  sed -i -e '1,$s!/etc/lmod/modules!/etc/lmod/modules/Linux\n/etc/lmod/modules/ROCm\n/etc/lmod/modules/ROCmPlus\n/etc/lmod/modules/ROCmPlus-MPI\n/etc/lmod/modules/ROCmPlus-AMDResearchTools\n/etc/lmod/modules/ROCmPlus-LatestCompilers\n/etc/lmod/modules/ROCmPlus-AI\n/etc/lmod/modules/misc!' /etc/lmod/modulespath
    #cat /etc/lmod/modulespath
 fi
@@ -80,7 +82,7 @@ else
 fi
 
 if [ "${DISTRO}" = "ubuntu" ]; then
-   ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get -q clean && ${SUDO} rm -rf /var/lib/apt/lists/*
+   ${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get -q clean && ${SUDO} rm -rf /var/lib/apt/lists/*
 fi
 
 if test -f /etc/profile.d/z01_StdEnv.csh; then

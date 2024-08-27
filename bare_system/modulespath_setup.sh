@@ -1,12 +1,14 @@
 # Install needed dependencies -- tcl and lmod
 
 SUDO="sudo"
+DEBIAN_FRONTEND_MODE="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
+   DEBIAN_FRONTEND_MODE=""
 fi
 
-${SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y tcl tcl-dev lmod
+${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get install -q -y tcl tcl-dev lmod
 
 ${SUDO} sed -i -e '1,$s!/etc/lmod/modules!/etc/lmod/modules/Linux\n/etc/lmod/modules/ROCm\n/etc/lmod/modules/ROCmPlus\n/etc/lmod/modules/ROCmPlus-MPI\n/etc/lmod/modules/ROCmPlus-AMDResearchTools\n/etc/lmod/modules/ROCmPlus-LatestCompilers\n/etc/lmod/modules/ROCmPlus-AI\n/etc/lmod/modules/misc!' /etc/lmod/modulespath
 
