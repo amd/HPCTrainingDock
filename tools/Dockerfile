@@ -95,7 +95,7 @@ RUN  /tmp/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit 
 #
 COPY tools/sources/scripts/tau_setup.sh /tmp/tau_setup.sh
 
-RUN  /tmp/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_TAU} && \
+RUN  /tmp/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-tau ${BUILD_TAU} && \
      rm /tmp/tau_setup.sh
 
 
