@@ -2,15 +2,13 @@
 echo "########## Install additional libs and apps #############"
 
 SUDO="sudo"
-DEBIAN_FRONTEND_MODE="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
-   DEBIAN_FRONTEND_MODE=""
 fi
 
-${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get update
-${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get install -y valgrind \
+${SUDO} apt-get update
+${SUDO} apt-get install -y valgrind \
                         kcachegrind kcachegrind-converters \
                         libboost-all-dev \
                         libgmp-dev \

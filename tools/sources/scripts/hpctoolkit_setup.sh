@@ -6,11 +6,9 @@ MODULE_PATH=/etc/lmod/modules/misc/hpctoolkit
 BUILD_HPCTOOLKIT=0
 ROCM_VERSION=6.0
 SUDO="sudo"
-DEBIAN_FRONTEND_MODE="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
-   DEBIAN_FRONTEND_MODE=""
 fi
 
 usage()
@@ -106,7 +104,7 @@ else
       module load rocm/${ROCM_VERSION}
 
       # openmpi library being installed as dependency of libboost-all-dev
-      ${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get install -q -y pipx libboost-all-dev liblzma-dev libgtk-3-dev
+      ${SUDO} apt-get install -q -y pipx libboost-all-dev liblzma-dev libgtk-3-dev
 
       cd /tmp
 

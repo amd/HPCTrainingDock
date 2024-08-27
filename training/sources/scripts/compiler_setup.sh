@@ -4,11 +4,9 @@ DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | t
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 SUDO="sudo"
-DEBIAN_FRONTEND_MODE="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
-   DEBIAN_FRONTEND_MODE=""
 fi
 
 echo ""
@@ -16,15 +14,15 @@ echo "############# Compiler Setup script ################"
 echo ""
 
 ${SUDO} apt-get update
-${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get install -y software-properties-common
-${SUDO} ${DEBIAN_FRONTEND_MODE}  add-apt-repository -y ppa:ubuntu-toolchain-r/test
+${SUDO} apt-get install -y software-properties-common
+${SUDO}  add-apt-repository -y ppa:ubuntu-toolchain-r/test
 
 #${SUDO} apt-get -qq update && ${SUDO} apt-get -qqy install gcc-9 g++-9 gfortran-9
 #${SUDO} apt-get -qq update && ${SUDO} apt-get -qqy install gcc-10 g++-10 gfortran-10
 # Need to install libstdc++ for aomp install and some occasional software
-${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get -qq update && ${SUDO} apt-get -qqy install libstdc++-11-dev
-${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get -qq update && ${SUDO} apt-get -qqy install gcc-12 g++-12 gfortran-12 libstdc++-12-dev
-${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get -qq update && ${SUDO} apt-get -qqy install gcc-13 g++-13 gfortran-13 libstdc++-13-dev
+${SUDO} apt-get -qq update && ${SUDO} apt-get -qqy install libstdc++-11-dev
+${SUDO} apt-get -qq update && ${SUDO} apt-get -qqy install gcc-12 g++-12 gfortran-12 libstdc++-12-dev
+${SUDO} apt-get -qq update && ${SUDO} apt-get -qqy install gcc-13 g++-13 gfortran-13 libstdc++-13-dev
 #${SUDO} update-alternatives \
 #      --install /usr/bin/gcc      gcc      /usr/bin/gcc-9      70 \
 #      --slave   /usr/bin/g++      g++      /usr/bin/g++-9         \
@@ -54,13 +52,13 @@ ${SUDO} update-alternatives \
       --slave   /usr/bin/gcov     gcov     /usr/bin/gcov-13        \
       --slave   /usr/lib/libstdc++.so libstdc++.so /usr/lib/gcc/x86_64-linux-gnu/13/libstdc++.so
 
-${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get -qy install gcc-11-offload-amdgcn
-${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get -qy install gcc-12-offload-amdgcn
-${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get -qy install gcc-13-offload-amdgcn
+${SUDO} apt-get -qy install gcc-11-offload-amdgcn
+${SUDO} apt-get -qy install gcc-12-offload-amdgcn
+${SUDO} apt-get -qy install gcc-13-offload-amdgcn
 
-${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get -qq install clang libomp-14-dev
+${SUDO} apt-get -qq install clang libomp-14-dev
 #${SUDO} apt-get -qq update && ${SUDO} apt-get -q install -y clang-14 libomp-14-dev
-${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get -qq update && ${SUDO} apt-get -q install -y clang-15 libomp-15-dev
+${SUDO} apt-get -qq update && ${SUDO} apt-get -q install -y clang-15 libomp-15-dev
 
 ${SUDO} update-alternatives \
       --install /usr/bin/clang     clang     /usr/bin/clang-14      70 \
@@ -82,8 +80,8 @@ ${SUDO} chmod u+s /usr/bin/update-alternatives
 ${SUDO} update-alternatives --config gcc
 ${SUDO} update-alternatives --config clang
 
-${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get autoremove
-${SUDO} ${DEBIAN_FRONTEND_MODE} apt-get -q clean && ${SUDO} rm -rf /var/lib/apt/lists/*
+${SUDO} apt-get autoremove
+${SUDO} apt-get -q clean && ${SUDO} rm -rf /var/lib/apt/lists/*
 
 # ${SUDO} apt purge --autoremove -y gcc-11
 
