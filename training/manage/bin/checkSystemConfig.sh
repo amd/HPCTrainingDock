@@ -7,7 +7,7 @@ MI210_COUNT=`rocminfo | grep MI210 | wc -l`
 
 GRUB_UPDATE_NEEDED=0
 
-if [[ "${MI300A_COUNT}" -ge 0 ]]; then
+if [[ "${MI300A_COUNT}" -gt 0 ]]; then
    echo "====================================="
    echo "This system has MI300A APUs"
    echo "System Settings Check for MI300A APUs"
