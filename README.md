@@ -19,7 +19,7 @@ mkdir singularity_dir
 export SINGULARITY_DIR_PATH=$PWD
 ```
 
-Note that the location where you created the above directory needs ot have enough storage space available. Then, start up a Singularity image with the `--sandbox` option, pulling from a plain Docker image for Ubuntu 22.04 (for instance):
+Note that the location where you created the above directory needs to have enough storage space available. Then, start up a Singularity image with the `--sandbox` option, pulling from a plain Docker image for Ubuntu 22.04 (for instance):
 
 ```bash
 singularity build --sandbox container docker://ubuntu:22.04
@@ -31,9 +31,11 @@ The next step is to install software in the directory:
 singularity shell -e --writable --fakeroot  -H $PWD:/home ${SINGULARITY_DIR_PATH}/singularity_dir
 ```
 
-The above command will take care of several things: the `shell` command allows us to run shell scripts in the `singularity_dir`. The input flag `--fakeroot` will make the use of `sudo` not necessary, and the `-e` flag will clear your environment from anything coming from the host (i.e. the system from which you ae running Singularity commands) before getting on the `singularity_dir` directory. Finally the `-H` options make your current directory your home directory once in `singularity_dir`.
-**NOTE**: changes made to host directories modified while on using Singularity  will reflect once exited.
-Once this command has completed, run `bare_metal/main_setup.sh +options` as will be explained in [Section 2.2](#2.2-training-enviroment-install-on-bare-system).
+The above command will take care of several things: the `shell` command allows us to run shell scripts in the `singularity_dir`. The input flag `--fakeroot` will make the use of `sudo` not necessary, and the `-e` flag will clear your environment from anything coming from the host (i.e. the system from which you ae running Singularity commands) before getting on the `singularity_dir` directory. Finally the `-H` option makes your current directory your home directory once in `singularity_dir`.
+
+**NOTE**: changes made to host directories modified while using Singularity  will reflect once exited.
+
+Once this command has completed, run `bare_metal/main_setup.sh +options` as explained in [Section 2.2](#2.2-training-enviroment-install-on-bare-system).
 
 The final step is to create a Singularity image `singularity_image` from the `singularity_dir` directory:
 
@@ -41,7 +43,7 @@ The final step is to create a Singularity image `singularity_image` from the `si
 singularity build ${SINGULARITY_DIR_PATH}/singularity_dir ${SINGULARITY_DIR_PATH}/singularity_image.sif
 ```
 
-The above command will create the image `singularity_image.sif` and place it in SINGULARITY_DIR_PATH. To run the image do:
+The above command will create the image `singularity_image.sif` and place it in `SINGULARITY_DIR_PATH`. To run the image do:
 
 ```bash
 singularity run -e ${SINGULARITY_DIR_PATH}/singularity_image.sif
