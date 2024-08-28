@@ -121,43 +121,43 @@ hpctoolkit.timestamp: rocm.timestamp
 # From Training layer
 
 compiler_setup.sh:
-	training/sources/scripts/compiler_setup.sh
+	extras/sources/scripts/compiler_setup.sh
 	touch compiler_setup.timestamp
 
 amd_gcc.timestamp: rocm.timestamp
-	training/sources/scripts/amd_gcc_setup.sh \
+	extras/sources/scripts/amd_gcc_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-gcc-latest ${BUILD_GCC_LATEST}
 	touch amd_gcc.timestamp
 
 aomp.timestamp: rocm.timestamp
-	training/sources/scripts/aomp_setup.sh \
+	extras/sources/scripts/aomp_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-aomp-latest ${BUILD_AOMP_LATEST}
 	touch aomp.timestamp
 
 kokkos.timestamp:
-	training/sources/scripts/kokoks_setup.sh \
+	extras/sources/scripts/kokoks_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-kokkos ${BUILD_KOKKOS}
 	touch kokkos.timestamp
 
 cupy.timestamp: rocm.timestamp
-	training/sources/scripts/cupy_setup.sh \
+	extras/sources/scripts/cupy_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
 	   --build-cupy ${BUILD_CUPY}
 	touch cupy.timestamp
 
 pytorch.timestamp: rocm.timestamp
-	training/sources/scripts/pytorch_setup.sh \
+	extras/sources/scripts/pytorch_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
 	   --build-pytorch ${BUILD_PYTORCH}
 	touch pytorch.timestamp
 
 apps_setup.timestamp:
-	training/sources/scripts/apps_setup.sh
+	extras/sources/scripts/apps_setup.sh
 	touch apps_basic.timestamp
 
 
@@ -167,11 +167,11 @@ HPCTrainingExamples:
 	cd HPCTrainingExamples/tests && mkdir build && cd build && cmake ..
 
 checkSystemConfig.timestamp: rocm.timestamp
-	training/manage/bin/checkSystemConfig.sh
+	extras/manage/bin/checkSystemConfig.sh
 	touch checkSystemConfig.timestamp
 
 env_check.timestamp: rocm.timestamp
-	training/manage/bin/env_check.sh check
+	extras/manage/bin/env_check.sh check
 	touch env_check.timestamp
 
 rocm_bandwidth_test.timestamp: rocm.timestamp

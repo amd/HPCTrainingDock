@@ -80,7 +80,7 @@ These instructions will setup a container on `localhost` and assume that:
 3. For Docker, you can issue Docker commands without `sudo`.
  
 ### 2.1.1  Building the Four Images of the Container 
-The container is set up to use Ubuntu 22.04 as OS, and will build four different images called `rocm`, `comm`,  `tools` and `training`. 
+The container is set up to use Ubuntu 22.04 as OS, and will build four different images called `rocm`, `comm`,  `tools` and `extras`. 
 Here is a flowchart of the container installation process
 <p>
 <img src="figures/container_flowchart.png" \>
@@ -274,38 +274,47 @@ rocm/sources/scripts/rocm_setup.sh
 // install OpenMPI and create OpenMPI module
 comm/sources/scripts/openmpi_setup.sh 
 
-// install MVAPICH2 and create MVAPICH2 module
-comm/sources/scripts/mvapich2_setup.sh 
+// install MVAPICH and create MVAPICH module
+comm/sources/scripts/mvapich_setup.sh 
+
+// install MPI4PY and create MPI4PY module
+comm/sources/scripts/mpi4py_setup.sh 
 
 // install Miniconda3 and create Miniconda3 module
-yools/sources/scripts/miniconda3_setup.sh 
+tools/sources/scripts/miniconda3_setup.sh 
 
-// install Omnitrace and create Omnitrace module
+// install AMD Research Omnitrace and create module
 tools/sources/scripts/omnitrace_setup.sh 
 
 // install Grafana (needed for Omniperf)
 tools/sources/scripts/grafana_setup.sh
 
-// install Omniperf and create Omniperf module
+// install AMD Research Omniperf and create module
 tools/sources/scripts/omniperf_setup.sh 
 
+// install HPCToolkit and create HPCToolkit module
+tools/sources/scripts/hpctoolkit_setup.sh 
+
+// install TAU and create TAU module
+tools/sources/scripts/tau_setup.sh 
+
 // install clang/14  clang/15  gcc/11  gcc/12  gcc/13 and create modules
-training/sources/scripts/compiler_setup.sh
+extras/sources/scripts/compiler_setup.sh
 
 // install liblapack and libopenblas
-training/sources/scripts/apps_setup_basic.sh
+extras/sources/scripts/apps_setup_basic.sh
 
 // install CuPy and create CuPy module
-training/sources/scripts/cupy_setup.sh 
+extras/sources/scripts/cupy_setup.sh 
 
 // install PyTorch and create PyTorch module
-training/sources/scripts/pytorch_setup.sh 
+extras/sources/scripts/pytorch_setup.sh 
 
 // install additional libs and apps such as valgrind, boost, parmetis, openssl, etc.
-training/sources/scripts/apps_setup.sh
+extras/sources/scripts/apps_setup.sh
 
 // install Kokkos
-training/sources/scripts/kokkos_setup.sh
+extras/sources/scripts/kokkos_setup.sh
 
 ```
 
@@ -335,7 +344,7 @@ clang/base clang/14 (D) clang/15 gcc/base gcc/11 (D) gcc/12 gcc/13 miniconda3/23
 ------------------------------------------------------------------- /etc/lmod/modules/ROCm -------------------------------------------------------------------
 amdclang/17.0-6.1.2 hipfort/6.1.2 opencl/6.1.2 rocm/6.1.2
 --------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-MPI ---------------------------------------------------------------
-openmpi/5.0.5-ucc1.3.0-ucx1.17.0
+mpi4py/dev openmpi/5.0.5-ucc1.3.0-ucx1.17.0
 -------------------------------------------------------- /etc/lmod/modules/ROCmPlus-AMDResearchTools ---------------------------------------------------------
 omniperf/2.0.0 omnitrace/1.11.2
 --------------------------------------------------------- /etc/lmod/modules/ROCmPlus-LatestCompilers ---------------------------------------------------------
@@ -343,7 +352,7 @@ amd-gcc/13.2.0 aomp/amdclang-19.0
 --------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-AI ----------------------------------------------------------------
 cupy/13.0.0b1 pytorch/2.2
 ------------------------------------------------------------------- /etc/lmod/modules/misc -------------------------------------------------------------------
-kokkos/4.3.1
+kokkos/4.3.1 hpctoolkit/dev  tau/dev
 -------------------------------------------------------------- /usr/share/lmod/lmod/modulefiles --------------------------------------------------------------
 Core/lmod/6.6 Core/settarg/6.6
 ```

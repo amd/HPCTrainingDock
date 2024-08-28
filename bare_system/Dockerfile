@@ -61,7 +61,7 @@ ADD bare_system/Makefile Makefile
 ADD rocm rocm
 ADD comm comm
 ADD tools tools
-ADD training training
+ADD extras extras 
 
 RUN bare_system/main_setup.sh --rocm-version ${ROCM_VERSION} --rocm-install-path ${ROCM_INSTALLPATH} \
     --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --use-makefile ${USE_MAKEFILE}
