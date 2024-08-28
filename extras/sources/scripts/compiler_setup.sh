@@ -4,9 +4,11 @@ DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | t
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 SUDO="sudo"
+DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
+   DEB_FRONTEND=""
 fi
 
 echo ""
@@ -14,15 +16,16 @@ echo "############# Compiler Setup script ################"
 echo ""
 
 ${SUDO} apt-get update
-${SUDO} apt-get install -y software-properties-common
-${SUDO}  add-apt-repository -y ppa:ubuntu-toolchain-r/test
+${SUDO} ${DEB_FRONTEND} apt-get install -y software-properties-common
+${SUDO} add-apt-repository -y ppa:ubuntu-toolchain-r/test
 
 #${SUDO} apt-get -qq update && ${SUDO} apt-get -qqy install gcc-9 g++-9 gfortran-9
 #${SUDO} apt-get -qq update && ${SUDO} apt-get -qqy install gcc-10 g++-10 gfortran-10
 # Need to install libstdc++ for aomp install and some occasional software
-${SUDO} apt-get -qq update && ${SUDO} apt-get -qqy install libstdc++-11-dev
-${SUDO} apt-get -qq update && ${SUDO} apt-get -qqy install gcc-12 g++-12 gfortran-12 libstdc++-12-dev
-${SUDO} apt-get -qq update && ${SUDO} apt-get -qqy install gcc-13 g++-13 gfortran-13 libstdc++-13-dev
+${SUDO} apt-get -qq update
+${SUDO} ${DEB_FRONTEND} apt-get -qqy install libstdc++-11-dev \
+                                             gcc-12 g++-12 gfortran-12 libstdc++-12-dev \
+                                             gcc-13 g++-13 gfortran-13 libstdc++-13-dev
 #${SUDO} update-alternatives \
 #      --install /usr/bin/gcc      gcc      /usr/bin/gcc-9      70 \
 #      --slave   /usr/bin/g++      g++      /usr/bin/g++-9         \

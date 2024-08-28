@@ -87,6 +87,8 @@ echo "BUILD_TAU: $BUILD_TAU"
 echo "==================================="
 echo ""
 
+CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+
 if [ "${BUILD_TAU}" = "0" ]; then
 
    echo "TAU will not be build, according to the specified value of BUILD_TAU"
@@ -94,7 +96,7 @@ if [ "${BUILD_TAU}" = "0" ]; then
    exit 
 
 else
-   if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/tau.tgz ]; then
+   if [ -f ${CACHE_FILES}/tau.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached TAU"
@@ -103,9 +105,13 @@ else
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf CacheFiles/tau.tgz
-      chown -R root:root /opt/rocmplus-${ROCM_VERSION}/tau
-      ${SUDO} rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/tau.tgz
+      tar -xzf ${CACHE_FILES}/tau.tgz
+      if [ "${USER}" != "root" ]; then
+         chown -R root:root /opt/rocmplus-${ROCM_VERSION}/tau
+      fi
+      if [ "${USER}" != "sysadmin" ]; then
+         ${SUDO} rm /CacheFiles/tau.tgz
+      fi
 
    else
 

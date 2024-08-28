@@ -7,9 +7,11 @@ ROCM_PATH=/opt/rocm-${ROCM_VERSION}
 REPLACE=0
 DRY_RUN=0
 SUDO="sudo"
+DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
+   DEB_FRONTEND=""
 fi
 
 
@@ -120,13 +122,13 @@ if [ "${DISTRO}" = "rocky linux" ]; then
    rm ${MVAPICH_RPM_NAME}
 fi
 if [ "${DISTRO}" = "ubuntu" ]; then
-   ${SUDO} apt-get -qqy install alien
+   ${SUDO} ${DEB_FRONTEND} apt-get -qqy install alien
    ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/mvapich
 
    # install the GPU aware version of mvapich using an rpm (MVPlus3.0)
    ${SUDO} wget -q ${MVAPICH_DOWNLOAD_URL}/${MVAPICH_RPM_NAME}
    ls -l ${MVAPICH_RPM_NAME}
-   ${SUDO} apt-get install -y alien ${MVAPICH_RPM_NAME}
+   ${SUDO} ${DEB_FRONTEND} apt-get install -y alien ${MVAPICH_RPM_NAME}
    /opt/rocmplus-${ROCM_VERSION}/mvapich/bin/mpicc --show
    rm -rf ${MVAPICH_RPM_NAME}
 fi

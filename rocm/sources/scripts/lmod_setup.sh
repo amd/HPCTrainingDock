@@ -4,9 +4,11 @@
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 SUDO="sudo"
+export DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
+   DEB_FRONTEND=""
 fi
 
 
@@ -16,7 +18,7 @@ echo ""
 
 if [ "${DISTRO}" = "ubuntu" ]; then
    ${SUDO} apt-get -qq update
-   ${SUDO} apt-get -qqy install lmod
+   ${SUDO} ${DEB_FRONTEND} apt-get -qqy install lmod
    #${SUDO}  sed -i -e '1,$s!/etc/lmod/modules!/etc/lmod/modules/Linux\n/etc/lmod/modules/ROCm\n/etc/lmod/modules/ROCmPlus\n/etc/lmod/modules/ROCmPlus-MPI\n/etc/lmod/modules/ROCmPlus-AMDResearchTools\n/etc/lmod/modules/ROCmPlus-LatestCompilers\n/etc/lmod/modules/ROCmPlus-AI\n/etc/lmod/modules/misc!' /etc/lmod/modulespath
    #cat /etc/lmod/modulespath
 fi

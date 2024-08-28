@@ -22,9 +22,11 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 SUDO="sudo"
+DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
+   unset DEB_FRONTEND
 fi
 
 n=0
@@ -64,7 +66,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    # these are for slurm   :  libpmi2-0-dev 
    ${SUDO} apt-get update -y
    ${SUDO} apt-cache search libpmi*
-   ${SUDO} apt-get install -y libpmi2-0-dev \
+   ${SUDO} ${DEB_FRONTEND} apt-get install -y libpmi2-0-dev \
                            slurmd slurmctld
 
    apt-get -q clean && ${SUDO} rm -rf /var/lib/apt/lists/*

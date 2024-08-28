@@ -37,9 +37,11 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 SUDO="sudo"
+DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
+   DEB_FRONTEND=""
 fi
 
 usage()
@@ -53,7 +55,7 @@ usage()
     echo "--help: this usage information"
     echo "--install-path [ INSTALL_PATH ] default /opt/rocmplus-<ROCM_VERSION>/openmpi (ucx, and ucc)"
     echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/openmpi"
-    echo "--openmpi-path [OPENMPI_PATH] default $INSTALL_PATH/openmpi-$OPENMPI_VERSION-ucc-$UCC_VERSION-ucx-$UCX_VERSION"
+    echo "--openmpi-path [OPENMPI_PATH] default $INSTALL_PATH/openmpi-$OPENMPI_VERSION-ucc-$UCC_VERSION-ucx-$UCX_VERSION-xpmem-$XPMEM_VERSION"
     echo "--openmpi-version [VERSION] default $OPENMPI_VERSION"
     echo "--openmpi-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
     echo "--replace default off"
@@ -315,9 +317,9 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    if [[ "${DRY_RUN}" == "0" ]]; then
       # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
       ${SUDO} apt-get update
-      ${SUDO} apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
+      ${SUDO} ${DEB_FRONTEND} apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
          libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen
-      ${SUDO} apt-get install -y linux-headers-$(uname -r)
+      ${SUDO} ${DEB_FRONTEND} apt-get install -y linux-headers-$(uname -r)
    fi
 elif [ "${DISTRO}" = "rocky linux" ]; then
    echo "Install of pmix and hwloc packages"
@@ -433,7 +435,7 @@ else
    if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
       ${SUDO} rm -rf "${UCX_PATH}"
    fi
-   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${CACHE_FILES}/ucx-${UCX_VERSION}.tgz ]]; then
+   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${CACHE_FILES}/ucx-${UCX_VERSION}${XPMEM_STRING}.tgz ]]; then
       echo ""
       echo "============================"
       echo " Installing Cached UCX"
@@ -441,16 +443,16 @@ else
       echo ""
 
       #install the cached version
-      echo "cached file is ${CACHE_FILES}/ucx-${UCX_VERSION}.tgz"
+      echo "cached file is ${CACHE_FILES}/ucx-${UCX_VERSION}${XPMEM_STRING}.tgz"
       ${SUDO} mkdir -p ${UCX_PATH}
       cd ${INSTALL_PATH}
-      ${SUDO} tar -xzpf ${CACHE_FILES}/ucx-${UCX_VERSION}.tgz
+      ${SUDO} tar -xzpf ${CACHE_FILES}/ucx-${UCX_VERSION}${XPMEM_STRING}.tgz
       if [ "${USER}" != "root" ]; then
          ${SUDO} find ${UCX_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${UCX_PATH} -type d -execdir chown root:root "{}" +
       fi
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm "${CACHE_FILES}"/ucx-${UCX_VERSION}.tgz
+         ${SUDO} rm "${CACHE_FILES}"/ucx-${UCX_VERSION}${XPMEM_STRING}.tgz
       fi
    else
 
@@ -536,7 +538,7 @@ else
    if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
       ${SUDO} rm -rf "${UCC_PATH}"
    fi
-   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz ]]; then
+   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz ]]; then
       echo ""
       echo "============================"
       echo " Installing Cached UCC"
@@ -544,16 +546,16 @@ else
       echo ""
 
       #install the cached version
-      echo "cached file is ${CACHE_FILES}/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz"
+      echo "cached file is ${CACHE_FILES}/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz"
       ${SUDO} mkdir -p ${UCC_PATH}
       cd "${INSTALL_PATH}"
-      ${SUDO} tar -xzpf "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
+      ${SUDO} tar -xzpf "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz
       if [ "${USER}" != "root" ]; then
          ${SUDO} find ${UCC_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${UCC_PATH} -type d -execdir chown root:root "{}" +
       fi
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
+         ${SUDO} rm "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz
       fi
    else
 
@@ -637,7 +639,7 @@ else
    if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
       ${SUDO} rm -rf "${OPENMPI_PATH}"
    fi
-   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz ]]; then
+   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz ]]; then
       echo ""
       echo "============================"
       echo " Installing Cached OpenMPI"
@@ -645,16 +647,16 @@ else
       echo ""
 
       #install the cached version
-      echo "cached file is ${CACHE_FILES}/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz"
+      echo "cached file is ${CACHE_FILES}/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz"
       ${SUDO} mkdir -p ${OPENMPI_PATH}
       cd "${INSTALL_PATH}"
-      ${SUDO} tar -xzpf "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
+      ${SUDO} tar -xzpf "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz
       if [ "${USER}" != "root" ]; then
          ${SUDO} find ${OPENMPI_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${OPENMPI_PATH} -type d -execdir chown root:root "{}" +
       fi
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}.tgz
+         ${SUDO} rm "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz
       fi
    else
 

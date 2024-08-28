@@ -72,6 +72,8 @@ echo "BUILD_HPCTOOLKIT: $BUILD_HPCTOOLKIT"
 echo "==================================="
 echo ""
 
+CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+
 if [ "${BUILD_HPCTOOLKIT}" = "0" ]; then
 
    echo "HPCToolkit will not be build, according to the specified value of BUILD_HPCTOOLKIT"
@@ -79,7 +81,7 @@ if [ "${BUILD_HPCTOOLKIT}" = "0" ]; then
    exit 
 
 else
-   if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/hpctoolkit.tgz ]; then
+   if [ -f ${CACHE_FILES}/hpctoolkit.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached HPCToolkit"
@@ -88,9 +90,13 @@ else
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf CacheFiles/hpctoolkit.tgz
-      chown -R root:root /opt/rocmplus-${ROCM_VERSION}/hpctoolkit
-      ${SUDO} rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/hpctoolkit.tgz
+      tar -xzf ${CACHE_FILES}/hpctoolkit.tgz
+      if [ "${USER}" != "root" ]; then
+         chown -R root:root /opt/rocmplus-${ROCM_VERSION}/hpctoolkit
+      fi
+      if [ "${USER}" != "sysadmin" ]; then
+         ${SUDO} rm ${CACHE_FILES}/hpctoolkit.tgz
+      fi
 
    else
       echo ""
