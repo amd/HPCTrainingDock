@@ -105,7 +105,7 @@ else
       export USE_CUDA=0
       export MAX_JOBS=20
       export USE_MPI=1
-      export PYTORCH_ROCM_ARCH="${AMDGPU_GFXMODEL}"
+      export PYTORCH_ROCM_ARCH=${AMDGPU_GFXMODEL}
       
       export PYTORCH_INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/pytorch
 

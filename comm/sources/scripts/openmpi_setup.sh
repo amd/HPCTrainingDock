@@ -1,14 +1,11 @@
 #!/bin/bash
 
-# This script installs OpenMPI along with the UCX and UCC libraries. The simplest use case is:
+# This script installs OpenMPI along with the XPEM, UCX and UCC libraries. The simplest use case is:
 #   ./openmpi_setup.sh --rocm-version <ROCM_VERSION>
 # Most of the needed information for the install is autodetected. Others are set to the latest
 # available versions. Cross-compiling for a different GPU model can be done by specifying
 # the --amdgpu-gfxmodel <AMDGPU-GFXMODEL> option
 #
-# Best recommended installation also includes xpmem. That is not currently handled in this
-# script since it requires a kernel modification. Handling that in a container will take
-# some more effort.
 
 # Variables controlling setup process
 ROCM_VERSION=`cat /opt/rocm*/.info/version | head -1 | cut -f1 -d'-' `
@@ -17,21 +14,23 @@ REPLACE=0
 DRY_RUN=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/openmpi
 INSTALL_PATH_INPUT=""
+XPMEM_PATH_INPUT=""
+BUILD_XPMEM="1"
 UCX_PATH_INPUT=""
 UCC_PATH_INPUT=""
-MPI4PY_PATH_INPUT=""
 OPENMPI_PATH_INPUT=""
 USE_CACHE_BUILD=1
 UCX_VERSION=1.17.0
 UCX_MD5CHECKSUM=53537757b71e5eae4d283e6fc32907ba
 UCC_VERSION=1.3.0
 UCC_MD5CHECKSUM=b2d14666cb9a18b0aee57898ce0a8c8b
+XPMEM_VERSION=2.7.3
+XPMEM_MD5CHECKSUM=a161703b2f4740edbf6b9049a16ccb94
 OPENMPI_VERSION=5.0.5
 OPENMPI_MD5CHECKSUM=4dcea38dcfa6710a7ed2922fa609e41e
 C_COMPILER=gcc
 CXX_COMPILER=g++
 FC_COMPILER=gfortran
-MPI4PY=1
 
 # Autodetect defaults
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
@@ -46,6 +45,7 @@ fi
 usage()
 {
     echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
+    echo "--build-xpmem [ BUILD_XPMEM ] default 1-yes"
     echo "--c-compiler [ CC ] default gcc"
     echo "--cxx-compiler [ CXX ] default g++"
     echo "--dry-run default off"
@@ -65,8 +65,8 @@ usage()
     echo "--ucx-path default <INSTALL_PATH>/ucx"
     echo "--ucx-version [VERSION] default $UCX_VERSION"
     echo "--ucx-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
-    echo "--mpi4py-path default <INSTALL_PATH>/mpi4py"
-    echo "--build-mpi4py default is 1, build MPI for Python"
+    echo "--xpmem-path default <INSTALL_PATH>/ucx"
+    echo "--xpmem-version [VERSION] default $UCX_VERSION"
     exit 1
 }
 
@@ -89,6 +89,11 @@ do
       "--amdgpu-gfxmodel")
           shift
           AMDGPU_GFXMODEL=${1}
+          reset-last
+          ;;
+      "--build-xpmem")
+          shift
+          BUILD_XPMEM=${1}
           reset-last
           ;;
       "--c-compiler")
@@ -191,14 +196,22 @@ do
           fi
           reset-last
           ;;
-      "--build-mpi4py")
-         shift
-         MPI4PY=${1}
-         reset-last
-	 ;;
-      "--mpi4py-path")
+      "--xpmem-path")
           shift
-          MPI4PY_PATH_INPUT=${1}
+          XPMEM_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--xpmem-version")
+          shift
+          XPMEM_VERSION=${1}
+          reset-last
+          ;;
+      "--xpmem-md5checksum")
+          shift
+          XPMEM_MD5CHECKSUM=${1}
+          if [[ "${1}" = "" ]]; then
+             XPMEM_MD5CHECKSUM="skip"
+          fi
           reset-last
           ;;
       "--*")
@@ -255,34 +268,38 @@ if [ "${ROCM_VERSION_AFTER_INPUT}" != "${ROCM_VERSION}" ]; then
    echo "Run this script with --help to see what is the right syntax"
 fi
 
+if [ "${BUILD_XPMEM}" == "1" ]; then
+   XPMEM_STRING=-xpmem-${XPMEM_VERSION}
+fi
+
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH="${INSTALL_PATH_INPUT}"
 else
    INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}
 fi
 
+if [ "${XPMEM_PATH_INPUT}" != "" ]; then
+   XPMEM_PATH="${XPMEM_PATH_INPUT}"
+else
+   XPMEM_PATH="${INSTALL_PATH}"/xpmem-${XPMEM_VERSION}
+fi
+
 if [ "${UCX_PATH_INPUT}" != "" ]; then
    UCX_PATH="${UCX_PATH_INPUT}"
 else
-   UCX_PATH="${INSTALL_PATH}"/ucx-${UCX_VERSION}
+   UCX_PATH="${INSTALL_PATH}"/ucx-${UCX_VERSION}${XPMEM_STRING}
 fi
 
 if [ "${UCC_PATH_INPUT}" != "" ]; then
    UCC_PATH="${UCC_PATH_INPUT}"
 else
-   UCC_PATH="${INSTALL_PATH}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}
+   UCC_PATH="${INSTALL_PATH}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}
 fi
 
 if [ "${OPENMPI_PATH_INPUT}" != "" ]; then
    OPENMPI_PATH="${OPENMPI_PATH_INPUT}"
 else
-   OPENMPI_PATH="${INSTALL_PATH}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}
-fi
-
-if [ "${MPI4PY_PATH_INPUT}" != "" ]; then
-   MPI4PY_PATH="${MPI4PY_PATH_INPUT}"
-else
-   MPI4PY_PATH="${INSTALL_PATH}"/mpi4py
+   OPENMPI_PATH="${INSTALL_PATH}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}
 fi
 
 echo ""
@@ -300,6 +317,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
       ${SUDO} apt-get update
       ${SUDO} apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
          libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen
+      ${SUDO} apt-get install -y linux-headers-$(uname -r)
    fi
 elif [ "${DISTRO}" = "rocky linux" ]; then
    echo "Install of pmix and hwloc packages"
@@ -311,11 +329,98 @@ elif [ "${DISTRO}" = "rocky linux" ]; then
 fi
 
 if [[ "${DRY_RUN}" == "0" ]] && [[ ! -d ${INSTALL_PATH} ]] ; then
-   mkdir -p "${INSTALL_PATH}"
+   ${SUDO} mkdir -p "${INSTALL_PATH}"
 fi
 cd "${INSTALL_PATH}"
 
 CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+
+#
+# Install XPMEM
+#
+
+if [ "${BUILD_XPMEM}" == "1" ]; then
+   if [[ -d "${XPMEM_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
+      echo "There is a previous installation and the replace flag is false"
+      echo "  use --replace to request replacing the current installation"
+   else
+      if [[ -d "${XPMEM_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
+         ${SUDO} rm -rf "${XPMEM_PATH}"
+      fi
+      if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${CACHE_FILES}/xpmem-${XPMEM_VERSION}.tgz ]]; then
+         echo ""
+         echo "============================"
+         echo " Installing Cached XPMEM"
+         echo "============================"
+         echo ""
+
+         #install the cached version
+         echo "cached file is ${CACHE_FILES}/xpmem-${XPMEM_VERSION}.tgz"
+         ${SUDO} mkdir -p ${XPMEM_PATH}
+         cd ${INSTALL_PATH}
+         ${SUDO} tar -xzpf ${CACHE_FILES}/xpmem-${XPMEM_VERSION}.tgz
+         if [ "${USER}" != "root" ]; then
+            ${SUDO} find ${XPMEM_PATH} -type f -execdir chown root:root "{}" +
+            ${SUDO} find ${XPMEM_PATH} -type d -execdir chown root:root "{}" +
+         fi
+         if [ "${USER}" != "sysadmin" ]; then
+            ${SUDO} rm "${CACHE_FILES}"/xpmem-${XPMEM_VERSION}.tgz
+         fi
+      else
+
+         echo ""
+         echo "============================"
+         echo " Building XPMEM"
+         echo "============================"
+         echo ""
+
+         cd /tmp
+
+         XPMEM_DOWNLOAD_URL=https://github.com/openucx/xpmem/archive/refs/tags/v${XPMEM_VERSION}.tar.gz
+         count=0
+         while [ "$count" -lt 3 ]; do
+            wget -q --continue --tries=10 ${XPMEM_DOWNLOAD_URL} && break
+            count=$((count+1))
+         done
+         if [ ! -f v${XPMEM_VERSION}.tar.gz ]; then
+            echo "Failed to download v${XPMEM_VERSION}.tar.gz package from: "
+            echo "    ${XPMEM_DOWNLOAD_URL} ... exiting"
+            exit 1
+         else
+            MD5SUM_XPMEM=`md5sum v${XPMEM_VERSION}.tar.gz | cut -f1 -d' ' `
+            if [[ "${XPMEM_MD5CHECKSUM}" =~ "skip" ]]; then
+               echo "MD5SUM is ${MD5SUM_XPMEM}, no check requested"
+            elif [[ "${MD5SUM_XPMEM}" == "${XPMEM_MD5CHECKSUM}" ]]; then
+               echo "MD5SUM is verified: actual ${MD5SUM_XPMEM}, expecting ${XPMEM_MD5CHECKSUM}"
+            else
+               echo "Error: Wrong MD5Sum for v${XPMEM_VERSION}.tar.gz:"
+               echo "MD5SUM is ${MD5SUM_XPMEM}, expecting ${XPMEM_MD5CHECKSUM}"
+               exit 1
+            fi
+         fi
+         tar xzf v${XPMEM_VERSION}.tar.gz
+         cd xpmem-${XPMEM_VERSION}
+
+         ./autogen.sh
+         ./configure --prefix=${XPMEM_PATH}
+
+         make -j 16
+         if [[ "${DRY_RUN}" == "0" ]]; then
+            ${SUDO} make install
+         fi
+
+         cd ../..
+         rm -rf xpmem-${XPMEM_VERSION} v${XPMEM_VERSION}.tar.gz
+      fi
+
+      if [[ ! -d ${XPMEM_PATH}/lib ]] ; then
+         echo "XPMEM (OpenMPI) installation failed -- missing installation directories"
+         echo " XPMEM Installation path is ${XPMEM_PATH}"
+         ls -l "${XPMEM_PATH}"
+         exit 1
+      fi
+   fi
+fi
 
 #
 # Install UCX
@@ -386,6 +491,7 @@ else
       UCX_CONFIGURE_COMMAND="../contrib/configure-release \
          --prefix=${UCX_PATH} \
          --with-rocm=${ROCM_PATH} \
+         --with-xpmem=${XPMEM_PATH} \
          --without-cuda \
          --enable-mt \
          --enable-optimizations \
@@ -621,7 +727,7 @@ else
          ${SUDO} make install
 	 for file in ${OPENMPI_PATH}/share/man/man1/*
          do
-            gzip $file
+            ${SUDO} gzip $file
          done
       fi
       # make ucx the default point-to-point
@@ -667,9 +773,9 @@ if [[ "${DRY_RUN}" == "0" ]]; then
    ${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}-xpmem${XPMEM_VERSION}.lua
 	whatis("Name: GPU-aware openmpi")
-	whatis("Version: openmpi-${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}")
+	whatis("Version: openmpi-${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}-xpmem${XPMEM_VERSION}")
 	whatis("Description: An open source Message Passing Interface implementation")
 	whatis(" This is a GPU-Aware version of OpenMPI")
 	whatis("URL: https://github.com/open-mpi/ompi.git")

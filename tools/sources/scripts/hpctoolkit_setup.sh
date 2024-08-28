@@ -186,14 +186,14 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/dev.lua
 	whatis("HPCToolkit - integrated suite of tools for measurement and analysis of program performance")
 
-        local base = "${HPCTOOLKIT_PATH}"
+	local base = "${HPCTOOLKIT_PATH}"
 
 	load("rocm/${ROCM_VERSION}")
-        setenv("HPCTOOLKIT_PATH", base)
-        prepend_path("PATH",pathJoin(base, "bin"))
-        prepend_path("PATH","${HPCVIEWER_PATH}/bin")
-        prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
-        prepend_path("LD_LIBRARY_PATH","/usr/lib")
+	setenv("HPCTOOLKIT_PATH", base)
+	prepend_path("PATH",pathJoin(base, "bin"))
+	prepend_path("PATH","${HPCVIEWER_PATH}/bin")
+	prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
+	prepend_path("LD_LIBRARY_PATH","/usr/lib")
 EOF
 
 fi
