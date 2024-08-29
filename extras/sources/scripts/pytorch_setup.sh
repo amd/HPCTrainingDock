@@ -135,7 +135,7 @@ else
       # blocked and made private. We substitute https://oaitriton.blob.core.windows.net/public/llvm-builds/
       # The pytorch head already has this change, but the pytorch 2.4 does not
       # Patch documentation is at https://github.com/pytorch/pytorch/pull/133694/files
-      patch .github/scripts/build_triton_wheel.py < /tmp/pytorch_build_triton_wheel_py.patch
+      # patch .github/scripts/build_triton_wheel.py < /tmp/pytorch_build_triton_wheel_py.patch
       # The next fix is a ROCm fix. The USE_ROCM define is not passed to the CAFFE2 build
       # https://github.com/pytorch/pytorch/issues/103312
       # We comment out the lines within the USE_ROCM block in the torch/csrc/jit/ir/ir.cpp file
