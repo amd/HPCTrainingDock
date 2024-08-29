@@ -141,13 +141,13 @@ else
       # We comment out the lines within the USE_ROCM block in the torch/csrc/jit/ir/ir.cpp file
       sed -i -e 's/case cuda/\/\/case cuda/' torch/csrc/jit/ir/ir.cpp
       # With the next fix we are preventing Caffe2 from writing into /usr/local/
-      ${SUDO} sed -i '/install(DIRECTORY ${CMAKE_BINARY_DIR}\/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}/s/^/#/g' caffe2/CMakeLists.txt 
-      ${SUDO} sed -i '/FILES_MATCHING PATTERN \"\*\.py")/s/^/#/g' caffe2/CMakeLists.txt
+      sed -i '/install(DIRECTORY ${CMAKE_BINARY_DIR}\/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}/s/^/#/g' caffe2/CMakeLists.txt 
+      sed -i '/FILES_MATCHING PATTERN \"\*\.py")/s/^/#/g' caffe2/CMakeLists.txt
 
-      ${SUDO} pip3 install mkl-static mkl-include 
-      ${SUDO} pip3 install -r requirements.txt
+      pip3 install mkl-static mkl-include 
+      pip3 install -r requirements.txt
       
-      ${SUDO} python3 tools/amd_build/build_amd.py >& /dev/null
+      python3 tools/amd_build/build_amd.py >& /dev/null
       
       echo ""
       echo "===================="
@@ -155,7 +155,7 @@ else
       echo "===================="
       echo ""
       #export CMAKE_PREFIX_PATH=${PYTORCH_INSTALL_DIR}
-      ${SUDO} python setup.py install --prefix=${PYTORCH_INSTALL_DIR}
+      python setup.py install --prefix=${PYTORCH_INSTALL_DIR}
       #python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch
       echo ""
       echo "===================="
