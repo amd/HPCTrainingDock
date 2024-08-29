@@ -11,9 +11,14 @@ if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
 fi
 
+# Autodetect defaults
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
 usage()
 {
    echo "--help: this usage information"
+   echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
    echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/misc/hpctoolkit" 
    echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    exit 1
@@ -35,6 +40,11 @@ n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
+      "--amdgpu-gfxmodel")
+          shift
+          AMDGPU_GFXMODEL=${1}
+          reset-last
+          ;;
       "--build-hpctoolkit")
           shift
           BUILD_HPCTOOLKIT=${1}

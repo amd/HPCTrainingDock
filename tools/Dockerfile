@@ -86,7 +86,7 @@ RUN chmod a+x /docker-entrypoint.sh
 #
 COPY tools/sources/scripts/hpctoolkit_setup.sh /tmp/hpctoolkit_setup.sh
 
-RUN  /tmp/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_HPCTOOLKIT} && \
+RUN  /tmp/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_HPCTOOLKIT} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
      rm /tmp/hpctoolkit_setup.sh
 
 
@@ -95,7 +95,7 @@ RUN  /tmp/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit 
 #
 COPY tools/sources/scripts/tau_setup.sh /tmp/tau_setup.sh
 
-RUN  /tmp/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-tau ${BUILD_TAU} && \
+RUN  /tmp/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-tau ${BUILD_TAU} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
      rm /tmp/tau_setup.sh
 
 
