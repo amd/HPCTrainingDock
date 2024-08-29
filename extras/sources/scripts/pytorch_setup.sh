@@ -130,7 +130,7 @@ else
 
       cd pytorch
       # Pytorch 2.4 needs some patches to build for ROCm
-      # Fix triton build failure due to tritonlang.blob.core.windows.net not available
+      # NOT NEEDED ANYMORE:Fix triton build failure due to tritonlang.blob.core.windows.net not available
       # The download from https://tritonlang.blob.core.windows.net/llvm-builds/ has been
       # blocked and made private. We substitute https://oaitriton.blob.core.windows.net/public/llvm-builds/
       # The pytorch head already has this change, but the pytorch 2.4 does not
@@ -140,6 +140,10 @@ else
       # https://github.com/pytorch/pytorch/issues/103312
       # We comment out the lines within the USE_ROCM block in the torch/csrc/jit/ir/ir.cpp file
       sed -i -e 's/case cuda/\/\/case cuda/' torch/csrc/jit/ir/ir.cpp
+      # With the next fix we are preventing Caffe2 from writing into /usr/local/
+      ${SUDO} sed -i '1920s/^/#/' caffe2/CMakeLists.txt
+      ${SUDO} sed -i '1921s/^/#/' caffe2/CMakeLists.txt
+
       ${SUDO} pip3 install mkl-static mkl-include 
       ${SUDO} pip3 install -r requirements.txt
       
