@@ -129,6 +129,8 @@ else
       done
 
       cd pytorch
+      sed -i '266i os.environ["ROCM_HOME"] = '"${ROCM_HOME}"'' setup.py
+      sed -i '266i os.environ["PYTORCH_ROCM_ARCH"] = '"${PYTORCH_ROCM_ARCH}"'' setup.py
       # Pytorch 2.4 needs some patches to build for ROCm
       # NOT NEEDED ANYMORE:Fix triton build failure due to tritonlang.blob.core.windows.net not available
       # The download from https://tritonlang.blob.core.windows.net/llvm-builds/ has been
