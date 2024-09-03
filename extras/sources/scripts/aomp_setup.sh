@@ -17,10 +17,11 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 
 usage()
 {
-   echo "--build-aomp-latest "
-   echo "--help: this usage information"
-   echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-LatestCompilers/aomp"
-   echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "Usage:"
+   echo "  --build-aomp-latest"
+   echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-LatestCompilers/aomp"
+   echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --help: this usage information"
    exit 1
 }
 

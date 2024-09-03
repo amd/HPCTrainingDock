@@ -12,8 +12,9 @@ fi
 
 usage()
 {
-   echo "--help: this usage information"
-   echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "Usage:"
+   echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --help: this usage information"
    exit 1
 }
 

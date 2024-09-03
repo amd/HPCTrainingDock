@@ -4,9 +4,10 @@ PACKAGE_BASEDIR=""
 
 usage()
 {
-   echo "--package-basedir: directory base for package installation"
-   echo "--selection-string: substring to select packages"
-   echo "--help: this usage information"
+   echo "Usage:"
+   echo "  --package-basedir: directory base for package installation"
+   echo "  --selection-string: substring to select packages"
+   echo "  --help: this usage information"
    exit 1
 }
 

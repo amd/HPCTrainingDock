@@ -9,8 +9,10 @@ send-error()
 
 usage()
 {
-   echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
-   echo "--help: this usage information"
+   echo "Usage:"
+   echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
+   echo "  --help: this usage information"
+   exit 1
 }
 
 reset-last()

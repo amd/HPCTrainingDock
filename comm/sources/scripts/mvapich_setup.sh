@@ -21,13 +21,14 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 
 usage()
 {
-   echo "--dry-run default off"
-   echo "--help: this usage information"
-   echo "--install-path [ INSTALL_PATH ] default /opt/rocmplus-<ROCM_VERSION>/mvapich"
-   echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/mvapich"
-   echo "--replace default off"
-   echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "--rocm-path [ ROCM_PATH ] default /opt/rocm-$ROCM_VERSION"
+   echo "Usage:"
+   echo "  --dry-run default off"
+   echo "  --install-path [ INSTALL_PATH ] default /opt/rocmplus-<ROCM_VERSION>/mvapich"
+   echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/mvapich"
+   echo "  --replace default off"
+   echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --rocm-path [ ROCM_PATH ] default /opt/rocm-$ROCM_VERSION"
+   echo "  --help: this usage information"
    exit 1
 }
 

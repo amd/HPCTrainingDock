@@ -11,14 +11,15 @@ reset-last()
 
 usage()
 {
-   echo "--rocm-version [ ROCM_VERSION ]:  default is $ROCM_VERSION"
-   echo "--rocm-install-path [ ROCM_INSTALL_PATH ]:  default is $ROCM_INSTALLPATH"
-   echo "--python-versions [ PYTHON_VERSIONS ]: default is $PYTHON_VERSIONS"
-   echo "--amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: auto detected using rocminfo"
-   echo "--distro [DISTRO]: auto detected by looking into /etc/os-release "
-   echo "--distro-version [DISTRO_VERSION]: auto detected by looking into /etc/os-release "
-   echo "--use-makefile [0 or 1]: default 0 "
-   echo "--help: prints this message"
+   echo "Usage:"
+   echo "  --rocm-version [ ROCM_VERSION ]:  default is $ROCM_VERSION"
+   echo "  --rocm-install-path [ ROCM_INSTALL_PATH ]:  default is $ROCM_INSTALLPATH"
+   echo "  --python-versions [ PYTHON_VERSIONS ]: default is $PYTHON_VERSIONS"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: auto detected using rocminfo"
+   echo "  --distro [DISTRO]: auto detected by looking into /etc/os-release"
+   echo "  --distro-version [DISTRO_VERSION]: auto detected by looking into /etc/os-release"
+   echo "  --use-makefile [0 or 1]: default 0 "
+   echo "  --help: prints this message"
    exit 1
 }
 
