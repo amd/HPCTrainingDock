@@ -259,14 +259,14 @@ echo "ROCM_PATH after loading module is ${ROCM_PATH}"
 
 if [ "${ROCM_PATH_AFTER_INPUT}" != "${ROCM_PATH}" ]; then
    echo "Mismatch in ROCM_PATH -- after input ${ROCM_PATH_AFTER_INPUT} after module load ${ROCM_PATH}"
-   echo "It is possible that the auto detection of the PATH has picked up a ROCm stack that is not what is loaded by the module"
+   echo "It is possible that the autodetection of the PATH has picked up a ROCm stack that is not what is loaded by the module"
    echo "To make sure the ROCm stack loaded by the module is the one used, specify PATH and VERSION as input"
    echo "Run this script with --help to see what is the right syntax"
 fi
 
 if [ "${ROCM_VERSION_AFTER_INPUT}" != "${ROCM_VERSION}" ]; then
    echo "Mismatch in ROCM_VERSION -- after input ${ROCM_VERSION_AFTER_INPUT} after module load ${ROCM_VERSION}"
-   echo "It is possible that the auto detection of the PATH has picked up a ROCm stack that is not what is loaded by the module"
+   echo "It is possible that the autodetection of the PATH has picked up a ROCm stack that is not what is loaded by the module"
    echo "To make sure the ROCm stack loaded by the module is the one used, specify PATH and VERSION as input"
    echo "Run this script with --help to see what is the right syntax"
 fi
