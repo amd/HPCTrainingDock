@@ -125,11 +125,11 @@ else
 
       export JAX_ROCM_VERSION=$ROCM_VERSION
       
-      git clone --branch rocm-jax-stable-2024_08_07 https://github.com/ROCmSoftwarePlatform/xla.git
+      git clone https://github.com/ROCmSoftwarePlatform/xla.git
       cd xla
       export XLA_PATH=$PWD
       cd ..
-      git clone --branch rocm-jax-stable-2024_08_07 https://github.com/ROCm/jax.git
+      git clone https://github.com/ROCm/jax.git
       cd jax
       
       # install necessary packages in installation directory
