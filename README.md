@@ -33,7 +33,7 @@ singularity shell -e --writable --fakeroot  -H $PWD:/home ${SINGULARITY_DIR_PATH
 
 The above command will take care of several things: the `shell` command allows us to run shell scripts in the `singularity_dir`. The input flag `--fakeroot` will make the use of `sudo` not necessary, and the `-e` flag will clear your environment from anything coming from the host (i.e. the system from which you ae running Singularity commands) before getting on the `singularity_dir` directory. Finally the `-H` option makes your current directory your home directory once in `singularity_dir`.
 
-**NOTE**: changes made to host directories modified while using Singularity  will reflect once exited.
+**NOTE**: Changes made to host directories modified while using Singularity  will reflect once exited.
 
 Once this command has completed, run `bare_metal/main_setup.sh +options` as explained in [Section 2.2](#2.2-training-enviroment-install-on-bare-system).
 
@@ -49,7 +49,7 @@ The above command will create the image `singularity_image.sif` and place it in 
 singularity run -e ${SINGULARITY_DIR_PATH}/singularity_image.sif
 ```
 
-**NOTE**: once again, note that changes made while on the image to the directories from the host that are mirrored to the image will reflect once you exit the image.
+**NOTE**: Once again, note that changes made while on the image to the directories from the host that are mirrored to the image will reflect once you exit the image.
 
 ## 1.4 Operative System Info
 
@@ -65,7 +65,7 @@ Workstation GPUs (may give usable single GPU performance) : `AMD Radeon Pro W680
 
 Desktop GPUs (more limited in memory): `AMD Radeon VII`
 
-**NOTE**: others not listed may work, but have limited support. A [list]( https://llvm.org/docs/AMDGPUUsage.html#processors)
+**NOTE**: Others not listed may work, but have limited support. A [list]( https://llvm.org/docs/AMDGPUUsage.html#processors)
 of AMD GPUs in LLVM docs may help identify compiler support.
 
 # 2. Model Installation Setup Instructions
@@ -88,7 +88,7 @@ Here is a flowchart of the container installation process
 
 This documentation considers version 6.1.0 of ROCm as an example. The ROCm version can be specified at build time as an input flag. 
 
-**NOTE**: with the release of ROCm [6.2](https://github.com/ROCm/ROCm/releases), `Omnitrace` and `Omniperf` are included in the ROCm stack. In the container installation, if `--rocm-versions` includes 6.2, the Omnitrace and Omniperf versions installed are:
+**NOTE**: With the release of ROCm [6.2](https://github.com/ROCm/ROCm/releases), `Omnitrace` and `Omniperf` are included in the ROCm stack. In the container installation, if `--rocm-versions` includes 6.2, the Omnitrace and Omniperf versions installed are:
 
 1. The built-in versions included in the ROCm 6.2 software stack. These can be used by loading: `module load omnitrace/6.2.0`, `module load omniperf/6.2.0`.
 
@@ -109,7 +109,7 @@ To build the four images, run the following command (note that `<admin>` is set 
 
 To visualize all the input flags that can be provided to the script, run: `./build-docker.sh --help`.
 
-**NOTE**: in some OS cases, when launching the installation scripts it may be necessary to explictly include the  `--distro` option to avoid "7 arguments instead of 1" type of errors.
+**NOTE**: In some OS cases, when launching the installation scripts it may be necessary to explictly include the  `--distro` option to avoid "7 arguments instead of 1" type of errors.
 
 To show more docker build output, add this option to the build command above:
 
@@ -185,7 +185,7 @@ To start the container, run:
 docker run -it --device=/dev/kfd --device=/dev/dri --group-add video -p 2222:22 --detach --name Training --rm -v $HOME/Class/training/hostdir:/hostdir --security-opt seccomp=unconfined docker.io/library/training
 ```
 
-**NOTE**: if you are testing the container on a machine that does not have a GPU (such as your laptop), you need to remove the `--device=/dev/kfd` option from the above command. 
+**NOTE**: If you are testing the container on a machine that does not have a GPU (such as your laptop), you need to remove the `--device=/dev/kfd` option from the above command. 
 
 You can check what containers are running by running `docker ps`.
 
@@ -250,7 +250,7 @@ The above command sequence will clone this repo and then execute the `test_insta
 As seen form the image above, setting `--use-makefile 1` option will bypass the installation of the scripts and automatically get you on the container, on which packages can be installed with `make <package>` and then tested with `make <package_tests>`.
 To visualize all the input flags that can be provided to the script, run: `./bare_system/test_install.sh --help`.
 
-If you are satisfied with the test installation, you can proceed with the actual installation on your systemr by doing:
+If you are satisfied with the test installation, you can proceed with the actual installation on your system by doing:
 
 ```bash
 git clone --recursive git@github.com:amd/HPCTrainingDock.git && \
@@ -318,7 +318,7 @@ extras/sources/scripts/kokkos_setup.sh
 
 ```
 
-**NOTE**: As mentioned before, those scripts are the same used by the Docker containers (either the actual Training Docker Container or the Test Docker Container run by `test_install.sh`). The reason why the script work for both installations (bare system and Docker) is because the commands are executed at the `sudo` level. Since Docker is already at the `sudo` level, the instructions in the scripts work in both contexts.
+**NOTE**: As mentioned before, those scripts are the same used by the Docker containers (either the actual training Docker container or the test Docker container run by `test_install.sh`). The reason why the script work for both installations (bare system and Docker) is because the commands are executed at the `sudo` level. Since Docker is already at the `sudo` level, the instructions in the scripts work in both contexts.
 
 
 ### 2.2.1 Alternative installation directory for ROCm
@@ -376,9 +376,7 @@ First, install the Julia installation manager Juliaup:
 
 ```bash
 sudo -s
-
 curl -fsSL https://install.julialang.org | sh
-
 exit
 ```
 
@@ -430,9 +428,9 @@ Now, `module avail` will show this additional module:
 
 # 5. Testing the Installation
 
-A test suite to test the installation of the software is available at: https://github.com/amd/HPCTrainingExamples.git
+A test suite to test the installation of the software is available at https://github.com/amd/HPCTrainingExamples.git
 There are currently two ways to test the success of the installation:
-1. Directly: clone the repo and run the test suiteThis option can be used both with the training container and with the bare system install scripts, with either the `main_setup.sh` (when performing the actual installation) or with the `test_install.sh` (when testing the installation before deployment).
+1. Directly: clone the repo and run the test suite. This option can be used both with the training container and with the bare system install scripts, with either the `main_setup.sh` (when performing the actual installation) or with the `test_install.sh` (when testing the installation before deployment).
 2. With the Makefile build of the test installation: run `make <package>` followed by `make <package_tests>`. Note that this option only applies when doing a test installation using `test_install.sh` and specifying `--use-makefile 1` when launching the script.
 
 ## 5.1 Testing the Installation Directly
@@ -440,11 +438,12 @@ There are currently two ways to test the success of the installation:
 To test the installation directly, do:
 
 ```bash
-git clone https://github.com/amd/HPCTrainingExamples.gitcd HPCTrainingExample/tests
+git clone https://github.com/amd/HPCTrainingExamples.git
+cd HPCTrainingExample/tests
 ./runTests.sh --test
 ```
 
-If no `--test` is specified, all tests will be run. For example, to run OpenMPI tests do:
+If no `--test` is specified, all tests will be run. Depending on the installed software, one may want to run only subset of tests, e.g., to run only OpenMPI tests do:
 
 ```bash
 ./runTests.sh --openmpi 
