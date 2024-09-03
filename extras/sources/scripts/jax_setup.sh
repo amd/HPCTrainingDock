@@ -137,6 +137,11 @@ else
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod a+w /opt/rocmplus-${ROCM_VERSION}/jax
       fi
+
+      # build the wheel
+      python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH --bazel_options=--override_repository=xla=$XLA_PATH --rocm_amdgpu_target=$AMDGPU_GFXMODEL --bazel_options=--action_env=CC=/usr/bin/gcc
+
+      # install the wheel
       pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/jax dist/jaxlib-0.4.32.dev20240903+rocm620-cp310-cp310-manylinux2014_x86_64.whl 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/jax -type f -execdir chown root:root "{}" +
@@ -147,7 +152,8 @@ else
       
       # cleanup
       cd ..
-      rm -rf jax
+      rm -rf /tmp/jax
+      rm -rf /tmp/xla
       module unload rocm/${ROCM_VERSION}
    fi
       
