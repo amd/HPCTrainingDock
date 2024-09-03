@@ -17,7 +17,7 @@ usage()
    echo "  --python-versions [ PYTHON_VERSIONS ]: default is $PYTHON_VERSIONS"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: autodetected using rocminfo"
    echo "  --distro [DISTRO]: autodetected by looking into /etc/os-release"
-   echo "  --distro-version [DISTRO_VERSION]: autodetected by looking into /etc/os-release"
+   echo "  --distro-versions [DISTRO_VERSION]: autodetected by looking into /etc/os-release"
    echo "  --use-makefile [0 or 1]: default 0 "
    echo "  --help: prints this message"
    exit 1
@@ -51,7 +51,7 @@ do
           DISTRO=${1}
           last() { DISTRO="${DISTRO} ${1}"; }
           ;;
-      "--distro-version")
+      "--distro-versions")
           shift
           DISTRO_VERSION=${1}
           last() { DISTRO_VERSION="${DISTRO_VERSION} ${1}"; }
