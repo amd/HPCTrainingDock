@@ -17,10 +17,11 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 
 usage()
 {
-   echo "--help: this usage information"
-   echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
-   echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/misc/hpctoolkit" 
-   echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "Usage:"
+   echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/misc/hpctoolkit"
+   echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
+   echo "  --help: this usage information"
    exit 1
 }
 

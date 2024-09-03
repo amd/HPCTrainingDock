@@ -19,13 +19,14 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 
 usage()
 {
-   echo "--help: this usage information"
-   echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
-   echo "--build-tau: default is 0"
-   echo "--mpi-include: default is an empty string"
-   echo "--mpi-lib: default is an empty string"
-   echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/misc/tau"
-   echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "Usage:"
+   echo "  --build-tau: default is 0"
+   echo "  --mpi-include: default is an empty string"
+   echo "  --mpi-lib: default is an empty string"
+   echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/misc/tau"
+   echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
+   echo "  --help: this usage information"
    exit 1
 }
 

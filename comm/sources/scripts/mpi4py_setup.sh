@@ -16,12 +16,13 @@ LOAD_MODULE="openmpi"
 
 usage()
 {
-   echo "--help: this usage information"
-   echo "--build-mpi4py: default is 0"
-   echo "--load-module [ LOAD_MODULE ] default is ""openmpi"" module"
-   echo "--module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/mpi4py"
-   echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "--mpi-path [MPI_PATH] default is from MPI module"
+   echo "Usage:"
+   echo "  --build-mpi4py: default is 0"
+   echo "  --load-module [ LOAD_MODULE ] default is ""openmpi"" module"
+   echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/mpi4py"
+   echo "  --mpi-path [MPI_PATH] default is from MPI module"
+   echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --help: this usage information"
    exit 1
 }
 
