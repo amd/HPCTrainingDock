@@ -443,7 +443,7 @@ cd HPCTrainingExample/tests
 ./runTests.sh --test
 ```
 
-If no `--test` is specified, all tests will be run. Depending on the installed software, one may want to run only subset of tests, e.g., to run only OpenMPI tests do:
+If no `--test` is specified, all tests will be run. Depending on the installed software, one may want to run only a subset of the tests, e.g., to run only OpenMPI tests do:
 
 ```bash
 ./runTests.sh --openmpi 
@@ -481,4 +481,4 @@ This make command tars up the `rocm-6.1.2` directory and then the next build it 
 
 # 7. Feedback and Contributions
 
-We very much welcome user experience and feedback, please feel free to reach out to us by creating pull requests of opening issues if you consider it necessary. We will get back to you as soon as possible. For information on licenses, please see the `LICENSE.md` file.
+We very much welcome user experience and feedback, please feel free to reach out to us by creating pull requests or opening issues if you consider it necessary. We will get back to you as soon as possible. For information on licenses, please see the `LICENSE.md` file.
