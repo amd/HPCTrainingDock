@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
-all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau
-.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau
+all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax
+.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
@@ -17,6 +17,7 @@ mpi4py: mpi4py.timestamp
 hpctoolkit: hpctoolkit.timestamp
 cupy: cupy.timestamp
 pytorch: pytorch.timestamp
+jax: jax.timestamp
 apps_setup: apps_setup.timestamp
 
 checkSystemConfig: checkSystemConfig.timestamp
@@ -35,6 +36,7 @@ mpi4py_tests: mpi4py_tests.timestamp
 hpctoolkit_tests: hpctoolkit_tests.timestamp
 cupy_tests: cupy_tests.timestamp
 pytorch_tests: pytorch_tests.timestamp
+jax_tests: jax_tests.timestamp
 
 rocm_package: rocm_package.timestamp
 openmpi_package: openmpi_package.timestamp
@@ -156,6 +158,13 @@ pytorch.timestamp: rocm.timestamp
 	   --build-pytorch ${BUILD_PYTORCH}
 	touch pytorch.timestamp
 
+jax.timestamp: rocm.timestamp
+	extras/sources/scripts/jax_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
+	   --build-jax ${BUILD_JAX}
+	touch jax.timestamp
+
 apps_setup.timestamp:
 	extras/sources/scripts/apps_setup.sh
 	touch apps_basic.timestamp
@@ -226,6 +235,9 @@ pytorch_tests.timestamp: pytorch.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Pytorch
 	touch pytorch_tests.timestamp
 
+jax_tests.timestamp: jax.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R JAX
+	touch jax_tests.timestamp
 
 # Deploy targets create a compressed tar image of the directory for the package
 rocm_package.timestamp: rocm.timestamp

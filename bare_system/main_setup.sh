@@ -4,6 +4,7 @@
 : ${ROCM_INSTALLPATH:="/opt/"}
 : ${BUILD_PYTORCH:="1"}
 : ${BUILD_CUPY:="1"}
+: ${BUILD_JAX:="1"}
 : ${BUILD_KOKKOS:="1"}
 : ${BUILD_HPCTOOLKIT:="1"}
 : ${BUILD_MPI4PY:="1"}
@@ -130,6 +131,8 @@ extras/sources/scripts/compiler_setup.sh
 extras/sources/scripts/apps_setup_basic.sh
 
 extras/sources/scripts/cupy_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-cupy ${BUILD_CUPY} 
+
+extras/sources/scripts/jax_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-jax ${BUILD_JAX} 
 
 extras/sources/scripts/pytorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-pytorch ${BUILD_PYTORCH}
 
