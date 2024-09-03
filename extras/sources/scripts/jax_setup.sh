@@ -138,6 +138,15 @@ else
          ${SUDO} chmod a+w /opt/rocmplus-${ROCM_VERSION}/jax
       fi
 
+      if [[ `which python | wc -l` -eq 0 ]]; then
+         echo "============================"
+	 echo "WARNING: pyhton needs to be linked to python3 for the build to work"
+	 echo ".....Installing python-is-python3......"
+         echo "============================"
+	 ${SUDO} apt-get update
+         ${SUDO} apt-get install -y python-is-python3
+      fi
+
       # build the wheel
       python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH --bazel_options=--override_repository=xla=$XLA_PATH --rocm_amdgpu_target=$AMDGPU_GFXMODEL --bazel_options=--action_env=CC=/usr/bin/gcc
 

@@ -43,7 +43,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
       gcc g++ gfortran ninja-build
 
 # Install python packages
-   ${SUDO} ${DEB_FRONTEND} apt-get install -q -y python3-pip python3-dev python3-venv pyhton-is-python3
+   ${SUDO} ${DEB_FRONTEND} apt-get install -q -y python3-pip python3-dev python3-venv
 
    ${SUDO} localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
 fi
