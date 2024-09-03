@@ -73,7 +73,7 @@ do
    shift
 done
 
-# Load the ROCm version for this CuPy build
+# Load the ROCm version for this JAX build
 source /etc/profile.d/lmod.sh
 source /etc/profile.d/z01_lmod.sh
 module load rocm/${ROCM_VERSION}
@@ -125,11 +125,11 @@ else
 
       export JAX_ROCM_VERSION=$ROCM_VERSION
       
-      git clone --recursive --depth 1 --branch rocm-xla-stable-2024_08_07 https://github.com/ROCmSoftwarePlatform/xla.git
+      git clone --branch rocm-jax-stable-2024_08_07 https://github.com/ROCmSoftwarePlatform/xla.git
       cd xla
       export XLA_PATH=$PWD
       cd ..
-      git clone --recursive --depth 1 --branch rocm-jax-stable-2024_08_07 https://github.com/ROCm/jax.git  
+      git clone --branch rocm-jax-stable-2024_08_07 https://github.com/ROCm/jax.git
       cd jax
       
       # install necessary packages in installation directory
