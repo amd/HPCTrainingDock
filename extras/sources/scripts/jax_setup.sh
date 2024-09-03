@@ -127,10 +127,12 @@ else
       
       git clone https://github.com/ROCmSoftwarePlatform/xla.git
       cd xla
+      git reset --hard 8d53a6c61429310b561f17e08a35d90486055d64
       export XLA_PATH=$PWD
       cd ..
       git clone https://github.com/ROCm/jax.git
       cd jax
+      git reset --hard 644ac10c92c38bfbeb87ba5698084757a80408a5
       
       # install necessary packages in installation directory
       ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/jax
@@ -175,7 +177,7 @@ else
 	whatis("JAX with ROCm support")
 
 	load("rocm/${ROCM_VERSION}")
-	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/jax")
+	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}")
 EOF
 
 fi
