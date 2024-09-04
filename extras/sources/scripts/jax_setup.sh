@@ -123,8 +123,9 @@ else
       echo "============================"
       echo ""
 
-      export JAX_ROCM_VERSION=$ROCM_VERSION
-      
+      ${SUDO} pip3 install build
+      export JAX_PLATFORMS="rocm,cpu"
+
       git clone --branch rocm-jaxlib-v0.4.30 https://github.com/ROCm/xla.git
       cd xla
       export XLA_PATH=$PWD
@@ -150,7 +151,12 @@ else
       fi
 
       # build the wheel for jaxlib
-      python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH --bazel_options=--override_repository=xla=$XLA_PATH --rocm_amdgpu_target=$AMDGPU_GFXMODEL --bazel_options=--action_env=CC=/usr/bin/gcc
+      python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
+	                     --bazel_options=--override_repository=xla=$XLA_PATH \
+			     --rocm_amdgpu_target=$AMDGPU_GFXMODEL \
+			     --bazel_options=--action_env=CC=/usr/bin/gcc \
+			     --bazel_options=--jobs=128 \
+			     --bazel_startup_options=--host_jvm_args=-Xmx512m
 
       # install the wheel for jaxlib
       pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/jaxlib dist/jaxlib-*.whl
@@ -185,6 +191,7 @@ else
 
 	load("rocm/${ROCM_VERSION}")
 	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/jaxlib")
+	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/jax")
 EOF
 
 fi
