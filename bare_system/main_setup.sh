@@ -143,7 +143,8 @@ extras/sources/scripts/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-ko
 
 #If ROCm should be installed in a different location
 if [ "${ROCM_INSTALLPATH}" != "/opt/" ]; then
-   ${SUDO} mv /opt/rocm-${ROCM_VERSION}/ ${ROCM_INSTALLPATH}
+   ${SUDO} mv /opt/rocm-${ROCM_VERSION} ${ROCM_INSTALLPATH}
+   ${SUDO} mv /opt/rocmplus-${ROCM_VERSION} ${ROCM_INSTALLPATH}
    ${SUDO} ln -sfn ${ROCM_INSTALLPATH}/rocm-${ROCM_VERSION} /etc/alternatives/rocm
    ${SUDO} sed -i "s|\/opt\/|${ROCM_INSTALLPATH}|" /etc/lmod/modules/ROCm/*/*.lua
 fi
