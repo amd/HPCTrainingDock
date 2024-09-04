@@ -125,7 +125,7 @@ else
 
       export JAX_ROCM_VERSION=$ROCM_VERSION
       
-      git clone --branch rocm-jaxlib-v0.4.30 https://github.com/ROCmSoftwarePlatform/xla.git
+      git clone --branch rocm-jaxlib-v0.4.30 https://github.com/ROCm/xla.git
       cd xla
       export XLA_PATH=$PWD
       cd ..
