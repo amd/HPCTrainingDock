@@ -190,8 +190,8 @@ else
 	whatis("JAX with ROCm support")
 
 	load("rocm/${ROCM_VERSION}")
-	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/jaxlib")
 	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/jax")
+	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/jaxlib")
 EOF
 
 fi
