@@ -119,7 +119,7 @@ else
    else
       echo ""
       echo "============================"
-      echo " Building JAX"
+      echo " Building JAXLIB and JAX"
       echo "============================"
       echo ""
 
@@ -135,8 +135,10 @@ else
       git reset --hard 644ac10c92c38bfbeb87ba5698084757a80408a5
       
       # install necessary packages in installation directory
+      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/jaxlib
       ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/jax
       if [[ "${USER}" != "root" ]]; then
+         ${SUDO} chmod a+w /opt/rocmplus-${ROCM_VERSION}/jaxlib
          ${SUDO} chmod a+w /opt/rocmplus-${ROCM_VERSION}/jax
       fi
 
@@ -149,18 +151,25 @@ else
          ${SUDO} apt-get install -y python-is-python3
       fi
 
-      # build the wheel
+      # build the wheel for jaxlib
       python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH --bazel_options=--override_repository=xla=$XLA_PATH --rocm_amdgpu_target=$AMDGPU_GFXMODEL --bazel_options=--action_env=CC=/usr/bin/gcc
 
-      # install the wheel
-      pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/jax dist/jaxlib-0.4.32.dev20240903+rocm620-cp310-cp310-manylinux2014_x86_64.whl 
+      # install the wheel for jaxlib
+      pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/jaxlib dist/jaxlib-*.whl
+
+      # next we need to install the jax python module
+      pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/jax jax==0.4.31
+
       if [[ "${USER}" != "root" ]]; then
+         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/jaxlib -type f -execdir chown root:root "{}" +
+         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/jaxlib -type d -execdir chown root:root "{}" +
          ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/jax -type f -execdir chown root:root "{}" +
          ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/jax -type d -execdir chown root:root "{}" +
 
+         ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}/jaxlib
          ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}/jax
       fi
-      
+
       # cleanup
       cd ..
       rm -rf /tmp/jax
@@ -177,8 +186,8 @@ else
 	whatis("JAX with ROCm support")
 
 	load("rocm/${ROCM_VERSION}")
+	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/jaxlib")
 	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/jax")
-	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}")
 EOF
 
 fi
