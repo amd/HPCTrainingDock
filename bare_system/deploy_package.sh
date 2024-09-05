@@ -87,7 +87,7 @@ for package in `find . -maxdepth 1 -type d `; do
          echo "SIZE of $package: $PACKAGE_SIZE" >> /tmp/InstallLog.txt
 
          cat /tmp/InstallLog.txt
-         ${SUDO} cat /tmp/InstallLog.txt >> ${CACHE_DIR}/InstallLog.txt
+	 echo "$(cat /tmp/InstallLog.txt)" | ${SUDO} tee -a ${CACHE_DIR}/InstallLog.txt > /dev/null
       else
          echo "${CACHE_DIR}/${package}.tgz already exists"
       fi
