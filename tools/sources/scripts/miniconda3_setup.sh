@@ -47,7 +47,7 @@ if [ "${DISTRO}" = "ubuntu" ] ; then
     conda config --set always_yes yes --set changeps1 no 
     conda update -c defaults -n base conda 
     for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c defaults -c conda-forge python=3.${i} pip; done 
-    for i in ${PYTHON_VERSIONS}; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+    for i in ${PYTHON_VERSIONS}; do /opt/miniconda3/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
     conda clean -a -y 
     rm -f /tmp/miniconda-installer.sh
 fi
