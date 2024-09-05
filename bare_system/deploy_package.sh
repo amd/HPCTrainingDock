@@ -2,6 +2,13 @@
 SELECTION_STRING=""
 PACKAGE_BASEDIR=""
 
+SUDO="sudo"
+
+if [  -f /.singularity.d/Singularity ]; then
+   SUDO=""
+fi
+
+
 usage()
 {
    echo "Usage:"
@@ -69,7 +76,7 @@ for package in `find . -maxdepth 1 -type d `; do
       CACHE_DIR=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
       if [ ! -f "${CACHE_DIR}/${package}.tgz" ]; then
          echo "Packing up $package"
-         tar -czvpf ${CACHE_DIR}/${package}.tgz ${package}
+         ${SUDO} tar -czvpf ${CACHE_DIR}/${package}.tgz ${package}
          echo "" > /tmp/InstallLog.txt
          echo "Package $package built on " `date` >> /tmp/InstallLog.txt
          PACKAGE_MD5SUM=`md5sum ${CACHE_DIR}/${package}.tgz`
@@ -80,7 +87,7 @@ for package in `find . -maxdepth 1 -type d `; do
          echo "SIZE of $package: $PACKAGE_SIZE" >> /tmp/InstallLog.txt
 
          cat /tmp/InstallLog.txt
-         cat /tmp/InstallLog.txt >> ${CACHE_DIR}/InstallLog.txt
+         ${SUDO} cat /tmp/InstallLog.txt >> ${CACHE_DIR}/InstallLog.txt
       else
          echo "${CACHE_DIR}/${package}.tgz already exists"
       fi
