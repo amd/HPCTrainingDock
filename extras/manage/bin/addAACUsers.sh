@@ -14,8 +14,6 @@ Help()
    echo
 }
 
-source userlist.sh
-
 SHARED="/datasets/teams/hackathon-testing"
 #SHARED="/home"
 
@@ -24,6 +22,8 @@ SHARED="/datasets/teams/hackathon-testing"
 
 HACKATHONBASEUSER=12050
 HACKATHONGROUP=12000
+
+source userlist.sh
 
 i=0
 
