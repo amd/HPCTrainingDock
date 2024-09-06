@@ -439,7 +439,7 @@ To test the installation directly, do:
 
 ```bash
 git clone https://github.com/amd/HPCTrainingExamples.git
-cd HPCTrainingExample/tests
+cd HPCTrainingExamples/tests
 ./runTests.sh --test
 ```
 
