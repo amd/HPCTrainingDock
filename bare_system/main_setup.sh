@@ -125,7 +125,7 @@ tools/sources/scripts/omniperf_setup.sh --rocm-version ${ROCM_VERSION}
 
 tools/sources/scripts/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_HPCTOOLKIT}
 
-tools/sources/scripts/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_TAU}
+tools/sources/scripts/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-tau ${BUILD_TAU}
 
 extras/sources/scripts/compiler_setup.sh
 
