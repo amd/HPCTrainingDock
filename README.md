@@ -307,6 +307,9 @@ extras/sources/scripts/apps_setup_basic.sh
 // install CuPy and create CuPy module
 extras/sources/scripts/cupy_setup.sh 
 
+// install JAX and create JAX module
+extras/sources/scripts/jax_setup.sh 
+
 // install PyTorch and create PyTorch module
 extras/sources/scripts/pytorch_setup.sh 
 
@@ -350,7 +353,7 @@ omniperf/2.0.0 omnitrace/1.11.2
 --------------------------------------------------------- /etc/lmod/modules/ROCmPlus-LatestCompilers ---------------------------------------------------------
 amd-gcc/13.2.0 aomp/amdclang-19.0
 --------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-AI ----------------------------------------------------------------
-cupy/13.0.0b1 pytorch/2.2
+cupy/13.0.0b1 pytorch/2.4 /jax/0.4.30
 ------------------------------------------------------------------- /etc/lmod/modules/misc -------------------------------------------------------------------
 kokkos/4.3.1 hpctoolkit/dev  tau/dev
 -------------------------------------------------------------- /usr/share/lmod/lmod/modulefiles --------------------------------------------------------------
