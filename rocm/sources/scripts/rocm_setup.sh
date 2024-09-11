@@ -10,17 +10,19 @@ REPLACE=0
 # Autodetect defaults
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-if [ "${DISTRO}" == "rocky linux" ]; then
-   ROCM_REPO_DIST=${DISTRO_VERSION}
-else
-   ROCM_REPO_DIST=`lsb_release -c | cut -f2`
-fi
+#if [ "${DISTRO}" == "rocky linux" ]; then
+#   ROCM_REPO_DIST=${DISTRO_VERSION}
+#else
+#   ROCM_REPO_DIST=`lsb_release -c | cut -f2`
+#fi
 DISTRO_CODENAME=`cat /etc/os-release | grep '^VERSION_CODENAME' | sed -e 's/VERSION_CODENAME=//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 SUDO="sudo"
+DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
+   DEB_FRONTEND=""
 fi
 
 
@@ -341,7 +343,7 @@ if [ "${DISTRO}" == "ubuntu" ]; then
       wget -q https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/${DISTRO}/${ROCM_REPO_DIST}/amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
 
       # Run the amdgpu-install script. We have already installed the kernel driver, so use we use --no-dkms
-      ${SUDO} apt-get install -q -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+      ${SUDO} ${DEB_FRONTEND} apt-get install -q -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
 # if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
 # if ROCM_VERSION is less than or equalt to 6.1.2, the awk command result will be blank
       result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result

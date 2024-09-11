@@ -4,9 +4,11 @@
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 SUDO="sudo"
+DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
+   DEB_FRONTEND=""
 fi
 
 
@@ -77,7 +79,7 @@ if [[ -f /opt/rocm-${ROCM_VERSION}/bin/omnitrace ]] ; then
 fi
 
 if [ "${DISTRO}" == "ubuntu" ]; then
-   ${SUDO} apt-get install -q -y omnitrace
+   ${SUDO} ${DEB_FRONTEND} apt-get install -q -y omnitrace
 fi
 
 if [[ -f /opt/rocm-${ROCM_VERSION}/bin/omnitrace ]] ; then
