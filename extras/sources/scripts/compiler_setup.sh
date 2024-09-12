@@ -55,13 +55,13 @@ ${SUDO} update-alternatives \
       --slave   /usr/bin/gcov     gcov     /usr/bin/gcov-13        \
       --slave   /usr/lib/libstdc++.so libstdc++.so /usr/lib/gcc/x86_64-linux-gnu/13/libstdc++.so
 
-${SUDO} apt-get -qy install gcc-11-offload-amdgcn
-${SUDO} apt-get -qy install gcc-12-offload-amdgcn
-${SUDO} apt-get -qy install gcc-13-offload-amdgcn
+${SUDO} ${DEB_FRONTEND} apt-get -qy install gcc-11-offload-amdgcn
+${SUDO} ${DEB_FRONTEND} apt-get -qy install gcc-12-offload-amdgcn
+${SUDO} ${DEB_FRONTEND} apt-get -qy install gcc-13-offload-amdgcn
 
-${SUDO} apt-get -qq install clang libomp-14-dev
+${SUDO} ${DEB_FRONTEND} apt-get -qq install clang libomp-14-dev
 #${SUDO} apt-get -qq update && ${SUDO} apt-get -q install -y clang-14 libomp-14-dev
-${SUDO} apt-get -qq update && ${SUDO} apt-get -q install -y clang-15 libomp-15-dev
+${SUDO} apt-get -qq update && ${SUDO} ${DEB_FRONTEND} apt-get -q install -y clang-15 libomp-15-dev
 
 ${SUDO} update-alternatives \
       --install /usr/bin/clang     clang     /usr/bin/clang-14      70 \

@@ -3,9 +3,11 @@
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 BUILD_PYTORCH=0
 SUDO="sudo"
+DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
+   DEB_FRONTEND=""
 fi
 
 n=0
@@ -80,8 +82,8 @@ else
       #module load openmpi
 
       ${SUDO} apt-get update
-      ${SUDO} apt-get install -y python-is-python3
-      ${SUDO} apt-get install -y libopenmpi-dev
+      ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
+      ${SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
       
       # unset environment variables that are not needed for pytorch
       unset BUILD_AOMP_LATEST
