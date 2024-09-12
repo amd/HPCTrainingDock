@@ -123,7 +123,8 @@ else
       echo "============================"
       echo ""
 
-      ${SUDO} pip3 install build
+      export PYTHONPATH=/usr/local/lib/python3.10/dist-packages:$PYTHONPATH
+      pip3 install build
       export JAX_PLATFORMS="rocm,cpu"
 
       git clone --branch rocm-jaxlib-v0.4.30 https://github.com/ROCm/xla.git
