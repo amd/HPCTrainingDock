@@ -166,8 +166,19 @@ else
       git clone https://github.com/UO-OACISS/tau2.git
       cd tau2
 
-      # note: roctracer and pdt are currently excluded because they make the installation break
-      ${SUDO} ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=/usr/lib -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -mpi -ompt -openmp -rocmsmi=$ROCM_PATH -pdt=${PDT_PATH}
+      # install third pary dependencies
+      wget http://tau.uoregon.edu/ext.tgz
+
+      ${SUDO} tar zxf ext.tgz
+
+      # install OpenMPI if not in the system already
+      if [[ `which mpicc | wc -l` -eq 0 ]]; then
+         ${SUDO} apt-get update
+         ${SUDO} apt-get install libopenmpi-dev
+      fi
+
+      # note: roctracer is currently excluded because they make the installation break
+      ${SUDO} ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -mpi -ompt -openmp -rocmsmi=$ROCM_PATH -pdt=${PDT_PATH} -iowrapper
 
       ${SUDO} make install
 
@@ -199,6 +210,7 @@ else
 	whatis(" TAU - portable profiling and tracing toolkit ") 
 
 	prepend_path("PATH","${TAU_PATH}/x86_64/bin")
+	setenv("TAU_LIB","${TAU_PATH}/x86_64/lib")
 EOF
 
 fi
