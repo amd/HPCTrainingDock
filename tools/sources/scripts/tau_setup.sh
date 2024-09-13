@@ -174,7 +174,7 @@ else
       # install OpenMPI if not in the system already
       if [[ `which mpicc | wc -l` -eq 0 ]]; then
          ${SUDO} apt-get update
-         ${SUDO} apt-get install libopenmpi-dev
+         ${SUDO} apt-get install -q -y libopenmpi-dev
       fi
 
       # note: roctracer is currently excluded because they make the installation break
