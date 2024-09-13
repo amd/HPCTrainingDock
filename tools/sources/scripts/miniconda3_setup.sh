@@ -34,7 +34,7 @@ echo ""
 echo "============================"
 echo " Installing Miniconda3 with:"
 echo "ROCM_VERSION is $ROCM_VERSION"
-echo "PYTHON_VERSIONS is $PYTHON_VERSIONS"
+echo "PYTHON_VERSIONS (Python 3 minor releases) is $PYTHON_VERSIONS"
 echo "============================"
 echo ""
 

@@ -14,7 +14,7 @@ usage()
    echo "Usage:"
    echo "  --rocm-version [ ROCM_VERSION ]:  default is $ROCM_VERSION"
    echo "  --rocm-install-path [ ROCM_INSTALL_PATH ]:  default is $ROCM_INSTALLPATH"
-   echo "  --python-versions [ PYTHON_VERSIONS ]: default is $PYTHON_VERSIONS"
+   echo "  --python-versions [ PYTHON_VERSIONS ]: Python 3 minor releases, default is $PYTHON_VERSIONS"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: autodetected using rocminfo"
    echo "  --distro [DISTRO]: autodetected by looking into /etc/os-release"
    echo "  --distro-versions [DISTRO_VERSION]: autodetected by looking into /etc/os-release"

@@ -12,7 +12,7 @@
 : ${USE_MAKEFILE:="0"}
 
 OMNITRACE_BUILD_FROM_SOURCE=0
-PYTHON_VERSIONS="9 10"
+PYTHON_VERSIONS="9 10" # Python 3 minor releases
 SUDO="sudo"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -29,7 +29,7 @@ usage()
    echo "Usage:"
    echo "  --rocm-version [ ROCM_VERSIONS ]:  default is $ROCM_VERSIONS"
    echo "  --rocm-install-path [ ROCM_INSTALL_PATH ]:  default is $ROCM_INSTALLPATH"
-   echo "  --python-versions [ PYTHON_VERSIONS ]: default is $PYTHON_VERSIONS"
+   echo "  --python-versions [ PYTHON_VERSIONS ]: Python 3 minor releases, default is $PYTHON_VERSIONS"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: if not provided, rocminfo is used to assign a value" 
    echo "  --omnitrace-build-from-source [0 or 1]:  default is 0 (false)"
    echo "  --use-makefile [0 or 1]:  default is 0 (false)"
