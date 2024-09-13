@@ -3,6 +3,7 @@
 : ${ROCM_VERSION:="6.0"}
 : ${ROCM_INSTALLPATH:="/opt/"}
 : ${USE_MAKEFILE:="0"}
+: ${IMAGE_NAME:="bare"}
 
 reset-last()
 {
@@ -18,6 +19,7 @@ usage()
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: autodetected using rocminfo"
    echo "  --distro [DISTRO]: autodetected by looking into /etc/os-release"
    echo "  --distro-versions [DISTRO_VERSION]: autodetected by looking into /etc/os-release"
+   echo "  --image-name [IMAGE_NAME]: Docker image name, default is $IMAGE_NAME"
    echo "  --use-makefile [0 or 1]: default 0 "
    echo "  --help: prints this message"
    exit 1
@@ -42,10 +44,10 @@ do
           reset-last
           ;;
       "--amdgpu-gfxmodel")
-            shift
-            AMDGPU_GFXMODEL=${1}
-            reset-last
-            ;;
+          shift
+          AMDGPU_GFXMODEL=${1}
+          reset-last
+          ;;
       "--distro")
           shift
           DISTRO=${1}
@@ -55,6 +57,11 @@ do
           shift
           DISTRO_VERSION=${1}
           last() { DISTRO_VERSION="${DISTRO_VERSION} ${1}"; }
+          ;;
+      "--image-name")
+          shift
+          IMAGE_NAME=${1}
+          reset-last
           ;;
       "--use-makefile")
           shift
@@ -93,7 +100,8 @@ docker build --no-cache ${ADD_OPTIONS} \
              --build-arg ROCM_INSTALLPATH=${ROCM_INSTALLPATH} \
              --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
              --build-arg USE_MAKEFILE=${USE_MAKEFILE} \
-             -t bare -f bare_system/Dockerfile .
+             -t ${IMAGE_NAME} \
+	     -f bare_system/Dockerfile .
 
 ADD_OPTIONS=""
 
@@ -123,4 +131,4 @@ echo "PORT_NUMBER is ${PORT_NUMBER}"
 docker run -it --device=/dev/kfd --device=/dev/dri \
     --group-add video --group-add render ${ADD_OPTIONS} \
     -p ${PORT_NUMBER}:22 --name ${NAME}  --security-opt seccomp=unconfined \
-    --rm -v $PWD/CacheFiles:/CacheFiles bare
+    --rm -v $PWD/CacheFiles:/CacheFiles ${IMAGE_NAME}
