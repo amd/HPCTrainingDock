@@ -63,7 +63,7 @@ if [ "${DISTRO}" = "rocky linux" ]; then
    ${SUDO} yum clean all
 fi
 
-if [[ `which python3-pip | wc -l` -ge 1 ]]; then
+if [[ `which pip3 | wc -l` -ge 1 ]]; then
    ${SUDO} python3 -m pip install 'cmake==3.28.3'
 else
    # Instructions from https://apt.kitware.com/
