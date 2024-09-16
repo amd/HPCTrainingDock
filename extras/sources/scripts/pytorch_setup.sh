@@ -103,6 +103,7 @@ else
       
       export _GLIBCXX_USE_CXX11_ABI=1
       export ROCM_HOME=${ROCM_PATH}
+      export ROCM_SOURCE_DIR=${ROCM_PATH}
       export USE_ROCM=1
       export USE_CUDA=0
       export MAX_JOBS=20
