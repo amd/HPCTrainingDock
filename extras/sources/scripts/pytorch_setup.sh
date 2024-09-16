@@ -134,6 +134,7 @@ else
       cd pytorch
       if [[ "${USER}" == "root" ]]; then
          sed -i '266i os.environ["ROCM_HOME"] = '"${ROCM_HOME}"'' setup.py
+         sed -i '266i os.environ["ROCM_SOURCE_DIR"] = '"${ROCM_SOURCE_DIR}"'' setup.py
          sed -i '266i os.environ["PYTORCH_ROCM_ARCH"] = '"${PYTORCH_ROCM_ARCH}"'' setup.py
       fi
       # Pytorch 2.4 needs some patches to build for ROCm
