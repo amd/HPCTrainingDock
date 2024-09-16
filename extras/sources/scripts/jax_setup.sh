@@ -183,7 +183,7 @@ else
    ${SUDO} mkdir -p ${MODULE_PATH}
    
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/0.4.30.dev.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/0.4.32.dev.lua
 	whatis("JAX with ROCm support")
 
 	load("rocm/${ROCM_VERSION}")
