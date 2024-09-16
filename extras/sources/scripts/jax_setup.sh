@@ -127,19 +127,19 @@ else
       pip3 install build
       export JAX_PLATFORMS="rocm,cpu"
 
-      git clone --branch rocm-jaxlib-v0.4.30 https://github.com/ROCm/xla.git
+      git clone https://github.com/ROCm/xla.git
       cd xla
+      git reset --hard 8d53a6c61429310b561f17e08a35d90486055d64
       export XLA_PATH=$PWD
       cd ..
-      git clone --branch rocm-jaxlib-v0.4.30 https://github.com/ROCm/jax.git
+      git clone https://github.com/ROCm/jax.git
       cd jax
+      git reset --hard 644ac10c92c38bfbeb87ba5698084757a80408a5 
       
       # install necessary packages in installation directory
       ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/jaxlib
-      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/jax
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod a+w /opt/rocmplus-${ROCM_VERSION}/jaxlib
-         ${SUDO} chmod a+w /opt/rocmplus-${ROCM_VERSION}/jax
       fi
 
       if [[ `which python | wc -l` -eq 0 ]]; then
@@ -155,30 +155,28 @@ else
       python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
 	                     --bazel_options=--override_repository=xla=$XLA_PATH \
 			     --rocm_amdgpu_target=$AMDGPU_GFXMODEL \
-			     --bazel_options=--action_env=CC=/usr/bin/gcc \
+			     --bazel_options=--action_env=CC=/usr/bin/gcc --nouse_clang \
+			     --build_gpu_plugin --gpu_plugin_rocm_version=60 --build_gpu_kernel_plugin=rocm \
 			     --bazel_options=--jobs=128 \
 			     --bazel_startup_options=--host_jvm_args=-Xmx512m
 
       # install the wheel for jaxlib
-      pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/jaxlib dist/jaxlib-*.whl
+      pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/jaxlib dist/jax*.whl
 
       # next we need to install the jax python module
-      pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/jax jax==0.4.30
+      sudo pip3 install --target=/opt/rocmplus-${ROCM_VERSION}/jax .
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/jaxlib -type f -execdir chown root:root "{}" +
          ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/jaxlib -type d -execdir chown root:root "{}" +
-         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/jax -type f -execdir chown root:root "{}" +
-         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/jax -type d -execdir chown root:root "{}" +
 
          ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}/jaxlib
-         ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}/jax
       fi
 
       # cleanup
       cd ..
-      rm -rf /tmp/jax
-      rm -rf /tmp/xla
+      ${SUDO} rm -rf /tmp/jax
+      ${SUDO} rm -rf /tmp/xla
       module unload rocm/${ROCM_VERSION}
    fi
       
