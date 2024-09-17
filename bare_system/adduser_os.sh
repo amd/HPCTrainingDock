@@ -39,16 +39,9 @@ fi
 
 if [ "${DISTRO}" = "opensuse leap" ]; then
    useradd --create-home --user-group --home-dir /home/sysadmin --uid 20000 --shell /bin/bash sysadmin
-   # not working yet
-   #echo '%wheel ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
-#  cp /etc/sudoers /tmp
-   #echo '%wheel ALL=(ALL) NOPASSWD:ALL' | EDITOR='tee -a' visudo
+   # Need to install the system-group-wheel package -- see bootstrap_os.sh script
+   usermod -a -G wheel,video,render sysadmin
    echo '/^#\s*\%wheel\s*ALL=(ALL:ALL)\s*NOPASSWD/s/^#\s*//' | EDITOR='sed -f- -i' visudo
-   #usermod -a -G video,render,wheel sysadmin
-   usermod -a -G video,render sysadmin
-#  echo "Changed lines"
-#  echo "============="
-#  diff /etc/sudoers /tmp
-#  echo "============="
+   #groups sysadmin
    #cat /etc/sudoers
 fi

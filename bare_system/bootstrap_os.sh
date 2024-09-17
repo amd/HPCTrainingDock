@@ -24,5 +24,5 @@ fi
 if [ "${DISTRO}" = "opensuse leap" ]; then
    zypper update -y
    zypper dist-upgrade -y
-   zypper --non-interactive in ${SUDO} vim make
+   zypper --non-interactive in ${SUDO} vim make system-group-wheel
 fi

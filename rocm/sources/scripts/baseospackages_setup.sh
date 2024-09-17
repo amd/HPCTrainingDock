@@ -63,9 +63,7 @@ if [ "${DISTRO}" = "rocky linux" ]; then
    ${SUDO} yum clean all
 fi
 
-if [[ `which pip3 | wc -l` -ge 1 ]]; then
-   ${SUDO} python3 -m pip install 'cmake==3.28.3'
-else
+if [[ "${DISTRO}" == "ubuntu" ]]; then
    # Instructions from https://apt.kitware.com/
    # Remove standard version installed with ubuntu packages
    ${SUDO} apt-get purge --auto-remove -y cmake
@@ -90,4 +88,6 @@ else
    ${SUDO} ${DEB_FRONTEND} apt-get install -y cmake
    CMAKE_VERSION=`cmake --version`
    echo "Installed latest version of cmake ($CMAKE_VERSION)"
+else
+   ${SUDO} python3 -m pip install 'cmake==3.28.3'
 fi

@@ -27,6 +27,7 @@ ARG BUILD_CLACC_LATEST
 ARG BUILD_PYTORCH
 ARG BUILD_CUPY
 ARG BUILD_KOKKOS
+ARG BUILD_JAX
 ARG USE_CACHED_APPS
 ARG AMDGPU_GFXMODEL=gfx90a
 ARG PYTHON_VERSIONS
@@ -137,6 +138,14 @@ RUN /tmp/cupy_setup.sh --build-cupy ${BUILD_CUPY} --rocm-version ${ROCM_VERSION}
 
 WORKDIR /app 
 
+#
+# Install jax 
+#
+COPY extras/sources/scripts/jax_setup.sh /tmp/jax_setup.sh
+
+RUN /tmp/jax_setup.sh --build-jax ${BUILD_JAX} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/jax_setup.sh
+
+WORKDIR /app 
 #
 # Install pytorch
 #
