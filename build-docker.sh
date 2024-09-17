@@ -289,11 +289,11 @@ ROCM_DOCKER_OPTS="${PULL} -f rocm/Dockerfile ${NO_CACHE}"
 
 COMM_DOCKER_OPTS="-f comm/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL}"
 
-TOOLS_DOCKER_OPTS="-f tools/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg OMNITRACE_BUILD_FROM_SOURCE=\"${OMNITRACE_BUILD_FROM_SOURCE}\" --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" --build-arg BUILD_HPCTOOLKIT=${BUILD_HPCTOOLKIT} --build-arg BUILD_TAU=${BUILD_TAU} "
+TOOLS_DOCKER_OPTS="-f tools/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg OMNITRACE_BUILD_FROM_SOURCE=\"${OMNITRACE_BUILD_FROM_SOURCE}\" --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} --build-arg BUILD_HPCTOOLKIT=${BUILD_HPCTOOLKIT} --build-arg BUILD_TAU=${BUILD_TAU} "
 
-TRAINING_DOCKER_OPTS="${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg BUILD_DATE=$(date +'%Y-%m-%dT%H:%M:%SZ') --build-arg OG_BUILD_DATE=$(date -u +'%y-%m-%d') --build-arg BUILD_VERSION=1.1 --build-arg DISTRO=${DISTRO} --build-arg ADMIN_USERNAME=${ADMIN_USERNAME} --build-arg ADMIN_PASSWORD=${ADMIN_PASSWORD}"
+EXTRAS_DOCKER_OPTS="${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg BUILD_DATE=$(date +'%Y-%m-%dT%H:%M:%SZ') --build-arg OG_BUILD_DATE=$(date -u +'%y-%m-%d') --build-arg BUILD_VERSION=1.1 --build-arg DISTRO=${DISTRO} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" --build-arg ADMIN_USERNAME=${ADMIN_USERNAME} --build-arg ADMIN_PASSWORD=${ADMIN_PASSWORD}"
 
-TRAINING_DOCKER_OPTS="${TRAINING_DOCKER_OPTS} -f extras/Dockerfile"
+EXTRAS_DOCKER_OPTS="${EXTRAS_DOCKER_OPTS} -f extras/Dockerfile"
 
 ADD_OPTIONS=""
 PODMAN_DETECT=`docker |& grep "Emulate Docker CLI using podman" | wc -l`
@@ -331,8 +331,8 @@ do
        -t ${DOCKER_USER}/tools:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        .
 
-# Building training docker
-    verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${TRAINING_DOCKER_OPTS} \
+# Building extrasdocker
+    verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${EXTRAS_DOCKER_OPTS} \
        --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
        --build-arg BUILD_GCC_LATEST=${BUILD_GCC_LATEST} \
        --build-arg BUILD_AOMP_LATEST=${BUILD_AOMP_LATEST} \

@@ -29,6 +29,7 @@ ARG BUILD_CUPY
 ARG BUILD_KOKKOS
 ARG USE_CACHED_APPS
 ARG AMDGPU_GFXMODEL=gfx90a
+ARG PYTHON_VERSIONS
 
 LABEL maintainer="bob.robey@amd.com"
 
@@ -61,6 +62,16 @@ RUN apt-get install -y  net-tools iproute2 openssh-server iputils-ping && \
     systemctl enable ssh && service ssh start
 
 EXPOSE 22
+
+#
+# Install miniconda
+#
+COPY extras/sources/scripts/miniconda3_setup.sh /tmp/miniconda3_setup.sh
+
+RUN /tmp/miniconda3_setup.sh \
+        --rocm-version ${ROCM_VERSION} \
+        --python-versions "${PYTHON_VERSIONS}" && \
+    rm -f /tmp/miniconda3_setup.sh
 
 #
 # Install our desired compilers

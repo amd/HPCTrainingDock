@@ -15,19 +15,11 @@ FROM ${DOCKER_USER}/comm:release-base-ubuntu-${DISTRO_VERSION}-rocm-${ROCM_VERSI
 ARG ROCM_VERSION
 ARG OMNITRACE_BUILD_FROM_SOURCE
 ARG AMDGPU_GFXMODEL
-ARG PYTHON_VERSIONS
 ARG INSTALL_GRAFANA=0
 ARG BUILD_HPCTOOLKIT
 ARG BUILD_TAU
 
 LABEL maintainer="bob.robey@amd.com"
-
-COPY tools/sources/scripts/miniconda3_setup.sh /tmp/miniconda3_setup.sh
-
-RUN /tmp/miniconda3_setup.sh \
-        --rocm-version ${ROCM_VERSION} \
-        --python-versions "${PYTHON_VERSIONS}" && \
-    rm -f /tmp/miniconda3_setup.sh
 
 COPY tools/sources/scripts/omnitrace_setup.sh /tmp/omnitrace_setup.sh
 

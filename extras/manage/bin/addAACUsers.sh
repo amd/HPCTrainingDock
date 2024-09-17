@@ -14,8 +14,8 @@ Help()
    echo
 }
 
-SHARED="/datasets/teams/hackathon-testing"
-#SHARED="/home"
+#HOMEDIR_BASE=/home/aac/shared/teams/dcgpu_training
+HOMEDIR_BASE=/users
 
 # note these uid/gids are only for Containers for Bob Robey.
 # you MUST use other number for other Containers !
@@ -23,7 +23,8 @@ SHARED="/datasets/teams/hackathon-testing"
 HACKATHONBASEUSER=12050
 HACKATHONBASEGROUP=12000
 
-DRYRUN=1
+DRYRUN=0
+VERBOSE=1
 
 source userlist.sh
 
@@ -32,9 +33,13 @@ i=0
 HACKATHONLASTUSER=$((HACKATHONBASEUSER-1))
 HACKATHONLASTGROUP=$((HACKATHONBASEGROUP-1))
 
+if [ ! -d "$HOMEDIR_BASE" ]; then
+   sudo mkdir -p $HOMEDIR_BASE
+fi
+
 # First see what user ids and group ids are used by files in 
 # the Home directory tree and set the max to 
-sudo find ${SHARED} -type f -print0 | while read -r -d '' file; do
+sudo find ${HOMEDIR_BASE} -type f -print0 | while read -r -d '' file; do
    uid=`sudo stat -c %u $file`
    if [[ ! -z "$uid" ]]; then
       if (( $uid > ${HACKATHONLASTUSER} )); then
@@ -51,10 +56,10 @@ sudo find ${SHARED} -type f -print0 | while read -r -d '' file; do
 done
 while IFS='' read -r line; do
    gid=`echo $line | cut -d':' -f 3`
-   echo "Group id is $ggid"
+   #echo "Group id is $ggid"
    if [[ ! -z "$gid" ]]; then
       if (( $gid > 15000 )); then
-	 continue
+         continue
       fi
       if (( $gid > ${HACKATHONLASTGROUP} )); then
          HACKATHONLASTGROUP=$gid
@@ -64,12 +69,12 @@ done < /etc/group
 while IFS='' read -r line; do
    uid=`echo $line | cut -d':' -f 3`
    gid=`echo $line | cut -d':' -f 4`
-   echo "User id is $uuid Group id is $gid"
+   #echo "User id is $uuid Group id is $gid"
    if [[ ! -z "$gid" ]]; then
       if (( $gid > ${HACKATHONLASTGROUP} )); then
          if (( $gid < 15000 )); then
             HACKATHONLASTGROUP=$gid
-	 fi
+         fi
       fi
    fi
    if [[ ! -z "$uid" ]]; then
@@ -92,19 +97,21 @@ echo ""
 #sudo groupadd -f -g ${HACKATHONGROUP} hackathon
 #sudo usermod -a -G  ${HACKATHONGROUP} teacher
 
-# uncomment for real run
-
 if [ ! -f /users/default/aac1.termsOfUse.txt ]; then
-   echo "sudo cp ${HOME}/aac1.termsOfUse.txt /users/default"
-   echo "sudo chmod 666 /users/default/aac1.termsOfUse.txt"
+   if (( "${VERBOSE}" > 1 )); then
+      echo "sudo cp ${HOME}/aac1.termsOfUse.txt /users/default"
+      echo "sudo chmod 666 /users/default/aac1.termsOfUse.txt"
+   fi
    if [ "${DRYRUN}" != 1 ]; then
       sudo cp ${HOME}/aac1.termsOfUse.txt /users/default
       sudo chmod 666 /users/default/aac1.termsOfUse.txt
    fi
 fi
 if [ ! -f /users/default/bash_profile ]; then
-   echo "sudo cp ${HOME}/bash_profile /users/default"
-   echo "sudo chmod 666 /users/default/bash_profile"
+   if (( "${VERBOSE}" > 1 )); then
+      echo "sudo cp ${HOME}/bash_profile /users/default"
+      echo "sudo chmod 666 /users/default/bash_profile"
+   fi
    if [ "${DRYRUN}" != 1 ]; then
       sudo cp ${HOME}/bash_profile /users/default
       sudo chmod 666 /users/default/bash_profile
@@ -129,7 +136,7 @@ do
    echo "last : ${last}"
    echo "username : ${user_name}"
    echo "groupname : ${group_name}"
-   echo "key : ${sshkey}"
+   echo "sshkey : ${sshkey}"
    echo "pw : ${pw}"
    echo
 
@@ -140,6 +147,9 @@ do
    fi
 
    if id "${user_name}" &>/dev/null; then
+      #==================================
+      # User already exists in the system
+      #==================================
       uid=`getent passwd $user_name | cut -d: -f3`
       gid=`getent passwd $user_name | cut -d: -f4`
       USERHOMEDIR=`getent passwd $user_name | cut -d: -f6`
@@ -150,47 +160,57 @@ do
       #echo "Group exist is ${GROUP_EXIST}"
       if [[ "${GROUP_NAME_EXIST}" != "1" ]]; then
          GROUP_ID_EXIST=`getent group $gid | cut -d: -f3 | wc -l`
-	 if [[ "${GROUP_ID_EXIST}" != "1" ]]; then
+         if [[ "${GROUP_ID_EXIST}" != "1" ]]; then
             # create the group using the gid listed in the /etc/passwd file
-	    echo "group $group_name is missing from /etc/group -- creating it"
-            echo "  sudo groupadd -f -g ${gid} $group_name"
+            echo "group $group_name is missing from /etc/group -- creating it"
+            if (( "${VERBOSE}" > 0 )); then
+               echo "  sudo groupadd -f -g ${gid} $group_name"
+            fi
             if [ "${DRYRUN}" != 1 ]; then
                sudo groupadd -f -g ${gid} $group_name
-	    fi
-	 else
-	    echo "Adding user to group $group_name and making it the primary group for the user"
-            echo "  sudo usermod -a -G ${group_name}"
-            echo "  sudo usermod -g ${group_name}"
+            fi
+         else
+            echo "Adding user to group $group_name and making it the primary group for the user"
+            if (( "${VERBOSE}" > 0 )); then
+               echo "  sudo usermod -a -G ${group_name}"
+               echo "  sudo usermod -g ${group_name}"
+            fi
             if [ "${DRYRUN}" != 1 ]; then
-               sudo usermod -a -G ${group_name}
-               sudo usermod -g ${group_name}
-	    fi
-	 fi
+               sudo usermod -a -G ${group_name} ${user_name}
+               sudo usermod -g ${group_name} ${user_name}
+            fi
+         fi
       fi
       # Need to add a group for the home directory if it doesn't match the user's group id
       gid_homedir=`sudo stat -c %g $USERHOMEDIR`
       if id -g "$user_name" | grep -qw "$gid_homedir"; then
          GROUP_ID_EXIST=`getent group $gid_homedir | cut -d: -f3 | wc -l`
-	 #echo "GROUP_ID_EXIST is $GROUP_ID_EXIST"
-	 if [[ "${GROUP_ID_EXIST}" != "1" ]]; then
+         #echo "GROUP_ID_EXIST is $GROUP_ID_EXIST"
+         if [[ "${GROUP_ID_EXIST}" != "1" ]]; then
             GROUP_NAME_HOMEDIR=group${group_homedir}
-	    echo "Adding missing group for home directory ${GROUP_NAME_HOMEDIR}"
-            echo "  sudo groupadd -f -g $group_homedir ${GROUP_NAME_HOMEDIR}"
+            echo "Adding missing group for home directory ${GROUP_NAME_HOMEDIR}"
+            if (( "${VERBOSE}" > 0 )); then
+               echo "  sudo groupadd -f -g $group_homedir ${GROUP_NAME_HOMEDIR}"
+            fi
             if [ "${DRYRUN}" != 1 ]; then
                sudo groupadd -f -g $group_homedir ${GROUP_NAME_HOMEDIR}
-	    fi
-	 else
+            fi
+         else
             GROUP_NAME_HOMEDIR=`getent group $gid_homedir | cut -d: -f1`
-	 fi
-	 echo "Adding group of home directory ${GROUP_NAME_HOMEDIR} to user"
-         echo "  sudo usermod -a -G ${GROUP_NAME_HOMEDIR}"
+         fi
+         echo "Adding group of home directory ${GROUP_NAME_HOMEDIR} to user"
+         if (( "${VERBOSE}" > 0 )); then
+            echo "  sudo usermod -a -G ${GROUP_NAME_HOMEDIR}"
+         fi
          if [ "${DRYRUN}" != 1 ]; then
-            sudo usermod -a -G ${GROUP_NAME_HOMEDIR}
-	 fi
+            sudo usermod -a -G ${GROUP_NAME_HOMEDIR} ${user_name}
+         fi
       fi
    else 
+      #======================================================================
       # Check if home directory exists and we need to just add the user entry
-      USERHOMEDIR=`sudo find $SHARED -maxdepth 2 -name $user_name -print`
+      #======================================================================
+      USERHOMEDIR=`sudo find $HOMEDIR_BASE -maxdepth 2 -name $user_name -print`
       if [[ "$USERHOMEDIR" != "" ]]; then
          uid=`sudo stat -c %u $USERHOMEDIR`
          gid=`sudo stat -c %g $USERHOMEDIR`
@@ -198,85 +218,112 @@ do
          #echo "Group exist is ${GROUP_EXIST}"
          if [[ "${GROUP_EXIST}" != "1" ]]; then
             # should add a check that the subdirectory matches the group name?
-	    echo "home directory exists, but group for it does not. Adding group"
-            echo "  sudo groupadd -f -g ${gid} $group_name"
+            echo "home directory exists, but group for it does not. Adding group"
+            if (( "${VERBOSE}" > 0 )); then
+               echo "  sudo groupadd -f -g ${gid} $group_name"
+            fi
             if [ "${DRYRUN}" != 1 ]; then
                sudo groupadd -f -g ${gid} $group_name
-	    fi
+            fi
          fi
-	 echo "home directory exists, but user does not. Adding user"
-         echo "  sudo useradd --shell /bin/bash --home ${USERHOMEDIR} --uid $uid --gid ${gid} ${user_name}"
+         echo "home directory exists, but user does not. Adding user"
+         if (( "${VERBOSE}" > 0 )); then
+            echo "  sudo useradd --shell /bin/bash --home ${USERHOMEDIR} --uid $uid --gid ${gid} ${user_name}"
+         fi
          if [ "${DRYRUN}" != 1 ]; then
             sudo useradd --shell /bin/bash --home ${USERHOMEDIR} --uid $uid --gid ${gid} ${user_name}
-	 fi
+         fi
 
-	 # Need to add a group for the home directory if it doesn't match the user's group id
+         # Need to add a group for the home directory if it doesn't match the user's group id
          id_homedir=`sudo stat -c %g $USERHOMEDIR`
          if [ $gid != "$gid_homedir" ]; then
             GROUP_ID_EXIST=`getent group $gid_homedir | cut -d: -f3 | wc -l`
-	    #echo "GROUP_ID_EXIST is $GROUP_ID_EXIST"
-	    if [[ "${GROUP_ID_EXIST}" != "1" ]]; then
+            #echo "GROUP_ID_EXIST is $GROUP_ID_EXIST"
+            if [[ "${GROUP_ID_EXIST}" != "1" ]]; then
                GROUP_NAME_HOMEDIR=group${group_homedir}
-	       echo "Adding missing group for home directory ${GROUP_NAME_HOMEDIR}"
-               echo "  sudo groupadd -f -g $group_homedir ${GROUP_NAME_HOMEDIR}"
+               echo "Adding missing group for home directory ${GROUP_NAME_HOMEDIR}"
+               if (( "${VERBOSE}" > 0 )); then
+                  echo "  sudo groupadd -f -g $group_homedir ${GROUP_NAME_HOMEDIR}"
+               fi
                if [ "${DRYRUN}" != 1 ]; then
                   sudo groupadd -f -g $group_homedir ${GROUP_NAME_HOMEDIR}
-	       fi
-	    else
+               fi
+            else
                GROUP_NAME_HOMEDIR=`getent group $gid_homedir | cut -d: -f1`
-	    fi
-	    echo "Adding group of home directory ${GROUP_NAME_HOMEDIR} to user"
-            echo "  sudo usermod -a -G ${GROUP_NAME_HOMEDIR}"
+            fi
+            echo "Adding group of home directory ${GROUP_NAME_HOMEDIR} to user"
+            if (( "${VERBOSE}" > 0 )); then
+               echo "  sudo usermod -a -G ${GROUP_NAME_HOMEDIR}"
+            fi
             if [ "${DRYRUN}" != 1 ]; then
                sudo usermod -a -G ${GROUP_NAME_HOMEDIR}
-	    fi
+            fi
          fi
          # set password
          if [ ! -z "${pw}" ]; then
             echo "Password requested for ${user_name}:${pw}"
             if [ "${DRYRUN}" != 1 ]; then
                echo ${user_name}:${pw} | sudo chpasswd
-	    fi
-	 else
-            echo "No password requested for ${user_name}"
+            fi
+         else
+            if (( "${VERBOSE}" > 0 )); then
+               echo "No password requested for ${user_name}"
+            fi
          fi
       else
+         #================================================================
          # Neither user exists in /etc/passwd or home directory exists, so
          #   create a user from scratch
-	 echo "User does not exist and home directory does not exist"
+         #================================================================
+         echo "User does not exist and home directory does not exist"
          if [ "$group_name" != "" ]; then
             GROUP_EXIST=`getent group $group_name | cut -d: -f4 | wc -l`
             #echo "Group exist is ${GROUP_EXIST}"
             if [[ "${GROUP_EXIST}" != "1" ]]; then
                # should add a check that the subdirectory matches the group name?
-	       echo "Group does not exist -- creating group"
-               echo "  sudo groupadd -f -g ${HACKATHONBASEGROUP} $group_name"
+               echo "Group does not exist -- creating group"
+               if (( "${VERBOSE}" > 0 )); then
+                  echo "  sudo groupadd -f -g ${HACKATHONBASEGROUP} $group_name"
+               fi
                if [ "${DRYRUN}" != 1 ]; then
                   sudo groupadd -f -g ${HACKATHONBASEGROUP} $group_name
-	       fi
+               fi
                #echo "HACKATHONBASEGROUP=$((HACKATHONBASEGROUP+1))"
             fi
-            USERHOMEDIR=${SHARED}/${group_name}/${user_name}
+            USERHOMEDIR=${HOMEDIR_BASE}/${group_name}/${user_name}
+            if [ ! -d ${HOMEDIR_BASE}/${group_name} ]; then
+               sudo mkdir -p ${HOMEDIR_BASE}/${group_name}
+               sudo chgrp ${group_name}  ${HOMEDIR_BASE}/${group_name}
+            fi
          else
-            USERHOMEDIR=${SHARED}/${user_name}
+            USERHOMEDIR=${HOMEDIR_BASE}/${user_name}
          fi
 
          id=$((HACKATHONBASEUSER+i))
-	 echo "User does not exist -- creating user account"
-         echo "  sudo useradd --create-home --skel /users/default --shell /bin/bash --home ${USERHOMEDIR} --uid $id --gid ${gid} ${user_name}"
-         echo "  sudo chmod go-rwx  ${USERHOMEDIR}"
+         gid=`getent group $group_name | cut -d: -f3`
+         echo "User does not exist -- creating user account"
+         if (( "${VERBOSE}" > 0 )); then
+            echo "  sudo useradd --create-home --skel /users/default --shell /bin/bash --home ${USERHOMEDIR} --uid $id --gid ${gid} ${user_name}"
+	 fi
+         if (( "${VERBOSE}" > 1 )); then
+            echo "  sudo chmod -R go-rwx  ${USERHOMEDIR}"
+            echo "  sudo chgrp -R ${group_name}  ${USERHOMEDIR}"
+         fi
          if [ "${DRYRUN}" != 1 ]; then
             sudo useradd --create-home --skel /users/default --shell /bin/bash --home ${USERHOMEDIR} --uid $id --gid ${gid} ${user_name}
-            sudo chmod go-rwx  ${USERHOMEDIR}
-	 fi
+            sudo chmod -R go-rwx  ${USERHOMEDIR}
+            sudo chgrp -R ${group_name}  ${USERHOMEDIR}
+         fi
          # set password
          if [ ! -z "${pw}" ]; then
             echo "Password requested for ${user_name}:${pw}"
             if [ "${DRYRUN}" != 1 ]; then
                echo ${user_name}:${pw} | sudo chpasswd
-	    fi
-	 else
-            echo "No password requested for ${user_name}"
+            fi
+         else
+            if (( "${VERBOSE}" > 1 )); then
+               echo "No password requested for ${user_name}"
+            fi
          fi
       fi
    fi
@@ -292,9 +339,11 @@ do
    fi
 
    if [[ $VIDEO_GROUP != 1 ]] || [[ $AUDIO_GROUP != 1 ]] || [[ $RENDER_GROUP != 1 ]] ; then
-      echo "Add groups for access to the GPU (see /dev/dri /dev/kfd)"
-      #sudo usermod -a -G video,audio,render,renderalt ${user_name}
-      echo "  sudo usermod -a -G video,audio,render ${user_name}"
+      if (( "${VERBOSE}" > 2 )); then
+         echo "Add groups for access to the GPU (see /dev/dri /dev/kfd)"
+         #sudo usermod -a -G video,audio,render,renderalt ${user_name}
+         echo "  sudo usermod -a -G video,audio,render ${user_name}"
+      fi
       if [ "${DRYRUN}" != 1 ]; then
          sudo usermod -a -G video,audio,render ${user_name}
       fi
@@ -302,51 +351,93 @@ do
    # add the ssh key to the users authorized_keys file
    #sudo chmod a+rwx  ${USERHOMEDIR}
    if [ ! -z "${sshkey}" ]; then
-      if sudo test ! -d ${USERHOMEDIR}/.ssh ; then
-         echo "Creating .ssh directory for user"
-         echo "  sudo mkdir -p  ${USERHOMEDIR}/.ssh"
-         echo "  sudo chgrp $group_name ${USERHOMEDIR}/.ssh"
+      if (( "${VERBOSE}" > 1 )); then
+         echo "  sudo chmod a+rwx ${USERHOMEDIR}"
+      fi
+      if [ "${DRYRUN}" != 1 ]; then
+         sudo chmod a+rwx ${USERHOMEDIR}
+      fi
+      if [ ! -d ${USERHOMEDIR}/.ssh ]; then
+         if (( "${VERBOSE}" > 1 )); then
+            echo "  sudo mkdir -p  ${USERHOMEDIR}/.ssh"
+            echo "  sudo chgrp teacher ${USERHOMEDIR}/.ssh"
+            echo "  sudo chmod g+rwx ${USERHOMEDIR}/.ssh"
+	 fi
          if [ "${DRYRUN}" != 1 ]; then
             sudo mkdir -p  ${USERHOMEDIR}/.ssh
-            sudo chgrp $group_name ${USERHOMEDIR}/.ssh
-         fi
+            sudo chgrp teacher ${USERHOMEDIR}/.ssh
+            sudo chmod g+rwx ${USERHOMEDIR}/.ssh
+	 fi
       fi
-      if sudo test ! -f ${USERHOMEDIR}/.ssh/authorized_keys ; then
-         echo "Creating authorized_keys file for user"
-         echo "  sudo touch  ${USERHOMEDIR}/.ssh/authorized_keys"
-         echo "  sudo chown $user_name ${USERHOMEDIR}/.ssh/authorized_keys"
-         echo "  sudo chmod 600 ${USERHOMEDIR}/.ssh/authorized_keys"
+      if [ ! -f ${USERHOMEDIR}/.ssh/authorized_keys ]; then
+         if (( "${VERBOSE}" > 1 )); then
+            echo "  sudo touch  ${USERHOMEDIR}/.ssh/authorized_keys"
+	 fi
          if [ "${DRYRUN}" != 1 ]; then
             sudo touch  ${USERHOMEDIR}/.ssh/authorized_keys
-            sudo chown $user_name ${USERHOMEDIR}/.ssh/authorized_keys
-            sudo chmod 600 ${USERHOMEDIR}/.ssh/authorized_keys
-         fi
+	 fi
       fi
-
+      KEY_EXIST=0
       if sudo test -f ${USERHOMEDIR}/.ssh/authorized_keys ; then
          KEY_EXIST=`sudo grep "${key}" ${USERHOMEDIR}/.ssh/authorized_keys | wc -l`
-         if [ "${KEY_EXIST}" == 0 ]; then
-            echo "Adding ssh public key for user"
-            echo "  sudo chmod 666 ${USERHOMEDIR}/.ssh/authorized_keys"
-            echo "  sudo echo "${key}" >> ${USERHOMEDIR}/.ssh/authorized_keys "
-            echo "  sudo chmod 600       ${USERHOMEDIR}/.ssh/authorized_keys"
-            if [ "${DRYRUN}" != 1 ]; then
-               sudo chmod 666 ${USERHOMEDIR}/.ssh/authorized_keys
-               sudo echo "${key}" >> ${USERHOMEDIR}/.ssh/authorized_keys 
-               sudo chmod 600       ${USERHOMEDIR}/.ssh/authorized_keys
-            fi
-         fi
+      fi
+      if [ "${KEY_EXIST}" == 0 ]; then
+         if (( "${VERBOSE}" > 1 )); then
+            echo "  sudo chmod a+rwx ${USERHOMEDIR}/.ssh/authorized_keys"
+            echo "  sudo cat ${USERHOMEDIR}/.ssh/authorized_keys > key.txt"
+            echo "  sudo echo "${sshkey}" >> key.txt"
+            echo "  sudo scp -p key.txt ${USERHOMEDIR}/.ssh/authorized_keys"
+            echo "  sudo chmod 600 ${USERHOMEDIR}/.ssh/authorized_keys"
+            echo "  sudo chown $user_name ${USERHOMEDIR}/.ssh"
+            echo "  sudo chown $user_name ${USERHOMEDIR}/.ssh/authorized_keys"
+            echo "  sudo chgrp $group_name ${USERHOMEDIR}/.ssh"
+            echo "  sudo chgrp $group_name ${USERHOMEDIR}/.ssh/authorized_keys"
+            echo "  sudo rm key.txt"
+            echo "  sudo chmod a-rwx ${USERHOMEDIR}/.ssh/authorized_keys"
+            echo "  sudo chmod u+rw  ${USERHOMEDIR}/.ssh/authorized_keys"
+	 fi
+         if [ "${DRYRUN}" != 1 ]; then
+            sudo chmod a+rwx ${USERHOMEDIR}/.ssh/authorized_keys
+            sudo cat ${USERHOMEDIR}/.ssh/authorized_keys > key.txt
+            sudo echo "${sshkey}" >> key.txt
+            sudo scp -p key.txt ${USERHOMEDIR}/.ssh/authorized_keys
+            sudo chmod 600 ${USERHOMEDIR}/.ssh/authorized_keys
+            sudo chown $user_name ${USERHOMEDIR}/.ssh
+            sudo chown $user_name ${USERHOMEDIR}/.ssh/authorized_keys
+            sudo chgrp $group_name ${USERHOMEDIR}/.ssh
+            sudo chgrp $group_name ${USERHOMEDIR}/.ssh/authorized_keys
+            sudo rm key.txt
+            sudo chmod a-rwx ${USERHOMEDIR}/.ssh/authorized_keys
+            sudo chmod u+rw  ${USERHOMEDIR}/.ssh/authorized_keys
+	 fi
+      fi
+
+      if (( "${VERBOSE}" > 1 )); then
+         echo "  sudo chmod a-rwx ${USERHOMEDIR}/.ssh"
+         echo "  sudo chmod u+rwx ${USERHOMEDIR}/.ssh"
+         echo "  sudo chmod a-rwx ${USERHOMEDIR}"
+         echo "  sudo chmod u+rwx ${USERHOMEDIR}"
+      fi
+      if [ "${DRYRUN}" != 1 ]; then
+         sudo chmod a-rwx ${USERHOMEDIR}/.ssh
+         sudo chmod u+rwx ${USERHOMEDIR}/.ssh
+         sudo chmod a-rwx ${USERHOMEDIR}
+         sudo chmod u+rwx ${USERHOMEDIR}
       fi
    fi
 
    if sudo test ! -f ${USERHOMEDIR}/.bash_profile ; then
-      echo "Missing .bash_profile file for $user_name. Creating it"
-      echo "  sudo cp /users/default/bash_profile ${USERHOMEDIR}/.bash_profile"
-      echo "  sudo chown ${user_name} ${USERHOMEDIR}/.bash_profile"
-      echo "  sudo chmod 600 ${USERHOMEDIR}/.bash_profile"
+      if (( "${VERBOSE}" > 2 )); then
+         echo "Missing .bash_profile file for $user_name. Creating it"
+         echo "  sudo cp /users/default/bash_profile ${USERHOMEDIR}/.bash_profile"
+         echo "  sudo chown ${user_name} ${USERHOMEDIR}/.bash_profile"
+         echo "  sudo chgrp ${group_name} ${USERHOMEDIR}/.bash_profile"
+         echo "  sudo chmod 600 ${USERHOMEDIR}/.bash_profile"
+      fi
       if [ "${DRYRUN}" != 1 ]; then
          sudo cp /users/default/bash_profile ${USERHOMEDIR}/.bash_profile
          sudo chown ${user_name} ${USERHOMEDIR}/.bash_profile
+         sudo chgrp ${group_name} ${USERHOMEDIR}/.bash_profile
          sudo chmod 600 ${USERHOMEDIR}/.bash_profile
       fi
    fi 
