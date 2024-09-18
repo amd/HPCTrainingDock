@@ -17,6 +17,7 @@
 : ${BUILD_JAX:="0"}
 : ${BUILD_KOKKOS:="0"}
 : ${BUILD_TAU:="0"}
+: ${BUILD_SCOREP:="0"}
 : ${BUILD_MPI4PY:="0"}
 : ${BUILD_HPCTOOLKIT:="0"}
 : ${BUILD_ALL_LATEST:="0"}
@@ -236,6 +237,10 @@ do
             BUILD_TAU="1"
             reset-last
             ;;
+        "--build-scorep")
+            BUILD_SCOREP="1"
+            reset-last
+            ;;
         "--build-mpi4py")
             BUILD_MPI4PY="1"
             reset-last
@@ -259,6 +264,7 @@ do
             BUILD_JAX="1"
 	    BUILD_KOKKOS="1"
 	    BUILD_TAU="1"
+	    BUILD_SCOREP="1"
 	    BUILD_MPI4PY="1"
 	    BUILD_HPCTOOLKIT="1"
             reset-last
@@ -289,7 +295,7 @@ ROCM_DOCKER_OPTS="${PULL} -f rocm/Dockerfile ${NO_CACHE}"
 
 COMM_DOCKER_OPTS="-f comm/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL}"
 
-TOOLS_DOCKER_OPTS="-f tools/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg OMNITRACE_BUILD_FROM_SOURCE=\"${OMNITRACE_BUILD_FROM_SOURCE}\" --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} --build-arg BUILD_HPCTOOLKIT=${BUILD_HPCTOOLKIT} --build-arg BUILD_TAU=${BUILD_TAU} "
+TOOLS_DOCKER_OPTS="-f tools/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg OMNITRACE_BUILD_FROM_SOURCE=\"${OMNITRACE_BUILD_FROM_SOURCE}\" --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} --build-arg BUILD_HPCTOOLKIT=${BUILD_HPCTOOLKIT} --build-arg BUILD_TAU=${BUILD_TAU} --build-arg BUILD_SCOREP=${BUILD_SCOREP} "
 
 EXTRAS_DOCKER_OPTS="${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg BUILD_DATE=$(date +'%Y-%m-%dT%H:%M:%SZ') --build-arg OG_BUILD_DATE=$(date -u +'%y-%m-%d') --build-arg BUILD_VERSION=1.1 --build-arg DISTRO=${DISTRO} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" --build-arg ADMIN_USERNAME=${ADMIN_USERNAME} --build-arg ADMIN_PASSWORD=${ADMIN_PASSWORD}"
 
@@ -344,6 +350,7 @@ do
        --build-arg BUILD_JAX=${BUILD_JAX} \
        --build-arg BUILD_KOKKOS=${BUILD_KOKKOS} \
        --build-arg BUILD_TAU=${BUILD_TAU} \
+       --build-arg BUILD_SCOREP=${BUILD_SCOREP} \
        --build-arg BUILD_MPI4PY=${BUILD_MPI4PY} \
        --build-arg BUILD_HPCTOOLKIT=${BUILD_HPCTOOLKIT} \
        --build-arg USE_CACHED_APPS=${USE_CACHED_APPS} \
