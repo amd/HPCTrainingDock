@@ -261,7 +261,7 @@ else
 
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/8.4.lua
-	whatis(" SCORE-P Performance Analysis Tool ") 
+	whatis(" Score-P Performance Analysis Tool ")
 
         load("rocm/${ROCM_VERSION}")
 	prepend_path("PATH","${SCOREP_PATH}/bin")
