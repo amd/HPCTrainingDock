@@ -224,14 +224,18 @@ else
 
       wget https://gitlab.com/score-p/scorep/-/archive/v8.4/scorep-v8.4.tar.gz
       tar -xvf  scorep-v8.4.tar.gz
-      touch scorep-v8.4/build-config/REVISION
       cd scorep-v8.4
       ./bootstrap
       mkdir build
       cd build
-      # currently MPI support is OFF because of conflict with HIP on the compiler (Score-P say it needs Clang but does not pick it up when specified at config time)
-      # ../configure --with-rocm=$ROCM_PATH --with-pdt=$PDT_PATH --with-mpi=openmpi --with-shmem=openmpi --prefix=$SCOREP_PATH  --with-librocm_smi64-include=$ROCM_PATH/include/rocm_smi --with-librocm_smi64-lib=$ROCM_PATH/lib --with-libunwind=download CC=$ROCM_PATH/llvm/bin/clang CXX=$ROCM_PATH/llvm/bin/clang++ FC=$ROCM_PATH/llvm/bin/flang --enable-shared
-      ../configure --with-rocm=$ROCM_PATH --with-pdt=$PDT_PATH --without-mpi --without-shmem --prefix=$SCOREP_PATH  --with-librocm_smi64-include=$ROCM_PATH/include/rocm_smi --with-librocm_smi64-lib=$ROCM_PATH/lib --with-libunwind=download CC=$ROCM_PATH/llvm/bin/clang CXX=$ROCM_PATH/llvm/bin/clang++ FC=$ROCM_PATH/llvm/bin/flang --enable-shared
+      touch ../build-config/REVISION
+      export OMPI_CC=$ROCM_PATH/llvm/bin/clang
+      export OMPI_CXX=$ROCM_PATH/llvm/bin/clang++
+      export OMPI_FC=$ROCM_PATH/llvm/bin/flang
+      ../configure --with-rocm=$ROCM_PATH --with-pdt=$PDT_PATH --with-mpi=openmpi \
+	           --without-shmem --prefix=$SCOREP_PATH  --with-librocm_smi64-include=$ROCM_PATH/include/rocm_smi \
+		   --with-librocm_smi64-lib=$ROCM_PATH/lib --with-libunwind=download CC=$ROCM_PATH/llvm/bin/clang \
+		     CXX=$ROCM_PATH/llvm/bin/clang++ FC=$ROCM_PATH/llvm/bin/flang --enable-shared
       ${SUDO} make
       ${SUDO} make install
 
