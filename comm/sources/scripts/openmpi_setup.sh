@@ -544,7 +544,7 @@ else
       echo "============================"
       echo " Installing Cached UCC"
       echo "============================"
-      e7. Create module filecho ""
+      echo ""
 
       #install the cached version
       echo "cached file is ${CACHE_FILES}/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz"
