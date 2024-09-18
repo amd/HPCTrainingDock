@@ -23,6 +23,10 @@ reset-last()
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+RHEL_COMPATIBLE=0
+if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
+   RHEL_COMPATIBLE=1
+fi
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
@@ -72,14 +76,19 @@ if [ "${DISTRO}" = "ubuntu" ]; then
                            slurmd slurmctld
 
    apt-get -q clean && ${SUDO} rm -rf /var/lib/apt/lists/*
-
-   ${SUDO} cp /tmp/slurm.conf /etc/slurm/slurm.conf
-   ${SUDO} cp /tmp/gres.conf /etc/slurm/gres.conf
-
-   ${SUDO} chown slurm /etc/slurm/slurm.conf
-   ${SUDO} chgrp slurm /etc/slurm/slurm.conf
-   ${SUDO} chmod 777 /etc/slurm
-
-   ${SUDO} echo "OPTIONS=\"--force --key-file /etc/munge/munge.key --num-threads 10\"" > /etc/default/munge
+elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
+   yum install -y slurm-slurmd slurm-slurmctld
+else
+   echo "DISTRO version ${DISTRO} not recognized or supported"
+   exit
 fi
+
+${SUDO} cp /tmp/slurm.conf /etc/slurm/slurm.conf
+${SUDO} cp /tmp/gres.conf /etc/slurm/gres.conf
+
+${SUDO} chown slurm /etc/slurm/slurm.conf
+${SUDO} chgrp slurm /etc/slurm/slurm.conf
+${SUDO} chmod 777 /etc/slurm
+
+${SUDO} echo "OPTIONS=\"--force --key-file /etc/munge/munge.key --num-threads 10\"" > /etc/default/munge
 

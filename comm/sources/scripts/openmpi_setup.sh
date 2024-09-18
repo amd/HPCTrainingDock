@@ -36,6 +36,10 @@ FC_COMPILER=gfortran
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+RHEL_COMPATIBLE=0
+if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
+   RHEL_COMPATIBLE=1
+fi
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
@@ -322,13 +326,16 @@ if [ "${DISTRO}" = "ubuntu" ]; then
          libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen
       ${SUDO} ${DEB_FRONTEND} apt-get install -y linux-headers-$(uname -r)
    fi
-elif [ "${DISTRO}" = "rocky linux" ]; then
+elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    echo "Install of pmix and hwloc packages"
    if [[ "${DRY_RUN}" == "0" ]]; then
       # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
       ${SUDO} yum update
       ${SUDO} yum install -y pmix hwloc
    fi
+else
+   echo "DISTRO version ${DISTRO} not recognized or supported"
+   exit
 fi
 
 if [[ "${DRY_RUN}" == "0" ]] && [[ ! -d ${INSTALL_PATH} ]] ; then
