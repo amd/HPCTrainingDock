@@ -18,7 +18,7 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 DISTRO_CODENAME=`cat /etc/os-release | grep '^VERSION_CODENAME' | sed -e 's/VERSION_CODENAME=//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 RHEL_COMPATIBLE=0
-if [[ "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
+if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
    RHEL_COMPATIBLE=1
 fi
 

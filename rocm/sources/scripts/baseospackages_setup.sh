@@ -13,7 +13,7 @@ if [  -f /.singularity.d/Singularity ]; then
 fi
 
 RHEL_COMPATIBLE=0
-if [[ "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
+if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
    RHEL_COMPATIBLE=1
 fi
 
