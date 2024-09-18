@@ -5,6 +5,7 @@
 : ${BUILD_PYTORCH:="1"}
 : ${BUILD_CUPY:="1"}
 : ${BUILD_JAX:="1"}
+: ${BUILD_SCOREP:="1"}
 : ${BUILD_KOKKOS:="1"}
 : ${BUILD_HPCTOOLKIT:="1"}
 : ${BUILD_MPI4PY:="1"}
@@ -124,6 +125,8 @@ tools/sources/scripts/grafana_setup.sh
 tools/sources/scripts/omniperf_setup.sh --rocm-version ${ROCM_VERSION}
 
 tools/sources/scripts/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_HPCTOOLKIT}
+
+tools/sources/scripts/scorep_setup.sh --rocm-version ${ROCM_VERSION} --build-scorep ${BUILD_SCOREP}
 
 tools/sources/scripts/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-tau ${BUILD_TAU}
 
