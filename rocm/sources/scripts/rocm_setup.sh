@@ -281,7 +281,9 @@ echo "=================================="
 echo ""
 
 if [ "${DISTRO}" == "rocky linux" ]; then
-   ${SUDO} cat >> /etc/yum.repos.d/rocm.repo <<-EOF
+	${SUDO} touch /etc/yum.repos.d/rocm.repo
+	${SUDO} chmod a+w /etc/yum.repos.d/rocm.repo
+	cat <<-EOF | ${SUD0} tee -a /etc/yum.repos.d/rocm.repo
 	[ROCm-${AMDGPU_ROCM_VERSION}]
 	name=ROCm${AMDGPU_ROCM_VERSION}
 	baseurl=https://repo.radeon.com/rocm/rhel9/${AMDGPU_ROCM_VERSION}/main
@@ -290,10 +292,10 @@ if [ "${DISTRO}" == "rocky linux" ]; then
 	gpgcheck=1
 	gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
 EOF
-cat /etc/yum.repos.d/rocm.repo
+#cat /etc/yum.repos.d/rocm.repo
 
    #yum clean all
-   ${SUDO} yum install https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${ROCM_REPO_DIST}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
+   ${SUDO} yum install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${ROCM_REPO_DIST}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
 fi
 
 CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
