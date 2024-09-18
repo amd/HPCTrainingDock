@@ -18,6 +18,10 @@ fi
 # Autodetect defaults
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+RHEL_COMPATIBLE=0
+if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
+   RHEL_COMPATIBLE=1
+fi
 
 usage()
 {
@@ -110,18 +114,6 @@ echo ""
 MVAPICH_RPM_NAME=mvapich-plus-rocm5.6.0.multiarch.ucx.gnu8.5.0-3.0-1.el8.x86_64.rpm
 MVAPICH_DOWNLOAD_URL=https://mvapich.cse.ohio-state.edu/download/mvapich/plus/3.0/rocm/UCX/mofed5.0
 
-if [ "${DISTRO}" = "rocky linux" ]; then
-   ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/mvapich
-
-   cd /tmp
-   # install the GPU aware version of mvapich using an rpm (MVPlus3.0)
-   wget -q ${MVAPICH_DOWNLOAD_URL}/${MVAPICH_RPM_NAME}
-   if [[ "${DRY_RUN}" == "0" ]]; then
-      ${SUDO} rpm --prefix ${INSTALL_PATH} -Uvh --nodeps ${MVAPICH_RPM_NAME}
-      ${INSTALL_PATH}/mvapich/bin/mpicc -show
-   fi
-   rm ${MVAPICH_RPM_NAME}
-fi
 if [ "${DISTRO}" = "ubuntu" ]; then
    ${SUDO} ${DEB_FRONTEND} apt-get -qqy install alien
    ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/mvapich
@@ -132,9 +124,22 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    ${SUDO} ${DEB_FRONTEND} apt-get install -y alien ${MVAPICH_RPM_NAME}
    /opt/rocmplus-${ROCM_VERSION}/mvapich/bin/mpicc --show
    rm -rf ${MVAPICH_RPM_NAME}
-fi
-if [ "${DISTRO}" = "opensuse leap" ]; then
+elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
+   ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/mvapich
+
+   cd /tmp
+   # install the GPU aware version of mvapich using an rpm (MVPlus3.0)
+   wget -q ${MVAPICH_DOWNLOAD_URL}/${MVAPICH_RPM_NAME}
+   if [[ "${DRY_RUN}" == "0" ]]; then
+      ${SUDO} rpm --prefix ${INSTALL_PATH} -Uvh --nodeps ${MVAPICH_RPM_NAME}
+      ${INSTALL_PATH}/mvapich/bin/mpicc -show
+   fi
+   rm ${MVAPICH_RPM_NAME}
+elif [ "${DISTRO}" = "opensuse leap" ]; then
    echo "Mvapich install on Suse not working yet"
+   exit
+else
+   echo "DISTRO version ${DISTRO} not recognized or supported"
    exit
 fi
 
