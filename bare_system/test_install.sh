@@ -17,7 +17,7 @@ usage()
    echo "  --rocm-install-path [ ROCM_INSTALL_PATH ]:  default is $ROCM_INSTALLPATH"
    echo "  --python-versions [ PYTHON_VERSIONS ]: Python 3 minor releases, default is $PYTHON_VERSIONS"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: autodetected using rocminfo"
-   echo "  --distro [DISTRO]: autodetected by looking into /etc/os-release"
+   echo "  --distro [DISTRO: ubuntu|rockylinux|opensuse/leap]: autodetected by looking into /etc/os-release"
    echo "  --distro-versions [DISTRO_VERSION]: autodetected by looking into /etc/os-release"
    echo "  --image-name [IMAGE_NAME]: Docker image name, default is $IMAGE_NAME"
    echo "  --use-makefile [0 or 1]: default 0 "
