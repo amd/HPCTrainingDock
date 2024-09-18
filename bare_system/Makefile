@@ -103,6 +103,7 @@ grafana.timestamp:
 omniperf.timestamp: rocm.timestamp
 	tools/sources/scripts/omniperf_setup.sh \
 	   --rocm-version ${ROCM_VERSION}
+	touch omniperf.timestamp
 
 tau.timestamp: rocm.timestamp
 	tools/sources/scripts/tau_setup.sh \
