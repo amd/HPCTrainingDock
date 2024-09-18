@@ -26,6 +26,8 @@ env_check: env_check.timestamp
 rocm_bandwidth_test: rocm_bandwidth_test.timestamp
 hip_tests: hip_tests.timestamp
 rocprof_tests: rocprof_tests.timestamp
+omniperf_tests: omniperf_tests.timestamp
+omnitrace_tests: omnitrace_tests.timestamp
 openmp_tests: openmp_tests.timestamp
 hipstdpar_tests: hipstdpar_tests.timestamp
 rocm_tests: rocm_tests.timestamp
@@ -223,6 +225,14 @@ openmpi_tests.timestamp: openmpi.timestamp HPCTrainingExamples
 tau_tests.timestamp: tau.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R TAU
 	touch tau_tests.timestamp
+
+omniperf_tests.timestamp: omniperf.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R Omniperf
+	touch omniperf_tests.timestamp
+
+omnitrace_tests.timestamp: omnitrace.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R Omnitrace
+	touch omnitrace_tests.timestamp
 
 scorep_tests.timestamp: scorep.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Score-P
