@@ -4,8 +4,6 @@
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 MODULE_PATH=/etc/lmod/modules/misc/tau
 BUILD_TAU=0
-MPI_INCLUDE=""
-MPI_LIB=""
 ROCM_VERSION=6.0
 SUDO="sudo"
 
@@ -21,8 +19,6 @@ usage()
 {
    echo "Usage:"
    echo "  --build-tau: default is 0"
-   echo "  --mpi-include: default is an empty string"
-   echo "  --mpi-lib: default is an empty string"
    echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/misc/tau"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
@@ -54,16 +50,6 @@ do
       "--build-tau")
           shift
           BUILD_TAU=${1}
-          reset-last
-          ;;
-      "--mpi-include")
-          shift
-          MPI_INCLUDE=${1}
-          reset-last
-          ;;
-      "--mpi-lib")
-          shift
-          MPI_LIB=${1}
           reset-last
           ;;
       "--help")

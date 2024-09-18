@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
-all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax
-.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax
+all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep
+.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
@@ -13,6 +13,7 @@ amd_gcc: amd_gcc.timestamp
 aomp: aomp.timestamp
 kokkos: kokkos.timestamp
 tau: tau.timestamp
+scorep: scorep.timestamp
 mpi4py: mpi4py.timestamp
 hpctoolkit: hpctoolkit.timestamp
 cupy: cupy.timestamp
@@ -30,6 +31,7 @@ hipstdpar_tests: hipstdpar_tests.timestamp
 rocm_tests: rocm_tests.timestamp
 openmpi_tests: openmpi_tests.timestamp
 tau_tests: tau_tests.timestamp
+scorep_tests: scorep_tests.timestamp
 aomp_tests: aomp_tests.timestamp
 kokkos_tests: kokkos_tests.timestamp
 mpi4py_tests: mpi4py_tests.timestamp
@@ -113,6 +115,12 @@ tau.timestamp: rocm.timestamp
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-tau ${BUILD_TAU}
 	touch tau.timestamp
+
+scorep.timestamp: rocm.timestamp
+	tools/sources/scripts/scorep_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --build-scorep ${BUILD_SCOREP}
+	touch scorep.timestamp
 
 hpctoolkit.timestamp: rocm.timestamp
 	tools/sources/scripts/hpctoolkit_setup.sh \
@@ -214,6 +222,10 @@ openmpi_tests.timestamp: openmpi.timestamp HPCTrainingExamples
 tau_tests.timestamp: tau.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R TAU
 	touch tau_tests.timestamp
+
+scorep_tests.timestamp: scorep.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R Score-P
+	touch scorep_tests.timestamp
 
 mpi4py_tests.timestamp: mpi4py.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R MPI4PY
