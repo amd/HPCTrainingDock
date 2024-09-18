@@ -371,6 +371,15 @@ if [ "${DISTRO}" == "ubuntu" ]; then
    fi
 fi
 
+# WIP, tested for RHEL 9.2
+if [ "${DISTRO}" == "rocky linux" ]; then
+   wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | ${SUDO} tee /etc/apt/keyrings/rocm.gpg > /dev/null
+   yum updateinfo
+   wget -q https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${ROCM_REPO_DIST}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
+   ${SUDO} yum install -q -y ./amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
+   amdgpu-install -q -y --usecase=rocm,hip,hiplibsdk --no-dkms
+fi
+
 # rocm-validation-suite is optional
 #apt-get install -qy rocm-validation-suite
 
