@@ -12,6 +12,10 @@ if [  -f /.singularity.d/Singularity ]; then
    DEB_FRONTEND=""
 fi
 
+RHEL_COMPATIBLE=0
+if [[ "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
+   RHEL_COMPATIBLE=1
+fi
 
 echo ""
 echo "==================================="
@@ -46,21 +50,20 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    ${SUDO} ${DEB_FRONTEND} apt-get install -q -y python3-pip python3-dev python3-venv
 
    ${SUDO} localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
-fi
-
-if [ "${DISTRO}" = "opensuse leap" ]; then
-   ${SUDO} zypper update -y && \
-   ${SUDO} zypper dist-upgrade -y && \
-   ${SUDO} zypper install -y -t pattern devel_basis && \
-   ${SUDO} zypper install -y python3-pip openmpi3-devel gcc-c++ git libnuma-devel dpkg-devel rpm-build wget curl binutils-gold
-fi
-
-if [ "${DISTRO}" = "rocky linux" ]; then
+elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    ${SUDO} yum groupinstall -y "Development Tools"
    ${SUDO} yum install -y ${SUDO}
    ${SUDO} yum install -y epel-release
    ${SUDO} yum install -y --allowerasing curl dpkg-devel numactl-devel openmpi-devel papi-devel python3-pip wget zlib-devel 
    ${SUDO} yum clean all
+elif [ "${DISTRO}" = "opensuse leap" ]; then
+   ${SUDO} zypper update -y && \
+   ${SUDO} zypper dist-upgrade -y && \
+   ${SUDO} zypper install -y -t pattern devel_basis && \
+   ${SUDO} zypper install -y python3-pip openmpi3-devel gcc-c++ git libnuma-devel dpkg-devel rpm-build wget curl binutils-gold
+else
+   echo "DISTRO version ${DISTRO} not recognized or supported"
+   exit
 fi
 
 if [[ "${DISTRO}" == "ubuntu" ]]; then

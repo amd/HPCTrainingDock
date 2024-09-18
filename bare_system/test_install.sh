@@ -103,12 +103,16 @@ docker build --no-cache ${ADD_OPTIONS} \
              -t ${IMAGE_NAME} \
 	     -f bare_system/Dockerfile .
 
+RHEL_COMPATIBLE=0
+if [[ "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
+   RHEL_COMPATIBLE=1
+fi
+
 ADD_OPTIONS=""
 
 if [[ "${DISTRO}" == "ubuntu" ]]; then
    ADD_OPTIONS="${ADD_OPTIONS} --group-add renderalt"
-fi
-if [[ "${DISTRO}" == "rocky linux" ]]; then
+elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    ADD_OPTIONS="${ADD_OPTIONS} --group-add renderalt"
 fi
 
