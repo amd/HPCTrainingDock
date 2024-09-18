@@ -240,6 +240,13 @@ git clone --recursive git@github.com:amd/HPCTrainingDock.git && \
 cd HPCTrainingDock && \
 ./bare_system/test_install.sh --rocm-version <rocm-version>
 ```
+In addition, the Linux distro version can be specified. Some of those tried are:
+
+```bash
+--distro ubuntu
+--distro rockylinux
+--distro "opensuse/leap"
+```
 
 The above command sequence will clone this repo and then execute the `test_install.sh` script. This script calls a the `main_install.sh` which is what you would execute to perform the actual installation on your system. The `test_install.sh` sets up a Docker container where you can test the installation of the software before proceeding to deploy it on your actual system by running `main_install.sh`. The `test_install.sh` script automatically runs the Docker container after it is built, and you can inspect it as `sysadmin`. Here is a flowchart of the process initiated by the script:
 

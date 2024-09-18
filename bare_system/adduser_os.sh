@@ -18,37 +18,22 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    fi
    adduser --home /home/sysadmin --uid 20000 --shell /bin/bash --disabled-password --gecos '' sysadmin
    echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
-   usermod -a -G video,render,renderalt,sudo sysadmin
+   usermod -a -G sudo,video,render,renderalt sysadmin
 fi
 
 if [ "${DISTRO}" = "rocky linux" ]; then
 # password is disabled by default and --disable-password option is not portable. Same with --gecos
-#  yum install diffutils -y
    adduser --home /home/sysadmin --uid 20000 --shell /bin/bash sysadmin
-   #echo '%wheel ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
-#  grep wheel /etc/sudoers
-#  cp /etc/sudoers /tmp
    echo '/^#\s*\%wheel\s*ALL=(ALL)\s*NOPASSWD/s/^#\s*//' | EDITOR='sed -f- -i' visudo
-#  echo "Changed lines"
-#  echo "============="
-#  diff /etc/sudoers /tmp
-#  echo "============="
 #  grep wheel /etc/sudoers
-   usermod -a -G video,render,renderalt,wheel sysadmin
+   usermod -a -G wheel,video,render sysadmin
 fi
 
 if [ "${DISTRO}" = "opensuse leap" ]; then
    useradd --create-home --user-group --home-dir /home/sysadmin --uid 20000 --shell /bin/bash sysadmin
-   # not working yet
-   #echo '%wheel ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
-#  cp /etc/sudoers /tmp
-   #echo '%wheel ALL=(ALL) NOPASSWD:ALL' | EDITOR='tee -a' visudo
+   # Need to install the system-group-wheel package -- see bootstrap_os.sh script
+   usermod -a -G wheel,video,render sysadmin
    echo '/^#\s*\%wheel\s*ALL=(ALL:ALL)\s*NOPASSWD/s/^#\s*//' | EDITOR='sed -f- -i' visudo
-   #usermod -a -G video,render,wheel sysadmin
-   usermod -a -G video,render sysadmin
-#  echo "Changed lines"
-#  echo "============="
-#  diff /etc/sudoers /tmp
-#  echo "============="
+   #groups sysadmin
    #cat /etc/sudoers
 fi

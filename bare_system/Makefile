@@ -90,13 +90,7 @@ mpi4py.timestamp: rocm.timestamp
 
 # From Tools layer
 
-miniconda3.timestamp:
-	tools/sources/scripts/miniconda3_setup.sh \
-	   --rocm-version ${ROCM_VERSION} \
-	   --python-versions ${PYTHON_VERSIONS}
-	touch miniconda3.timestamp
-
-omnitrace.timestamp: miniconda3.timestamp openmpi.timestamp
+omnitrace.timestamp: openmpi.timestamp
 	tools/sources/scripts/omnitrace_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
@@ -145,6 +139,12 @@ aomp.timestamp: rocm.timestamp
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-aomp-latest ${BUILD_AOMP_LATEST}
 	touch aomp.timestamp
+
+miniconda3.timestamp:
+	extras/sources/scripts/miniconda3_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --python-versions ${PYTHON_VERSIONS}
+	touch miniconda3.timestamp
 
 kokkos.timestamp:
 	extras/sources/scripts/kokoks_setup.sh \

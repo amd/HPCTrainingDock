@@ -281,7 +281,9 @@ echo "=================================="
 echo ""
 
 if [ "${DISTRO}" == "rocky linux" ]; then
-   ${SUDO} cat >> /etc/yum.repos.d/rocm.repo <<-EOF
+	${SUDO} touch /etc/yum.repos.d/rocm.repo
+	${SUDO} chmod a+w /etc/yum.repos.d/rocm.repo
+	cat <<-EOF | ${SUD0} tee -a /etc/yum.repos.d/rocm.repo
 	[ROCm-${AMDGPU_ROCM_VERSION}]
 	name=ROCm${AMDGPU_ROCM_VERSION}
 	baseurl=https://repo.radeon.com/rocm/rhel9/${AMDGPU_ROCM_VERSION}/main
@@ -290,10 +292,10 @@ if [ "${DISTRO}" == "rocky linux" ]; then
 	gpgcheck=1
 	gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
 EOF
-cat /etc/yum.repos.d/rocm.repo
+#cat /etc/yum.repos.d/rocm.repo
 
    #yum clean all
-   ${SUDO} yum install https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${ROCM_REPO_DIST}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
+   ${SUDO} yum install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${ROCM_REPO_DIST}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
 fi
 
 CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
@@ -344,7 +346,7 @@ if [ "${DISTRO}" == "ubuntu" ]; then
       # Run the amdgpu-install script. We have already installed the kernel driver, so use we use --no-dkms
       ${SUDO} ${DEB_FRONTEND} apt-get install -q -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
 # if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
-# if ROCM_VERSION is less than or equalt to 6.1.2, the awk command result will be blank
+# if ROCM_VERSION is less than or equal to 6.1.2, the awk command result will be blank
       result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
       if [[ "${result}" ]]; then
          result=`echo $DISTRO_VERSION | awk '$1>24.00'` && echo $result
