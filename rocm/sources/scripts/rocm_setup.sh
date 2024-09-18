@@ -17,6 +17,11 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 #fi
 DISTRO_CODENAME=`cat /etc/os-release | grep '^VERSION_CODENAME' | sed -e 's/VERSION_CODENAME=//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
+RHEL_COMPATIBLE=0
+if [[ "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
+   RHEL_COMPATIBLE=1
+fi
+
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
@@ -107,7 +112,7 @@ rocm-repo-dist-set()
 {
    if [ "${DISTRO}" = "ubuntu" ]; then
        ubuntu-set
-   elif [ "${DISTRO}" = "rocky linux" ]; then
+   elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
        rhel-set
    elif [ "${DISTRO}" = "opensuse" ]; then
        opensuse-set
@@ -247,7 +252,7 @@ opensuse-set()
 #  ROCM_DOCKER_OPTS="${ROCM_DOCKER_OPTS} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PERL_REPO=${PERL_REPO}"
 }
 
-if [ "${DISTRO}" == "rocky linux" ]; then
+if [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    ROCM_REPO_DIST=${DISTRO_VERSION}
 else
    ROCM_REPO_DIST=`lsb_release -c | cut -f2`
@@ -280,7 +285,7 @@ echo "AMDGPU_INSTALL_VERSION: $AMDGPU_INSTALL_VERSION"
 echo "=================================="
 echo ""
 
-if [ "${DISTRO}" == "rocky linux" ]; then
+if [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
 	${SUDO} touch /etc/yum.repos.d/rocm.repo
 	${SUDO} chmod a+w /etc/yum.repos.d/rocm.repo
 	cat <<-EOF | ${SUD0} tee -a /etc/yum.repos.d/rocm.repo
@@ -369,15 +374,16 @@ if [ "${DISTRO}" == "ubuntu" ]; then
 
       rm -rf amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
    fi
-fi
-
+elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
 # WIP, tested for RHEL 9.2
-if [ "${DISTRO}" == "rocky linux" ]; then
    wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | ${SUDO} tee /etc/apt/keyrings/rocm.gpg > /dev/null
    yum updateinfo
    wget -q https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${ROCM_REPO_DIST}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
    ${SUDO} yum install -q -y ./amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
    amdgpu-install -q -y --usecase=rocm,hip,hiplibsdk --no-dkms
+else
+   echo "DISTRO version ${DISTRO} not recognized or supported"
+   exit
 fi
 
 # rocm-validation-suite is optional

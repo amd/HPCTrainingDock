@@ -22,6 +22,8 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    #${SUDO}  sed -i -e '1,$s!/etc/lmod/modules!/etc/lmod/modules/Linux\n/etc/lmod/modules/ROCm\n/etc/lmod/modules/ROCmPlus\n/etc/lmod/modules/ROCmPlus-MPI\n/etc/lmod/modules/ROCmPlus-AMDResearchTools\n/etc/lmod/modules/ROCmPlus-LatestCompilers\n/etc/lmod/modules/ROCmPlus-AI\n/etc/lmod/modules/misc!' /etc/lmod/modulespath
    #cat /etc/lmod/modulespath
 fi
+echo "DISTRO is ${DISTRO}"
+
 if [ "${DISTRO}" = "rocky linux" ]; then
    ${SUDO} yum -y install epel-release
    ${SUDO} yum repolist
