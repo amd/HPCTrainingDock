@@ -74,7 +74,10 @@ if [ "${DISTRO}" = "ubuntu" ]; then
 
    apt-get -q clean && ${SUDO} rm -rf /var/lib/apt/lists/*
 elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
+   ${SUDO} yum install -y munge munge-devel
    ${SUDO} yum install -y slurm-slurmd slurm-slurmctld
+   ${SUDO} groupadd -g 900 slurm
+   ${SUDO} useradd -m -c "SLURM workload manager" -d /var/lib/slurm -u 900 -g slurm -s /bin/bash slurm
 else
    echo "DISTRO version ${DISTRO} not recognized or supported"
    exit
