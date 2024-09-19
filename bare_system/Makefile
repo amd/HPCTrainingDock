@@ -255,8 +255,8 @@ cupy_tests.timestamp: cupy.timestamp HPCTrainingExamples
 	touch cupy_tests.timestamp
 
 kokkos_tests.timestamp: kokkos.timestamp HPCTrainingExamples
-        cd HPCTrainingExamples/tests/build && ctest -R Kokkos
-        touch kokkos_tests.timestamp
+	cd HPCTrainingExamples/tests/build && ctest -R Kokkos
+	touch kokkos_tests.timestamp
 
 pytorch_tests.timestamp: pytorch.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Pytorch
