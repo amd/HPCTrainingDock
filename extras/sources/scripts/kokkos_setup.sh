@@ -107,7 +107,7 @@ else
 
       ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/kokkos
 
-      git clone https://github.com/kokkos/kokkos
+      git clone --branch 4.4.00 https://github.com/kokkos/kokkos
       cd kokkos
 
       ${SUDO} mkdir build
@@ -135,7 +135,7 @@ else
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/4.3.1.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/4.4.0.lua
 	whatis("Kokkos - Performance Portability Language")
 
 	load("rocm/${ROCM_VERSION}")
