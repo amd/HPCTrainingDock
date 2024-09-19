@@ -6,7 +6,7 @@ baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
 openmpi: openmpi.timestamp
 mvapich: mvapich.timestamp
-slurm: slurm.timestip
+slurm: slurm.timestamp
 omnitrace: omnitrace.timestamp
 omniperf: omniperf.timestamp
 amd_gcc: amd_gcc.timestamp

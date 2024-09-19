@@ -58,9 +58,6 @@ do
    shift
 done
 
-DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-
 echo ""
 echo "====================================="
 echo "Installing Slurm with:"
@@ -77,7 +74,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
 
    apt-get -q clean && ${SUDO} rm -rf /var/lib/apt/lists/*
 elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
-   yum install -y slurm-slurmd slurm-slurmctld
+   ${SUDO} yum install -y slurm-slurmd slurm-slurmctld
 else
    echo "DISTRO version ${DISTRO} not recognized or supported"
    exit
