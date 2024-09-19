@@ -150,7 +150,7 @@ miniconda3.timestamp:
 	touch miniconda3.timestamp
 
 kokkos.timestamp:
-	extras/sources/scripts/kokoks_setup.sh \
+	extras/sources/scripts/kokkos_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-kokkos ${BUILD_KOKKOS}
 	touch kokkos.timestamp
