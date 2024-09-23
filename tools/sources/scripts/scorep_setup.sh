@@ -150,15 +150,13 @@ else
 
       # get PDT install dir created by spack
       PDT_PATH=`spack find -p pdt | awk '{print $2}' | grep opt`
+      export PATH=$PDT_PATH/bin:$PATH
 
       # install OpenMPI if not in the system already
       if [[ `which mpicc | wc -l` -eq 0 ]]; then
          ${SUDO} apt-get update
          ${SUDO} apt-get install -q -y libopenmpi-dev  
       fi
-
-      ${SUDO} apt-get update
-      ${SUDO} apt-get install -q -y binutils-dev
 
       # install afs-dev
       wget https://perftools.pages.jsc.fz-juelich.de/utils/afs-dev/afs-dev-latest.tar.gz
@@ -235,7 +233,7 @@ else
       ../configure --with-rocm=$ROCM_PATH --with-pdt=$PDT_PATH --with-mpi=openmpi \
 	           --without-shmem --prefix=$SCOREP_PATH  --with-librocm_smi64-include=$ROCM_PATH/include/rocm_smi \
 		   --with-librocm_smi64-lib=$ROCM_PATH/lib --with-libunwind=download CC=$ROCM_PATH/llvm/bin/clang \
-		     CXX=$ROCM_PATH/llvm/bin/clang++ FC=$ROCM_PATH/llvm/bin/flang --enable-shared
+		     CXX=$ROCM_PATH/llvm/bin/clang++ FC=$ROCM_PATH/llvm/bin/flang --enable-shared --with-libbfd=download
       ${SUDO} make
       ${SUDO} make install
 
