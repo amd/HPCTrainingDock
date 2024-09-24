@@ -92,7 +92,7 @@ ${SUDO} rm -rf /etc/apt/trusted.gpg.d/ubuntu-toolchain-r_ubuntu_test.gpg
 ${SUDO} rm -rf /etc/apt/sources.list.d/ubuntu-toolchain-r-ubuntu-test-focal.list
 
 MODULE_PATH=/etc/lmod/modules/Linux/gcc
-${SUDO} mkdir ${MODULE_PATH}
+${SUDO} mkdir -p ${MODULE_PATH}
 
 
 if [ "${DISTRO_VERSION}" = "22.04" ]; then
@@ -149,7 +149,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/.version
 EOF
 
 MODULE_PATH=/etc/lmod/modules/Linux/clang
-${SUDO} mkdir ${MODULE_PATH}
+${SUDO} mkdir -p ${MODULE_PATH}
 
 for CLANG_VERSION in ${CLANG_VERSION_LIST}
 do

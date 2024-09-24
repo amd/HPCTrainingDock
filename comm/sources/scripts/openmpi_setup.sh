@@ -716,6 +716,7 @@ else
 
       OPENMPI_CONFIGURE_COMMAND="../configure \
          --prefix=${OPENMPI_PATH} \
+         --with-rocm=${ROCM_PATH} \
          --with-ucx=${UCX_PATH} \
          --with-ucc=${UCC_PATH} \
          --enable-mca-no-build=btl-uct \
