@@ -109,7 +109,9 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
       pwd
       echo "====================================="
       export AOMP=/opt/rocmplus-${ROCM_VERSION}/aomp
-      ${SUDO} chmod a+w /opt
+      if [[ "${USER}" != "root" ]]; then
+         ${SUDO} chmod a+rwX /opt
+      fi
 
 # Installs aomp from .deb package but then we can't specify where to install it
 #     wget -q https://github.com/ROCm/aomp/releases/download/rel_19.0-0/aomp_Ubuntu2204_19.0-0_amd64.deb
@@ -117,7 +119,7 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
 
       ${SUDO} apt-get update
       ${SUDO} ${DEB_FRONTEND} apt-get install -y gawk ninja-build generate-ninja ccache libssl-dev \
-	      libgmp-dev libmpfr-dev libbabeltrace-dev
+	      libgmp-dev libmpfr-dev libbabeltrace-dev liblzma-dev
       pip3 install CppHeaderParser
       
       wget -q https://github.com/ROCm-Developer-Tools/aomp/releases/download/rel_${AOMP_VERSION_NUMBER}/aomp-${AOMP_VERSION_NUMBER}.tar.gz
@@ -132,7 +134,11 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
       cd ..
       rm -rf aomp-${AOMP_VERSION_NUMBER}.tar.gz aomp${AOMP_VERSION_SHORT}
 
-      ${SUDO} chmod a-w /opt
+      if [[ "${USER}" != "root" ]]; then
+         ${SUDO} find /opt -type f -execdir chown root:root "{}" +
+         ${SUDO} chmod go-w /opt
+      fi
+
    fi
 
    # In either case, create a module file for AOMP compiler
