@@ -112,6 +112,12 @@ else
 
    else
 
+      echo ""
+      echo "==============================="
+      echo "        Building SCORE-P       "
+      echo "==============================="
+      echo ""
+
       source /etc/profile.d/lmod.sh
       module load rocm/${ROCM_VERSION}
 
@@ -119,14 +125,6 @@ else
       PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
       ${SUDO} mkdir -p ${SCOREP_PATH}
       ${SUDO} mkdir -p ${PDT_PATH}
-
-      export PATH=${SCOREP_PATH}/bin:$PATH
-
-      echo ""
-      echo "==============================="
-      echo " Building SCORE-P Dependencies"
-      echo "==============================="
-      echo ""
 
       git clone https://github.com/spack/spack.git
 
@@ -158,94 +156,29 @@ else
          ${SUDO} apt-get install -q -y libopenmpi-dev  
       fi
 
-      # install afs-dev
-      wget https://perftools.pages.jsc.fz-juelich.de/utils/afs-dev/afs-dev-latest.tar.gz
-      tar -xvf afs-dev-latest.tar.gz
-      cd afs-dev-latest
-      ./install-afs-dev.sh --continue-after-download --prefix=$SCOREP_PATH
-      cd ..
-      rm -rf afs-dev-latest*
-
-      # install perftools-dev
-      wget https://perftools.pages.jsc.fz-juelich.de/utils/perftools-dev/perftools-dev-latest.tar.gz
-      tar -xvf perftools-dev-latest.tar.gz
-      cd perftools-dev-latest
-      ./install-perftools-dev.sh --continue-after-download --prefix=$SCOREP_PATH
-      cd ..
-      rm -rf perftools-dev-latest*
-
-      # install cubew
-      wget https://apps.fz-juelich.de/scalasca/releases/cube/4.8/dist/cubew-4.8.2.tar.gz
-      tar -xvf cubew-4.8.2.tar.gz
-      cd cubew-4.8.2
-      ./configure --prefix=$SCOREP_PATH
-      make
-      make install
-      cd ..
-      rm -rf cubew-4.8.2*
-
-      # install cubelib
-      wget https://apps.fz-juelich.de/scalasca/releases/cube/4.8/dist/cubelib-4.8.2.tar.gz
-      tar -xvf cubelib-4.8.2.tar.gz
-      cd cubelib-4.8.2
-      ./configure --prefix=$SCOREP_PATH
-      make
-      make install
-      cd ..
-      rm -rf cubelib*
-
-      # install opari2
-      wget https://perftools.pages.jsc.fz-juelich.de/cicd/opari2/tags/opari2-2.0.8/opari2-2.0.8.tar.gz
-      tar -xvf opari2-2.0.8.tar.gz
-      cd opari2-2.0.8
-      ./configure --prefix=$SCOREP_PATH
-      make
-      make install
-      cd ..
-      rm -rf opari2-2.0.8*
-
-      # install otf2
-      wget https://perftools.pages.jsc.fz-juelich.de/cicd/otf2/tags/otf2-3.0.3/otf2-3.0.3.tar.gz
-      tar -xvf otf2-3.0.3.tar.gz
-      cd otf2-3.0.3
-      ./configure --prefix=$SCOREP_PATH
-      make
-      make install
-      cd ..
-      rm -rf otf2*
-
-      echo ""
-      echo "==============================="
-      echo "        Building SCORE-P       "
-      echo "==============================="
-      echo ""
-
-      wget https://gitlab.com/score-p/scorep/-/archive/v8.4/scorep-v8.4.tar.gz
-      tar -xvf  scorep-v8.4.tar.gz
-      cd scorep-v8.4
-      ./bootstrap
+      wget http://go.fzj.de/scorep-ompt-device-tracing
+      mv scorep-ompt-device-tracing scorep-ompt-device-tracing.tar.gz
+      tar -xvf scorep-ompt-device-tracing.tar.gz
+      cd sources.37b6f127
       mkdir build
       cd build
-      touch ../build-config/REVISION
       export OMPI_CC=$ROCM_PATH/llvm/bin/clang
       export OMPI_CXX=$ROCM_PATH/llvm/bin/clang++
       export OMPI_FC=$ROCM_PATH/llvm/bin/flang
-      ../configure --with-rocm=$ROCM_PATH --with-pdt=$PDT_PATH --with-mpi=openmpi \
-	           --without-shmem --prefix=$SCOREP_PATH  --with-librocm_smi64-include=$ROCM_PATH/include/rocm_smi \
-		   --with-librocm_smi64-lib=$ROCM_PATH/lib --with-libunwind=download CC=$ROCM_PATH/llvm/bin/clang \
-		     CXX=$ROCM_PATH/llvm/bin/clang++ FC=$ROCM_PATH/llvm/bin/flang --enable-shared --with-libbfd=download
+      ../configure --with-rocm=$ROCM_PATH  --with-mpi=openmpi  --prefix=$SCOREP_PATH  --with-librocm_smi64-include=$ROCM_PATH/include/rocm_smi \
+                   --with-librocm_smi64-lib=$ROCM_PATH/lib --with-libunwind=download --enable-shared --with-libbfd=download --without-shmem  \
+		     CC=$ROCM_PATH/llvm/bin/clang CXX=$ROCM_PATH/llvm/bin/clang++ FC=$ROCM_PATH/llvm/bin/flang CFLAGS=-fPIE
+
       ${SUDO} make
       ${SUDO} make install
 
       cd ../..
-#      ${SUDO} rm -rf scorep-v8.4*
+      ${SUDO} rm -rf scorep-ompt* sources.37b6f127
       ${SUDO} rm -rf spack
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/pdt -type f -execdir chown root:root "{}" +
          ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/scorep -type f -execdir chown root:root "{}" +
-      fi
-      if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}/pdt
          ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}/scorep
       fi
@@ -258,7 +191,7 @@ else
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/8.4.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/9.0-dev.lua
 	whatis(" Score-P Performance Analysis Tool ")
 
         load("rocm/${ROCM_VERSION}")
