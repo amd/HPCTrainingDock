@@ -49,7 +49,7 @@ if [ -d "$INSTALL_DIR" ]; then
       echo "Exiting"
       exit
    else
-      ${SUDO} rm -rf /opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0
+      ${SUDO} rm -rf ${INSTALLATION_DIR}
    fi
 fi
 
@@ -79,10 +79,27 @@ ${SUDO} sed -i -e 's/ascii/utf-8/' /opt/rocmplus-*/omniperf-*/bin/utils/specs.py
 # Create a module file for Mvapich
 export MODULE_PATH=/etc/lmod/modules/ROCmPlus-AMDResearchTools/omniperf
 
+if [ -d "$MODULE_PATH" ]; then
+   if [ "$REPLACE" != 1 ]; then
+      echo "Installation directory $MODULE_PATH exists and replace option is false"
+      echo "Exiting"
+      exit
+   else
+      ${SUDO} rm -rf ${MODULE_PATH}/2.0.0*.lua 
+   fi
+fi
+
+
 ${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/2.0.0.lua
+if [ "$AMD_STAGING" = 1 ]; then
+   MODULE_VERSION=2.0.0-dev.lua
+else
+   MODULE_VERSION=2.0.0.lua
+fi
+
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${MODULE_VERSION}
 	local help_message = [[
 
 	Omniperf is an open-source performance analysis tool for profiling
