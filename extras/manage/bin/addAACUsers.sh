@@ -14,8 +14,8 @@ Help()
    echo
 }
 
-#HOMEDIR_BASE=/home/aac/shared/teams/dcgpu_training
-HOMEDIR_BASE=/users
+HOMEDIR_BASE=/home/aac/shared/teams/dcgpu_training
+#HOMEDIR_BASE=/users
 
 # note these uid/gids are only for Containers for Bob Robey.
 # you MUST use other number for other Containers !
@@ -39,7 +39,7 @@ fi
 
 # First see what user ids and group ids are used by files in 
 # the Home directory tree and set the max to 
-sudo find ${HOMEDIR_BASE} -type f -print0 | while read -r -d '' file; do
+sudo find ${HOMEDIR_BASE} -maxdepth 2 -type f -print0 | while read -r -d '' file; do
    uid=`sudo stat -c %u $file`
    if [[ ! -z "$uid" ]]; then
       if (( $uid > ${HACKATHONLASTUSER} )); then
