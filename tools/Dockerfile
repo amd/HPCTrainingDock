@@ -18,6 +18,7 @@ ARG AMDGPU_GFXMODEL
 ARG INSTALL_GRAFANA=0
 ARG BUILD_HPCTOOLKIT
 ARG BUILD_TAU
+ARG BUILD_SCOREP
 
 LABEL maintainer="bob.robey@amd.com"
 
@@ -90,5 +91,13 @@ COPY tools/sources/scripts/tau_setup.sh /tmp/tau_setup.sh
 RUN  /tmp/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-tau ${BUILD_TAU} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
      rm /tmp/tau_setup.sh
 
+
+#
+# Install Score-P
+#
+COPY tools/sources/scripts/scorep_setup.sh /tmp/scorep_setup.sh
+
+RUN  /tmp/scorep_setup.sh --rocm-version ${ROCM_VERSION} --build-scorep ${BUILD_SCOREP} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+     rm /tmp/scorep_setup.sh
 
 ENTRYPOINT [ "/docker-entrypoint.sh" ]
