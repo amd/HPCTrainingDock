@@ -57,9 +57,9 @@ if [ "$AMD_STAGING" = 1 ]; then
    git clone -b amd-staging https://github.com/ROCm/omniperf.git
    cd omniperf
 else
-   wget -q https://github.com/AMDResearch/omniperf/releases/download/v2.0.0-RC1/omniperf-2.0.0-RC1.tar.gz && \
-     ${SUDO} tar xfz omniperf-2.0.0-RC1.tar.gz && \
-     cd ./omniperf-2.0.0-RC1
+   wget -q https://github.com/AMDResearch/omniperf/releases/download/v2.0.1/omniperf-2.0.1.tar.gz && \
+     ${SUDO} tar xfz omniperf-2.0.1.tar.gz && \
+     cd ./omniperf-2.0.1
 fi
 
 ${SUDO} sed -i '152i \                                            .astype(str)' src/utils/tty.py \
