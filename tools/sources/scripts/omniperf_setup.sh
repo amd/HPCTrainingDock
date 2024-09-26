@@ -1,6 +1,8 @@
 #!/bin/bash
 
 ROCM_VERSION=6.0
+AMD_STAGING=0
+REPLACE=0
 SUDO="sudo"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -15,6 +17,14 @@ do
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
+          ;;
+      "--amd-staging")
+          shift
+          AMD_STAGING=${1}
+          ;;
+      "--replace")
+          shift
+          REPLACE=${1}
           ;;
       *)
          last ${1}
@@ -32,10 +42,27 @@ echo "====================================="
 echo ""
 
 INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0
-wget -q https://github.com/AMDResearch/omniperf/releases/download/v2.0.0-RC1/omniperf-2.0.0-RC1.tar.gz && \
+
+if [ -d "$INSTALL_DIR" ]; then
+   if [ "$REPLACE" != 1 ]; then
+      echo "Installation directory $INSTALLATION_DIR exists and replace option is false"
+      echo "Exiting"
+      exit
+   else
+      ${SUDO} rm -rf /opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0
+   fi
+fi
+
+if [ "$AMD_STAGING" = 1 ]; then
+   git clone -b amd-staging https://github.com/ROCm/omniperf.git
+   cd omniperf
+else
+   wget -q https://github.com/AMDResearch/omniperf/releases/download/v2.0.0-RC1/omniperf-2.0.0-RC1.tar.gz && \
      ${SUDO} tar xfz omniperf-2.0.0-RC1.tar.gz && \
-     cd ./omniperf-2.0.0-RC1\
-     && ${SUDO} sed -i '152i \                                            .astype(str)' src/utils/tty.py \
+     cd ./omniperf-2.0.0-RC1
+fi
+
+${SUDO} sed -i '152i \                                            .astype(str)' src/utils/tty.py \
      && ${SUDO} python3 -m pip install -t ${INSTALL_DIR}/python-libs -r requirements.txt --upgrade \
      && ${SUDO} python3 -m pip install -t ${INSTALL_DIR}/python-libs pytest --upgrade \
      && ${SUDO} mkdir build \
@@ -45,7 +72,7 @@ wget -q https://github.com/AMDResearch/omniperf/releases/download/v2.0.0-RC1/omn
         -DPYTHON_DEPS=${INSTALL_DIR}/python-libs \
         -DMOD_INSTALL_PATH=${INSTALL_DIR}/modulefiles .. \
      && ${SUDO} make install
-cd ../.. && ${SUDO} rm -rf omniperf-2.0.0-RC1 omniperf-2.0.0-RC1.tar.gz
+cd ../.. && ${SUDO} rm -rf omniperf-2.0.0-RC1 omniperf-2.0.0-RC1.tar.gz omniperf
 
 ${SUDO} sed -i -e 's/ascii/utf-8/' /opt/rocmplus-*/omniperf-*/bin/utils/specs.py
 
