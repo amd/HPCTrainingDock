@@ -41,7 +41,7 @@ echo "ROCM_VERSION is $ROCM_VERSION"
 echo "====================================="
 echo ""
 
-INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.1
+INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0
 
 if [ -d "$INSTALL_DIR" ]; then
    if [ "$REPLACE" != 1 ]; then
@@ -57,9 +57,9 @@ if [ "$AMD_STAGING" = 1 ]; then
    git clone -b amd-staging https://github.com/ROCm/omniperf.git
    cd omniperf
 else
-   wget -q https://github.com/AMDResearch/omniperf/releases/download/v2.0.1/omniperf-2.0.1.tar.gz && \
-     ${SUDO} tar xfz omniperf-2.0.1.tar.gz && \
-     cd ./omniperf-2.0.1
+   wget -q https://github.com/AMDResearch/omniperf/releases/download/v2.0.0-RC1/omniperf-2.0.0-RC1.tar.gz && \
+     ${SUDO} tar xfz omniperf-2.0.0-RC1.tar.gz && \
+     cd ./omniperf-2.0.0-RC1
 fi
 
 ${SUDO} sed -i '152i \                                            .astype(str)' src/utils/tty.py \
@@ -72,7 +72,7 @@ ${SUDO} sed -i '152i \                                            .astype(str)' 
         -DPYTHON_DEPS=${INSTALL_DIR}/python-libs \
         -DMOD_INSTALL_PATH=${INSTALL_DIR}/modulefiles .. \
      && ${SUDO} make install
-cd ../.. && ${SUDO} rm -rf omniperf-2.0.1 omniperf-2.0.1.tar.gz omniperf
+cd ../.. && ${SUDO} rm -rf omniperf-2.0.0-RC1 omniperf-2.0.0-RC1.tar.gz omniperf
 
 ${SUDO} sed -i -e 's/ascii/utf-8/' /opt/rocmplus-*/omniperf-*/bin/utils/specs.py
 
@@ -85,7 +85,7 @@ if [ -d "$MODULE_PATH" ]; then
       echo "Exiting"
       exit
    else
-      ${SUDO} rm -rf ${MODULE_PATH}/2.0.*.lua 
+      ${SUDO} rm -rf ${MODULE_PATH}/2.0.0*.lua 
    fi
 fi
 
@@ -94,9 +94,9 @@ ${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
 if [ "$AMD_STAGING" = 1 ]; then
-   MODULE_VERSION=2.0.1-dev.lua
+   MODULE_VERSION=2.0.0-dev.lua
 else
-   MODULE_VERSION=2.0.1.lua
+   MODULE_VERSION=2.0.0.lua
 fi
 
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${MODULE_VERSION}
@@ -105,23 +105,23 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${MODULE_VERSION}
 	Omniperf is an open-source performance analysis tool for profiling
 	machine learning/HPC workloads running on AMD MI GPUs.
 
-	Version 2.0.1
+	Version 2.0.0
 	]]
 
 	help(help_message,"\n")
 
 	whatis("Name: omniperf")
-	whatis("Version: 2.0.1")
+	whatis("Version: 2.0.0")
 	whatis("Keywords: Profiling, Performance, GPU")
 	whatis("Description: tool for GPU performance profiling")
 	whatis("URL: https://github.com/AMDResearch/omniperf")
 
 	-- Export environmental variables
-	local topDir="/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.1"
-	local binDir="/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.1/bin"
-	local shareDir="/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.1/share"
-	local pythonDeps="/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.1/python-libs"
-	local roofline="/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.1/1in/utils/rooflines/roofline-ubuntu20_04-mi200-rocm5"
+	local topDir="/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0"
+	local binDir="/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0/bin"
+	local shareDir="/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0/share"
+	local pythonDeps="/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0/python-libs"
+	local roofline="/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0/bin/utils/rooflines/roofline-ubuntu20_04-mi200-rocm5"
 
 	setenv("OMNIPERF_DIR",topDir)
 	setenv("OMNIPERF_BIN",binDir)
