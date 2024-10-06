@@ -60,16 +60,16 @@ ${SUDO} ${DEB_FRONTEND} apt-get install -y x11vnc xvfb
 
 cat <<-EOF | ${SUDO} tee /usr/bin/startvncserver.sh
 	#!/bin/bash
-	if [ ! -f $HOME/.vnc/passwd ]; then
+	if [ ! -f \$HOME/.vnc/passwd ]; then
 	   x11vnc -storepasswd
 	fi
-	/usr/bin/x11vnc -display :0 -auth $HOME/.Xauthority -rfbauth $HOME/.vnc/passwd -rfbport 5900 -forever -loop -noxdamage -repeat -shared -capslock -nomodtweak -create -auth guess &
+	/usr/bin/x11vnc -display :0 -auth \$HOME/.Xauthority -rfbauth \$HOME/.vnc/passwd --autoport n -forever -loop -noxdamage -repeat -shared -capslock -nomodtweak -create -auth guess &
 EOF
 ${SUDO} chmod 755 /usr/bin/startvncserver.sh
 
  
 cat <<-EOF | ${SUDO} tee /usr/bin/stopvncserver.sh
 	#!/bin/bash
-	killall x11vnc
+	killall -i x11vnc
 EOF
 ${SUDO} chmod 755 /usr/bin/stopvncserver.sh

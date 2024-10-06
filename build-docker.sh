@@ -272,6 +272,7 @@ do
 	    BUILD_SCOREP="1"
 	    BUILD_MPI4PY="1"
 	    BUILD_HPCTOOLKIT="1"
+	    BUILD_X11VNC="1"
             reset-last
             ;;
         "--use-cached-apps")

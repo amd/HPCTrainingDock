@@ -162,7 +162,7 @@ WORKDIR /app
 #
 # Install VNC
 #
-EXPOSE 5900
+EXPOSE 5900-5920
 COPY extras/sources/scripts/x11vnc_setup.sh /tmp/x11vnc_setup.sh
 
 RUN  chmod u+x /tmp/x11vnc_setup.sh && \
