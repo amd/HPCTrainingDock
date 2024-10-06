@@ -67,3 +67,7 @@ echo "starting ssh server and waiting for ssh logins...."
 
 /usr/sbin/sshd -D
 
+#HAVE_X11VNC=`which x11vnc |wc -l`
+#if [ "${HAVE_X11VNC}" == "1" ] then
+#   x11vnc -display :0 -rfbport 5900 -xkb -repeat -skip_dups -forever -shared -rfbauth "AAA"invoke-rc.d: could not determine current runlevel
+#fi

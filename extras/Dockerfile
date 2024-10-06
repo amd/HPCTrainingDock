@@ -28,6 +28,7 @@ ARG BUILD_PYTORCH
 ARG BUILD_CUPY
 ARG BUILD_KOKKOS
 ARG BUILD_JAX
+ARG BUILD_X11VNC
 ARG USE_CACHED_APPS
 ARG AMDGPU_GFXMODEL=gfx90a
 ARG PYTHON_VERSIONS
@@ -157,6 +158,15 @@ RUN /tmp/pytorch_setup.sh --build-pytorch ${BUILD_PYTORCH} --rocm-version ${ROCM
 
 RUN echo "At end of pytorch install" && cd /app && ls -l && cd /tmp && ls -l && cd && ls -l
 WORKDIR /app
+
+#
+# Install VNC
+#
+EXPOSE 5900
+COPY extras/sources/scripts/x11vnc_setup.sh /tmp/x11vnc_setup.sh
+
+RUN  chmod u+x /tmp/x11vnc_setup.sh && \
+     /tmp/x11vnc_setup.sh --build-x11vnc ${BUILD_X11VNC} ; rm /tmp/x11vnc_setup.sh
 
 #
 # Install any additional apps or libs that are needed 

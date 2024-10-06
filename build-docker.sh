@@ -20,6 +20,7 @@
 : ${BUILD_SCOREP:="0"}
 : ${BUILD_MPI4PY:="0"}
 : ${BUILD_HPCTOOLKIT:="0"}
+: ${BUILD_X11VNC:="0"}
 : ${BUILD_ALL_LATEST:="0"}
 : ${RETRY:=3}
 : ${NO_CACHE:=""}
@@ -249,6 +250,10 @@ do
             BUILD_HPCTOOLKIT="1"
             reset-last
             ;;
+        "--build-x11vnc")
+            BUILD_X11VNC="1"
+            reset-last
+            ;;
         "--install-grafana")
             INSTALL_GRAFANA="1"
             reset-last
@@ -353,6 +358,7 @@ do
        --build-arg BUILD_SCOREP=${BUILD_SCOREP} \
        --build-arg BUILD_MPI4PY=${BUILD_MPI4PY} \
        --build-arg BUILD_HPCTOOLKIT=${BUILD_HPCTOOLKIT} \
+       --build-arg BUILD_X11VNC=${BUILD_X11VNC} \
        --build-arg USE_CACHED_APPS=${USE_CACHED_APPS} \
        -t ${DOCKER_USER}/training:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        -t training \
