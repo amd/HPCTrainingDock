@@ -162,6 +162,9 @@ WORKDIR /app
 #
 # Install VNC
 #
+ADD extras/image/etc  /etc
+ADD extras/image/usr  /usr
+ADD extras/image/home /users/default
 EXPOSE 5900-5920
 COPY extras/sources/scripts/x11vnc_setup.sh /tmp/x11vnc_setup.sh
 

@@ -56,20 +56,55 @@ do
 done
 
 ${SUDO} apt-get update
-${SUDO} ${DEB_FRONTEND} apt-get install -y x11vnc xvfb
+#${SUDO} ${DEB_FRONTEND} apt-get install -y x11vnc xvfb xserver-xorg-core fvwm lxde
+${SUDO} ${DEB_FRONTEND} apt-get install -y xserver-xorg-video-dummy \
+        lxde \
+        x11-xserver-utils xdotool \
+        xterm \
+        gnome-themes-standard \
+        gtk2-engines-pixbuf \
+        gtk2-engines-murrine \
+        libcanberra-gtk-module libcanberra-gtk3-module \
+        fonts-liberation \
+        xfonts-base xfonts-100dpi xfonts-75dpi xfonts-scalable xfonts-cyrillic \
+        libopengl0 mesa-utils libglu1-mesa libgl1-mesa-dri libjpeg8 libjpeg62 \
+        xauth xdg-utils \
+        x11vnc
+${SUDO} sed -i -e '/allowed_users/s/console/anybody/' /etc/X11/Xwrapper.config
 
-cat <<-EOF | ${SUDO} tee /usr/bin/startvncserver.sh
-	#!/bin/bash
-	if [ ! -f \$HOME/.vnc/passwd ]; then
-	   x11vnc -storepasswd
-	fi
-	/usr/bin/x11vnc -display :0 -auth \$HOME/.Xauthority -rfbauth \$HOME/.vnc/passwd --autoport n -forever -loop -noxdamage -repeat -shared -capslock -nomodtweak -create -auth guess &
-EOF
-${SUDO} chmod 755 /usr/bin/startvncserver.sh
-
- 
-cat <<-EOF | ${SUDO} tee /usr/bin/stopvncserver.sh
-	#!/bin/bash
-	killall -i x11vnc
-EOF
-${SUDO} chmod 755 /usr/bin/stopvncserver.sh
+#cat <<-EOF | ${SUDO} tee /usr/local/bin/startvncserver.sh
+#	#!/bin/bash
+#	# Find an available display and set ports for VNC and NoVNC
+#	for i in \$(seq 0 9); do
+#	    if [ ! -e /tmp/.X\${i}-lock -a ! -e /tmp/.X11-unix/X\${i} ]; then
+#	        DISP=\$i
+#	        break
+#	    fi
+#	done
+#	if [ -z "\$DISP" ]; then
+#	    echo "Cannot find a free DISPLAY port"
+#	    exit
+#	fi
+#	mkdir \$HOME/.log
+#	Xorg -noreset +extension GLX +extension RANDR +extension RENDER \
+#	     -logfile \$HOME/.log/Xorg_X\$DISP.log -config \$HOME/.config/xorg_X\$DISP.conf \
+#	     :\$DISP &> \$HOME/.log/Xorg_X\${DISP}_err.log &
+#	XORG_PID=\$!
+#	ps \$XORG_PID > /dev/null || { cat \$HOME/.log/Xorg_X\${DISP}_err.log && exit -1; }
+#	lxsession -s LXDE -e LXDE
+#	
+#	if [ ! -f \$HOME/.vnc/passwd ]; then
+#	   x11vnc -storepasswd
+#	fi
+#	touch \$HOME/.Xauthority
+#	/usr/bin/x11vnc -display :\$DISP -auth \$HOME/.Xauthority -rfbauth \$HOME/.vnc/passwd --autoport n -forever -loop -noxdamage -repeat -shared -capslock -nomodtweak &
+#	sleep 5
+#EOF
+#${SUDO} chmod 755 /usr/local/bin/startvncserver.sh
+#
+# 
+#cat <<-EOF | ${SUDO} tee /usr/local/bin/stopvncserver.sh
+#	#!/bin/bash
+#	killall -i x11vnc
+#EOF
+#${SUDO} chmod 755 /usr/local/bin/stopvncserver.sh
