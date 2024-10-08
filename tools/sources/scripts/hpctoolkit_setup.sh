@@ -145,7 +145,7 @@ else
       git clone https://gitlab.com/hpctoolkit/hpctoolkit.git
       cd hpctoolkit
       export CMAKE_PREFIX_PATH=$ROCM_PATH:$CMAKE_PREFIX_PATH
-      meson setup -Drocm=enabled -Dextended_tests=enabled  --prefix=${HPCTOOLKIT_PATH} --libdir=${HPCTOOLKIT_PATH}/lib build
+      meson setup -Drocm=enabled --prefix=${HPCTOOLKIT_PATH} --libdir=${HPCTOOLKIT_PATH}/lib build
       cd  build
       meson compile
       meson install
