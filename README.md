@@ -489,6 +489,10 @@ make rocm_package
 ```
 This make command tars up the `rocm-6.1.2` directory and then the next build it will restore from the tar file.
 
-# 7. Feedback and Contributions
+# 7. Additional Resources
+
+Please see: https://github.com/amd/InfinityHub-CI for a list of instructions on how to run a variety of scientific application codes on AMD GPUs. The repository mostly deals with Docker containers, but some Bare Metal installs are also available.
+
+# 8. Feedback and Contributions
 
 We very much welcome user experience and feedback, please feel free to reach out to us by creating pull requests or opening issues if you consider it necessary. We will get back to you as soon as possible. For information on licenses, please see the `LICENSE.md` file.
