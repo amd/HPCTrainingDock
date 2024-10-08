@@ -39,6 +39,7 @@ do
       "--help")
           shift
           usage
+	  ;;
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
