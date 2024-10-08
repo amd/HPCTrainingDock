@@ -10,6 +10,7 @@
 : ${BUILD_HPCTOOLKIT:="1"}
 : ${BUILD_MPI4PY:="1"}
 : ${BUILD_TAU:="1"}
+: ${BUILD_X11VNC:"1"}
 : ${USE_MAKEFILE:="0"}
 
 OMNITRACE_BUILD_FROM_SOURCE=0
@@ -143,6 +144,8 @@ extras/sources/scripts/pytorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-
 extras/sources/scripts/apps_setup.sh
 
 extras/sources/scripts/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-kokkos ${BUILD_KOKKOS}
+
+extras/sources/scripts/x11vnc_setup.sh --build-x11vnc ${BUILD_X11VNC}
 
 #If ROCm should be installed in a different location
 if [ "${ROCM_INSTALLPATH}" != "/opt/" ]; then

@@ -8,13 +8,42 @@ fi
 
 INSTALL_GRAFANA=0
 
+usage()
+{
+   echo "Usage:"
+   echo "  --help: display this usage information"
+   echo "  --install-grafana: default value is 0, set it to 1 to install grafana"
+   exit 1
+}
+
+send-error()
+{
+    usage
+    echo -e "\nError: ${@}"
+    exit 1
+}
+
+reset-last()
+{
+   last() { send-error "Unsupported argument :: ${1}"; }
+}
+
+
 n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
+      "--help")
+          shift
+          usage
+          ;;
       "--install-grafana")
           shift
           INSTALL_GRAFANA=${1}
+	  reset-last
+          ;;
+      "--*")
+          send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
       *)
          last ${1}

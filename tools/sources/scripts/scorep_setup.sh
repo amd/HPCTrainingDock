@@ -18,7 +18,7 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 usage()
 {
    echo "Usage:"
-   echo "  --build-scorep: default is 0"
+   echo "  --build-scorep: set to 1 to build Score-P, default is 0"
    echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/misc/scorep"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"

@@ -9,22 +9,53 @@ if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
 fi
 
+usage()
+{
+   echo "Usage:"
+   echo "  --help: display this usage information"
+   echo "  --rocm-version: default is $ROCM_VERSION"
+   echo "  --amd-staging: set to 1 to build the amd-staging branch, default is 0"
+   echo "  --replace: set to 1 to remove existing installation directory, default is 0"
+   exit 1
+}
+
+send-error()
+{
+    usage
+    echo -e "\nError: ${@}"
+    exit 1
+}
+
+reset-last()
+{
+   last() { send-error "Unsupported argument :: ${1}"; }
+}
+
 
 n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
+      "--help")
+          shift
+          usage
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
+	  reset-last
           ;;
       "--amd-staging")
           shift
           AMD_STAGING=${1}
+          reset-last
           ;;
       "--replace")
           shift
           REPLACE=${1}
+          reset-last
+          ;;
+      "--*")
+          send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
       *)
          last ${1}

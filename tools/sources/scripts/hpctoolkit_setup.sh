@@ -23,6 +23,7 @@ usage()
    echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/misc/hpctoolkit"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
+   echo "  --build-hpctoolkit [ BUILD_HPCTOOLKIT ] default is 0"
    echo "  --help: this usage information"
    exit 1
 }
