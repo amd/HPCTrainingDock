@@ -123,6 +123,8 @@ else
 
       TAU_PATH=/opt/rocmplus-${ROCM_VERSION}/tau
       PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
+      export TAU_LIB_DIR=${TAU_PATH}/x86_64/lib
+      echo 'Defaults:%sudo env_keep += "TAU_LIB_DIR"' | ${SUDO} EDITOR='tee -a' visudo
       ${SUDO} mkdir -p ${TAU_PATH}
       ${SUDO} mkdir -p ${PDT_PATH}
 
@@ -232,7 +234,7 @@ else
 
         load("rocm/${ROCM_VERSION}")
 	prepend_path("PATH","${TAU_PATH}/x86_64/bin")
-	setenv("TAU_LIB","${TAU_PATH}/x86_64/lib")
+	setenv("TAU_LIB_DIR","${TAU_LIB_DIR}")
 EOF
 
 fi
