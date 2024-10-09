@@ -126,7 +126,8 @@ if [ "${BUILD_GCC_LATEST}" = "1" ] ; then
       cd ..
 
       rm -rf build buildhost
-      rm -rf gcc newlib
+      cd ..
+      rm -rf gcc newlib ${LLVM_DIR_SHORT}.tar.gz
 
       chmod a-w /opt
    fi
