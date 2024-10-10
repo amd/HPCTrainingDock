@@ -17,6 +17,7 @@ usage()
    echo "Usage:"
    echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/misc/kokkos"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --build-kokkos [ BUILD_KOKKOS ], set to 1 to build Kokkos, default is 0"
    echo "  --help: this usage information"
    exit 1
 }
