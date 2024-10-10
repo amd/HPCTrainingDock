@@ -165,6 +165,10 @@ else
          ${SUDO} apt-get install -q -y libopenmpi-dev
       fi
 
+      # install java to use paraprof
+      ${SUDO} apt-get update
+      ${SUDO} apt install default-jre
+
       # configure with: MPI OMPT OPENMP PDT ROCM
       ${SUDO} ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -mpi -ompt -openmp -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -pdt=${PDT_PATH} -iowrapper
 
