@@ -76,12 +76,12 @@ echo "BUILD_FLANGNEW: $BUILD_FLANGNEW"
 echo "==================================="
 echo ""
 
-if [ "${BUILD_KOKKOS}" = "0" ]; then
+if [ "${BUILD_FLANGNEW}" = "0" ]; then
       echo "flang-new will not be build, according to the specified value of BUILD_FLANGNEW"
       echo "BUILD_FLANGNEW: $BUILD_FLANGNEW"
       exit 
 else  
-      if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles//rocm-afar-5891-* ]; then
+      if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/rocm-afar-5891-* ]; then
          echo ""
          echo "============================="
          echo " Installing Cached flang-new "
@@ -124,7 +124,7 @@ else
 	      prepend_path("CPLUS_INCLUDE_PATH","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/include")
 	      load("rocm/${ROCM_VERSION}")
 	      family("compiler")
-   EOF
+EOF
    else 
          echo " The pre-production flang-new software can currently only be installed from a cached archive"
 	 exit 1
