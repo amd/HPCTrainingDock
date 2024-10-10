@@ -100,7 +100,6 @@ else
          fi
  
          ${SUDO} chown -R root:root /opt/rocmplus-${ROCM_VERSION}/rocm-afar-5891
-         ${SUDO} rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/rocm-afar-5891-*
 
          # Create a module file for flang-new
          ${SUDO} mkdir -p ${MODULE_PATH}
