@@ -79,7 +79,7 @@ These instructions will setup a container on `localhost` and assume that:
 2. For Docker, your userid is part of the Docker group.
 3. For Docker, you can issue Docker commands without `sudo`.
  
-### 2.1.1  Building the Four Images of the Container 
+### 2.1.1 Building the Four Images of the Container 
 The container is set up to use Ubuntu 22.04 as OS, and will build four different images called `rocm`, `comm`,  `tools` and `extras`. 
 Here is a flowchart of the container installation process
 <p>
@@ -210,7 +210,73 @@ Once you are in, you can startup slurm with the manage script `manage.sh` locate
 rsync -avz -e "ssh -p 2222" <file> <admin>@localhost:<path/to/destination>
 ```
 
-### 2.1.5 Killing the Container and Cleaning Up your System
+### 2.1.5 Enable VNC Server in Container
+
+A Graphics User Interface (GUI) can be enabled in the container. There are currently two ways to enable the GUI: one way is through a tunnel to the node launching the container (Method 1), the other through a tunnel directly to the container (Method 2). The second method is preferable when the information on how to access the node launching the container is not available. The following instructions consider a scenario where multiple hops are necessary, as shown in the figure below:
+
+<p>
+<img src="figures/ssh_jumps.png" \>
+</p>
+
+Note that in the above figure, `Remoteserver` refers to the node that is launching the container. Keeping the above figure in mind, and assuming a Linux system, follow these steps to enable a GUI in the container (steps 1.,2.,3.,7.,8.,9.,10. are the same for Method 1 and Method 2):
+
+1. Build the container as in [Section 2.1.1](2.1.1-building-the-four-images-of-the-container), but make sure to include this additional input flag: `--build-x11vnc`.
+2. Run the container as in [Section 2.1.3](2.1.3-starting-the-container), including this additional input flag `-p 5950-5970:5900-5920` after `-p 222:22`.
+3. Access the container as shown in [Section 2.1.4](2.1.4-accessing-the-container).
+```
+------------------
+ Method 1
+```
+4. Access the node that is launching the container using ssh and copy-paste the content of the ssh public key in your local system to `.ssh/authorized_keys` in the node launching the container.
+5. From the container, run `/usr/local/bin/startvnc.sh` which will produce some output, the relevant part will look something like: 
+```bash
+or connect your VNC viewer to localhost:<port_number> with password <password>
+```
+From the above output, take note of the `<password>`.
+6. To encrypt the network traffic, pass the VNC connection through ssh tunnel by going on your local system and running
+```bash
+ssh -L 5950:localhost:5950 -N -f <username>@Remoteserver
+```
+where, the `<username>` is the username you use to ssh into the `Remoteserver`.
+```
+------------------
+Method 2
+```
+4. Access the container using ssh and copy-paste the content of the ssh public key in your local system to `.ssh/authorized_keys` in the container.
+5. From the container, run `/usr/local/bin/startvnc.sh` which will produce some output, the relevant part will look something like:
+```bash
+or connect your VNC viewer to localhost:<port_number> with password <password>
+```
+From the above output, take note of the `<port_number>` and `<password>`.
+6. To encrypt the network traffic, pass the VNC connection through ssh tunnel by going on your local system and running
+```bash
+ssh -L 5950:localhost:<port_number> -N -f <username>@Container
+```
+where, the `<username>` is the username you use to ssh into the `Container`, and `<port_number>` is the one given on Step 5.
+```
+------------------
+```
+7. Install `remmina` from terminal: 
+```bash
+sudo apt-get update 
+sudo apt-get install remmina
+```
+8. Launch the `remmina` GUI from terminal:
+```bash
+remmina &
+```
+9. From the remmina GUI, click on the icon on the top left corner (the one including the plus sign) and make the following selection:
+```bash
+Protocol: Remmina VNC Plugin
+Server: localhost:5950 
+Username: <username>
+```
+Then click on the *Advanced* tab, and check the box for *Forget passwords after use*.
+Click on *Save and Connect*, then type the `<password>` noted from Step 5. This will open the Remmina VNC window.
+10. In the bottom left of the VNC window, click on the terminal icon to access the terminal from the container. 
+Note that desktop directories will be added to your container home.
+
+### 2.1.6 Killing the Container and Cleaning Up your System
 
 To exit the container, just do:
 ```bash
