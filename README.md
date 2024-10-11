@@ -235,7 +235,9 @@ From the above output, take note of the `<password>`.
 ```bash
 ssh -L 5950:localhost:5950 -N -f <username>@Remoteserver
 ```
+
 where, the `<username>` is the username you use to ssh into the `Remoteserver`.
+
 ---------------------------------------------------------------------------------------------------------------
 #### Method 2
 4. Access the container using ssh and copy-paste the content of the ssh public key in your local system to `.ssh/authorized_keys` in the container.
@@ -248,8 +250,11 @@ From the above output, take note of the `<port_number>` and `<password>`.
 ```bash
 ssh -L 5950:localhost:<port_number> -N -f <username>@Container
 ```
+
 where, the `<username>` is the username you use to ssh into the `Container`, and `<port_number>` is the one given on Step 5.
+
 ---------------------------------------------------------------------------------------------------------------
+
 7. Install `remmina` from terminal: 
 ```bash
 sudo apt-get update 
