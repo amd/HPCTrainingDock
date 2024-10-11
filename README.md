@@ -223,10 +223,8 @@ Note that in the above figure, `Remoteserver` refers to the node that is launchi
 1. Build the container as in [Section 2.1.1](2.1.1-building-the-four-images-of-the-container), but make sure to include this additional input flag: `--build-x11vnc`.
 2. Run the container as in [Section 2.1.3](2.1.3-starting-the-container), including this additional input flag `-p 5950-5970:5900-5920` after `-p 222:22`.
 3. Access the container as shown in [Section 2.1.4](2.1.4-accessing-the-container).
-```
-------------------
- Method 1
-```
+---------------------------------------------------------------------------------------------------------------
+#### Method 1
 4. Access the node that is launching the container using ssh and copy-paste the content of the ssh public key in your local system to `.ssh/authorized_keys` in the node launching the container.
 5. From the container, run `/usr/local/bin/startvnc.sh` which will produce some output, the relevant part will look something like: 
 ```bash
@@ -238,10 +236,8 @@ From the above output, take note of the `<password>`.
 ssh -L 5950:localhost:5950 -N -f <username>@Remoteserver
 ```
 where, the `<username>` is the username you use to ssh into the `Remoteserver`.
-```
-------------------
-Method 2
-```
+---------------------------------------------------------------------------------------------------------------
+#### Method 2
 4. Access the container using ssh and copy-paste the content of the ssh public key in your local system to `.ssh/authorized_keys` in the container.
 5. From the container, run `/usr/local/bin/startvnc.sh` which will produce some output, the relevant part will look something like:
 ```bash
@@ -253,9 +249,7 @@ From the above output, take note of the `<port_number>` and `<password>`.
 ssh -L 5950:localhost:<port_number> -N -f <username>@Container
 ```
 where, the `<username>` is the username you use to ssh into the `Container`, and `<port_number>` is the one given on Step 5.
-```
-------------------
-```
+---------------------------------------------------------------------------------------------------------------
 7. Install `remmina` from terminal: 
 ```bash
 sudo apt-get update 
