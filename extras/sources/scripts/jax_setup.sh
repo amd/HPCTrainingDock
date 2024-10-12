@@ -7,9 +7,11 @@ MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/jax
 AMDGPU_GFXMODEL_INPUT=""
 
 SUDO="sudo"
+DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
+   DEB_FRONTEND=""
 fi
 
 # Autodetect defaults
@@ -142,11 +144,11 @@ else
 
       if [[ `which python | wc -l` -eq 0 ]]; then
          echo "============================"
-	 echo "WARNING: pyhton needs to be linked to python3 for the build to work"
+	 echo "WARNING: python needs to be linked to python3 for the build to work"
 	 echo ".....Installing python-is-python3......"
          echo "============================"
 	 ${SUDO} apt-get update
-         ${SUDO} apt-get install -y python-is-python3
+         ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
       fi
 
       # build the wheel for jaxlib

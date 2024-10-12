@@ -91,7 +91,7 @@ echo ""
 
 if [ "${BUILD_MPI4PY}" = "0" ]; then
 
-   echo "MPI4PY will not be build, according to the specified value of BUILD_MPI4PY"
+   echo "MPI4PY will not be built, according to the specified value of BUILD_MPI4PY"
    echo "BUILD_MPI4PY: $BUILD_MPI4PY"
    exit 
 
