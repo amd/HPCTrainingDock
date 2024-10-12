@@ -212,13 +212,42 @@ rsync -avz -e "ssh -p 2222" <file> <admin>@localhost:<path/to/destination>
 
 ### 2.1.5 Enable VNC Server in Container
 
-A Graphics User Interface (GUI) can be enabled in the container. There are currently two ways to enable the GUI: one way is through a tunnel to the node launching the container (Method 1), the other through a tunnel directly to the container (Method 2). The second method is preferable when the information on how to access the node launching the container is not available. The following instructions consider a scenario where multiple hops are necessary, as shown in the figure below:
+A Graphics User Interface (GUI) can be enabled in the container. There are currently two ways to enable the GUI: one way is through a tunnel to the node launching the container (Method 1), the other through a tunnel directly to the container (Method 2). The second method is preferable when the information on how to access the node launching the container is not available. The following instructions consider a scenario where multiple hops are necessary, as shown in a sample `.ssh/config` file that should exist in your local system:
+
+```bash
+Host Gateway
+   HostName Gateway.<site>.com
+   User <username> # on Gateway
+   Port 22
+   IdentityFile ~/.ssh/id_rsa # file on this local starting system
+   ForwardX11 yes
+
+Host Remoteserver
+   ProxyJump Gateway
+   HostName Remoteserver
+   User <username> # on Remoteserver
+   Port 22
+   IdentityFile ~/.ssh/id_rsa # again a file on this starting system
+   ForwardX11 yes
+
+Host Container
+   ProxyJump Remoteserver
+   Hostname localhost
+   Port 2222
+   User <username> # on Container
+   ForwardX11 yes
+   StrictHostKeyChecking no
+   IdentityFile ~/.ssh/id_ed25519
+```
+
+Note that `Remoteserver` refers to the node that is launching the container.
+The present approach is summarized in the figure below:
 
 <p>
 <img src="figures/ssh_jumps.png" \>
 </p>
 
-Note that in the above figure, `Remoteserver` refers to the node that is launching the container. Keeping the above figure in mind, and assuming a Linux system, follow these steps to enable a GUI in the container (steps 1.,2.,3.,7.,8.,9.,10. are the same for Method 1 and Method 2):
+In the above figure, it is assumed that your local systme is either a *Linux Laptop* or a *wsl* terminal from Windows, for example. Follow the following steps to enable a GUI in the container (steps 1.,2.,3.,7.,8.,9.,10. are the same for Method 1 and Method 2):
 
 1. Build the container as in [Section 2.1.1](https://github.com/amd/HPCTrainingDock?tab=readme-ov-file#211--building-the-four-images-of-the-container), but make sure to include this additional input flag: `--build-x11vnc`.
 2. Run the container as in [Section 2.1.3](https://github.com/amd/HPCTrainingDock?tab=readme-ov-file#213-starting-the-container), including this additional input flag `-p 5950-5970:5900-5920` after `-p 222:22`.
@@ -272,8 +301,21 @@ Username: <username>
 ```
 Then click on the *Advanced* tab, and check the box for *Forget passwords after use*.
 Click on *Save and Connect*, then type the `<password>` noted from Step 5. This will open the Remmina VNC window.
+
 10. In the bottom left of the VNC window, click on the terminal icon to access the terminal from the container. 
 Note that desktop directories will be added to your container home.
+
+#### Troubleshooting
+
+Note that the ssh tunnel will persist until it is destroyed. To show what tunnels currently exist, from your local system, search for `ssh` in the output of the following command:
+```bash
+ps -ef
+```
+Then you can kill the process by running:
+```bash
+kill <process_ID>
+```
+
 
 ### 2.1.6 Killing the Container and Cleaning Up your System
 
