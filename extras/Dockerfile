@@ -171,6 +171,7 @@ ADD extras/image/etc  /etc
 ADD extras/image/usr  /usr
 ADD extras/image/home /users/default
 EXPOSE 5900-5920
+EXPOSE 6080
 COPY extras/sources/scripts/x11vnc_setup.sh /tmp/x11vnc_setup.sh
 
 RUN  chmod u+x /tmp/x11vnc_setup.sh && \
