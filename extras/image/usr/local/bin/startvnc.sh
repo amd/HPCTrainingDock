@@ -61,6 +61,8 @@ trap cleanup EXIT
 
 #/usr/local/bin/init_vnc && sync
 
+mkdir -p $HOME/.config
+
 # unset all environment variables related to desktop manager
 for var in $(env | cut -d= -f1 | grep -E \
 	"^XDG|SESSION|^GTK|XKEYS|^WLS|WINDOWMANAGER|WAYLAND_DISPLAY|BROWSER"); do

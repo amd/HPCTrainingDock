@@ -38,10 +38,15 @@ RUN cat /tmp/bash.bashrc >> /etc/bash.bashrc && rm -f /tmp/bash.bashrc
 
 SHELL ["/bin/bash", "-c"]
 
+RUN apt-get update && \
+    apt-get install -y  net-tools iproute2 openssh-server iputils-ping && \
+    systemctl enable ssh
+
+EXPOSE 22
+
 COPY bare_system/adduser_os.sh /tmp/adduser_os.sh
 RUN /tmp/adduser_os.sh && rm /tmp/adduser_os.sh
 
-RUN chown -R sysadmin:sysadmin /home/sysadmin
 USER sysadmin
 ENV HOME=/home/sysadmin
 ENV USER=sysadmin
@@ -61,7 +66,14 @@ ADD bare_system/Makefile Makefile
 ADD rocm rocm
 ADD comm comm
 ADD tools tools
-ADD extras extras 
+ADD extras extras
+
+# for VNC
+ADD extras/image/etc  /etc
+ADD extras/image/usr  /usr
+ADD extras/image/home /home/sysadmin
+
+RUN sudo chown -R sysadmin:sysadmin /home/sysadmin
 
 RUN bare_system/main_setup.sh --rocm-version ${ROCM_VERSION} --rocm-install-path ${ROCM_INSTALLPATH} \
     --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --use-makefile ${USE_MAKEFILE}

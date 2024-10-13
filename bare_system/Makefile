@@ -1,5 +1,5 @@
 SHELL:=/bin/bash
-all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep
+all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc
 .PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep
 
 baseospackages: baseospackages.timestamp
@@ -18,6 +18,7 @@ mpi4py: mpi4py.timestamp
 hpctoolkit: hpctoolkit.timestamp
 cupy: cupy.timestamp
 pytorch: pytorch.timestamp
+x11vnc: x11vnc.timestamp
 jax: jax.timestamp
 apps_setup: apps_setup.timestamp
 
@@ -175,6 +176,11 @@ jax.timestamp: rocm.timestamp
 	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
 	   --build-jax ${BUILD_JAX}
 	touch jax.timestamp
+
+x11vnc.timestamp:
+	extras/sources/scripts/x11vnc_setup.sh \
+           --build-x11vnc ${BUILD_X11VNC}
+	touch x11vnc.timestamp
 
 apps_setup.timestamp:
 	extras/sources/scripts/apps_setup.sh
