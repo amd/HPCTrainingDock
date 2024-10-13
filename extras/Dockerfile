@@ -29,6 +29,7 @@ ARG BUILD_CUPY
 ARG BUILD_KOKKOS
 ARG BUILD_JAX
 ARG BUILD_X11VNC
+ARG BUILD_FLANGNEW
 ARG USE_CACHED_APPS
 ARG AMDGPU_GFXMODEL=gfx90a
 ARG PYTHON_VERSIONS
@@ -98,6 +99,10 @@ RUN /tmp/aomp_setup.sh --build-aomp-latest ${BUILD_AOMP_LATEST} --rocm-version $
  
 RUN echo "At end of aomp install" && cd /app && ls -l && cd /tmp && ls -l && cd && ls -l
 
+# install flang-new
+COPY extras/sources/scripts/flang-new_setup.sh /tmp/flang-new_setup.sh
+RUN /tmp/flang-new_setup.sh --build-flang-new ${BUILD_FLANGNEW} --rocm-version ${ROCM_VERSION} && rm /tmp/flang-new_setup.sh
+ 
 # install latest llvm
 COPY extras/sources/scripts/llvm-build.sh /tmp/llvm-build.sh
 RUN /tmp/llvm-build.sh --build-llvm-latest ${BUILD_LLVM_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/llvm-build.sh
