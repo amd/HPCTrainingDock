@@ -39,7 +39,7 @@ fi
 
 # First see what user ids and group ids are used by files in 
 # the Home directory tree and set the max to 
-echo "Starting scan for last used uid and gid in our range (12050, 12000 respectively"
+echo "Starting scan for last used uid and gid in our range (12050, 12000) respectively"
 sudo find ${HOMEDIR_BASE} -maxdepth 2 -type f -print0 | while read -r -d '' file; do
    uid=`sudo stat -c %u $file`
    if [[ ! -z "$uid" ]]; then
@@ -237,12 +237,12 @@ do
          fi
 
          # Need to add a group for the home directory if it doesn't match the user's group id
-         id_homedir=`sudo stat -c %g $USERHOMEDIR`
+         gid_homedir=`sudo stat -c %g $USERHOMEDIR`
          if [ $gid != "$gid_homedir" ]; then
             GROUP_ID_EXIST=`getent group $gid_homedir | cut -d: -f3 | wc -l`
             #echo "GROUP_ID_EXIST is $GROUP_ID_EXIST"
             if [[ "${GROUP_ID_EXIST}" != "1" ]]; then
-               GROUP_NAME_HOMEDIR=group${group_homedir}
+               GROUP_NAME_HOMEDIR=`getent group $gid_homedir | cut -d: -f1`
                echo "Adding missing group for home directory ${GROUP_NAME_HOMEDIR}"
                if (( "${VERBOSE}" > 0 )); then
                   echo "  sudo groupadd -f -g $group_homedir ${GROUP_NAME_HOMEDIR}"
