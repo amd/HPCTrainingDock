@@ -65,7 +65,7 @@ echo "=================================="
 echo ""
 
 # if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
-# if ROCM_VERSION is less than or equalt to 6.1.2, the awk command result will be blank
+# if ROCM_VERSION is less than or equal to 6.1.2, the awk command result will be blank
 result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
 if [[ "${result}" == "" ]]; then
    echo "ROCm built-in Omniperf version cannot be installed on ROCm versions before 6.2.0"
@@ -73,12 +73,11 @@ if [[ "${result}" == "" ]]; then
 fi
 if [[ -f /opt/rocm-${ROCM_VERSION}/bin/omniperf ]] ; then
    echo "ROCm built-in Omniperf already installed"
-   exit
-fi
-
-if [ "${DISTRO}" == "ubuntu" ]; then
-   ${SUDO} ${DEB_FRONTEND} apt-get install -q -y omniperf
-   ${SUDO} python3 -m pip install -t /opt/rocm-${ROCM_VERSION}/libexec/omniperf/python-libs -r /opt/rocm-${ROCM_VERSION}/libexec/omniperf/requirements.txt
+else
+   if [ "${DISTRO}" == "ubuntu" ]; then
+      ${SUDO} ${DEB_FRONTEND} apt-get install -q -y omniperf
+      ${SUDO} python3 -m pip install -t /opt/rocm-${ROCM_VERSION}/libexec/omniperf/python-libs -r /opt/rocm-${ROCM_VERSION}/libexec/omniperf/requirements.txt
+   fi
 fi
 
 if [[ -f /opt/rocm-${ROCM_VERSION}/bin/omniperf ]] ; then

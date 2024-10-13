@@ -75,11 +75,10 @@ if [[ "${result}" == "" ]]; then
 fi
 if [[ -f /opt/rocm-${ROCM_VERSION}/bin/omnitrace ]] ; then
    echo "ROCm built-in Omnitrace already installed"
-   exit
-fi
-
-if [ "${DISTRO}" == "ubuntu" ]; then
-   ${SUDO} ${DEB_FRONTEND} apt-get install -q -y omnitrace
+else
+   if [ "${DISTRO}" == "ubuntu" ]; then
+      ${SUDO} ${DEB_FRONTEND} apt-get install -q -y omnitrace
+   fi
 fi
 
 if [[ -f /opt/rocm-${ROCM_VERSION}/bin/omnitrace ]] ; then
