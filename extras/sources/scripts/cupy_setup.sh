@@ -20,7 +20,7 @@ usage()
    echo "  --build-cupy"
    echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-AI/cupy" 
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --help: this usage information"
 }
 

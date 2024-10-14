@@ -126,8 +126,7 @@ else
 EOF
    else 
          echo " The pre-production flang-new software can currently only be installed from a cached archive"
-	 exit 1
+	 exit
    fi	   
 
 fi
-
