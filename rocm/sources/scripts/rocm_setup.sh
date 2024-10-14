@@ -461,7 +461,7 @@ EOF
 export MODULE_PATH=/etc/lmod/modules/ROCm/amdclang
 
 ${SUDO} mkdir -p ${MODULE_PATH}
-AMDCLANG_VERSION=`/opt/rocm-${ROCM_VERSION}/llvm/bin/amdclang/amdclang --version |head -1 | cut -f 4 -d' ' | tr -d -c '[:digit:]\.'`
+AMDCLANG_VERSION=`/opt/rocm-${ROCM_VERSION}/llvm/bin/amdclang --version |head -1 | cut -f 4 -d' ' | tr -d -c '[:digit:]\.'`
 
 # The - option suppresses tabs
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${AMDCLANG_VERSION}-${ROCM_VERSION}.lua
