@@ -219,7 +219,7 @@ Host Gateway
    HostName Gateway.<site>.com
    User <username> # on Gateway
    Port 22
-   IdentityFile ~/.ssh/id_rsa # file on this local starting system
+   IdentityFile ~/.ssh/id_ed25519 # ssh key on local starting system
    ForwardX11 yes
 
 Host Remoteserver
@@ -227,7 +227,7 @@ Host Remoteserver
    HostName Remoteserver
    User <username> # on Remoteserver
    Port 22
-   IdentityFile ~/.ssh/id_rsa # again a file on this starting system
+   IdentityFile ~/.ssh/id_ed25519 # same ssh key file as above, on local system
    ForwardX11 yes
 
 Host Container
@@ -237,7 +237,7 @@ Host Container
    User <username> # on Container
    ForwardX11 yes
    StrictHostKeyChecking no
-   IdentityFile ~/.ssh/id_ed25519
+   IdentityFile ~/.ssh/id_ed25519 # same ssh key file as above, on local system
 ```
 
 Note that `Remoteserver` refers to the node that is launching the container.
@@ -307,7 +307,14 @@ Note that desktop directories will be added to your container home.
 
 #### Troubleshooting
 
-Note that the ssh tunnel will persist until it is destroyed. To show what tunnels currently exist, from your local system, search for `ssh` in the output of the following command:
+It is recommended to test each ssh access before opening the tunnel, by doing:
+```bash
+ssh Remoteserver
+ssh Container
+```
+as needed.
+
+Note also that the ssh tunnel will persist until it is destroyed. To show what tunnels currently exist, from your local system, search for *ssh* in the output of the following command:
 ```bash
 ps -ef
 ```
@@ -450,6 +457,51 @@ If the argument `--rocm-install-path` is specified, installation scripts will fi
 
 **NOTE**: In general, if you are moving ROCm folder outside of the usual `/opt/`, it is very important not to forget to update new path in all of its dependencies and module files.
 
+### 2.2.2 Enable VNC Server to Test Bare Metal Scripts
+
+It is possible to enable the VNC server for the container that is brought up by the `test_install.sh` script. To do so, first add the following to your `.ssh/config`:
+
+```bash
+Host Makefile
+   ProxyJump Remoteserver
+   Hostname localhost
+   Port 2222
+   User sysadmin 
+   ForwardX11 yes
+   StrictHostKeyChecking no
+   IdentityFile ~/.ssh/id_ed25519 # ssh key file on local system
+``` 
+
+Then, proceed with these steps:
+
+1. Run `./bare_system/test_install.sh --rocm-version <rocm_version> --use-makefile 1`.
+2. Once in the container, run  `make x11vnc`.
+3. From the container, run `sudo service ssh start` to start the ssh process.
+4. On the container do: `mkdir .ssh`.
+5. Then: `touch .ssh/authorized_keys`.
+6. Copy-paste the ssh public key on your local system to the `.ssh/authorized_keys` file in the container.
+7. Test on the local system that `ssh Makefile` let's you log in into the container.
+8. Run from the container: `/usr/local/bin/startvnc.sh` and record the `<port_number>` and `<password>` outputted by this command.
+9. From your local system, open the ssh tunnerl: `-L 5950:localhost:<port_number> -N -f sysadmin@Makefile`, where `<port_number>` is the one recorded at Step 8.
+10. Install `remmina` from terminal:
+```bash
+sudo apt-get update
+sudo apt-get install remmina
+```
+11. Launch the `remmina` GUI from terminal:
+```bash
+remmina &
+```
+12. From the remmina GUI, click on the icon on the top left corner (the one including the plus sign) and make the following selection:
+```bash
+Protocol: Remmina VNC Plugin
+Server: localhost:5950
+Username: sysadmin
+```
+Then click on the *Advanced* tab, and check the box for *Forget passwords after use*.
+Click on *Save and Connect*, then type the `<password>` noted from Step 8. This will open the Remmina VNC window.
+
+13. In the bottom left of the VNC window, click on the terminal icon to access the terminal from the container.
 
 # 3. Inspecting the Model Installation Environment
 
