@@ -40,7 +40,7 @@ fi
 # First see what user ids and group ids are used by files in 
 # the Home directory tree and set the max to 
 echo "Starting scan for last used uid and gid in our range (12050, 12000) respectively"
-sudo find ${HOMEDIR_BASE} -maxdepth 2 -type f -print0 | while read -r -d '' file; do
+sudo find ${HOMEDIR_BASE} -maxdepth 2 -print0 | while read -r -d '' file; do
    uid=`sudo stat -c %u $file`
    if [[ ! -z "$uid" ]]; then
       if (( $uid > ${HACKATHONLASTUSER} )); then

@@ -173,6 +173,9 @@ else
       ${SUDO} make install
 
       cd ../..
+      echo "Current directory"
+      pwd
+      ls -l
       ${SUDO} rm -rf scorep-ompt* sources.37b6f127
       ${SUDO} rm -rf spack
 
