@@ -23,6 +23,8 @@ ARG DISTRO
 ARG DISTRO_VERSION
 ARG ROCM_VERSION="0.0"
 ARG AMDGPU_GFXMODEL=gfx90a
+ARG AMDGPU_GFXMODEL_FIRST=gfx90a
+ARG AMDGPU_GFXMODEL_STRING=gfx90a
 ENV PATH ${HOME}/.local/bin:${PATH}
 
 COPY rocm/sources/scripts/baseospackages_setup.sh /tmp/baseospackages_setup.sh
@@ -36,8 +38,8 @@ RUN  /tmp/lmod_setup.sh && \
      rm /tmp/lmod_setup.sh
 
 # Grab any cached files of MPI builds and place them in /opt/rocmplus-VERSION
-ADD CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL} \
-   /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+ADD CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING} \
+   /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
 COPY rocm/sources/scripts/rocm_setup.sh /tmp/rocm_setup.sh
 
@@ -75,11 +77,10 @@ RUN groupadd renderalt -g 110
 
 COPY rocm/sources/scripts/slurm_setup.sh /tmp/slurm_setup.sh
 
-COPY rocm/sources/slurm/slurm_${AMDGPU_GFXMODEL}.conf /tmp/slurm.conf
-COPY rocm/sources/slurm/gres_${AMDGPU_GFXMODEL}.conf /tmp/gres.conf
+COPY rocm/sources/slurm/slurm_${AMDGPU_GFXMODEL_FIRST}.conf /tmp/slurm.conf
+COPY rocm/sources/slurm/gres_${AMDGPU_GFXMODEL_FIRST}.conf /tmp/gres.conf
 
-RUN  /tmp/slurm_setup.sh --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
-     rm /tmp/slurm_setup.sh
+RUN  /tmp/slurm_setup.sh && rm /tmp/slurm_setup.sh
 
 ENV LC_ALL C.UTF-8
 

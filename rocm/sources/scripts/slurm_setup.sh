@@ -10,7 +10,6 @@ send-error()
 usage()
 {
    echo "Usage:"
-   echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
    echo "  --help: this usage information"
    exit 1
 }
@@ -20,7 +19,6 @@ reset-last()
    last() { send-error "Unsupported argument :: ${1}"; }
 }
 
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 RHEL_COMPATIBLE=0
@@ -39,11 +37,6 @@ n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
-      "--amdgpu-gfxmodel")
-         shift
-         AMDGPU_GFXMODEL=${1}
-         reset-last
-         ;;
       "--help")
          usage
          ;;
@@ -61,7 +54,6 @@ done
 echo ""
 echo "====================================="
 echo "Installing Slurm with:"
-echo "AMDGPU_GFXMODEL is $AMDGPU_GFXMODEL"
 echo "====================================="
 echo ""
 
