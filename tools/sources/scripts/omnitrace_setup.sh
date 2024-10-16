@@ -91,7 +91,8 @@ echo "============================"
 echo ""
 
 if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "0" ] ; then
-   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+   AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
    if [ -f ${CACHE_FILES}/omnitrace.tgz ]; then
       echo ""
       echo "============================"

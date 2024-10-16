@@ -86,11 +86,12 @@ echo "BUILD_HPCTOOLKIT: $BUILD_HPCTOOLKIT"
 echo "==================================="
 echo ""
 
-CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
+CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
 if [ "${BUILD_HPCTOOLKIT}" = "0" ]; then
 
-   echo "HPCToolkit will not be build, according to the specified value of BUILD_HPCTOOLKIT"
+   echo "HPCToolkit will not be built, according to the specified value of BUILD_HPCTOOLKIT"
    echo "BUILD_HPCTOOLKIT: $BUILD_HPCTOOLKIT"
    exit 
 

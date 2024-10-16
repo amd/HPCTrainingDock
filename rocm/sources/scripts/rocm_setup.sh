@@ -59,6 +59,11 @@ do
       "--help")
          usage
 	 ;;
+      "--amdgpu-gfxmodel-string")
+          shift
+          AMDGPU_GFXMODEL_STRING=${1}
+          reset-last
+          ;;
       "--replace")
           REPLACE=1
           reset-last
@@ -303,7 +308,7 @@ EOF
    ${SUDO} yum install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${ROCM_REPO_DIST}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
 fi
 
-CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
 if [[ -d "/opt/rocm-${ROCM_VERSION}" ]] && [[ "${REPLACE}" == "0" ]] ; then
    echo "There is a previous installation and the replace flag is false"

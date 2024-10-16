@@ -45,12 +45,13 @@ echo ""
 
 if [ "${BUILD_PYTORCH}" = "0" ]; then
 
-   echo "pytorch will not be build, according to the specified value of BUILD_PYTORCH"
+   echo "pytorch will not be built, according to the specified value of BUILD_PYTORCH"
    echo "BUILD_PYTORCH: $BUILD_PYTORCH"
    exit
 
 else
-   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+   AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
    if [ -f ${CACHE_FILES}/pytorch.tgz ]; then
       echo ""
       echo "============================"

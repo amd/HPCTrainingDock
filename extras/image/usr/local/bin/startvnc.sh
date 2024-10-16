@@ -28,8 +28,12 @@ start_xorg()
 
 start_novnc()
 {
-    /usr/local/noVNC/utils/launch.sh --web /usr/local/noVNC \
+    #/usr/local/noVNC/utils/launch.sh --web /usr/local/noVNC \
+    #    --vnc localhost:$VNC_PORT --listen $WEB_PORT > $HOME/.log/novnc_X$DISP.log 2>&1 &
+    /usr/share/novnc/utils/launch.sh --web /usr/share/novnc \
         --vnc localhost:$VNC_PORT --listen $WEB_PORT > $HOME/.log/novnc_X$DISP.log 2>&1 &
+    cat $HOME/.log/novnc_X$DISP.log
+    #/usr/share/novnc/utils/launch.sh --vnc localhost:$VNC_PORT > $HOME/.log/novnc_X$DISP.log 2>&1 &
     NOVNC_PID=$1
     ps $NOVNC_PID > /dev/null || { cat $HOME/.log/novnc_X$DISP.log && exit -1; }
 }
@@ -142,7 +146,7 @@ echo "    http://localhost:$WEB_PORT/vnc.html?resize=downscale&autoconnect=1&pas
 echo "or connect your VNC viewer to localhost:$VNC_PORT with password $VNCPASS"
 
 # Fix issues with Shift-Tab
-xmodmap -e 'keycode 23 = Tab'
+#xmodmap -e 'keycode 23 = Tab'
 
 # Restart x11vnc if it dies, typically after changing screen resolution
 # See /usr/local/bin/lxrandr

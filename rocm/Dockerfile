@@ -43,7 +43,7 @@ ADD CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODE
 
 COPY rocm/sources/scripts/rocm_setup.sh /tmp/rocm_setup.sh
 
-RUN  /tmp/rocm_setup.sh --rocm-version ${ROCM_VERSION} && \
+RUN  /tmp/rocm_setup.sh --amdgpu-gfxmodel-string ${AMDGPU_GFXMODEL_STRING} --rocm-version ${ROCM_VERSION} && \
      rm /tmp/rocm_setup.sh
 
 COPY rocm/sources/lua/bash.bashrc /tmp/bash.bashrc

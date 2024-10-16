@@ -347,6 +347,7 @@ do
 # Building comm docker
     verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${COMM_DOCKER_OPTS} \
        --build-arg AMDGPU_GFXMODEL=\"${AMDGPU_GFXMODEL}\" \
+       --build-arg AMDGPU_GFXMODEL_STRING=\"${AMDGPU_GFXMODEL_STRING}\" \
        --build-arg USE_CACHED_APPS=${USE_CACHED_APPS} \
        -t ${DOCKER_USER}/comm:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        .

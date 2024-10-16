@@ -68,5 +68,19 @@ ${SUDO} ${DEB_FRONTEND} apt-get install -y xserver-xorg-video-dummy \
         xfonts-base xfonts-100dpi xfonts-75dpi xfonts-scalable xfonts-cyrillic \
         libopengl0 mesa-utils libglu1-mesa libgl1-mesa-dri libjpeg8 libjpeg62 \
         xauth xdg-utils \
-        x11vnc
+        x11vnc \
+	novnc
+#curl -O https://bootstrap.pypa.io/get-pip.py && \
+#    python3 get-pip.py && \
+#    pip3 install --no-cache-dir \
+#        setuptools && \
+
+#     pip3 install -U https://github.com/novnc/websockify/archive/refs/tags/v0.10.0.tar.gz && \
+#     mkdir /usr/local/noVNC && \
+#     curl -s -L https://github.com/x11vnc/noVNC/archive/refs/heads/x11vnc.zip | \
+#           bsdtar zxf - -C /usr/local/noVNC --strip-components 1 && \
+#     (chmod a+x /usr/local/noVNC/utils/launch.sh || \
+#         (chmod a+x /usr/local/noVNC/utils/novnc_proxy && \
+#          ln -s -f /usr/local/noVNC/utils/novnc_proxy /usr/local/noVNC/utils/launch.sh))
+#    #rm -rf /tmp/* /var/tmp/*
 ${SUDO} sed -i -e '/allowed_users/s/console/anybody/' /etc/X11/Xwrapper.config

@@ -84,11 +84,12 @@ echo "BUILD_SCOREP: $BUILD_SCOREP"
 echo "==================================="
 echo ""
 
-CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
+CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
 if [ "${BUILD_SCOREP}" = "0" ]; then
 
-   echo "SCORE-P will not be build, according to the specified value of BUILD_SCOREP"
+   echo "SCORE-P will not be built, according to the specified value of BUILD_SCOREP"
    echo "BUILD_SCOREP: $BUILD_SCOREP"
    exit 
 
