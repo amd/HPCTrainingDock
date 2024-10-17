@@ -31,7 +31,7 @@ ENV TZ "US/Chicago"
 # install OpenMPI, UCC, and UCX
 #
 
-COPY comm/sources/scripts/openmpi_setup.sh /tmp/openmpi_setup.sh
+COPY comm/scripts/openmpi_setup.sh /tmp/openmpi_setup.sh
 
 RUN  /tmp/openmpi_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
      rm /tmp/openmpi_setup.sh
@@ -40,7 +40,7 @@ RUN  /tmp/openmpi_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AM
 # Install mvapich
 #
 
-COPY comm/sources/scripts/mvapich_setup.sh /tmp/mvapich_setup.sh
+COPY comm/scripts/mvapich_setup.sh /tmp/mvapich_setup.sh
 
 RUN  /tmp/mvapich_setup.sh --rocm-version ${ROCM_VERSION} && \
      rm /tmp/mvapich_setup.sh
@@ -49,7 +49,7 @@ RUN  /tmp/mvapich_setup.sh --rocm-version ${ROCM_VERSION} && \
 # install MPI4PY
 #
 
-COPY comm/sources/scripts/mpi4py_setup.sh /tmp/mpi4py_setup.sh
+COPY comm/scripts/mpi4py_setup.sh /tmp/mpi4py_setup.sh
 
 RUN  /tmp/mpi4py_setup.sh --rocm-version ${ROCM_VERSION} --build-mpi4py 1 && \
      rm /tmp/mpi4py_setup.sh

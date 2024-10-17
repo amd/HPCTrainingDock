@@ -22,7 +22,7 @@ ARG BUILD_SCOREP
 
 LABEL maintainer="bob.robey@amd.com"
 
-COPY tools/sources/scripts/omnitrace_setup.sh /tmp/omnitrace_setup.sh
+COPY tools/scripts/omnitrace_setup.sh /tmp/omnitrace_setup.sh
 
 RUN /tmp/omnitrace_setup.sh \
        --rocm-version ${ROCM_VERSION} \
@@ -48,7 +48,7 @@ RUN chmod 1777 /tmp
 # Install Grafana
 #
 
-COPY tools/sources/scripts/grafana_setup.sh /tmp/grafana_setup.sh
+COPY tools/scripts/grafana_setup.sh /tmp/grafana_setup.sh
 
 RUN  /tmp/grafana_setup.sh --install-grafana ${INSTALL_GRAFANA} && \
      rm /tmp/grafana_setup.sh
@@ -59,7 +59,7 @@ ENV PATH=$HOME/.yarn/bin:$HOME/.config/yarn/global/node_modules/.bin:$PATH
 # Install Omniperf
 #
 
-COPY tools/sources/scripts/omniperf_setup.sh /tmp/omniperf_setup.sh
+COPY tools/scripts/omniperf_setup.sh /tmp/omniperf_setup.sh
 
 RUN  /tmp/omniperf_setup.sh --rocm-version ${ROCM_VERSION} && \
      rm /tmp/omniperf_setup.sh
@@ -77,7 +77,7 @@ RUN chmod a+x /docker-entrypoint.sh
 #
 # Install HPCToolkit
 #
-COPY tools/sources/scripts/hpctoolkit_setup.sh /tmp/hpctoolkit_setup.sh
+COPY tools/scripts/hpctoolkit_setup.sh /tmp/hpctoolkit_setup.sh
 
 RUN  /tmp/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_HPCTOOLKIT} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
      rm /tmp/hpctoolkit_setup.sh
@@ -86,7 +86,7 @@ RUN  /tmp/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit 
 #
 # Install TAU
 #
-COPY tools/sources/scripts/tau_setup.sh /tmp/tau_setup.sh
+COPY tools/scripts/tau_setup.sh /tmp/tau_setup.sh
 
 RUN  /tmp/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-tau ${BUILD_TAU} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
      rm /tmp/tau_setup.sh
@@ -95,7 +95,7 @@ RUN  /tmp/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-tau ${BUILD_TAU} -
 #
 # Install Score-P
 #
-COPY tools/sources/scripts/scorep_setup.sh /tmp/scorep_setup.sh
+COPY tools/scripts/scorep_setup.sh /tmp/scorep_setup.sh
 
 RUN  /tmp/scorep_setup.sh --rocm-version ${ROCM_VERSION} --build-scorep ${BUILD_SCOREP} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
      rm /tmp/scorep_setup.sh

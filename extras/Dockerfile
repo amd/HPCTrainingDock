@@ -69,7 +69,7 @@ EXPOSE 22
 #
 # Install miniconda
 #
-COPY extras/sources/scripts/miniconda3_setup.sh /tmp/miniconda3_setup.sh
+COPY extras/scripts/miniconda3_setup.sh /tmp/miniconda3_setup.sh
 
 RUN /tmp/miniconda3_setup.sh \
         --rocm-version ${ROCM_VERSION} \
@@ -79,7 +79,7 @@ RUN /tmp/miniconda3_setup.sh \
 #
 # Install our desired compilers
 #
-COPY extras/sources/scripts/compiler_setup.sh /tmp/compiler_setup.sh
+COPY extras/scripts/compiler_setup.sh /tmp/compiler_setup.sh
 
 RUN /tmp/compiler_setup.sh && \
     rm /tmp/compiler_setup.sh
@@ -89,40 +89,36 @@ RUN /tmp/compiler_setup.sh && \
 #RUN pip3 install CppHeaderParser
 
 # Build the latest GCC for AMD compiler if requested
-COPY extras/sources/scripts/amd_gcc_setup.sh /tmp/amd_gcc_setup.sh
+COPY extras/scripts/amd_gcc_setup.sh /tmp/amd_gcc_setup.sh
 RUN /tmp/amd_gcc_setup.sh --build-gcc-latest ${BUILD_GCC_LATEST} --rocm-version ${ROCM_VERSION} && \
     rm /tmp/amd_gcc_setup.sh
 
 # install aomp
-COPY extras/sources/scripts/aomp_setup.sh /tmp/aomp_setup.sh
+COPY extras/scripts/aomp_setup.sh /tmp/aomp_setup.sh
 RUN /tmp/aomp_setup.sh --build-aomp-latest ${BUILD_AOMP_LATEST} --rocm-version ${ROCM_VERSION} && rm /tmp/aomp_setup.sh
  
 RUN echo "At end of aomp install" && cd /app && ls -l && cd /tmp && ls -l && cd && ls -l
 
 # install flang-new
-COPY extras/sources/scripts/flang-new_setup.sh /tmp/flang-new_setup.sh
+COPY extras/scripts/flang-new_setup.sh /tmp/flang-new_setup.sh
 RUN /tmp/flang-new_setup.sh --build-flang-new ${BUILD_FLANGNEW} --rocm-version ${ROCM_VERSION} && rm /tmp/flang-new_setup.sh
  
 # install latest llvm
-COPY extras/sources/scripts/llvm-build.sh /tmp/llvm-build.sh
+COPY extras/scripts/llvm-build.sh /tmp/llvm-build.sh
 RUN /tmp/llvm-build.sh --build-llvm-latest ${BUILD_LLVM_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/llvm-build.sh
  
 # Grab any cache files of compiler builds
 
 # Build the clacc_clang compiler
-COPY extras/sources/scripts/clacc_setup.sh /tmp/clacc_setup.sh
+COPY extras/scripts/clacc_setup.sh /tmp/clacc_setup.sh
 RUN /tmp/clacc_setup.sh --build-clacc-latest ${BUILD_CLACC_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/clacc_setup.sh
-
-# Install the OpenMP GCC compiler latest drop
-COPY extras/sources/scripts/og_setup.sh /tmp/og_setup.sh
-RUN /tmp/og_setup.sh --build-og-latest ${BUILD_OG_LATEST} --rocm-version ${ROCM_VERSION} && rm /tmp/og_setup.sh
 
 WORKDIR /tmp 
 
 #
 # Install kokkos
 #
-COPY extras/sources/scripts/kokkos_setup.sh /tmp/kokkos_setup.sh
+COPY extras/scripts/kokkos_setup.sh /tmp/kokkos_setup.sh
 
 RUN /tmp/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-kokkos ${BUILD_KOKKOS} && rm /tmp/kokkos_setup.sh
 
@@ -130,7 +126,7 @@ RUN /tmp/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-kokkos ${BUILD_K
 # Moved into scripts that need these
 # Install any additional apps or libs that are needed 
 #
-#COPY extras/sources/scripts/apps_setup_basic.sh /tmp/apps_setup_basic.sh
+#COPY extras/scripts/apps_setup_basic.sh /tmp/apps_setup_basic.sh
 #
 #RUN  chmod u+x /tmp/apps_setup_basic.sh && \
 #     /tmp/apps_setup_basic.sh; rm /tmp/apps_setup_basic.sh
@@ -138,7 +134,7 @@ RUN /tmp/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-kokkos ${BUILD_K
 #
 # Install cupy 
 #
-COPY extras/sources/scripts/cupy_setup.sh /tmp/cupy_setup.sh
+COPY extras/scripts/cupy_setup.sh /tmp/cupy_setup.sh
 
 RUN /tmp/cupy_setup.sh --build-cupy ${BUILD_CUPY} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/cupy_setup.sh
 
@@ -147,7 +143,7 @@ WORKDIR /app
 #
 # Install jax 
 #
-COPY extras/sources/scripts/jax_setup.sh /tmp/jax_setup.sh
+COPY extras/scripts/jax_setup.sh /tmp/jax_setup.sh
 
 RUN /tmp/jax_setup.sh --build-jax ${BUILD_JAX} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/jax_setup.sh
 
@@ -156,8 +152,8 @@ WORKDIR /app
 # Install pytorch
 #
 
-COPY extras/sources/scripts/pytorch_setup.sh /tmp/pytorch_setup.sh
-COPY extras/sources/scripts/pytorch_build_triton_wheel_py.patch /tmp/pytorch_build_triton_wheel_py.patch
+COPY extras/scripts/pytorch_setup.sh /tmp/pytorch_setup.sh
+COPY extras/scripts/pytorch_build_triton_wheel_py.patch /tmp/pytorch_build_triton_wheel_py.patch
 
 RUN /tmp/pytorch_setup.sh --build-pytorch ${BUILD_PYTORCH} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} |& tee /app/pytorch_build.out && rm /tmp/pytorch_setup.sh
 
@@ -172,7 +168,7 @@ ADD extras/image/usr  /usr
 ADD extras/image/home /users/default
 EXPOSE 5900-5920
 EXPOSE 6080
-COPY extras/sources/scripts/x11vnc_setup.sh /tmp/x11vnc_setup.sh
+COPY extras/scripts/x11vnc_setup.sh /tmp/x11vnc_setup.sh
 
 RUN  chmod u+x /tmp/x11vnc_setup.sh && \
      /tmp/x11vnc_setup.sh --build-x11vnc ${BUILD_X11VNC} ; rm /tmp/x11vnc_setup.sh
@@ -180,7 +176,7 @@ RUN  chmod u+x /tmp/x11vnc_setup.sh && \
 #
 # Install any additional apps or libs that are needed 
 #
-COPY extras/sources/scripts/apps_setup.sh /tmp/apps_setup.sh
+COPY extras/scripts/apps_setup.sh /tmp/apps_setup.sh
 
 RUN  chmod u+x /tmp/apps_setup.sh && \
      /tmp/apps_setup.sh; rm /tmp/apps_setup.sh
@@ -213,7 +209,7 @@ RUN usermod -a -G audio,video,render,renderalt ${ADMIN_USERNAME} \
 
 
 # add some users 
-#COPY ./sources/scripts/add_users.sh /tmp/add_users.sh
+#COPY ./scripts/add_users.sh /tmp/add_users.sh
 #RUN  chmod u+x /tmp/add_users.sh  \
 #     && /tmp/add_users.sh  \
 #     && rm -f /tmp/add_users.sh 

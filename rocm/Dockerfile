@@ -27,12 +27,12 @@ ARG AMDGPU_GFXMODEL_FIRST=gfx90a
 ARG AMDGPU_GFXMODEL_STRING=gfx90a
 ENV PATH ${HOME}/.local/bin:${PATH}
 
-COPY rocm/sources/scripts/baseospackages_setup.sh /tmp/baseospackages_setup.sh
+COPY rocm/scripts/baseospackages_setup.sh /tmp/baseospackages_setup.sh
 
 RUN  /tmp/baseospackages_setup.sh && \
      rm /tmp/baseospackages_setup.sh
 
-COPY rocm/sources/scripts/lmod_setup.sh /tmp/lmod_setup.sh
+COPY rocm/scripts/lmod_setup.sh /tmp/lmod_setup.sh
 
 RUN  /tmp/lmod_setup.sh && \
      rm /tmp/lmod_setup.sh
@@ -41,7 +41,7 @@ RUN  /tmp/lmod_setup.sh && \
 ADD CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING} \
    /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
-COPY rocm/sources/scripts/rocm_setup.sh /tmp/rocm_setup.sh
+COPY rocm/scripts/rocm_setup.sh /tmp/rocm_setup.sh
 
 RUN  /tmp/rocm_setup.sh --amdgpu-gfxmodel-string ${AMDGPU_GFXMODEL_STRING} --rocm-version ${ROCM_VERSION} && \
      rm /tmp/rocm_setup.sh
@@ -49,12 +49,12 @@ RUN  /tmp/rocm_setup.sh --amdgpu-gfxmodel-string ${AMDGPU_GFXMODEL_STRING} --roc
 COPY rocm/sources/lua/bash.bashrc /tmp/bash.bashrc
 RUN cat /tmp/bash.bashrc >> /etc/bash.bashrc && rm -f /tmp/bash.bashrc
 
-COPY rocm/sources/scripts/rocm_omnitrace_setup.sh /tmp/rocm_omnitrace_setup.sh
+COPY rocm/scripts/rocm_omnitrace_setup.sh /tmp/rocm_omnitrace_setup.sh
 
 RUN  /tmp/rocm_omnitrace_setup.sh --rocm-version ${ROCM_VERSION} && \
      rm /tmp/rocm_omnitrace_setup.sh
 
-COPY rocm/sources/scripts/rocm_omniperf_setup.sh /tmp/rocm_omniperf_setup.sh
+COPY rocm/scripts/rocm_omniperf_setup.sh /tmp/rocm_omniperf_setup.sh
 
 RUN  /tmp/rocm_omniperf_setup.sh --rocm-version ${ROCM_VERSION} && \
      rm /tmp/rocm_omniperf_setup.sh
@@ -75,7 +75,7 @@ RUN groupadd renderalt -g 110
 # Install Slurm
 #
 
-COPY rocm/sources/scripts/slurm_setup.sh /tmp/slurm_setup.sh
+COPY rocm/scripts/slurm_setup.sh /tmp/slurm_setup.sh
 
 COPY rocm/sources/slurm/slurm_${AMDGPU_GFXMODEL_FIRST}.conf /tmp/slurm.conf
 COPY rocm/sources/slurm/gres_${AMDGPU_GFXMODEL_FIRST}.conf /tmp/gres.conf

@@ -129,7 +129,6 @@ usage()
     print_default_option push -- "Push the image to Dockerhub" "do not push"
 }
 
-
 n=0
 while [[ $# -gt 0 ]]
 do
@@ -203,6 +202,11 @@ do
             RETRY=${1}
             reset-last
             ;;
+	"--build-options")
+            shift
+	    BUILD_OPTIONS=${1}
+	    reset-last
+	    ;;
         "--build-aomp-latest")
             BUILD_AOMP_LATEST="1"
             reset-last
@@ -213,10 +217,6 @@ do
             ;;
         "--build-gcc-latest")
             BUILD_GCC_LATEST="1"
-            reset-last
-            ;;
-        "--build-og-latest")
-            BUILD_OG_LATEST="1"
             reset-last
             ;;
         "--build-clacc-latest")
@@ -300,6 +300,138 @@ do
     shift
 done
 
+if [ "${BUILD_OPTIONS}" != "" ]; then
+   echo "Requesting additional \"${BUILD_OPTIONS}\" build options"
+   for i in ${BUILD_OPTIONS//;/ }
+   do
+      case "$i" in
+	 # optional communication packages
+         "mpi4py")
+	    echo "Setting MPI4PY build"
+            BUILD_MPI4PY=1
+	    ;;
+	 # optional tool packages
+         "grafana")
+	    echo "Setting grafana build"
+            BUILD_GRAFANA=1
+	    ;;
+         "hpctoolkit")
+	    echo "Setting hpctoolkit build"
+            BUILD_HPCTOOLKIT=1
+	    ;;
+         "omnitrace_research")
+	    echo "Setting omnitrace research build"
+            BUILD_OMNITRACE_RESEARCH=1
+	    ;;
+         "omniperf_research")
+	    echo "Setting omniperf research build"
+            BUILD_OMNIPERF_RESEARCH=1
+	    ;;
+         "scorep")
+	    echo "Setting scorep build"
+            BUILD_SCOREP=1
+	    ;;
+         "tau")
+	    echo "Setting TAU build"
+            BUILD_TAU=1
+	    ;;
+	 # optional compiler packages
+         "aomp_latest")
+	    echo "Setting AOMP_LATEST build"
+            BUILD_AOMP_LATEST=1
+	    ;;
+         "clacc_latest")
+	    echo "Setting CLACC_LATEST build"
+            BUILD_CLACC_LATEST=1
+	    ;;
+         "flang-new")
+	    echo "Setting FLANGNEW build"
+            BUILD_FLANGNEW=1
+	    ;;
+         "gcc_latest")
+	    echo "Setting GCC_LATEST build"
+            BUILD_GCC_LATEST=1
+	    ;;
+         "llvm_latest")
+	    echo "Setting LLVM_LATEST build"
+            BUILD_LLVM_LATEST=1
+	    ;;
+	 # optional AI packages
+         "cupy")
+	    echo "Setting CUPY build"
+            BUILD_CUPY=1
+	    ;;
+         "jax")
+	    echo "Setting JAX build"
+            BUILD_JAX=1
+	    ;;
+         "pytorch")
+	    echo "Setting PYTORCH build"
+            BUILD_PYTORCH=1
+	    ;;
+	 # optional languages/frameworks
+         "kokkos")
+	    echo "Setting KOKKOS build"
+            BUILD_KOKKOS=1
+	    ;;
+	 # optional graphics interfaces
+         "x11vnc")
+	    echo "Setting X11VNC build"
+            BUILD_X11VNC=1
+	    ;;
+	 # All latest recommended
+         "all-latest")
+	    echo "Setting all latest build"
+            BUILD_AOMP_LATEST="1"
+            #BUILD_LLVM_LATEST="1"
+            BUILD_GCC_LATEST="1"
+            #BUILD_OG_LATEST="1"
+            #BUILD_CLACC_LATEST="1"
+            BUILD_PYTORCH="1"
+            BUILD_CUPY="1"
+            BUILD_JAX="1"
+            BUILD_KOKKOS="1"
+            BUILD_TAU="1"
+            BUILD_SCOREP="1"
+            BUILD_MPI4PY="1"
+            BUILD_HPCTOOLKIT="1"
+            BUILD_X11VNC="1"
+            BUILD_FLANGNEW="1"
+            BUILD_X11VNC=1
+	    ;;
+         *)
+            echo "Unsupported build option request \"$i\""
+	    echo "Valid options are:"
+	    echo " # optional communication packages"
+            echo "   mpi4py"
+	    echo " # optional tool packages"
+            echo "   grafana"
+            echo "   hpctoolkit"
+            echo "   omnitrace_research"
+            echo "   omniperf_research"
+            echo "   scorep"
+            echo "   tau"
+	    echo " # optional compiler packages"
+            echo "   aomp_latest"
+            echo "   clacc_latest"
+            echo "   flang-new"
+            echo "   gcc_latest"
+            echo "   llvm_latest"
+	    echo " # optional AI packages"
+            echo "   cupy"
+            echo "   jax"
+            echo "   pytorch"
+	    echo " # optional languages/frameworks"
+            echo "   kokkos"
+	    echo " # optional graphics interfaces"
+            echo "   x11vnc"
+	    echo " # All latest recommended"
+            echo "   all-latest"
+            ;;
+      esac
+   done
+fi
+
 if [ "x${ADMIN_PASSWORD}" == "x" ] ; then
 	echo "A password for the admin user is required"
 	echo " --admin-password <xxxx>"
@@ -309,16 +441,6 @@ fi
 
 AMDGPU_GFXMODEL_FIRST=`echo ${AMDGPU_GFXMODEL} | cut -f1 -d';'`
 AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
-
-ROCM_DOCKER_OPTS="${PULL} -f rocm/Dockerfile ${NO_CACHE}"
-
-COMM_DOCKER_OPTS="-f comm/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER}"
-
-TOOLS_DOCKER_OPTS="-f tools/Dockerfile ${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg OMNITRACE_BUILD_FROM_SOURCE=\"${OMNITRACE_BUILD_FROM_SOURCE}\" --build-arg BUILD_HPCTOOLKIT=${BUILD_HPCTOOLKIT} --build-arg BUILD_TAU=${BUILD_TAU} --build-arg BUILD_SCOREP=${BUILD_SCOREP} "
-
-EXTRAS_DOCKER_OPTS="${NO_CACHE} --build-arg DOCKER_USER=${DOCKER_USER} --build-arg BUILD_DATE=$(date +'%Y-%m-%dT%H:%M:%SZ') --build-arg OG_BUILD_DATE=$(date -u +'%y-%m-%d') --build-arg BUILD_VERSION=1.1 --build-arg DISTRO=${DISTRO} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" --build-arg ADMIN_USERNAME=${ADMIN_USERNAME} --build-arg ADMIN_PASSWORD=${ADMIN_PASSWORD}"
-
-EXTRAS_DOCKER_OPTS="${EXTRAS_DOCKER_OPTS} -f extras/Dockerfile"
 
 ADD_OPTIONS=""
 PODMAN_DETECT=`docker |& grep "Emulate Docker CLI using podman" | wc -l`
@@ -334,33 +456,41 @@ do
        USE_CACHED_APPS=1
     fi
 
-    GENERAL_DOCKER_OPTS="${ADD_OPTIONS} --build-arg DISTRO=${DISTRO} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION}"
+    GENERAL_DOCKER_OPTS="${ADD_OPTIONS} ${OUTPUT_VERBOSITY} ${NO_CACHE}"
+    GENERAL_DOCKER_OPTS="${GENERAL_DOCKER_OPTS} --build-arg DISTRO=${DISTRO}"
+    GENERAL_DOCKER_OPTS="${GENERAL_DOCKER_OPTS} --build-arg DISTRO_VERSION=${DISTRO_VERSION}"
+    GENERAL_DOCKER_OPTS="${GENERAL_DOCKER_OPTS} --build-arg ROCM_VERSION=${ROCM_VERSION}"
+    GENERAL_DOCKER_OPTS="${GENERAL_DOCKER_OPTS} --build-arg USE_CACHED_APPS=${USE_CACHED_APPS}"
+    GENERAL_DOCKER_OPTS="${GENERAL_DOCKER_OPTS} --build-arg DOCKER_USER=${DOCKER_USER}"
 
 # Building rocm docker
-    verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${ROCM_DOCKER_OPTS} \
+    verbose-build docker build ${GENERAL_DOCKER_OPTS} ${PULL} \
        --build-arg AMDGPU_GFXMODEL=\"${AMDGPU_GFXMODEL}\" \
        --build-arg AMDGPU_GFXMODEL_STRING=\"${AMDGPU_GFXMODEL_STRING}\" \
-       --build-arg USE_CACHED_APPS=${USE_CACHED_APPS} \
        --tag ${DOCKER_USER}/rocm:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
-       .
+       -f rocm/Dockerfile .
 
 # Building comm docker
-    verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${COMM_DOCKER_OPTS} \
+    verbose-build docker build ${GENERAL_DOCKER_OPTS} \
        --build-arg AMDGPU_GFXMODEL=\"${AMDGPU_GFXMODEL}\" \
        --build-arg AMDGPU_GFXMODEL_STRING=\"${AMDGPU_GFXMODEL_STRING}\" \
-       --build-arg USE_CACHED_APPS=${USE_CACHED_APPS} \
+       --build-arg BUILD_MPI4PY=${BUILD_MPI4PY} \
        -t ${DOCKER_USER}/comm:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
-       .
+       -f comm/Dockerfile .
 
 # Building tools docker
-    verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${TOOLS_DOCKER_OPTS} \
+    verbose-build docker build ${GENERAL_DOCKER_OPTS} \
        --build-arg AMDGPU_GFXMODEL=\"${AMDGPU_GFXMODEL}\" \
        --build-arg INSTALL_GRAFANA="${INSTALL_GRAFANA}" \
+       --build-arg OMNITRACE_BUILD_FROM_SOURCE=\"${OMNITRACE_BUILD_FROM_SOURCE}\"  \
+       --build-arg BUILD_HPCTOOLKIT=${BUILD_HPCTOOLKIT}  \
+       --build-arg BUILD_TAU=${BUILD_TAU}  \
+       --build-arg BUILD_SCOREP=${BUILD_SCOREP} \
        -t ${DOCKER_USER}/tools:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
-       .
+       -f tools/Dockerfile .
 
 # Building extrasdocker
-    verbose-build docker build ${OUTPUT_VERBOSITY} ${GENERAL_DOCKER_OPTS} ${EXTRAS_DOCKER_OPTS} \
+    verbose-build docker build ${GENERAL_DOCKER_OPTS} \
        --build-arg AMDGPU_GFXMODEL=\"${AMDGPU_GFXMODEL}\" \
        --build-arg BUILD_GCC_LATEST=${BUILD_GCC_LATEST} \
        --build-arg BUILD_AOMP_LATEST=${BUILD_AOMP_LATEST} \
@@ -371,16 +501,18 @@ do
        --build-arg BUILD_CUPY=${BUILD_CUPY} \
        --build-arg BUILD_JAX=${BUILD_JAX} \
        --build-arg BUILD_KOKKOS=${BUILD_KOKKOS} \
-       --build-arg BUILD_TAU=${BUILD_TAU} \
-       --build-arg BUILD_SCOREP=${BUILD_SCOREP} \
-       --build-arg BUILD_MPI4PY=${BUILD_MPI4PY} \
-       --build-arg BUILD_HPCTOOLKIT=${BUILD_HPCTOOLKIT} \
        --build-arg BUILD_X11VNC=${BUILD_X11VNC} \
        --build-arg BUILD_FLANGNEW=${BUILD_FLANGNEW} \
-       --build-arg USE_CACHED_APPS=${USE_CACHED_APPS} \
+       --build-arg BUILD_DATE=$(date +'%Y-%m-%dT%H:%M:%SZ') \
+       --build-arg OG_BUILD_DATE=$(date -u +'%y-%m-%d') \
+       --build-arg BUILD_VERSION=1.1 \
+       --build-arg DISTRO=${DISTRO} \
+       --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" \
+       --build-arg ADMIN_USERNAME=${ADMIN_USERNAME} \
+       --build-arg ADMIN_PASSWORD=${ADMIN_PASSWORD} \
        -t ${DOCKER_USER}/training:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        -t training \
-       .
+       -f extras/Dockerfile .
 
     if [ "${PUSH}" -ne 0 ]; then
         docker push ${CONTAINER}

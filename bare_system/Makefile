@@ -51,42 +51,42 @@ all_packages: all_packages.timestamp
 
 # From base rocm layer
 baseospackages.timestamp:
-	rocm/sources/scripts/baseospackages_setup.sh
+	rocm/scripts/baseospackages_setup.sh
 	touch baseospackages.timestamp
 
 rocm.timestamp: baseospackages.timestamp # lmod.timestamp
-	rocm/sources/scripts/rocm_setup.sh \
+	rocm/scripts/rocm_setup.sh \
 	   --rocm-version ${ROCM_VERSION}
 	touch rocm.timestamp
 
 rocm_omnitrace.timestamp: baseospackages.timestamp rocm.timestamp
-	rocm/sources/scripts/rocm_omnitrace_setup.sh \
+	rocm/scripts/rocm_omnitrace_setup.sh \
 	   --rocm-version ${ROCM_VERSION}
 	touch rocm_omnitrace.timestamp
 
 rocm_omniperf.timestamp: baseospackages.timestamp rocm.timestamp
-	rocm/sources/scripts/rocm_omniperf_setup.sh \
+	rocm/scripts/rocm_omniperf_setup.sh \
 	   --rocm-version ${ROCM_VERSION}
 	touch rocm_omniperf.timestamp
 
 slurm.timestamp:
-	rocm/sources/scripts/slurm_setup.sh
+	rocm/scripts/slurm_setup.sh
 	touch slurm.timestamp
 
 # From Comm layer
 openmpi.timestamp: rocm.timestamp
-	comm/sources/scripts/openmpi_setup.sh \
+	comm/scripts/openmpi_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
 	touch openmpi.timestamp
 
 mvapich.timestamp: rocm.timestamp
-	comm/sources/scripts/mvapich_setup.sh \
+	comm/scripts/mvapich_setup.sh \
 	   --rocm-version ${ROCM_VERSION}
 	touch mvapich.timestamp
 
 mpi4py.timestamp: rocm.timestamp
-	comm/sources/scripts/mpi4py_setup.sh \
+	comm/scripts/mpi4py_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-mpi4py ${BUILD_MPI4PY}
 	touch mpi4py.timestamp
@@ -94,34 +94,34 @@ mpi4py.timestamp: rocm.timestamp
 # From Tools layer
 
 omnitrace.timestamp: openmpi.timestamp
-	tools/sources/scripts/omnitrace_setup.sh \
+	tools/scripts/omnitrace_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
 	   --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE}
 	touch omnitrace.timestamp
 
 grafana.timestamp:
-	tools/sources/scripts/grafana_setup.sh
+	tools/scripts/grafana_setup.sh
 
 omniperf.timestamp: rocm.timestamp
-	tools/sources/scripts/omniperf_setup.sh \
+	tools/scripts/omniperf_setup.sh \
 	   --rocm-version ${ROCM_VERSION}
 	touch omniperf.timestamp
 
 tau.timestamp: rocm.timestamp
-	tools/sources/scripts/tau_setup.sh \
+	tools/scripts/tau_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-tau ${BUILD_TAU}
 	touch tau.timestamp
 
 scorep.timestamp: rocm.timestamp
-	tools/sources/scripts/scorep_setup.sh \
+	tools/scripts/scorep_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-scorep ${BUILD_SCOREP}
 	touch scorep.timestamp
 
 hpctoolkit.timestamp: rocm.timestamp
-	tools/sources/scripts/hpctoolkit_setup.sh \
+	tools/scripts/hpctoolkit_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-hpctoolkit ${BUILD_HPCTOOLKIT}
 	touch hpctoolkit.timestamp
@@ -129,61 +129,61 @@ hpctoolkit.timestamp: rocm.timestamp
 # From Training layer
 
 compiler_setup.sh:
-	extras/sources/scripts/compiler_setup.sh
+	extras/scripts/compiler_setup.sh
 	touch compiler_setup.timestamp
 
 amd_gcc.timestamp: rocm.timestamp
-	extras/sources/scripts/amd_gcc_setup.sh \
+	extras/scripts/amd_gcc_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-gcc-latest ${BUILD_GCC_LATEST}
 	touch amd_gcc.timestamp
 
 aomp.timestamp: rocm.timestamp
-	extras/sources/scripts/aomp_setup.sh \
+	extras/scripts/aomp_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-aomp-latest ${BUILD_AOMP_LATEST}
 	touch aomp.timestamp
 
 miniconda3.timestamp:
-	extras/sources/scripts/miniconda3_setup.sh \
+	extras/scripts/miniconda3_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --python-versions ${PYTHON_VERSIONS}
 	touch miniconda3.timestamp
 
 kokkos.timestamp:
-	extras/sources/scripts/kokkos_setup.sh \
+	extras/scripts/kokkos_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-kokkos ${BUILD_KOKKOS}
 	touch kokkos.timestamp
 
 cupy.timestamp: rocm.timestamp
-	extras/sources/scripts/cupy_setup.sh \
+	extras/scripts/cupy_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
 	   --build-cupy ${BUILD_CUPY}
 	touch cupy.timestamp
 
 pytorch.timestamp: rocm.timestamp
-	extras/sources/scripts/pytorch_setup.sh \
+	extras/scripts/pytorch_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
 	   --build-pytorch ${BUILD_PYTORCH}
 	touch pytorch.timestamp
 
 jax.timestamp: rocm.timestamp
-	extras/sources/scripts/jax_setup.sh \
+	extras/scripts/jax_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
 	   --build-jax ${BUILD_JAX}
 	touch jax.timestamp
 
 x11vnc.timestamp:
-	extras/sources/scripts/x11vnc_setup.sh \
+	extras/scripts/x11vnc_setup.sh \
            --build-x11vnc ${BUILD_X11VNC}
 	touch x11vnc.timestamp
 
 apps_setup.timestamp:
-	extras/sources/scripts/apps_setup.sh
+	extras/scripts/apps_setup.sh
 	touch apps_basic.timestamp
 
 

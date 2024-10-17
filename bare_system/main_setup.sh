@@ -99,53 +99,53 @@ if [ "${USE_MAKEFILE}" == 1 ]; then
 fi
 
 
-rocm/sources/scripts/baseospackages_setup.sh
+rocm/scripts/baseospackages_setup.sh
 
-rocm/sources/scripts/lmod_setup.sh
+rocm/scripts/lmod_setup.sh
 
 source ~/.bashrc
 
-rocm/sources/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION}
+rocm/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION}
 
-rocm/sources/scripts/rocm_omnitrace_setup.sh --rocm-version ${ROCM_VERSION}
+rocm/scripts/rocm_omnitrace_setup.sh --rocm-version ${ROCM_VERSION}
 
-rocm/sources/scripts/rocm_omniperf_setup.sh --rocm-version ${ROCM_VERSION}
+rocm/scripts/rocm_omniperf_setup.sh --rocm-version ${ROCM_VERSION}
 
-comm/sources/scripts/openmpi_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
+comm/scripts/openmpi_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
 
-comm/sources/scripts/mpi4py_setup.sh --rocm-version ${ROCM_VERSION} --build-mpi4py ${BUILD_MPI4PY}
+comm/scripts/mpi4py_setup.sh --rocm-version ${ROCM_VERSION} --build-mpi4py ${BUILD_MPI4PY}
 
-comm/sources/scripts/mvapich_setup.sh --rocm-version ${ROCM_VERSION}
+comm/scripts/mvapich_setup.sh --rocm-version ${ROCM_VERSION}
 
-tools/sources/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --python-versions ${PYTHON_VERSIONS}
+tools/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --python-versions ${PYTHON_VERSIONS}
 
-tools/sources/scripts/omnitrace_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE}
+tools/scripts/omnitrace_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE}
 
-tools/sources/scripts/grafana_setup.sh
+tools/scripts/grafana_setup.sh
 
-tools/sources/scripts/omniperf_setup.sh --rocm-version ${ROCM_VERSION}
+tools/scripts/omniperf_setup.sh --rocm-version ${ROCM_VERSION}
 
-tools/sources/scripts/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_HPCTOOLKIT}
+tools/scripts/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_HPCTOOLKIT}
 
-tools/sources/scripts/scorep_setup.sh --rocm-version ${ROCM_VERSION} --build-scorep ${BUILD_SCOREP}
+tools/scripts/scorep_setup.sh --rocm-version ${ROCM_VERSION} --build-scorep ${BUILD_SCOREP}
 
-tools/sources/scripts/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-tau ${BUILD_TAU}
+tools/scripts/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-tau ${BUILD_TAU}
 
-extras/sources/scripts/compiler_setup.sh
+extras/scripts/compiler_setup.sh
 
-extras/sources/scripts/apps_setup_basic.sh
+extras/scripts/apps_setup_basic.sh
 
-extras/sources/scripts/cupy_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-cupy ${BUILD_CUPY} 
+extras/scripts/cupy_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-cupy ${BUILD_CUPY} 
 
-extras/sources/scripts/jax_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-jax ${BUILD_JAX} 
+extras/scripts/jax_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-jax ${BUILD_JAX} 
 
-extras/sources/scripts/pytorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-pytorch ${BUILD_PYTORCH}
+extras/scripts/pytorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-pytorch ${BUILD_PYTORCH}
 
-extras/sources/scripts/apps_setup.sh
+extras/scripts/apps_setup.sh
 
-extras/sources/scripts/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-kokkos ${BUILD_KOKKOS}
+extras/scripts/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-kokkos ${BUILD_KOKKOS}
 
-extras/sources/scripts/x11vnc_setup.sh --build-x11vnc ${BUILD_X11VNC}
+extras/scripts/x11vnc_setup.sh --build-x11vnc ${BUILD_X11VNC}
 
 #If ROCm should be installed in a different location
 if [ "${ROCM_INSTALLPATH}" != "/opt/" ]; then

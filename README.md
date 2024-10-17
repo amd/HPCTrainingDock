@@ -384,61 +384,61 @@ The `main_install.sh` script calls a series of other scripts to install the soft
 
 ```bash
  // install linux software such as cmake and system compilers
-rocm/sources/scripts/baseospackages_setup.sh
+rocm/scripts/baseospackages_setup.sh
 
 // install lmod and create the modulepath
-rocm/sources/scripts/lmod_setup.sh 
+rocm/scripts/lmod_setup.sh 
 
 // install ROCm and create ROCm module
-rocm/sources/scripts/rocm_setup.sh 
+rocm/scripts/rocm_setup.sh 
 
 // install OpenMPI and create OpenMPI module
-comm/sources/scripts/openmpi_setup.sh 
+comm/scripts/openmpi_setup.sh 
 
 // install MVAPICH and create MVAPICH module
-comm/sources/scripts/mvapich_setup.sh 
+comm/scripts/mvapich_setup.sh 
 
 // install MPI4PY and create MPI4PY module
-comm/sources/scripts/mpi4py_setup.sh 
+comm/scripts/mpi4py_setup.sh 
 
 // install Miniconda3 and create Miniconda3 module
-tools/sources/scripts/miniconda3_setup.sh 
+tools/scripts/miniconda3_setup.sh 
 
 // install AMD Research Omnitrace and create module
-tools/sources/scripts/omnitrace_setup.sh 
+tools/scripts/omnitrace_setup.sh 
 
 // install Grafana (needed for Omniperf)
-tools/sources/scripts/grafana_setup.sh
+tools/scripts/grafana_setup.sh
 
 // install AMD Research Omniperf and create module
-tools/sources/scripts/omniperf_setup.sh 
+tools/scripts/omniperf_setup.sh 
 
 // install HPCToolkit and create HPCToolkit module
-tools/sources/scripts/hpctoolkit_setup.sh 
+tools/scripts/hpctoolkit_setup.sh 
 
 // install TAU and create TAU module
-tools/sources/scripts/tau_setup.sh 
+tools/scripts/tau_setup.sh 
 
 // install clang/14  clang/15  gcc/11  gcc/12  gcc/13 and create modules
-extras/sources/scripts/compiler_setup.sh
+extras/scripts/compiler_setup.sh
 
 // install liblapack and libopenblas
-extras/sources/scripts/apps_setup_basic.sh
+extras/scripts/apps_setup_basic.sh
 
 // install CuPy and create CuPy module
-extras/sources/scripts/cupy_setup.sh 
+extras/scripts/cupy_setup.sh 
 
 // install JAX and create JAX module
-extras/sources/scripts/jax_setup.sh 
+extras/scripts/jax_setup.sh 
 
 // install PyTorch and create PyTorch module
-extras/sources/scripts/pytorch_setup.sh 
+extras/scripts/pytorch_setup.sh 
 
 // install additional libs and apps such as valgrind, boost, parmetis, openssl, etc.
-extras/sources/scripts/apps_setup.sh
+extras/scripts/apps_setup.sh
 
 // install Kokkos
-extras/sources/scripts/kokkos_setup.sh
+extras/scripts/kokkos_setup.sh
 
 ```
 

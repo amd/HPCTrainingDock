@@ -28,7 +28,7 @@ WORKDIR /tmp
 COPY bare_system/bootstrap_os.sh /tmp/bootstrap_os.sh
 RUN /tmp/bootstrap_os.sh && rm /tmp/bootstrap_os.sh
 
-COPY rocm/sources/scripts/lmod_setup.sh /tmp/lmod_setup.sh
+COPY rocm/scripts/lmod_setup.sh /tmp/lmod_setup.sh
 
 RUN  /tmp/lmod_setup.sh && \
      rm /tmp/lmod_setup.sh
