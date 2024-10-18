@@ -128,7 +128,7 @@ else
          ${SUDO} chmod a+w ${MPI4PY_PATH}
       fi
 
-      git clone https://github.com/mpi4py/mpi4py.git
+      git clone --branch 4.0.1 https://github.com/mpi4py/mpi4py.git
       cd mpi4py
 
       echo "[model]              = ${MPI_PATH}" >> mpi.cfg

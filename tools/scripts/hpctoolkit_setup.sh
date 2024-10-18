@@ -144,11 +144,11 @@ else
       pipx install 'meson>=1.3.2'
       export PATH=$HOME/.local/bin:$PATH
       git clone https://gitlab.com/hpctoolkit/hpctoolkit.git
-      git checkout fda401c1f6f4a219f7c07f0606fa1e479f2f341e
       #wget -q https://gitlab.com/hpctoolkit/hpctoolkit/-/archive/2024.01.1/hpctoolkit-2024.01.1.tar.gz
       #tar -xzf hpctoolkit-2024.01.1.tar.gz
       #cd hpctoolkit-2024.01.1
       cd hpctoolkit
+      git checkout fda401c1f6f4a219f7c07f0606fa1e479f2f341e
       # xerces-c download tar not updated upstream
       sed -i -e 's/3.2.5/3.3.0/g' subprojects/xerces-c.wrap
       OLD_SOURCE_HASH="source_hash = 545cfcce6c4e755207bd1f27e319241e50e37c0c27250f11cda116018f1ef0f5"
