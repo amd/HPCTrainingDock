@@ -275,6 +275,43 @@ if [ "${ROCM_VERSION_AFTER_INPUT}" != "${ROCM_VERSION}" ]; then
    echo "Run this script with --help to see what is the right syntax"
 fi
 
+echo ""
+echo "============================"
+echo " Installing OpenMPI with:"
+echo "   ROCM_VERSION: $ROCM_VERSION"
+echo "   ROCM_PATH: ${ROCM_PATH}"
+echo "============================"
+echo ""
+
+if [ "${DISTRO}" = "ubuntu" ]; then
+   echo "Install of libpmix-dev libhwloc-dev libevent-dev libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen packages"
+   if [[ "${DRY_RUN}" == "0" ]]; then
+      # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
+      ${SUDO} apt-get update
+      ${SUDO} ${DEB_FRONTEND} apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
+         libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen
+      IS_DOCKER=0
+      if [ -f "/run/systemd/container" ]; then
+        IS_DOCKER=`grep -E '^docker$' /run/systemd/container |wc -l`
+      fi
+      if [ "${IS_DOCKER}" == "1" ]; then
+	 BUILD_XPMEM=0
+      else
+         ${SUDO} ${DEB_FRONTEND} apt-get install -y linux-headers-$(uname -r)
+      fi
+   fi
+elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
+   echo "Install of pmix and hwloc packages"
+   if [[ "${DRY_RUN}" == "0" ]]; then
+      # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
+      ${SUDO} yum update
+      ${SUDO} yum install -y pmix hwloc
+   fi
+else
+   echo "DISTRO version ${DISTRO} not recognized or supported"
+   exit
+fi
+
 if [ "${BUILD_XPMEM}" == "1" ]; then
    XPMEM_STRING=-xpmem-${XPMEM_VERSION}
 fi
@@ -309,34 +346,6 @@ else
    OPENMPI_PATH="${INSTALL_PATH}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}
 fi
 
-echo ""
-echo "============================"
-echo " Installing OpenMPI with:"
-echo "   ROCM_VERSION: $ROCM_VERSION"
-echo "   ROCM_PATH: ${ROCM_PATH}"
-echo "============================"
-echo ""
-
-if [ "${DISTRO}" = "ubuntu" ]; then
-   echo "Install of libpmix-dev libhwloc-dev libevent-dev libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen packages"
-   if [[ "${DRY_RUN}" == "0" ]]; then
-      # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
-      ${SUDO} apt-get update
-      ${SUDO} ${DEB_FRONTEND} apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
-         libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen
-      ${SUDO} ${DEB_FRONTEND} apt-get install -y linux-headers-$(uname -r)
-   fi
-elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
-   echo "Install of pmix and hwloc packages"
-   if [[ "${DRY_RUN}" == "0" ]]; then
-      # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
-      ${SUDO} yum update
-      ${SUDO} yum install -y pmix hwloc
-   fi
-else
-   echo "DISTRO version ${DISTRO} not recognized or supported"
-   exit
-fi
 
 if [[ "${DRY_RUN}" == "0" ]] && [[ ! -d ${INSTALL_PATH} ]] ; then
    ${SUDO} mkdir -p "${INSTALL_PATH}"

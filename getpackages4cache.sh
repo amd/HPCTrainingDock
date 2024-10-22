@@ -97,29 +97,23 @@ echo ":${PACKAGE_LIST}:"
 app=rocm-${ROCM_VERSION}
 if [ ! -f "HPCTrainingDock/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}/${app}.tgz" ]; then
    PACKAGE_SIZE=`ssh -p ${PORT_NUMBER} ${IDENTITY_FILE} ${ADMIN_USER}@localhost -t "du -sk /opt/${app} | cut -f1 | tr -d $'\n'" `
-   echo "Package size is ${PACKAGE_SIZE}"
+   echo "Package size for ${app} is ${PACKAGE_SIZE}"
    if [ "${PACKAGE_SIZE}" -gt "100" ]; then
       echo "Retrieving ${app}"
       ssh -p ${PORT_NUMBER} ${IDENTITY_FILE} ${ADMIN_USER}@localhost -t "cd /opt && tar -czpf /users/${ADMIN_USER}/${app}.tgz ${app}"
       rsync -avz -e "ssh -p ${PORT_NUMBER} ${IDENTITY_FILE}"  ${ADMIN_USER}@localhost:${app}.tgz HPCTrainingDock/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}/${app}.tgz
    fi
 fi
-if [ `du -sk "HPCTrainingDock/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}/${app}.tgz" | cut -f1` -eq 0 ] ; then
-   rm "HPCTrainingDock/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}/${app}.tgz"
-fi
 
 for app in ${PACKAGE_LIST}
 do
    if [ ! -f "HPCTrainingDock/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}/${app}.tgz" ]; then
       PACKAGE_SIZE=`ssh -p ${PORT_NUMBER} ${IDENTITY_FILE} ${ADMIN_USER}@localhost -t "du -sk /opt/rocmplus-${ROCM_VERSION}/${app} | cut -f1 | tr -d $'\n'" `
-      echo "Package size is ${PACKAGE_SIZE}"
+      echo "Package size for ${app} is ${PACKAGE_SIZE}"
       if [ "${PACKAGE_SIZE}" -gt "100" ]; then
          echo "Retrieving ${app}"
          ssh -p ${PORT_NUMBER} ${IDENTITY_FILE} ${ADMIN_USER}@localhost -t "cd /opt/rocmplus-${ROCM_VERSION} && tar -czf /users/${ADMIN_USER}/${app}.tgz ${app}"
          rsync -avz -e "ssh -p ${PORT_NUMBER} ${IDENTITY_FILE}" ${ADMIN_USER}@localhost:${app}.tgz HPCTrainingDock/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}/${app}.tgz
       fi
-   fi
-   if [ `du -sk "HPCTrainingDock/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}/${app}.tgz" | cut -f1` -eq 0 ] ; then
-      rm "HPCTrainingDock/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}/${app}.tgz"
    fi
 done
