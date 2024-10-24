@@ -51,7 +51,7 @@ RUN  /tmp/mvapich_setup.sh --rocm-version ${ROCM_VERSION} && \
 
 COPY comm/scripts/mpi4py_setup.sh /tmp/mpi4py_setup.sh
 
-RUN  /tmp/mpi4py_setup.sh --rocm-version ${ROCM_VERSION} --build-mpi4py 1 && \
+RUN  /tmp/mpi4py_setup.sh --rocm-version ${ROCM_VERSION}  --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-mpi4py 1 && \
      rm /tmp/mpi4py_setup.sh
 
 ENV LC_ALL C.UTF-8

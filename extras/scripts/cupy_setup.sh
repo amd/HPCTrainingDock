@@ -6,6 +6,9 @@ BUILD_CUPY=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/cupy
 AMDGPU_GFXMODEL_INPUT=""
 
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
 SUDO="sudo"
 
 if [  -f /.singularity.d/Singularity ]; then

@@ -6,6 +6,7 @@ MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/amdflang-new-beta-drop
 BUILD_FLANGNEW=0
 ROCM_VERSION=6.0
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 SUDO="sudo"
 
@@ -16,6 +17,7 @@ fi
 usage()
 {
    echo "Usage:"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-LatestCompilers/amdflang-new-beta-drop"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --build-flang-new [ BUILD_FLANGNEW ] default $BUILD_FLANGNEW"
@@ -39,6 +41,11 @@ n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
+      "--amdgpu-gfxmodel")
+          shift
+          AMDGPU_GFXMODEL_INPUT=${1}
+          reset-last
+          ;;
       "--build-flang-new")
           shift
           BUILD_FLANGNEW=${1}
@@ -81,7 +88,9 @@ if [ "${BUILD_FLANGNEW}" = "0" ]; then
       echo "BUILD_FLANGNEW: $BUILD_FLANGNEW"
       exit 
 else  
-      if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/rocm-afar-5891-* ]; then
+      AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
+      CACHEFILES=/Cachefile
+      if [ -f /opt/rocmplus-${ROCM_VERSION}/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}/CacheFiles/rocm-afar-5891-* ]; then
          echo ""
          echo "============================="
          echo " Installing Cached flang-new "

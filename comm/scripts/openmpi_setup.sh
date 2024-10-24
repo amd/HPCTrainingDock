@@ -794,9 +794,9 @@ if [[ "${DRY_RUN}" == "0" ]]; then
    ${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}-xpmem${XPMEM_VERSION}.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}.lua
 	whatis("Name: GPU-aware openmpi")
-	whatis("Version: openmpi-${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}-xpmem${XPMEM_VERSION}")
+	whatis("Version: openmpi-${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}")
 	whatis("Description: An open source Message Passing Interface implementation")
 	whatis(" This is a GPU-Aware version of OpenMPI")
 	whatis("URL: https://github.com/open-mpi/ompi.git")
