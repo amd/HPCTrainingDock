@@ -19,103 +19,31 @@ ${SUDO} apt-get update
 ${SUDO} ${DEB_FRONTEND} apt-get install -y software-properties-common
 ${SUDO} add-apt-repository -y ppa:ubuntu-toolchain-r/test
 
-#${SUDO} apt-get -qq update && ${SUDO} apt-get -qqy install gcc-9 g++-9 gfortran-9
-#${SUDO} apt-get -qq update && ${SUDO} apt-get -qqy install gcc-10 g++-10 gfortran-10
-# Need to install libstdc++ for aomp install and some occasional software
-${SUDO} apt-get -qq update
-${SUDO} ${DEB_FRONTEND} apt-get -qqy install libstdc++-11-dev \
-                                             gcc-12 g++-12 gfortran-12 libstdc++-12-dev \
-                                             gcc-13 g++-13 gfortran-13 libstdc++-13-dev
-#${SUDO} update-alternatives \
-#      --install /usr/bin/gcc      gcc      /usr/bin/gcc-9      70 \
-#      --slave   /usr/bin/g++      g++      /usr/bin/g++-9         \
-#      --slave   /usr/bin/gfortran gfortran /usr/bin/gfortran-9    \
-#      --slave   /usr/bin/gcov     gcov     /usr/bin/gcov-9
-#${SUDO} update-alternatives \
-#      --install /usr/bin/gcc      gcc      /usr/bin/gcc-10      75 \
-#      --slave   /usr/bin/g++      g++      /usr/bin/g++-10         \
-#      --slave   /usr/bin/gfortran gfortran /usr/bin/gfortran-10    \
-#      --slave   /usr/bin/gcov     gcov     /usr/bin/gcov-10
-${SUDO} update-alternatives \
-      --install /usr/bin/gcc      gcc      /usr/bin/gcc-11      80 \
-      --slave   /usr/bin/g++      g++      /usr/bin/g++-11         \
-      --slave   /usr/bin/gfortran gfortran /usr/bin/gfortran-11    \
-      --slave   /usr/bin/gcov     gcov     /usr/bin/gcov-11        \
-      --slave   /usr/lib/libstdc++.so libstdc++.so /usr/lib/gcc/x86_64-linux-gnu/11/libstdc++.so
-${SUDO} update-alternatives \
-      --install /usr/bin/gcc      gcc      /usr/bin/gcc-12      75 \
-      --slave   /usr/bin/g++      g++      /usr/bin/g++-12         \
-      --slave   /usr/bin/gfortran gfortran /usr/bin/gfortran-12    \
-      --slave   /usr/bin/gcov     gcov     /usr/bin/gcov-12        \
-      --slave   /usr/lib/libstdc++.so libstdc++.so /usr/lib/gcc/x86_64-linux-gnu/12/libstdc++.so
-${SUDO} update-alternatives \
-      --install /usr/bin/gcc      gcc      /usr/bin/gcc-13      70 \
-      --slave   /usr/bin/g++      g++      /usr/bin/g++-13         \
-      --slave   /usr/bin/gfortran gfortran /usr/bin/gfortran-13    \
-      --slave   /usr/bin/gcov     gcov     /usr/bin/gcov-13        \
-      --slave   /usr/lib/libstdc++.so libstdc++.so /usr/lib/gcc/x86_64-linux-gnu/13/libstdc++.so
-
-${SUDO} ${DEB_FRONTEND} apt-get -qy install gcc-11-offload-amdgcn
-${SUDO} ${DEB_FRONTEND} apt-get -qy install gcc-12-offload-amdgcn
-${SUDO} ${DEB_FRONTEND} apt-get -qy install gcc-13-offload-amdgcn
-
-${SUDO} ${DEB_FRONTEND} apt-get -qq install clang libomp-14-dev
-#${SUDO} apt-get -qq update && ${SUDO} apt-get -q install -y clang-14 libomp-14-dev
-${SUDO} apt-get -qq update && ${SUDO} ${DEB_FRONTEND} apt-get -q install -y clang-15 libomp-15-dev
-
-${SUDO} update-alternatives \
-      --install /usr/bin/clang     clang     /usr/bin/clang-14      70 \
-      --slave   /usr/bin/clang++   clang++   /usr/bin/clang++-14       \
-      --slave   /usr/bin/clang-cpp clang-cpp /usr/bin/clang-cpp-14
-${SUDO} update-alternatives \
-      --install /usr/bin/clang     clang     /usr/bin/clang-15      75 \
-      --slave   /usr/bin/clang++   clang++   /usr/bin/clang++-15       \
-      --slave   /usr/bin/clang-cpp clang-cpp /usr/bin/clang-cpp-15
-#${SUDO} update-alternatives \
-#      --install /usr/bin/clang     clang     /opt/rocm-ROCM_VERSION/llvm/bin/clang    80 \
-#      --slave   /usr/bin/clang++   clang++   /opt/rocm-ROCM_VERSION/llvm/bin/clang++     \
-#      --slave   /usr/bin/clang-cpp clang-cpp /opt/rocm-ROCM_VERSION/llvm/bin/clang-cpp
-
-${SUDO} chmod u+s /usr/bin/update-alternatives
-
-# To change GCC version
-# dad 3/23/23 add next line back in
-${SUDO} update-alternatives --config gcc
-${SUDO} update-alternatives --config clang
-
-${SUDO} apt-get autoremove
-${SUDO} apt-get -q clean && ${SUDO} rm -rf /var/lib/apt/lists/*
-
-# ${SUDO} apt purge --autoremove -y gcc-11
-
-${SUDO} rm -rf /etc/apt/trusted.gpg.d/ubuntu-toolchain-r_ubuntu_test.gpg
-${SUDO} rm -rf /etc/apt/sources.list.d/ubuntu-toolchain-r-ubuntu-test-focal.list
+GCC_BASE_VERSION=`ls /usr/bin/gcc-* | cut -f2 -d'-' | grep '^[[:digit:]]'`
+GCC_VERSION_LIST=`apt list |grep '^gcc-[[:digit:]]*\/' |cut -f2 -d'-' | cut -f1 -d'/' | sort -n | tr '\n' ' '`
+echo "GCC_BASE_VERSION is ${GCC_BASE_VERSION}, GCC_VERSION_LIST is ${GCC_VERSION_LIST}"
 
 MODULE_PATH=/etc/lmod/modules/Linux/gcc
 ${SUDO} mkdir -p ${MODULE_PATH}
 
-
-if [ "${DISTRO_VERSION}" = "22.04" ]; then
-   GCC_VERSION_LIST="11 12 13"
-   GCC_BASE_VERSION=11
-   CLANG_VERSION_LIST="14 15"
-   CLANG_BASE_VERSION=14
-elif [ "${DISTRO_VERSION}" = "20.04" ]; then
-	# more were needed for 20.04
-   GCC_VERSION_LIST="11 12 13"
-   GCC_BASE_VERSION=11
-   CLANG_VERSION_LIST="14 15"
-   CLANG_BASE_VERSION=14
-else
-   GCC_VERSION_LIST="11 12 13"
-   GCC_BASE_VERSION=11
-   CLANG_VERSION_LIST="14 15"
-   CLANG_BASE_VERSION=14
-fi
-
-# The - option suppresses tabs
+val=80
 for GCC_VERSION in ${GCC_VERSION_LIST}
 do
+   result=`echo $GCC_VERSION | awk '$1<$GCC_BASE_VERSION'` && echo $result
+   if [ "$GCC_VERSION" -lt "$GCC_BASE_VERSION" ]; then
+      continue
+   fi
+   echo "Adding GCC_VERSION $GCC_VERSION"
+   ${SUDO} ${DEB_FRONTEND} apt-get -qqy install gcc-$GCC_VERSION g++-$GCC_VERSION gfortran-$GCC_VERSION libstdc++-$GCC_VERSION-dev
+   ${SUDO} update-alternatives \
+         --install /usr/bin/gcc      gcc      /usr/bin/gcc-$GCC_VERSION      $val \
+         --slave   /usr/bin/g++      g++      /usr/bin/g++-$GCC_VERSION           \
+         --slave   /usr/bin/gfortran gfortran /usr/bin/gfortran-$GCC_VERSION      \
+         --slave   /usr/bin/gcov     gcov     /usr/bin/gcov-$GCC_VERSION          \
+         --slave   /usr/lib/libstdc++.so libstdc++.so /usr/lib/gcc/x86_64-linux-gnu/$GCC_VERSION/libstdc++.so
+   ${SUDO} ${DEB_FRONTEND} apt-get -qy install gcc-$GCC_VERSION-offload-amdgcn
+   val=$((val - 5))
+# The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GCC_VERSION}.lua
 	whatis("GCC Version ${GCC_VERSION} compiler")
 	setenv("CC", "/usr/bin/gcc-${GCC_VERSION}")
@@ -148,11 +76,26 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/.version
 	set ModulesVersion "${GCC_BASE_VERSION}"
 EOF
 
+${SUDO} ${DEB_FRONTEND} apt-get -q install -y clang
+CLANG_BASE_VERSION=`ls /usr/bin/clang-* | cut -f2 -d'-' | grep '^[[:digit:]]'`
+CLANG_VERSION_LIST=`apt list |grep '^clang-[[:digit:]]*\/' |cut -f2 -d'-' | cut -f1 -d'/' | sort -n | tr '\n' ' '`
+echo "CLANG_BASE_VERSION is ${CLANG_BASE_VERSION}, CLANG_VERSION_LIST is ${CLANG_VERSION_LIST}"
+
 MODULE_PATH=/etc/lmod/modules/Linux/clang
 ${SUDO} mkdir -p ${MODULE_PATH}
 
+val=80
 for CLANG_VERSION in ${CLANG_VERSION_LIST}
 do
+   if [ "$CLANG_VERSION" -lt "$CLANG_BASE_VERSION" ]; then
+      continue
+   fi
+   ${SUDO} apt-get -qq update && ${SUDO} ${DEB_FRONTEND} apt-get -q install -y clang-$CLANG_VERSION libomp-$CLANG_VERSION-dev
+   ${SUDO} update-alternatives \
+         --install /usr/bin/clang     clang     /usr/bin/clang-$CLANG_VERSION      $val \
+         --slave   /usr/bin/clang++   clang++   /usr/bin/clang++-$CLANG_VERSION         \
+         --slave   /usr/bin/clang-cpp clang-cpp /usr/bin/clang-cpp-$CLANG_VERSION
+   val=$((val - 5))
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${CLANG_VERSION}.lua
 	whatis("Clang (LLVM) Version ${CLANG_VERSION} compiler")
 	setenv("CC", "/usr/bin/clang-${CLANG_VERSION}")
@@ -185,3 +128,19 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/.version
 	set ModulesVersion "${CLANG_BASE_VERSION}"
 EOF
 
+# Need to install libstdc++ for aomp install and some occasional software
+
+${SUDO} chmod u+s /usr/bin/update-alternatives
+
+# To change GCC version
+# dad 3/23/23 add next line back in
+${SUDO} update-alternatives --config gcc
+${SUDO} update-alternatives --config clang
+
+${SUDO} apt-get autoremove
+${SUDO} apt-get -q clean && ${SUDO} rm -rf /var/lib/apt/lists/*
+
+# ${SUDO} apt purge --autoremove -y gcc-11
+
+${SUDO} rm -rf /etc/apt/trusted.gpg.d/ubuntu-toolchain-r_ubuntu_test.gpg
+${SUDO} rm -rf /etc/apt/sources.list.d/ubuntu-toolchain-r-ubuntu-test-focal.list
