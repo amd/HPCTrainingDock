@@ -89,8 +89,8 @@ if [ "${BUILD_FLANGNEW}" = "0" ]; then
       exit 
 else  
       AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
-      CACHEFILES=/Cachefile
-      if [ -f /opt/rocmplus-${ROCM_VERSION}/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}/CacheFiles/rocm-afar-5891-* ]; then
+      CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
+      if [ -f ${CACHE_FILES}/CacheFiles/rocm-afar-5891-* ]; then
          echo ""
          echo "============================="
          echo " Installing Cached flang-new "
@@ -101,14 +101,18 @@ else
          cd /opt/rocmplus-${ROCM_VERSION}
      
          if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
-   	       ${SUDO} tar -xvjf CacheFiles/rocm-afar-5891-rhel.tar.bz2
+   	       ${SUDO} tar -xvjf ${CACHE_FILES}/rocm-afar-5891-rhel.tar.bz2
          elif  [[ "${DISTRO}" == "ubuntu" ]]; then
-	       ${SUDO} tar -xvjf CacheFiles/rocm-afar-5891-ubuntu.tar.bz2
+	       ${SUDO} tar -xvjf ${CACHE_FILES}/rocm-afar-5891-ubuntu.tar.bz2
          elif  [[ "${DISTRO}" == "opensuse/leap" ]]; then
-	       ${SUDO} tar -xvjf CacheFiles/rocm-afar-5891-sles.tar.bz2
+	       ${SUDO} tar -xvjf ${CACHE_FILES}/rocm-afar-5891-sles.tar.bz2
          fi
  
          ${SUDO} chown -R root:root /opt/rocmplus-${ROCM_VERSION}/rocm-afar-5891
+
+         if [ "${USER}" != "sysadmin" ]; then
+            ${SUDO} rm ${CACHE_FILES}/rocm-afar-5891-*.tar.bz2
+         fi
 
          # Create a module file for flang-new
          ${SUDO} mkdir -p ${MODULE_PATH}

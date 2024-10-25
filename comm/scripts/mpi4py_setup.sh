@@ -115,9 +115,11 @@ else
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf CacheFiles/mpi4py.tgz
+      tar -xzf ${CACHE_FILES}/mpi4py.tgz
       chown -R root:root ${MPI4PY_PATH}
-      ${SUDO} rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/mpi4py.tgz
+      if [ "${USER}" != "sysadmin" ]; then
+         ${SUDO} rm ${CACHE_FILES}/mpi4py.tgz
+      fi
 
    else
 

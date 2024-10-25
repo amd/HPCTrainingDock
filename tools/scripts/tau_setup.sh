@@ -108,7 +108,7 @@ else
          chown -R root:root /opt/rocmplus-${ROCM_VERSION}/tau
       fi
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm /CacheFiles/tau.tgz
+         ${SUDO} rm ${CACHE_FILES}/tau.tgz
       fi
 
    else
