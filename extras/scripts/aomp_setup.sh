@@ -120,7 +120,7 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
 
       ${SUDO} apt-get update
       ${SUDO} ${DEB_FRONTEND} apt-get install -y gawk ninja-build generate-ninja ccache libssl-dev \
-	      libgmp-dev libmpfr-dev libbabeltrace-dev liblzma-dev
+	      libgmp-dev libmpfr-dev libbabeltrace-dev liblzma-dev libdrm-dev libelf-dev
       pip3 install CppHeaderParser
       
       wget -q https://github.com/ROCm-Developer-Tools/aomp/releases/download/rel_${AOMP_VERSION_NUMBER}/aomp-${AOMP_VERSION_NUMBER}.tar.gz

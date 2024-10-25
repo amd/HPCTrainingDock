@@ -108,13 +108,13 @@ RUN /tmp/amd_gcc_setup.sh --build-gcc-latest ${BUILD_GCC_LATEST} --rocm-version 
 
 # install aomp
 COPY extras/scripts/aomp_setup.sh /tmp/aomp_setup.sh
-RUN /tmp/aomp_setup.sh --build-aomp-latest ${BUILD_AOMP_LATEST} --rocm-version ${ROCM_VERSION} && rm /tmp/aomp_setup.sh
+RUN /tmp/aomp_setup.sh --build-aomp-latest ${BUILD_AOMP_LATEST} --rocm-version ${ROCM_VERSION}  |& tee /app/aomp_build.out && rm /tmp/aomp_setup.sh
  
 RUN echo "At end of aomp install" && cd /app && ls -l && cd /tmp && ls -l && cd && ls -l
 
 # install flang-new
 COPY extras/scripts/flang-new_setup.sh /tmp/flang-new_setup.sh
-RUN /tmp/flang-new_setup.sh --build-flang-new ${BUILD_FLANGNEW} --rocm-version ${ROCM_VERSION} && rm /tmp/flang-new_setup.sh
+RUN /tmp/flang-new_setup.sh --build-flang-new ${BUILD_FLANGNEW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/flang-new_setup.sh
  
 # install latest llvm
 COPY extras/scripts/llvm-build.sh /tmp/llvm-build.sh

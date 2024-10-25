@@ -8,6 +8,9 @@ ROCM_VERSION=6.0
 MPI_PATH="/usr"
 SUDO="sudo"
 
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
 fi
@@ -42,6 +45,10 @@ n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
+      "--amdgpu-gfxmodel")
+          shift
+          AMDGPU_GFXMODEL=${1}
+          ;;
       "--build-mpi4py")
           shift
           BUILD_MPI4PY=${1}
@@ -97,7 +104,9 @@ if [ "${BUILD_MPI4PY}" = "0" ]; then
 
 else
    MPI4PY_PATH=/opt/rocmplus-${ROCM_VERSION}/mpi4py
-   if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/mpi4py.tgz ]; then
+   AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
+   if [ -f ${CACHE_FILES}/mpi4py.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached MPI4PY"
@@ -106,9 +115,11 @@ else
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf CacheFiles/mpi4py.tgz
+      tar -xzf ${CACHE_FILES}/mpi4py.tgz
       chown -R root:root ${MPI4PY_PATH}
-      ${SUDO} rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/mpi4py.tgz
+      if [ "${USER}" != "sysadmin" ]; then
+         ${SUDO} rm ${CACHE_FILES}/mpi4py.tgz
+      fi
 
    else
 

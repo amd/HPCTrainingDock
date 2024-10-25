@@ -115,6 +115,8 @@ MVAPICH_RPM_NAME=mvapich-plus-rocm5.6.0.multiarch.ucx.gnu8.5.0-3.0-1.el8.x86_64.
 MVAPICH_DOWNLOAD_URL=https://mvapich.cse.ohio-state.edu/download/mvapich/plus/3.0/rocm/UCX/mofed5.0
 
 if [ "${DISTRO}" = "ubuntu" ]; then
+   echo "Mvapich install on Ubuntu not working yet"
+   exit
    ${SUDO} ${DEB_FRONTEND} apt-get -qqy install alien
    ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/mvapich
 

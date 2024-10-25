@@ -84,7 +84,6 @@ echo "BUILD_TAU: $BUILD_TAU"
 echo "==================================="
 echo ""
 
-CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
 
 if [ "${BUILD_TAU}" = "0" ]; then
 
@@ -93,6 +92,8 @@ if [ "${BUILD_TAU}" = "0" ]; then
    exit 
 
 else
+   AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
    if [ -f ${CACHE_FILES}/tau.tgz ]; then
       echo ""
       echo "============================"
@@ -107,7 +108,7 @@ else
          chown -R root:root /opt/rocmplus-${ROCM_VERSION}/tau
       fi
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm /CacheFiles/tau.tgz
+         ${SUDO} rm ${CACHE_FILES}/tau.tgz
       fi
 
    else

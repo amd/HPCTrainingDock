@@ -19,6 +19,7 @@ ${SUDO} apt-get update
 ${SUDO} ${DEB_FRONTEND} apt-get install -y software-properties-common
 ${SUDO} add-apt-repository -y ppa:ubuntu-toolchain-r/test
 
+# autodetecting default version for distro and getting available gcc version list
 GCC_BASE_VERSION=`ls /usr/bin/gcc-* | cut -f2 -d'-' | grep '^[[:digit:]]'`
 GCC_VERSION_LIST=`apt list |grep '^gcc-[[:digit:]]*\/' |cut -f2 -d'-' | cut -f1 -d'/' | sort -n | tr '\n' ' '`
 echo "GCC_BASE_VERSION is ${GCC_BASE_VERSION}, GCC_VERSION_LIST is ${GCC_VERSION_LIST}"
@@ -76,6 +77,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/.version
 	set ModulesVersion "${GCC_BASE_VERSION}"
 EOF
 
+# Install the default clang version before getting the base version for the distro
 ${SUDO} ${DEB_FRONTEND} apt-get -q install -y clang
 CLANG_BASE_VERSION=`ls /usr/bin/clang-* | cut -f2 -d'-' | grep '^[[:digit:]]'`
 CLANG_VERSION_LIST=`apt list |grep '^clang-[[:digit:]]*\/' |cut -f2 -d'-' | cut -f1 -d'/' | sort -n | tr '\n' ' '`
@@ -138,7 +140,7 @@ ${SUDO} update-alternatives --config gcc
 ${SUDO} update-alternatives --config clang
 
 ${SUDO} apt-get autoremove
-${SUDO} apt-get -q clean && ${SUDO} rm -rf /var/lib/apt/lists/*
+${SUDO} apt-get -qy clean && ${SUDO} rm -rf /var/lib/apt/lists/*
 
 # ${SUDO} apt purge --autoremove -y gcc-11
 
