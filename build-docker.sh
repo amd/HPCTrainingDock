@@ -7,6 +7,7 @@
 : ${PUSH:=0}
 : ${PULL:=--pull}
 : ${OUTPUT_VERBOSITY:=""}
+: ${BUILD_OPTIONS:=""}
 : ${BUILD_AOMP_LATEST:="0"}
 : ${BUILD_LLVM_LATEST:="0"}
 : ${BUILD_GCC_LATEST:="0"}
@@ -109,6 +110,7 @@ usage()
     print_default_option "pull" -- "instructs to not pull down the most recent base container" "--pull"
     print_default_option "admin-username" "[ADMIN_USERNAME]" "container admin username" "${ADMIN_USERNAME}"
     print_default_option admin-password "[ADMIN_PASSWORD]" "container admin password" "not set, needs to be provided as input"
+    print_default_option build-options -- "use this to specify a semi-colon separate list of packages to install" "default is ${BUILD_OPTIONS}"
     print_default_option build-openmpi -- "flag to build OpenMPI" "not included"
     print_default_option build-aomp-latest -- "flag to build the latest version of AOMP for offloading" "not included"
     print_default_option build-llvm-latest -- "flag to build the latest version of LLVM for offloading" "not included"
