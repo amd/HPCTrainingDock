@@ -2,7 +2,7 @@
 
 : ${DOCKER_USER:=$(whoami)}
 : ${ROCM_VERSIONS:="5.0"}
-: ${PYTHON_VERSIONS:="10"}
+: ${PYTHON_VERSION:="10"}
 : ${BUILD_CI:=""}
 : ${PUSH:=0}
 : ${PULL:=--pull}
@@ -19,6 +19,8 @@
 : ${BUILD_TAU:="0"}
 : ${BUILD_SCOREP:="0"}
 : ${BUILD_MPI4PY:="0"}
+: ${BUILD_MINICONDA3:="0"}
+: ${BUILD_MINIFORGE3:="0"}
 : ${BUILD_HPCTOOLKIT:="0"}
 : ${BUILD_X11VNC:="0"}
 : ${BUILD_FLANGNEW:="0"}
@@ -31,6 +33,17 @@
 : ${USE_CACHED_APPS:=0}
 : ${AMDGPU_GFXMODEL:=""}
 : ${INSTALL_GRAFANA:=0}
+
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+
+if [[ "${DISTRO}" == "ubuntu" ]]; then
+   if [[ "${DISTRO_VERSION}" == "24.04" ]]; then
+      PYTHON_VERSION="12"
+   fi
+fi
+
 
 tolower()
 {
@@ -86,10 +99,6 @@ reset-last()
 
 set -e
 
-DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-
 usage()
 {
     print_option() { printf "    --%-20s %-24s     %s\n" "${1}" "${2}" "${3}"; }
@@ -123,7 +132,7 @@ usage()
     print_default_option distro-versions "[VERSION] [VERSION...]" "Ubuntu, OpenSUSE, or RHEL release" "${DISTRO_VERSIONS}"
     print_default_option amdgpu-gfxmodel [AMDGPU_GFXMODEL] "Specify the AMD GPU target architecture" "${AMDGPU_GFXMODEL}"
     print_default_option rocm-versions "[VERSION] [VERSION...]" "ROCm versions" "${ROCM_VERSIONS}"
-    print_default_option python-versions "[VERSION] [VERSION...]" "Python 3 minor releases" "${PYTHON_VERSIONS}"
+    print_default_option python-version "[VERSION]" "python3 minor release" "${PYTHON_VERSION}"
     print_default_option "docker-user" "[DOCKER_USERNAME]" "DockerHub username" "${DOCKER_USER}"
     print_default_option "retry" "[NUMBER OF ATTEMPTS]" "Number of attempts to build (to account for network errors)" "${RETRY}"
     print_default_option push -- "Push the image to Dockerhub" "do not push"
@@ -152,10 +161,10 @@ do
             ROCM_VERSIONS=${1}
             last() { ROCM_VERSIONS="${ROCM_VERSIONS} ${1}"; }
             ;;
-        "--python-versions")
+        "--python-version")
             shift
-            PYTHON_VERSIONS=${1}
-            last() { PYTHON_VERSIONS="${PYTHON_VERSIONS} ${1}"; }
+            PYTHON_VERSION=${1}
+            reset-last
             ;;
         "--docker-user")
             shift
@@ -239,6 +248,14 @@ do
             BUILD_KOKKOS="1"
             reset-last
             ;;
+        "--build-miniconda3")
+            BUILD_MINICONDA3="1"
+            reset-last
+            ;;
+        "--build-miniforge3")
+            BUILD_MINIFORGE3="1"
+            reset-last
+            ;;
         "--build-tau")
             BUILD_TAU="1"
             reset-last
@@ -277,6 +294,8 @@ do
             BUILD_CUPY="1"
             BUILD_JAX="1"
 	    BUILD_KOKKOS="1"
+	    BUILD_MINICONDA3="1"
+	    BUILD_MINIFORGE3="1"
 	    BUILD_TAU="1"
 	    BUILD_SCOREP="1"
 	    BUILD_MPI4PY="1"
@@ -374,6 +393,15 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
 	    echo "Setting KOKKOS build"
             BUILD_KOKKOS=1
 	    ;;
+	 # optional python virtual environments
+         "miniconda3")
+	    echo "Setting MINICONDA3 build"
+            BUILD_MINICONDA3=1
+	    ;;
+         "minicforge3")
+	    echo "Setting MINIFORGE3 build"
+            BUILD_MINIFORGE3=1
+	    ;;
 	 # optional graphics interfaces
          "x11vnc")
 	    echo "Setting X11VNC build"
@@ -391,6 +419,8 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             BUILD_CUPY="1"
             BUILD_JAX="1"
             BUILD_KOKKOS="1"
+            BUILD_MINICONDA3="1"
+            BUILD_MINIFORGE3="1"
             BUILD_TAU="1"
             BUILD_SCOREP="1"
             BUILD_MPI4PY="1"
@@ -423,6 +453,9 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             echo "   pytorch"
 	    echo " # optional languages/frameworks"
             echo "   kokkos"
+	    echo " # optional python virtual environments"
+	    echo "   miniconda3"
+	    echo "   miniforge3"
 	    echo " # optional graphics interfaces"
             echo "   x11vnc"
 	    echo " # All latest recommended"
@@ -489,7 +522,7 @@ do
        -t ${DOCKER_USER}/tools:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        -f tools/Dockerfile .
 
-# Building extrasdocker
+# Building extras docker
     verbose-build docker build ${GENERAL_DOCKER_OPTS} \
        --build-arg AMDGPU_GFXMODEL=\"${AMDGPU_GFXMODEL}\" \
        --build-arg BUILD_GCC_LATEST=${BUILD_GCC_LATEST} \
@@ -501,13 +534,15 @@ do
        --build-arg BUILD_CUPY=${BUILD_CUPY} \
        --build-arg BUILD_JAX=${BUILD_JAX} \
        --build-arg BUILD_KOKKOS=${BUILD_KOKKOS} \
+       --build-arg BUILD_MINICONDA3=${BUILD_MINICONDA3} \
+       --build-arg BUILD_MINIFORGE3=${BUILD_MINIFORGE3} \
        --build-arg BUILD_X11VNC=${BUILD_X11VNC} \
        --build-arg BUILD_FLANGNEW=${BUILD_FLANGNEW} \
        --build-arg BUILD_DATE=$(date +'%Y-%m-%dT%H:%M:%SZ') \
        --build-arg OG_BUILD_DATE=$(date -u +'%y-%m-%d') \
        --build-arg BUILD_VERSION=1.1 \
        --build-arg DISTRO=${DISTRO} \
-       --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" \
+       --build-arg PYTHON_VERSION=${PYTHON_VERSION} \
        --build-arg ADMIN_USERNAME=${ADMIN_USERNAME} \
        --build-arg ADMIN_PASSWORD=${ADMIN_PASSWORD} \
        -t ${DOCKER_USER}/training:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \

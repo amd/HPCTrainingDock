@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
-all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc
-.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep
+all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3
+.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
@@ -12,6 +12,8 @@ omniperf: omniperf.timestamp
 amd_gcc: amd_gcc.timestamp
 aomp: aomp.timestamp
 kokkos: kokkos.timestamp
+miniconda3: miniconda3.timestamp
+miniforge3: miniforge3.timestamp
 tau: tau.timestamp
 scorep: scorep.timestamp
 mpi4py: mpi4py.timestamp
@@ -147,10 +149,18 @@ aomp.timestamp: rocm.timestamp
 miniconda3.timestamp:
 	extras/scripts/miniconda3_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-	   --python-versions ${PYTHON_VERSIONS}
+	   --python-version ${PYTHON_VERSION} \
+	   --build-miniconda3 ${BUILD_MINICONDA3}
 	touch miniconda3.timestamp
 
-kokkos.timestamp:
+miniforge3.timestamp:
+	extras/scripts/miniforge3_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --python-version ${PYTHON_VERSION} \
+	   --build-miniforge3 ${BUILD_MINIFORGE3}
+	touch miniforge3.timestamp
+
+kokkos.timestamp: rocm.timestamp
 	extras/scripts/kokkos_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-kokkos ${BUILD_KOKKOS}

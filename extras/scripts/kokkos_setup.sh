@@ -77,7 +77,7 @@ echo ""
 
 if [ "${BUILD_KOKKOS}" = "0" ]; then
 
-   echo "Kokkos will not be build, according to the specified value of BUILD_KOKKOS"
+   echo "Kokkos will not be built, according to the specified value of BUILD_KOKKOS"
    echo "BUILD_KOKKOS: $BUILD_KOKKOS"
    exit 
 
@@ -140,7 +140,6 @@ else
 	whatis("Kokkos - Performance Portability Language")
 
 	load("rocm/${ROCM_VERSION}")
-	load("amdclang")
 	prepend_path("PATH","/opt/rocmplus-${ROCM_VERSION}/kokkos")
 EOF
 

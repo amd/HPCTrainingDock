@@ -1,24 +1,35 @@
 #!/bin/bash
 
-: ${ROCM_VERSIONS:="6.0"}
+: ${ROCM_VERSION:="6.0"}
 : ${ROCM_INSTALLPATH:="/opt/"}
 : ${BUILD_PYTORCH:="1"}
 : ${BUILD_CUPY:="1"}
 : ${BUILD_JAX:="1"}
 : ${BUILD_SCOREP:="1"}
 : ${BUILD_KOKKOS:="1"}
+: ${BUILD_MINICONDA3:="1"}
+: ${BUILD_MINIFORGE3:="1"}
 : ${BUILD_HPCTOOLKIT:="1"}
 : ${BUILD_MPI4PY:="1"}
 : ${BUILD_TAU:="1"}
 : ${BUILD_X11VNC:="1"}
+: ${PYTHON_VERSION:="10"} # python3 minor release
 : ${USE_MAKEFILE:="0"}
 
 OMNITRACE_BUILD_FROM_SOURCE=0
-PYTHON_VERSIONS="9 10" # Python 3 minor releases
 SUDO="sudo"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
+fi
+
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
+if [[ "${DISTRO}" == "ubuntu" ]]; then
+   if [[ "${DISTRO_VERSION}" == "24.04" ]]; then
+      PYTHON_VERSION="12"
+   fi
 fi
 
 reset-last()
@@ -29,11 +40,13 @@ reset-last()
 usage()
 {
    echo "Usage:"
-   echo "  --rocm-version [ ROCM_VERSIONS ]:  default is $ROCM_VERSIONS"
+   echo "  --rocm-version [ ROCM_VERSION ]:  default is $ROCM_VERSION"
    echo "  --rocm-install-path [ ROCM_INSTALL_PATH ]:  default is $ROCM_INSTALLPATH"
-   echo "  --python-versions [ PYTHON_VERSIONS ]: Python 3 minor releases, default is $PYTHON_VERSIONS"
+   echo "  --python-version [ PYTHON_VERSION ]: python3 minor release, default is $PYTHON_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: if not provided, rocminfo is used to assign a value" 
    echo "  --omnitrace-build-from-source [0 or 1]:  default is 0 (false)"
+   echo "  --distro [DISTRO: ubuntu|rockylinux|opensuse/leap]: autodetected by looking into /etc/os-release"
+   echo "  --distro-versions [DISTRO_VERSION]: autodetected by looking into /etc/os-release"
    echo "  --use-makefile [0 or 1]:  default is 0 (false)"
    echo "  --help: prints this message"
    exit 1
@@ -53,9 +66,9 @@ do
           ROCM_INSTALLPATH=${1}
           reset-last
           ;;
-      "--python-versions")
+      "--python-version")
           shift
-          PYTHON_VERSIONS=${1}
+          PYTHON_VERSION=${1}
           reset-last
           ;;
       "--amdgpu-gfxmodel")
@@ -117,8 +130,6 @@ comm/scripts/mpi4py_setup.sh --rocm-version ${ROCM_VERSION} --build-mpi4py ${BUI
 
 comm/scripts/mvapich_setup.sh --rocm-version ${ROCM_VERSION}
 
-tools/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --python-versions ${PYTHON_VERSIONS}
-
 tools/scripts/omnitrace_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE}
 
 tools/scripts/grafana_setup.sh
@@ -144,6 +155,10 @@ extras/scripts/pytorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel
 extras/scripts/apps_setup.sh
 
 extras/scripts/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-kokkos ${BUILD_KOKKOS}
+
+extras/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniconda3 ${BUILD_MINICONDA3} --python-version ${PYTHON_VERSION}
+
+extras/scripts/miniforge3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniforge3 ${BUILD_MINIFORGE3}
 
 extras/scripts/x11vnc_setup.sh --build-x11vnc ${BUILD_X11VNC}
 

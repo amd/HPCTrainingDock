@@ -7,6 +7,7 @@ ARG DISTRO_VERSION
 ARG ROCM_VERSION
 ARG ROCM_INSTALLPATH
 ARG AMDGPU_GFXMODEL
+ARG PYTHON_VERSION
 ARG USE_MAKEFILE
 
 LABEL maintainer="bob.robey@amd.com"
@@ -54,10 +55,8 @@ WORKDIR /home/sysadmin
 
 ENV ROCM_VERSION=$ROCM_VERSION
 ENV AMDGPU_GFXMODEL=$AMDGPU_GFXMODEL
-ENV BUILD_CUPY=1
+ENV PYTHON_VERSION=$PYTHON_VERSION
 ENV OMNITRACE_BUILD_FROM_SOURCE=1
-ENV BUILD_PYTORCH=1
-ENV BUILD_AOMP_LATEST=1
 ENV DISTRO=${DISTRO}
 ENV DISTRO_VERSION=${DISTRO_VERSION}
 
@@ -76,6 +75,7 @@ ADD extras/image/home /home/sysadmin
 RUN sudo chown -R sysadmin:sysadmin /home/sysadmin
 
 RUN bare_system/main_setup.sh --rocm-version ${ROCM_VERSION} --rocm-install-path ${ROCM_INSTALLPATH} \
-    --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --use-makefile ${USE_MAKEFILE}
+    --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --use-makefile ${USE_MAKEFILE} --python-version ${PYTHON_VERSION} \
+    --distro ${DISTRO} --distro-version ${DISTRO_VERSION}
 
 ENTRYPOINT ["bash"]

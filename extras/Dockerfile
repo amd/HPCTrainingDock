@@ -27,12 +27,14 @@ ARG BUILD_CLACC_LATEST
 ARG BUILD_PYTORCH
 ARG BUILD_CUPY
 ARG BUILD_KOKKOS
+ARG BUILD_MINIFORGE3
+ARG BUILD_MINICONDA3
 ARG BUILD_JAX
 ARG BUILD_X11VNC
 ARG BUILD_FLANGNEW
 ARG USE_CACHED_APPS
 ARG AMDGPU_GFXMODEL=gfx90a
-ARG PYTHON_VERSIONS
+ARG PYTHON_VERSION
 
 LABEL maintainer="bob.robey@amd.com"
 
@@ -67,14 +69,25 @@ RUN apt-get install -y  net-tools iproute2 openssh-server iputils-ping && \
 EXPOSE 22
 
 #
-# Install miniconda
+# Install miniconda3
 #
 COPY extras/scripts/miniconda3_setup.sh /tmp/miniconda3_setup.sh
 
 RUN /tmp/miniconda3_setup.sh \
         --rocm-version ${ROCM_VERSION} \
-        --python-versions "${PYTHON_VERSIONS}" && \
+        --python-version ${PYTHON_VERSION} \
+        --build-miniconda3 ${BUILD_MINICONDA3} && \
     rm -f /tmp/miniconda3_setup.sh
+
+#
+# Install miniforge3
+#
+COPY extras/scripts/miniforge3_setup.sh /tmp/miniforge3_setup.sh
+
+RUN /tmp/miniforge3_setup.sh \
+        --rocm-version ${ROCM_VERSION} \
+        --build-miniforge3 ${BUILD_MINICONDA3} && \
+    rm -f /tmp/miniforge3_setup.sh
 
 #
 # Install our desired compilers

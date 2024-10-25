@@ -3,7 +3,18 @@
 : ${ROCM_VERSION:="6.0"}
 : ${ROCM_INSTALLPATH:="/opt/"}
 : ${USE_MAKEFILE:="0"}
+: ${PYTHON_VERSION:="10"}
 : ${IMAGE_NAME:="bare"}
+
+AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
+if [[ "${DISTRO}" == "ubuntu" ]]; then
+   if [[ "${DISTRO_VERSION}" == "24.04" ]]; then
+      PYTHON_VERSION="12"
+   fi
+fi
 
 reset-last()
 {
@@ -15,7 +26,7 @@ usage()
    echo "Usage:"
    echo "  --rocm-version [ ROCM_VERSION ]:  default is $ROCM_VERSION"
    echo "  --rocm-install-path [ ROCM_INSTALL_PATH ]:  default is $ROCM_INSTALLPATH"
-   echo "  --python-versions [ PYTHON_VERSIONS ]: Python 3 minor releases, default is $PYTHON_VERSIONS"
+   echo "  --python-version [ PYTHON_VERSION ]: python3 minor release, default is $PYTHON_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: autodetected using rocminfo"
    echo "  --distro [DISTRO: ubuntu|rockylinux|opensuse/leap]: autodetected by looking into /etc/os-release"
    echo "  --distro-versions [DISTRO_VERSION]: autodetected by looking into /etc/os-release"
@@ -24,10 +35,6 @@ usage()
    echo "  --help: prints this message"
    exit 1
 }
-
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 n=0
 while [[ $# -gt 0 ]]
@@ -46,6 +53,11 @@ do
       "--amdgpu-gfxmodel")
           shift
           AMDGPU_GFXMODEL=${1}
+          reset-last
+          ;;
+      "--python-version")
+          shift
+          PYTHON_VERSION=${1}
           reset-last
           ;;
       "--distro")
@@ -100,6 +112,7 @@ docker build --no-cache ${ADD_OPTIONS} \
              --build-arg ROCM_INSTALLPATH=${ROCM_INSTALLPATH} \
              --build-arg AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL} \
              --build-arg USE_MAKEFILE=${USE_MAKEFILE} \
+	     --build-arg PYTHON_VERSION=${PYTHON_VERSION} \
              -t ${IMAGE_NAME} \
 	     -f bare_system/Dockerfile .
 
