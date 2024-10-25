@@ -1,4 +1,4 @@
-Last review of this README: **October 23, 2024**
+Last review of this README: **October 25, 2024**
 
 # 1. Synopsis
 
@@ -433,6 +433,9 @@ tools/scripts/scorep_setup.sh
 // install Miniconda3 and create Miniconda3 module
 extras/scripts/miniconda3_setup.sh
  
+// install Miniforge3 and create Miniforge3 module
+extras/scripts/miniforge3_setup.sh
+
 // install clang/14  clang/15  gcc/11  gcc/12  gcc/13 and create modules
 extras/scripts/compiler_setup.sh
 
@@ -529,7 +532,7 @@ The training environment comes with a variety of modules installed, with their n
 
 ```bash
 ----------------------------------------------------------------------- /etc/lmod/modules/Linux ------------------------------------------------------------------------
-   clang/base    clang/14 (D)    clang/15    gcc/base    gcc/11 (D)    gcc/12    gcc/13    miniconda3/23.11.0
+   clang/base    clang/14 (D)    clang/15    gcc/base    gcc/11 (D)    gcc/12    gcc/13    miniconda3/24.9.2    miniforge3/24.9.0
 
 ------------------------------------------------------------------------ /etc/lmod/modules/ROCm ------------------------------------------------------------------------
    amdclang/-6.2.1    hipfort/6.2.1    omniperf/6.2.1 (D)    omnitrace/6.2.1 (D)    opencl/6.2.1    rocm/6.2.1
