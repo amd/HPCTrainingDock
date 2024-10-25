@@ -620,11 +620,12 @@ else
       tar xzf v${UCC_VERSION}.tar.gz
       cd ucc-${UCC_VERSION}
 
-      export AMDGPU_GFXMODEL_UCC=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/:/g'`
+      export AMDGPU_GFXMODEL_UCC=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/ --offload-arch=/g'`
+      AMDGPU_GFXMODEL_UCC="--offload-arch=${AMDGPU_GFXMODEL_UCC}"
 
-      sed -i '31i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu --offload-arch='"${AMDGPU_GFXMODEL_UCC}"' ${@:5} -fPIC -O3 -o ${pic_filepath}"' cuda_lt.sh
+      sed -i '31i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu "${AMDGPU_GFXMODEL_UCC}" ${@:5} -fPIC -O3 -o ${pic_filepath}"' cuda_lt.sh
       sed -i '32d' cuda_lt.sh
-      sed -i '41i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu --offload-arch='"${AMDGPU_GFXMODEL_UCC}"' ${@:5} -O3 -o ${npic_filepath}"' cuda_lt.sh
+      sed -i '41i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu "${AMDGPU_GFXMODEL_UCC}" ${@:5} -O3 -o ${npic_filepath}"' cuda_lt.sh
       sed -i '42d' cuda_lt.sh
 
       ./autogen.sh

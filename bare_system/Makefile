@@ -58,7 +58,7 @@ baseospackages.timestamp:
 
 rocm.timestamp: baseospackages.timestamp # lmod.timestamp
 	rocm/scripts/rocm_setup.sh \
-	   --rocm-version ${ROCM_VERSION}
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' --rocm-version ${ROCM_VERSION} 
 	touch rocm.timestamp
 
 rocm_omnitrace.timestamp: baseospackages.timestamp rocm.timestamp
@@ -79,7 +79,7 @@ slurm.timestamp:
 openmpi.timestamp: rocm.timestamp
 	comm/scripts/openmpi_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}'
 	touch openmpi.timestamp
 
 mvapich.timestamp: rocm.timestamp
@@ -98,7 +98,7 @@ mpi4py.timestamp: rocm.timestamp
 omnitrace.timestamp: openmpi.timestamp
 	tools/scripts/omnitrace_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
 	   --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE}
 	touch omnitrace.timestamp
 
@@ -169,21 +169,21 @@ kokkos.timestamp: rocm.timestamp
 cupy.timestamp: rocm.timestamp
 	extras/scripts/cupy_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
 	   --build-cupy ${BUILD_CUPY}
 	touch cupy.timestamp
 
 pytorch.timestamp: rocm.timestamp
 	extras/scripts/pytorch_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
 	   --build-pytorch ${BUILD_PYTORCH}
 	touch pytorch.timestamp
 
 jax.timestamp: rocm.timestamp
 	extras/scripts/jax_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-	   --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
 	   --build-jax ${BUILD_JAX}
 	touch jax.timestamp
 

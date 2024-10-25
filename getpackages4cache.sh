@@ -90,7 +90,7 @@ ssh-copy-id ${IDENTITY_FILE} -p ${PORT_NUMBER} -o UpdateHostKeys=yes ${ADMIN_USE
 
 PACKAGE_LIST=`ssh -p ${PORT_NUMBER} ${IDENTITY_FILE} ${ADMIN_USER}@localhost -t "ls /opt/rocmplus-${ROCM_VERSION}"`
 # Remove trailing line break
-PACKAGE_LIST=${PACKAGE_LIST%%[[:cntrl:]]}
+PACKAGE_LIST=`echo ${PACKAGE_LIST} | sed -e '/\t\n\r//'`
 echo "local package.list"
 echo ":${PACKAGE_LIST}:"
 

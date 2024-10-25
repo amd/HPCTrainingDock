@@ -61,7 +61,7 @@ do
 	 ;;
       "--amdgpu-gfxmodel-string")
           shift
-          AMDGPU_GFXMODEL_STRING=${1}
+          AMDGPU_GFXMODEL=${1}
           reset-last
           ;;
       "--replace")
@@ -308,6 +308,7 @@ EOF
    ${SUDO} yum install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${ROCM_REPO_DIST}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
 fi
 
+AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
 CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
 if [[ -d "/opt/rocm-${ROCM_VERSION}" ]] && [[ "${REPLACE}" == "0" ]] ; then
@@ -319,6 +320,8 @@ fi
 INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
 
 if [ "${DISTRO}" == "ubuntu" ]; then
+   ${SUDO} apt-get update
+   ${SUDO} ${DEB_FRONTEND} apt-get install -y libdrm-dev
    if [[ -d "${INSTALL_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
       ${SUDO} rm -rf ${INSTALL_PATH}
    fi
@@ -337,6 +340,13 @@ if [ "${DISTRO}" == "ubuntu" ]; then
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz
       fi
+      ROCM_ALTERNATIVES_BIN_LIST="amd-smi clinfo hipcc hipcc.bin hipcc_cmake_linker_helper hipcc.pl hipconfig hipconfig.bin hipconfig.pl hipconvertinplace-perl.sh hipconvertinplace.sh hipdemangleatp hipexamine-perl.sh hipexamine.sh hipify-clang hipify-perl roccoremerge rocgdb rocm_agent_enumerator rocminfo rocm-smi roc-obj roc-obj-extract roc-obj-ls rocprof rocprofv2 rocsys"
+      for file in $ROCM_ALTERNATIVES_BIN_LIST
+      do
+         ${SUDO} update-alternatives --install /usr/bin/$file $file /opt/rocm-${ROCM_VERSION}/bin/$file 100
+      done
+      ${SUDO} update-alternatives --install /opt/rocm rocm /opt/rocm-${ROCM_VERSION} 100
+
    else
 
       #mkdir --parents --mode=0755 /etc/apt/keyrings
