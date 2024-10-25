@@ -508,6 +508,7 @@ else
       cd ucx-${UCX_VERSION}
       mkdir build && cd build
 
+if [ "${BUILD_XPMEM}" == "1" ]; then
       UCX_CONFIGURE_COMMAND="../contrib/configure-release \
          --prefix=${UCX_PATH} \
          --with-rocm=${ROCM_PATH} \
@@ -520,6 +521,19 @@ else
          --enable-assertions \
          --enable-params-check \
          --enable-examples"
+else
+      UCX_CONFIGURE_COMMAND="../contrib/configure-release \
+         --prefix=${UCX_PATH} \
+         --with-rocm=${ROCM_PATH} \
+         --without-cuda \
+         --enable-mt \
+         --enable-optimizations \
+         --disable-logging \
+         --disable-debug \
+         --enable-assertions \
+         --enable-params-check \
+         --enable-examples"
+fi
 
       echo ""
       echo "UCX_CONFIGURE_COMMAND: "
@@ -606,13 +620,14 @@ else
       tar xzf v${UCC_VERSION}.tar.gz
       cd ucc-${UCC_VERSION}
 
-      export AMDGPU_GFXMODEL_UCC=${AMDGPU_GFXMODEL}
-      echo 'Defaults:%sudo env_keep += "AMDGPU_GFXMODEL_UCC"' | ${SUDO} EDITOR='tee -a' visudo
+      #export AMDGPU_GFXMODEL_UCC=${AMDGPU_GFXMODEL}
+      #echo 'Defaults:%sudo env_keep += "AMDGPU_GFXMODEL_UCC"' | ${SUDO} EDITOR='tee -a' visudo
+      export AMDGPU_GFXMODEL_UCC=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/:/g'`
 
-      ${SUDO} sed -i '31i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu --offload-arch='"${AMDGPU_GFXMODEL_UCC}"' ${@:5} -fPIC -O3 -o ${pic_filepath}"' cuda_lt.sh
-      ${SUDO} sed -i '32d' cuda_lt.sh
-      ${SUDO} sed -i '41i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu --offload-arch='"${AMDGPU_GFXMODEL_UCC}"' ${@:5} -O3 -o ${npic_filepath}"' cuda_lt.sh
-      ${SUDO} sed -i '42d' cuda_lt.sh
+      sed -i '31i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu --offload-arch='"${AMDGPU_GFXMODEL_UCC}"' ${@:5} -fPIC -O3 -o ${pic_filepath}"' cuda_lt.sh
+      sed -i '32d' cuda_lt.sh
+      sed -i '41i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu --offload-arch='"${AMDGPU_GFXMODEL_UCC}"' ${@:5} -O3 -o ${npic_filepath}"' cuda_lt.sh
+      sed -i '42d' cuda_lt.sh
 
       ./autogen.sh
 
