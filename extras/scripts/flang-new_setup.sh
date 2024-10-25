@@ -90,7 +90,7 @@ if [ "${BUILD_FLANGNEW}" = "0" ]; then
 else  
       AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
       CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-      if [ -f ${CACHE_FILES}/CacheFiles/rocm-afar-5891-* ]; then
+      if [ -f ${CACHE_FILES}/rocm-afar-5891-* ]; then
          echo ""
          echo "============================="
          echo " Installing Cached flang-new "
