@@ -620,8 +620,6 @@ else
       tar xzf v${UCC_VERSION}.tar.gz
       cd ucc-${UCC_VERSION}
 
-      #export AMDGPU_GFXMODEL_UCC=${AMDGPU_GFXMODEL}
-      #echo 'Defaults:%sudo env_keep += "AMDGPU_GFXMODEL_UCC"' | ${SUDO} EDITOR='tee -a' visudo
       export AMDGPU_GFXMODEL_UCC=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/:/g'`
 
       sed -i '31i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu --offload-arch='"${AMDGPU_GFXMODEL_UCC}"' ${@:5} -fPIC -O3 -o ${pic_filepath}"' cuda_lt.sh
