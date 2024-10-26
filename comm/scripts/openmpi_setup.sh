@@ -8,8 +8,8 @@
 #
 
 # Variables controlling setup process
-ROCM_VERSION=`cat /opt/rocm*/.info/version | head -1 | cut -f1 -d'-' `
-ROCM_PATH=/opt/rocm-${ROCM_VERSION}
+ROCM_VERSION=
+ROCM_PATH=
 REPLACE=0
 DRY_RUN=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/openmpi
@@ -33,7 +33,7 @@ CXX_COMPILER=g++
 FC_COMPILER=gfortran
 
 # Autodetect defaults
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+AMDGPU_GFXMODEL=
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 RHEL_COMPATIBLE=0
@@ -62,8 +62,8 @@ usage()
     echo "  --openmpi-version [VERSION] default $OPENMPI_VERSION"
     echo "  --openmpi-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
     echo "  --replace default off"
-    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-    echo "  --rocm-path [ ROCM_PATH ] default /opt/rocm-$ROCM_VERSION"
+    echo "  --rocm-version [ ROCM_VERSION ] default none"
+    echo "  --rocm-path [ ROCM_PATH ] default none"
     echo "  --ucc-path default <INSTALL_PATH>/ucc"
     echo "  --ucc-version [VERSION] default $UCC_VERSION"
     echo "  --ucc-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
@@ -159,12 +159,13 @@ do
           ;;
       "--rocm-path")
           shift
-          ROCM_PATH_INPUT=${1}
+          ROCM_PATH=${1}
+	  ROCM_VERSION=`cat ${ROCM_PATH}/.info/version | cut -f1 -d'-' `
           reset-last
           ;;
       "--rocm-version")
           shift
-          ROCM_VERSION_INPUT=${1}
+          ROCM_VERSION=${1}
           reset-last
           ;;
       "--ucc-path")
@@ -232,48 +233,10 @@ do
    shift
 done
 
-echo "ROCM_VERSION autodetected is ${ROCM_VERSION}"
-echo "ROCM_PATH autodetected is ${ROCM_PATH}"
-
-if [ "${ROCM_PATH_INPUT}" != "" ]; then
-   ROCM_PATH="${ROCM_PATH_INPUT}"
-else
-   ROCM_PATH="/opt/rocm-${ROCM_VERSION}"
-fi
-
-if [ "${ROCM_VERSION_INPUT}" != "" ]; then
-   ROCM_VERSION="${ROCM_VERSION_INPUT}"
-else
-   ROCM_VERSION=`cat ${ROCM_PATH}/.info/version | cut -f1 -d'-' `
-fi
-
-echo "ROCM_VERSION after input is ${ROCM_VERSION}"
-echo "ROCM_PATH after input is ${ROCM_PATH}"
-ROCM_VERSION_AFTER_INPUT=${ROCM_VERSION}
-ROCM_PATH_AFTER_INPUT=${ROCM_PATH}
-
 # Load the ROCm version for this build
 source /etc/profile.d/lmod.sh
 source /etc/profile.d/z01_lmod.sh
 module load rocm/${ROCM_VERSION}
-ROCM_VERSION=`cat $ROCM_PATH/.info/version | head -1 | cut -f1 -d'-'`
-
-echo "ROCM_VERSION after loading module is ${ROCM_VERSION}"
-echo "ROCM_PATH after loading module is ${ROCM_PATH}"
-
-if [ "${ROCM_PATH_AFTER_INPUT}" != "${ROCM_PATH}" ]; then
-   echo "Mismatch in ROCM_PATH -- after input ${ROCM_PATH_AFTER_INPUT} after module load ${ROCM_PATH}"
-   echo "It is possible that the autodetection of the PATH has picked up a ROCm stack that is not what is loaded by the module"
-   echo "To make sure the ROCm stack loaded by the module is the one used, specify PATH and VERSION as input"
-   echo "Run this script with --help to see what is the right syntax"
-fi
-
-if [ "${ROCM_VERSION_AFTER_INPUT}" != "${ROCM_VERSION}" ]; then
-   echo "Mismatch in ROCM_VERSION -- after input ${ROCM_VERSION_AFTER_INPUT} after module load ${ROCM_VERSION}"
-   echo "It is possible that the autodetection of the PATH has picked up a ROCm stack that is not what is loaded by the module"
-   echo "To make sure the ROCm stack loaded by the module is the one used, specify PATH and VERSION as input"
-   echo "Run this script with --help to see what is the right syntax"
-fi
 
 echo ""
 echo "============================"

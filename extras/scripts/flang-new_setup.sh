@@ -43,7 +43,7 @@ do
    case "${1}" in
       "--amdgpu-gfxmodel")
           shift
-          AMDGPU_GFXMODEL_INPUT=${1}
+          AMDGPU_GFXMODEL=${1}
           reset-last
           ;;
       "--build-flang-new")
