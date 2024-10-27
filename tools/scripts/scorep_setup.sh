@@ -6,9 +6,11 @@ MODULE_PATH=/etc/lmod/modules/misc/scorep
 BUILD_SCOREP=0
 ROCM_VERSION=6.0
 SUDO="sudo"
+DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
+   DEB_FRONTEND=""
 fi
 
 # Autodetect defaults
@@ -119,6 +121,8 @@ else
       echo "==============================="
       echo ""
 
+      CUR_DIR=`pwd`
+
       source /etc/profile.d/lmod.sh
       module load rocm/${ROCM_VERSION}
 
@@ -154,10 +158,10 @@ else
       # install OpenMPI if not in the system already
       if [[ `which mpicc | wc -l` -eq 0 ]]; then
          ${SUDO} apt-get update
-         ${SUDO} apt-get install -q -y libopenmpi-dev  
+         ${SUDO} ${DEB_FRONTEND} apt-get install -q -y libopenmpi-dev  
       fi
 
-      wget http://go.fzj.de/scorep-ompt-device-tracing
+      wget https://go.fzj.de/scorep-ompt-device-tracing
       mv scorep-ompt-device-tracing scorep-ompt-device-tracing.tar.gz
       tar -xvf scorep-ompt-device-tracing.tar.gz
       cd sources.37b6f127
@@ -170,15 +174,12 @@ else
                    --with-librocm_smi64-lib=$ROCM_PATH/lib --with-libunwind=download --enable-shared --with-libbfd=download --without-shmem  \
 		     CC=$ROCM_PATH/llvm/bin/clang CXX=$ROCM_PATH/llvm/bin/clang++ FC=$ROCM_PATH/llvm/bin/flang CFLAGS=-fPIE
 
-      ${SUDO} make
+      make
       ${SUDO} make install
 
-      cd ../..
-      echo "Current directory"
-      pwd
-      ls -l
-      ${SUDO} rm -rf scorep-ompt* sources.37b6f127
-      ${SUDO} rm -rf spack
+      cd ${CUR_DIR}
+      rm -rf scorep-ompt* sources.37b6f127
+      rm -rf spack
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/pdt -type f -execdir chown root:root "{}" +

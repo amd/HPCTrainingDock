@@ -100,13 +100,7 @@ else
          #install the cached version
          cd /opt/rocmplus-${ROCM_VERSION}
      
-         if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
-   	       ${SUDO} tar -xvjf ${CACHE_FILES}/rocm-afar-5891-rhel.tar.bz2
-         elif  [[ "${DISTRO}" == "ubuntu" ]]; then
-	       ${SUDO} tar -xvjf ${CACHE_FILES}/rocm-afar-5891-ubuntu.tar.bz2
-         elif  [[ "${DISTRO}" == "opensuse/leap" ]]; then
-	       ${SUDO} tar -xvjf ${CACHE_FILES}/rocm-afar-5891-sles.tar.bz2
-         fi
+         ${SUDO} tar -xvjf ${CACHE_FILES}/rocm-afar-5891.tgz
  
          ${SUDO} chown -R root:root /opt/rocmplus-${ROCM_VERSION}/rocm-afar-5891
 
@@ -118,24 +112,24 @@ else
          ${SUDO} mkdir -p ${MODULE_PATH}
 
          cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/4.0.lua
-              whatis("AMD AFAR drop #4.0 Beta Fortran OpenMP Compiler based on LLVM")
-              local help_message = [[
-              PRE-PRODUCTION SOFTWARE:  The software accessible on this page may be a pre-production version, intended to provide advance access to features that may or may not eventually be included into production version of the software.  Accordingly, pre-production software may not be fully functional, may contain errors, and may have reduced or different security, privacy, accessibility, availability, and reliability standards relative to production versions of the software. Use of pre-production software may result in unexpected results, loss of data, project delays or other unpredictable damage or loss.  Pre-production software is not intended for use in production, and your use of pre-production software is at your own risk.
-              ]]
-              prepend_path("PATH","/opt/rocmplus-${ROCM_VERSION}/rocm-afar-5891/bin")
-    	      setenv("CC","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/bin/amdclang")
-	      setenv("CXX","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/bin/amdclang++")
-	      setenv("FC","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/bin/amdflang-new")
-	      setenv("F77","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/bin/amdflang-new")
-	      setenv("F90","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/bin/amdflang-new")
-	      prepend_path("PATH","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/bin")
-	      prepend_path("LD_LIBRARY_PATH","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/libexec")
-	      prepend_path("LD_LIBRARY_PATH","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/lib")
-	      prepend_path("MANPATH","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/share/man")
-   	      prepend_path("C_INCLUDE_PATH","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/include")
-	      prepend_path("CPLUS_INCLUDE_PATH","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/include")
-	      load("rocm/${ROCM_VERSION}")
-	      family("compiler")
+		whatis("AMD AFAR drop #4.0 Beta Fortran OpenMP Compiler based on LLVM")
+		local help_message = [[
+		   PRE-PRODUCTION SOFTWARE:  The software accessible on this page may be a pre-production version, intended to provide advance access to features that may or may not eventually be included into production version of the software.  Accordingly, pre-production software may not be fully functional, may contain errors, and may have reduced or different security, privacy, accessibility, availability, and reliability standards relative to production versions of the software. Use of pre-production software may result in unexpected results, loss of data, project delays or other unpredictable damage or loss.  Pre-production software is not intended for use in production, and your use of pre-production software is at your own risk.
+		]]
+		prepend_path("PATH","/opt/rocmplus-${ROCM_VERSION}/rocm-afar-5891/bin")
+		setenv("CC","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/bin/amdclang")
+		setenv("CXX","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/bin/amdclang++")
+		setenv("FC","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/bin/amdflang-new")
+		setenv("F77","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/bin/amdflang-new")
+		setenv("F90","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/bin/amdflang-new")
+		prepend_path("PATH","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/bin")
+		prepend_path("LD_LIBRARY_PATH","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/libexec")
+		prepend_path("LD_LIBRARY_PATH","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/lib")
+		prepend_path("MANPATH","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/share/man")
+		prepend_path("C_INCLUDE_PATH","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/include")
+		prepend_path("CPLUS_INCLUDE_PATH","/opt/rocmplus-${ROCM_VERSION}//rocm-afar-5891/include")
+		load("rocm/${ROCM_VERSION}")
+		family("compiler")
 EOF
    else 
          echo " The pre-production flang-new software can currently only be installed from a cached archive"

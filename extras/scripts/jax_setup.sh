@@ -105,7 +105,7 @@ else
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   if [ -f ${CACHE_FILES}/jax.tgz ]; then
+   if [ -f ${CACHE_FILES}/jax.tgz ] && [ -f ${CACHE_FILES}/jaxlib.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached JAX"
@@ -113,11 +113,16 @@ else
       echo ""
 
       #install the cached version
-      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/jax
       cd /opt/rocmplus-${ROCM_VERSION}
+
+      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/jax
       ${SUDO} tar -xzpf ${CACHE_FILES}/jax.tgz
+
+      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/jaxlib
+      ${SUDO} tar -xzpf ${CACHE_FILES}/jaxlib.tgz
+
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm ${CACHE_FILES}/jax.tgz
+         ${SUDO} rm  ${CACHE_FILES}/jax.tgz ${CACHE_FILES}/jaxlib.tgz
       fi
    else
       echo ""

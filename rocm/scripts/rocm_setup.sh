@@ -59,7 +59,7 @@ do
       "--help")
          usage
 	 ;;
-      "--amdgpu-gfxmodel-string")
+      "--amdgpu-gfxmodel")
           shift
           AMDGPU_GFXMODEL=${1}
           reset-last
