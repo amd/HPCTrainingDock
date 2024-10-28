@@ -105,10 +105,7 @@ else
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf ${CACHE_FILES}/scorep.tgz
-      if [ "${USER}" != "root" ]; then
-         chown -R root:root /opt/rocmplus-${ROCM_VERSION}/scorep
-      fi
+      tar -xpzf ${CACHE_FILES}/scorep.tgz
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm /CacheFiles/scorep.tgz
       fi

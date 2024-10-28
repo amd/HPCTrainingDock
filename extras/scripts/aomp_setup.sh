@@ -94,8 +94,7 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      ${SUDO} tar -xzf ${CACHE_FILES}/aomp_${AOMP_VERSION_NUMBER}.tgz
-      ${SUDO} chown -R root:root /opt/rocmplus-${ROCM_VERSION}/aomp_${AOMP_VERSION_NUMBER}
+      ${SUDO} tar -xpzf ${CACHE_FILES}/aomp_${AOMP_VERSION_NUMBER}.tgz
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm ${CACHE_FILES}/aomp_${AOMP_VERSION_NUMBER}.tgz
       fi

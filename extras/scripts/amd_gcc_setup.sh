@@ -56,8 +56,7 @@ if [ "${BUILD_GCC_LATEST}" = "1" ] ; then
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      ${SUDO} tar -xzf ${CACHE_FILES}/${GCC_VERSION}.tgz
-      ${SUDO} chown -R root:root /opt/rocmplus-${ROCM_VERSION}/${GCC_VERSION}
+      ${SUDO} tar -xpzf ${CACHE_FILES}/${GCC_VERSION}.tgz
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm ${CACHE_FILES}/${GCC_VERSION}.tgz
       fi

@@ -250,7 +250,7 @@ tau_tests.timestamp: tau.timestamp HPCTrainingExamples
 	touch tau_tests.timestamp
 
 omniperf_tests.timestamp: omniperf.timestamp HPCTrainingExamples
-	cd HPCTrainingExamples/tests/build && ctest -R Omniperf
+	cd HPCTrainingExamples/tests/build && ctest -R Omniperf_AMD_Research
 	touch omniperf_tests.timestamp
 
 omnitrace_tests.timestamp: omnitrace.timestamp HPCTrainingExamples

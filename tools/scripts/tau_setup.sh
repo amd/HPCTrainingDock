@@ -94,7 +94,7 @@ if [ "${BUILD_TAU}" = "0" ]; then
 else
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   if [ -f ${CACHE_FILES}/tau.tgz ]; then
+   if [ -f ${CACHE_FILES}/tau.tgz ] && [ -f ${CACHE_FILES}/tau.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached TAU"
@@ -103,12 +103,10 @@ else
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf ${CACHE_FILES}/tau.tgz
-      if [ "${USER}" != "root" ]; then
-         chown -R root:root /opt/rocmplus-${ROCM_VERSION}/tau
-      fi
+      tar -xpzf ${CACHE_FILES}/pdt.tgz
+      tar -xpzf ${CACHE_FILES}/tau.tgz
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm ${CACHE_FILES}/tau.tgz
+         ${SUDO} rm ${CACHE_FILES}/pdt.tgz ${CACHE_FILES}/tau.tgz
       fi
 
    else

@@ -116,66 +116,13 @@ version-set()
 rocm-repo-dist-set()
 {
    if [ "${DISTRO}" = "ubuntu" ]; then
-       ubuntu-set
+       DISTRO_CODENAME=`cat /etc/os-release | grep '^VERSION_CODENAME' | sed -e 's/VERSION_CODENAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+       ROCM_REPO_DIST=${DISTRO_CODENAME}
    elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
        rhel-set
    elif [ "${DISTRO}" = "opensuse" ]; then
        opensuse-set
    fi
-}
-
-ubuntu-set()
-{
-   ROCM_REPO_DIST="ubuntu"
-   case "${ROCM_VERSION}" in
-       4.1* | 4.0*)
-          ROCM_REPO_DIST="xenial"
-           ;;
-       5.3* | 5.4* | 5.5* | 5.6* | 5.7*)
-           case "${DISTRO_VERSION}" in
-               22.04)
-                   ROCM_REPO_DIST="jammy"
-                   ;;
-               20.04)
-                   ROCM_REPO_DIST="focal"
-                   ;;
-               18.04)
-                   ROCM_REPO_DIST="bionic"
-                   ;;
-               *)
-                   ;;
-           esac
-           ;;
-       6.0* | 6.1*)
-           case "${DISTRO_VERSION}" in
-               22.04)
-                   ROCM_REPO_DIST="jammy"
-                   ;;
-               20.04)
-                   ROCM_REPO_DIST="focal"
-                   ;;
-               *)
-                   ;;
-           esac
-           ;;
-       6.2*)
-           case "${DISTRO_VERSION}" in
-               24.04)
-                   ROCM_REPO_DIST="noble"
-                   ;;
-               22.04)
-                   ROCM_REPO_DIST="jammy"
-                   ;;
-               20.04)
-                   ROCM_REPO_DIST="focal"
-                   ;;
-               *)
-                   ;;
-           esac
-           ;;
-       *)
-           ;;
-   esac
 }
 
 rhel-set()
@@ -210,9 +157,6 @@ rhel-set()
    # use Rocky Linux as a base image for RHEL builds
    DISTRO_BASE_IMAGE=rockylinux
 
-   #verbose-build docker build . ${PULL} -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_BASE_IMAGE} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PYTHON_VERSION=${PYTHON_VERSION}
-
-#  ROCM_DOCKER_OPTS="${ROCM_DOCKER_OPTS} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_BASE_IMAGE} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM}"
 }
 
 opensuse-set()
@@ -252,9 +196,6 @@ opensuse-set()
        ;;
    esac
    PERL_REPO="SLE_${VERSION_MAJOR}_SP${VERSION_MINOR}"
-   #verbose-build docker build . ${PULL} -f rocm/${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PERL_REPO=${PERL_REPO} --build-arg PYTHON_VERSION=${PYTHON_VERSION}
-
-#  ROCM_DOCKER_OPTS="${ROCM_DOCKER_OPTS} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg DISTRO_VERSION=${DISTRO_VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PERL_REPO=${PERL_REPO}"
 }
 
 if [[ "${RHEL_COMPATIBLE}" == 1 ]]; then

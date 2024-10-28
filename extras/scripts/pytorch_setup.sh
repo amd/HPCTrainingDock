@@ -55,7 +55,7 @@ if [ "${BUILD_PYTORCH}" = "0" ]; then
 else
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   if [ -f ${CACHE_FILES}/pytorch.tgz ]; then
+   if [ -f ${CACHE_FILES}/pytorch.tgz ] && [ -f ${CACHE_FILES}/audio.tgz ] && [ -f ${CACHE_FILES}/vision.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached Pytorch"
@@ -65,9 +65,10 @@ else
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
       tar -xzf ${CACHE_FILES}/pytorch.tgz
-      chown -R root:root /opt/rocmplus-${ROCM_VERSION}/pytorch
+      tar -xzf ${CACHE_FILES}/audio.tgz
+      tar -xzf ${CACHE_FILES}/vision.tgz
       if [ "${USER}" != "sysadmin" ]; then
-         rm ${CACHE_FILES}/pytorch.tgz
+         rm ${CACHE_FILES}/pytorch.tgz ${CACHE_FILES}/audio.tgz ${CACHE_FILES}/vision.tgz
       fi
    else
       echo ""

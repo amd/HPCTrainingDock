@@ -85,26 +85,36 @@ if [ -d "$INSTALL_DIR" ]; then
    fi
 fi
 
+set -v
 if [ "$AMD_STAGING" = 1 ]; then
    git clone -b amd-staging https://github.com/ROCm/omniperf.git
    cd omniperf
 else
-   wget -q https://github.com/AMDResearch/omniperf/releases/download/v2.0.0-RC1/omniperf-2.0.0-RC1.tar.gz && \
-     ${SUDO} tar xfz omniperf-2.0.0-RC1.tar.gz && \
-     cd ./omniperf-2.0.0-RC1
+   wget -q https://github.com/AMDResearch/omniperf/releases/download/v2.0.0-RC1/omniperf-2.0.0-RC1.tar.gz
+   tar xfz omniperf-2.0.0-RC1.tar.gz
+   cd ./omniperf-2.0.0-RC1
 fi
 
-${SUDO} sed -i '152i \                                            .astype(str)' src/utils/tty.py \
-     && ${SUDO} python3 -m pip install -t ${INSTALL_DIR}/python-libs -r requirements.txt --upgrade \
-     && ${SUDO} python3 -m pip install -t ${INSTALL_DIR}/python-libs pytest --upgrade \
-     && ${SUDO} mkdir build \
-     && cd build  \
-     &&  ${SUDO} cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}/ \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DPYTHON_DEPS=${INSTALL_DIR}/python-libs \
-        -DMOD_INSTALL_PATH=${INSTALL_DIR}/modulefiles .. \
-     && ${SUDO} make install
-cd ../.. && ${SUDO} rm -rf omniperf-2.0.0-RC1 omniperf-2.0.0-RC1.tar.gz omniperf
+${SUDO} mkdir -p ${INSTALL_DIR}
+if [[ "${USER}" != "root" ]]; then
+   ${SUDO} chmod a+w ${INSTALL_DIR}
+fi
+
+sed -i '152i \                                            .astype(str)' src/utils/tty.py
+python3 -m pip install -t ${INSTALL_DIR}/python-libs -r requirements.txt --upgrade
+python3 -m pip install -t ${INSTALL_DIR}/python-libs pytest --upgrade
+mkdir build && cd build
+cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}/ \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DPYTHON_DEPS=${INSTALL_DIR}/python-libs \
+      -DMOD_INSTALL_PATH=${INSTALL_DIR}/modulefiles ..
+${SUDO} make install
+cd ../..
+rm -rf omniperf-2.0.0-RC1 omniperf-2.0.0-RC1.tar.gz omniperf
+
+if [[ "${USER}" != "root" ]]; then
+   ${SUDO} chmod go-w ${INSTALL_DIR}
+fi
 
 ${SUDO} sed -i -e 's/ascii/utf-8/' /opt/rocmplus-*/omniperf-*/bin/utils/specs.py
 
@@ -124,13 +134,13 @@ fi
 
 ${SUDO} mkdir -p ${MODULE_PATH}
 
-# The - option suppresses tabs
 if [ "$AMD_STAGING" = 1 ]; then
    MODULE_VERSION=2.0.0-dev.lua
 else
    MODULE_VERSION=2.0.0.lua
 fi
 
+# The - option suppresses tabs
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${MODULE_VERSION}
 	local help_message = [[
 
