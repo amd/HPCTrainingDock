@@ -130,6 +130,7 @@ else
 
            setenv("PYTHONPREFIX",root)
            prepend_path("PATH",pathJoin(root,"bin"))
+           prepend_path("PATH",pathJoin(root,"condabin"))
 
            local myShell = myShellName()
            if (mode() == "load") then

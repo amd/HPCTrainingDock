@@ -116,7 +116,8 @@ else
            setenv("MINIFORGE3_ROOT", root) 
            setenv("CONDA_ENVS_PATH", pathJoin(root, "envs")) 
            setenv("MAMBA_ROOT_PREFIX", root) 
-           prepend_path("PATH", pathJoin(root, "bin"))
+           prepend_path("PATH",pathJoin(root,"bin"))
+           prepend_path("PATH",pathJoin(root,"condabin"))
 
            local myShell = myShellName()
            if (mode() == "load") then
@@ -132,8 +133,8 @@ else
            end
 
            if (mode() == "unload") then
-              remove_path("PATH", pathJoin(root, "bin"))
-              remove_path("PATH", pathJoin(root, "condabin"))
+              remove_path("PATH",pathJoin(root,"bin"))
+              remove_path("PATH",pathJoin(root,"condabin"))
 
               if (myShell == "bash") then
                  cmd2 = "unset CONDA_EXE; unset _CE_CONDA; unset _CE_M; " ..
