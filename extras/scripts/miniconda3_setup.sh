@@ -118,6 +118,7 @@ else
 
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/24.9.2.lua
+           conflict("miniforge3")
            local root = "${MINICONDA3_PATH}"
            local python_version = capture(root .. "/bin/python -V | awk '{print $2}'")
            local conda_version = capture(root .. "/bin/conda --version | awk '{print $2}'")

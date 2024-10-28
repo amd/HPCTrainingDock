@@ -109,9 +109,7 @@ else
 
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/24.9.0.lua
-	   help([[ Loads the Miniforge environment supporting Community-Collections. ]])
-	   whatis("Sets the environment to use the Community-Collections Miniforge.")
-
+           conflict("miniconda3")
            local root = "${MINIFORGE3_PATH}"
            setenv("MINIFORGE3_ROOT", root) 
            setenv("CONDA_ENVS_PATH", pathJoin(root, "envs")) 
