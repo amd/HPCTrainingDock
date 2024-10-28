@@ -157,6 +157,14 @@ else
       #${SUDO} ./configure --prefix=${HDF5_PATH}/libaec
       #${SUDO} make install
 
+      # default build is parallel hdf5
+      ENABLE_PARALLEL="OFF"
+      module load openmpi
+      if [[ `which mpicc | wc -l` -eq 1 ]]; then
+	 # if no mpi is found in the path, fall back to serial hdf5
+         ENABLE_PARALLEL="ON"
+      fi
+
       cd ..
       mkdir build && cd build
 
@@ -166,7 +174,8 @@ else
                                         -DZLIB_ROOT=${HDF5_PATH}/zlib \
                                         -DCMAKE_CXX_COMPILER=${CXX_COMPILER} \
                                         -DCMAKE_C_COMPILER=${C_COMPILER} \
-                                        -DCMAKE_FC_COMPILER=${FC_COMPILER} ..
+                                        -DCMAKE_FC_COMPILER=${FC_COMPILER} \
+					-DHDF5_ENABLE_PARALLEL:BOOL=${ENABLE_PARALLEL} ..
 
       ${SUDO} cmake --build . --config Release
 

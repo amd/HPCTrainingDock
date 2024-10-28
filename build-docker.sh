@@ -121,7 +121,7 @@ usage()
     print_default_option build-pytorch -- "flag to build version 2.4  of PyTorch" "not included"
     print_default_option build-miniconda3 -- "flag to build version 24.9.2 of Miniconda3" "not included"
     print_default_option build-miniforge3 -- "flag to build version 24.9.0 of Miniforge3" "not included"
-    print_default_option build-hdf5 -- "flag to build version 1.3.1 of HDF5" "not included"
+    print_default_option build-hdf5 -- "flag to build version 1.14.5 of HDF5" "not included"
     print_default_option build-cupy -- "flag to build version 13.0.0b1 of CuPy" "not included"
     print_default_option build-jax -- "flag to build version 0.4.32 of JAX" "not included"
     print_default_option build-kokkos -- "flag to build version 4.4.0 of Kokkos" "not included"
