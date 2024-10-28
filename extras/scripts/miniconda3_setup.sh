@@ -156,8 +156,6 @@ else
               execute{cmd=cmd2, modeA={"unload"}}
            end
 
-           load("rocm/${ROCM_VERSION}")
-
 EOF
 
 fi
