@@ -102,8 +102,8 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "0" ] ; then
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      ${SUDO} tar -xzf ${CACHE_FILES}/omnitrace.tgz
-      ${SUDO} chown -R root:root /opt/rocmplus-${ROCM_VERSION}/omnitrace
+      ${SUDO} tar -pxzf ${CACHE_FILES}/omnitrace.tgz
+      #${SUDO} chown -R root:root /opt/rocmplus-${ROCM_VERSION}/omnitrace
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm ${CACHE_FILES}/omnitrace.tgz
       fi
@@ -125,13 +125,13 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "1" ] ; then
    module load rocm/${ROCM_VERSION} openmpi
 
    CPU_TYPE=zen3
-   if [ "${AMDGFX_GFXMODE}L" = "gfx1030" ]; then
+   if [ "${AMDGFX_GFXMODEL}" = "gfx1030" ]; then
       CPU_TYPE=zen2
    fi
-   if [ "${AMDGFX_GFXMODE}L" = "gfx90a" ]; then
+   if [ "${AMDGFX_GFXMODEL}" = "gfx90a" ]; then
       CPU_TYPE=zen3
    fi
-   if [ "${AMDGFX_GFXMODE}L" = "gfx942" ]; then
+   if [ "${AMDGFX_GFXMODEL}" = "gfx942" ]; then
       CPU_TYPE=zen4
    fi
 
@@ -159,7 +159,7 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "1" ] ; then
           -D DYNINST_BUILD_BOOST=ON               \
           -D DYNINST_BUILD_ELFUTILS=ON            \
           -D DYNINST_BUILD_LIBIBERTY=ON           \
-          -D AMDGPU_TARGETS="${AMDGPU_GFXMODE}L"  \
+          -D AMDGPU_TARGETS="${AMDGPU_GFXMODEL}"  \
           -D CpuArch_TARGET=${CPU_TYPE} \
           -D OMNITRACE_DEFAULT_ROCM_PATH=/opt/rocm-${ROCM_VERSION} \
           -D OMNITRACE_USE_COMPILE_TIMING=ON \
