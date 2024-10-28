@@ -23,6 +23,7 @@
 : ${BUILD_MINICONDA3:="0"}
 : ${BUILD_MINIFORGE3:="0"}
 : ${BUILD_HPCTOOLKIT:="0"}
+: ${BUILD_HDF5:="0"}
 : ${BUILD_X11VNC:="0"}
 : ${BUILD_FLANGNEW:="0"}
 : ${BUILD_ALL_LATEST:="0"}
@@ -118,6 +119,9 @@ usage()
     print_default_option build-og-latest -- "flag to build the latest version of gcc develop with offloading" "not included"
     print_default_option build-clacc-latest -- "flag to build the latest version of clacc with offloading" "not included"
     print_default_option build-pytorch -- "flag to build version 2.4  of PyTorch" "not included"
+    print_default_option build-miniconda3 -- "flag to build version 24.9.2 of Miniconda3" "not included"
+    print_default_option build-miniforge3 -- "flag to build version 24.9.0 of Miniforge3" "not included"
+    print_default_option build-hdf5 -- "flag to build version 1.3.1 of HDF5" "not included"
     print_default_option build-cupy -- "flag to build version 13.0.0b1 of CuPy" "not included"
     print_default_option build-jax -- "flag to build version 0.4.32 of JAX" "not included"
     print_default_option build-kokkos -- "flag to build version 4.4.0 of Kokkos" "not included"
@@ -258,6 +262,10 @@ do
             BUILD_MINIFORGE3="1"
             reset-last
             ;;
+        "--build-hdf5")
+            BUILD_HDF5="1"
+            reset-last
+            ;;
         "--build-tau")
             BUILD_TAU="1"
             reset-last
@@ -295,6 +303,7 @@ do
             BUILD_PYTORCH="1"
             BUILD_CUPY="1"
             BUILD_JAX="1"
+            BUILD_HDF5="1"
 	    BUILD_KOKKOS="1"
 	    BUILD_MINICONDA3="1"
 	    BUILD_MINIFORGE3="1"
@@ -347,6 +356,10 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
          "omniperf_research")
 	    echo "Setting omniperf research build"
             BUILD_OMNIPERF_RESEARCH=1
+	    ;;
+         "hdf5")
+	    echo "Setting hdf5 build"
+            BUILD_HDF5=1
 	    ;;
          "scorep")
 	    echo "Setting scorep build"
@@ -426,6 +439,7 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             BUILD_TAU="1"
             BUILD_SCOREP="1"
             BUILD_MPI4PY="1"
+            BUILD_HDF5="1"
             BUILD_HPCTOOLKIT="1"
             BUILD_X11VNC="1"
             BUILD_FLANGNEW="1"
@@ -458,6 +472,8 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
 	    echo " # optional python virtual environments"
 	    echo "   miniconda3"
 	    echo "   miniforge3"
+	    echo " # optional data model"
+	    echo "   hdf5"
 	    echo " # optional graphics interfaces"
             echo "   x11vnc"
 	    echo " # All latest recommended"
@@ -538,6 +554,7 @@ do
        --build-arg BUILD_KOKKOS=${BUILD_KOKKOS} \
        --build-arg BUILD_MINICONDA3=${BUILD_MINICONDA3} \
        --build-arg BUILD_MINIFORGE3=${BUILD_MINIFORGE3} \
+       --build-arg BUILD_HDF5=${BUILD_HDF5} \
        --build-arg BUILD_X11VNC=${BUILD_X11VNC} \
        --build-arg BUILD_FLANGNEW=${BUILD_FLANGNEW} \
        --build-arg BUILD_DATE=$(date +'%Y-%m-%dT%H:%M:%SZ') \

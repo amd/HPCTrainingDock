@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
-all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3
-.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3
+all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5
+.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
@@ -14,6 +14,7 @@ aomp: aomp.timestamp
 kokkos: kokkos.timestamp
 miniconda3: miniconda3.timestamp
 miniforge3: miniforge3.timestamp
+hdf5: hdf5.timestamp
 tau: tau.timestamp
 scorep: scorep.timestamp
 mpi4py: mpi4py.timestamp
@@ -160,6 +161,12 @@ miniforge3.timestamp:
 	   --build-miniforge3 ${BUILD_MINIFORGE3}
 	touch miniforge3.timestamp
 
+hdf5.timestamp:
+	extras/scripts/hdf5_setup.sh \
+           --rocm-version ${ROCM_VERSION} \
+           --build-hdf5 ${BUILD_HDF5}
+	touch hdf5.timestamp
+
 kokkos.timestamp: rocm.timestamp
 	extras/scripts/kokkos_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
@@ -273,6 +280,18 @@ cupy_tests.timestamp: cupy.timestamp HPCTrainingExamples
 kokkos_tests.timestamp: kokkos.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Kokkos
 	touch kokkos_tests.timestamp
+
+miniconda3_tests.timestamp: miniconda3.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R Miniconda3
+	touch miniconda3_tests.timestamp
+
+miniforge3_tests.timestamp: miniforge3.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R Miniforge3
+	touch miniforge3_tests.timestamp
+
+hdf5_tests.timestamp: hdf5.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R HDF5
+	touch hdf5_tests.timestamp
 
 pytorch_tests.timestamp: pytorch.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Pytorch

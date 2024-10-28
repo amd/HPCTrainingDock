@@ -52,10 +52,10 @@ usage()
 {
     echo "Usage:"
     echo "  --build-xpmem [ BUILD_XPMEM ] default 1-yes"
-    echo "  --c-compiler [ CC ] default gcc"
-    echo "  --cxx-compiler [ CXX ] default g++"
+    echo "  --c-compiler [ CC ] default $C_COMPILER"
+    echo "  --cxx-compiler [ CXX ] default $CXX_COMPILER"
     echo "  --dry-run default off"
-    echo "  --fc-compiler [ FC ] default gfortran"
+    echo "  --fc-compiler [ FC ] default $FC_COMPILER"
     echo "  --install-path [ INSTALL_PATH ] default /opt/rocmplus-<ROCM_VERSION>/openmpi (ucx, and ucc)"
     echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/openmpi"
     echo "  --openmpi-path [OPENMPI_PATH] default $INSTALL_PATH/openmpi-$OPENMPI_VERSION-ucc-$UCC_VERSION-ucx-$UCX_VERSION-xpmem-$XPMEM_VERSION"

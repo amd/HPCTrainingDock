@@ -29,6 +29,7 @@ ARG BUILD_CUPY
 ARG BUILD_KOKKOS
 ARG BUILD_MINIFORGE3
 ARG BUILD_MINICONDA3
+ARG BUILD_HDF5
 ARG BUILD_JAX
 ARG BUILD_X11VNC
 ARG BUILD_FLANGNEW
@@ -134,6 +135,14 @@ WORKDIR /tmp
 COPY extras/scripts/kokkos_setup.sh /tmp/kokkos_setup.sh
 
 RUN /tmp/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-kokkos ${BUILD_KOKKOS} && rm /tmp/kokkos_setup.sh
+
+#
+# Install hdf5
+#
+COPY extras/scripts/hdf5_setup.sh /tmp/hdf5_setup.sh
+
+RUN /tmp/hdf5_setup.sh --rocm-version ${ROCM_VERSION} --build-hdf5 ${BUILD_HDF5} && rm /tmp/hdf5_setup.sh
+
 
 #
 # Moved into scripts that need these
