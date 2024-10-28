@@ -143,7 +143,7 @@ else
 
            if (myShell == "bash") then
               if (mode() == "unload") then
-              remove_path("PATH", pathJoin(myana,"condabin"))
+              remove_path("PATH", pathJoin(root,"condabin"))
               end
               cmd1 = "unset CONDA_EXE; unset _CE_CONDA; unset _CE_M; " ..
                     "unset -f __conda_activate; unset -f __conda_reactivate; " ..
