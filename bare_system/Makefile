@@ -40,6 +40,9 @@ tau_tests: tau_tests.timestamp
 scorep_tests: scorep_tests.timestamp
 aomp_tests: aomp_tests.timestamp
 kokkos_tests: kokkos_tests.timestamp
+miniconda3_tests: miniconda3_tests.timestamp
+miniforge3_tests: miniforge3_tests.timestamp
+hdf5_tests: hdf5_tests.timestamp
 mpi4py_tests: mpi4py_tests.timestamp
 hpctoolkit_tests: hpctoolkit_tests.timestamp
 cupy_tests: cupy_tests.timestamp
