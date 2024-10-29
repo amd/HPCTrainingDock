@@ -185,7 +185,7 @@ else
 
       ${SUDO} ./HDF5-${HDF5_VERSION}-Linux.sh --prefix=${HDF5_PATH} --skip-license
 
-      cd ..
+      cd ../..
       ${SUDO} rm -rf hdf5
 
    fi
