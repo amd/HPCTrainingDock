@@ -131,6 +131,15 @@ else
       echo "============================"
       echo ""
 
+      if [[ `which python | wc -l` -eq 0 ]]; then
+         echo "============================"
+	 echo "WARNING: python needs to be linked to python3 for the build to work"
+	 echo ".....Installing python-is-python3......"
+         echo "============================"
+	 ${SUDO} apt-get update
+         ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
+      fi
+
       export JAX_PLATFORMS="rocm,cpu"
 
       git clone https://github.com/ROCm/xla.git
@@ -144,17 +153,10 @@ else
       
       # install necessary packages in installation directory
       ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/jaxlib
+      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/jax
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod a+w /opt/rocmplus-${ROCM_VERSION}/jaxlib
-      fi
-
-      if [[ `which python | wc -l` -eq 0 ]]; then
-         echo "============================"
-	 echo "WARNING: python needs to be linked to python3 for the build to work"
-	 echo ".....Installing python-is-python3......"
-         echo "============================"
-	 ${SUDO} apt-get update
-         ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
+         ${SUDO} chmod a+w /opt/rocmplus-${ROCM_VERSION}/jax
       fi
 
       # build the wheel for jaxlib
@@ -170,7 +172,12 @@ else
       pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/jaxlib dist/jax*.whl
 
       # next we need to install the jax python module
-      sudo pip3 install --target=/opt/rocmplus-${ROCM_VERSION}/jax .
+      pip3 install --target=/opt/rocmplus-${ROCM_VERSION}/jax .
+
+      # cleanup
+      cd ..
+      rm -rf /tmp/jax
+      rm -rf /tmp/xla
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/jaxlib -type f -execdir chown root:root "{}" +
@@ -179,10 +186,6 @@ else
          ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}/jaxlib
       fi
 
-      # cleanup
-      cd ..
-      ${SUDO} rm -rf /tmp/jax
-      ${SUDO} rm -rf /tmp/xla
       module unload rocm/${ROCM_VERSION}
    fi
       

@@ -123,7 +123,6 @@ else
       TAU_PATH=/opt/rocmplus-${ROCM_VERSION}/tau
       PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
       export TAU_LIB_DIR=${TAU_PATH}/x86_64/lib
-      echo 'Defaults:%sudo env_keep += "TAU_LIB_DIR"' | ${SUDO} EDITOR='tee -a' visudo
       ${SUDO} mkdir -p ${TAU_PATH}
       ${SUDO} mkdir -p ${PDT_PATH}
 
@@ -136,11 +135,12 @@ else
       spack external find
 
       # change spack install dir for PDT
-      ${SUDO} sed -i 's|$spack/opt/spack|/opt/rocmplus-'"${ROCM_VERSION}"'/pdt|g' spack/etc/spack/defaults/config.yaml
+      sed -i 's|$spack/opt/spack|/opt/rocmplus-'"${ROCM_VERSION}"'/pdt|g' spack/etc/spack/defaults/config.yaml
 
       # open permissions to use spack to install PDT
       if [[ "${USER}" != "root" ]]; then
 	 ${SUDO} chmod -R a+rwX /opt/rocmplus-${ROCM_VERSION}/pdt
+	 ${SUDO} chmod -R a+rwX /opt/rocmplus-${ROCM_VERSION}/tau
       fi
 
       # install PDT with spack
@@ -157,7 +157,7 @@ else
       # install third pary dependencies
       wget http://tau.uoregon.edu/ext.tgz
 
-      ${SUDO} tar zxf ext.tgz
+      tar zxf ext.tgz
 
       # install OpenMPI if not in the system already
       if [[ `which mpicc | wc -l` -eq 0 ]]; then
@@ -170,42 +170,42 @@ else
       ${SUDO} apt install -q -y default-jre
 
       # configure with: MPI OMPT OPENMP PDT ROCM
-      ${SUDO} ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -mpi -ompt -openmp -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -pdt=${PDT_PATH} -iowrapper
+      ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -mpi -ompt -openmp -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -pdt=${PDT_PATH} -iowrapper
 
       ${SUDO} make install
 
       # configure with: MPI PDT ROCM
-      ${SUDO} ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -mpi -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -pdt=${PDT_PATH} -iowrapper
+      ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -mpi -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -pdt=${PDT_PATH} -iowrapper
 
       ${SUDO} make install
 
       # configure with: OMPT OPENMP PDT ROCM
-      ${SUDO} ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -ompt -openmp -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -pdt=${PDT_PATH} -iowrapper
+      ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -ompt -openmp -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -pdt=${PDT_PATH} -iowrapper
 
       ${SUDO} make install
 
       # configure with: PDT ROCM
-      ${SUDO} ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -pdt=${PDT_PATH} -iowrapper
+      ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -pdt=${PDT_PATH} -iowrapper
 
       ${SUDO} make install
 
       # configure with: ROCM
-      ${SUDO} ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -iowrapper
+      ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -iowrapper
 
       ${SUDO} make install
 
       # configure with: OMPT OPENMP ROCM
-      ${SUDO} ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -ompt -openmp -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -iowrapper
+      ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -ompt -openmp -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -iowrapper
 
       ${SUDO} make install
 
       # configure with: MPI ROCM
-      ${SUDO} ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -mpi -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -iowrapper
+      ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -mpi -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -iowrapper
 
       ${SUDO} make install
 
       # configure with: MPI OMPT OPENMP ROCM
-      ${SUDO} ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -mpi -ompt -openmp -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH}  -iowrapper
+      ./configure -c++=g++ -fortran=gfortran -cc=gcc -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  -rocm=${ROCM_PATH} -rocprofiler=${ROCM_PATH} -hip=${ROCM_PATH} -mpi -ompt -openmp -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH}  -iowrapper
 
       ${SUDO} make install
 
@@ -215,14 +215,18 @@ else
       ${SUDO} rm ${TAU_PATH}/x86_64/lib/wrappers/pthread_wrapper/link_options.tau
 
       cd ..
-      ${SUDO} rm -rf tau2
-      ${SUDO} rm -rf spack
+      rm -rf tau2
+      rm -rf spack
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/pdt -type f -execdir chown root:root "{}" +
+         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/pdt -type d -execdir chown root:root "{}" +
+         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/tau -type f -execdir chown root:root "{}" +
+         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/tau -type d -execdir chown root:root "{}" +
       fi
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}/pdt
+         ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}/tau
       fi
 
       module unload rocm/${ROCM_VERSION}
@@ -242,4 +246,3 @@ else
 EOF
 
 fi
-
