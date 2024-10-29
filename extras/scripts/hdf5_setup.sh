@@ -22,6 +22,7 @@ usage()
    echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/misc/kokkos"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --hdf5-version [ HDF5_VERSION ] default $HDF5_VERSIONS"
+   echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --c-compiler [ CC ] default ${C_COMPILER}"
    echo "  --cxx-compiler [ CXX ] default ${CXX_COMPILER}"
    echo "  --fc-compiler [ FC ] default ${FC_COMPILER}"
@@ -175,7 +176,8 @@ else
                                         -DCMAKE_CXX_COMPILER=${CXX_COMPILER} \
                                         -DCMAKE_C_COMPILER=${C_COMPILER} \
                                         -DCMAKE_FC_COMPILER=${FC_COMPILER} \
-					-DHDF5_ENABLE_PARALLEL:BOOL=${ENABLE_PARALLEL} ..
+					-DHDF5_ENABLE_PARALLEL:BOOL=${ENABLE_PARALLEL} \
+					-DHDF5_BUILD_FORTRAN:BOOL=ON ..
 
       ${SUDO} cmake --build . --config Release
 
