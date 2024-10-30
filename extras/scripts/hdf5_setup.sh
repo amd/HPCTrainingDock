@@ -9,6 +9,8 @@ C_COMPILER=gcc
 CXX_COMPILER=g++
 FC_COMPILER=gfortran
 HDF5_VERSION=1.14.5
+MPI_MODULE="openmpi"
+HDF5_PATH=/opt/rocmplus-${ROCM_VERSION}/hdf5
 
 SUDO="sudo"
 
@@ -23,9 +25,11 @@ usage()
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --hdf5-version [ HDF5_VERSION ] default $HDF5_VERSIONS"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
-   echo "  --c-compiler [ CC ] default ${C_COMPILER}"
-   echo "  --cxx-compiler [ CXX ] default ${CXX_COMPILER}"
-   echo "  --fc-compiler [ FC ] default ${FC_COMPILER}"
+   echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
+   echo "  --install-path [ HDF5_PATH ] degault $HDF5_PATH"
+   echo "  --c-compiler [ C_COMPILER ] default ${C_COMPILER}"
+   echo "  --cxx-compiler [ CXX_COMPILER ] default ${CXX_COMPILER}"
+   echo "  --fc-compiler [ FC_COMPILER ] default ${FC_COMPILER}"
    echo "  --build-hdf5 [ BUILD_HDF5 ], set to 1 to build HDF5, default is 0"
    echo "  --help: this usage information"
    exit 1
@@ -58,6 +62,16 @@ do
       "--module-path")
           shift
           MODULE_PATH=${1}
+          reset-last
+          ;;
+      "--install-path")
+          shift
+          HDF5_PATH=${1}
+          reset-last
+          ;;
+      "--mpi-module")
+          shift
+          MPI_MODULE=${1}
           reset-last
           ;;
       "--c-compiler")
@@ -134,7 +148,6 @@ else
       source /etc/profile.d/lmod.sh
       source /etc/profile.d/z01_lmod.sh
 
-      HDF5_PATH=/opt/rocmplus-${ROCM_VERSION}/hdf5
       ${SUDO} mkdir -p ${HDF5_PATH}
 
       git clone --branch hdf5_${HDF5_VERSION} https://github.com/HDFGroup/hdf5.git
@@ -160,7 +173,7 @@ else
 
       # default build is parallel hdf5
       ENABLE_PARALLEL="OFF"
-      module load openmpi
+      module load ${MPI_MODULE}
       if [[ `which mpicc | wc -l` -eq 1 ]]; then
 	 # if no mpi is found in the path, fall back to serial hdf5
          ENABLE_PARALLEL="ON"
@@ -175,9 +188,11 @@ else
                                         -DZLIB_ROOT=${HDF5_PATH}/zlib \
                                         -DCMAKE_CXX_COMPILER=${CXX_COMPILER} \
                                         -DCMAKE_C_COMPILER=${C_COMPILER} \
-                                        -DCMAKE_FC_COMPILER=${FC_COMPILER} \
+					-DCMAKE_Fortran_COMPILER=${FC_COMPILER} \
+					-DBUILD_TESTING:BOOL=OFF \
 					-DHDF5_ENABLE_PARALLEL:BOOL=${ENABLE_PARALLEL} \
 					-DHDF5_BUILD_FORTRAN:BOOL=ON ..
+
 
       ${SUDO} cmake --build . --config Release
 
@@ -202,6 +217,7 @@ else
         prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
         prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
         prepend_path("PATH", pathJoin(base, "bin"))
+        prepend_path("PATH", base)
 EOF
 
 fi
