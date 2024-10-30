@@ -64,8 +64,8 @@ RUN apt-get update && \
 #
 # some  networking tools, including the OpenSSH server 
 #
-RUN apt-get install -y  net-tools iproute2 openssh-server iputils-ping && \
-    systemctl enable ssh && service ssh start
+COPY extras/scripts/sshd_setup.sh /tmp/sshd_setup.sh
+RUN  /tmp/sshd_setup.sh && rm /tmp/sshd_setup.sh
 
 EXPOSE 22
 

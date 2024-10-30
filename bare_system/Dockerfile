@@ -39,9 +39,8 @@ RUN cat /tmp/bash.bashrc >> /etc/bash.bashrc && rm -f /tmp/bash.bashrc
 
 SHELL ["/bin/bash", "-c"]
 
-RUN apt-get update && \
-    apt-get install -y  net-tools iproute2 openssh-server iputils-ping && \
-    systemctl enable ssh
+COPY extras/scripts/sshd_setup.sh /tmp/sshd_setup.sh
+RUN  /tmp/sshd_setup.sh && rm /tmp/sshd_setup.sh
 
 EXPOSE 22
 
