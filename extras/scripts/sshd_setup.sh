@@ -26,6 +26,6 @@ if [ "${DISTRO}" = "ubuntu" ]; then
 elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    yum update -y
    yum install -y net-tools iproute openssh-server iputils
-   systemctl enable ssh
+   #systemctl enable ssh
 #elif [ "${DISTRO}" = "opensuse leap" ]; then
 fi
