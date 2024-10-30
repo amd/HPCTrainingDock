@@ -5,16 +5,9 @@
 USE_CACHE_BUILD=1
 REPLACE=0
 
-# Variables controlling setup process
-
 # Autodetect defaults
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-#if [ "${DISTRO}" == "rocky linux" ]; then
-#   ROCM_REPO_DIST=${DISTRO_VERSION}
-#else
-#   ROCM_REPO_DIST=`lsb_release -c | cut -f2`
-#fi
 DISTRO_CODENAME=`cat /etc/os-release | grep '^VERSION_CODENAME' | sed -e 's/VERSION_CODENAME=//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 RHEL_COMPATIBLE=0
