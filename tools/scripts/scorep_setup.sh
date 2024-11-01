@@ -7,6 +7,7 @@ BUILD_SCOREP=0
 ROCM_VERSION=6.0
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
+MPI_MODULE="openmpi"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
@@ -22,6 +23,7 @@ usage()
    echo "Usage:"
    echo "  --build-scorep: set to 1 to build Score-P, default is 0"
    echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/misc/scorep"
+   echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
    echo "  --help: this usage information"
@@ -60,6 +62,11 @@ do
       "--module-path")
           shift
           MODULE_PATH=${1}
+          reset-last
+          ;;
+     "--mpi-module")
+          shift
+          MPI_MODULE=${1}
           reset-last
           ;;
       "--rocm-version")
@@ -153,6 +160,7 @@ else
       export PATH=$PDT_PATH/bin:$PATH
 
       # install OpenMPI if not in the system already
+      module load ${MPI_MODULE}
       if [[ `which mpicc | wc -l` -eq 0 ]]; then
          ${SUDO} apt-get update
          ${SUDO} ${DEB_FRONTEND} apt-get install -q -y libopenmpi-dev  
@@ -161,7 +169,7 @@ else
       wget https://go.fzj.de/scorep-ompt-device-tracing
       mv scorep-ompt-device-tracing scorep-ompt-device-tracing.tar.gz
       tar -xvf scorep-ompt-device-tracing.tar.gz
-      cd sources.37b6f127
+      cd sources.00289e4c
       mkdir build
       cd build
       export OMPI_CC=$ROCM_PATH/llvm/bin/clang
@@ -175,7 +183,7 @@ else
       ${SUDO} make install
 
       cd ${CUR_DIR}
-      rm -rf scorep-ompt* sources.37b6f127
+      rm -rf scorep-ompt* sources.00289e4c
       rm -rf spack
 
       if [[ "${USER}" != "root" ]]; then
