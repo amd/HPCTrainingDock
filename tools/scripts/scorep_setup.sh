@@ -194,6 +194,7 @@ else
       fi
 
       module unload rocm/${ROCM_VERSION}
+      module unload ${MPI_MODULE}
 
    fi   
 
