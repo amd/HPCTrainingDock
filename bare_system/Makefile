@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
-all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5
-.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5
+all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort
+.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
@@ -15,6 +15,7 @@ kokkos: kokkos.timestamp
 miniconda3: miniconda3.timestamp
 miniforge3: miniforge3.timestamp
 hdf5: hdf5.timestamp
+hipfort: hipfort.timestamp
 tau: tau.timestamp
 scorep: scorep.timestamp
 mpi4py: mpi4py.timestamp
@@ -43,6 +44,7 @@ kokkos_tests: kokkos_tests.timestamp
 miniconda3_tests: miniconda3_tests.timestamp
 miniforge3_tests: miniforge3_tests.timestamp
 hdf5_tests: hdf5_tests.timestamp
+hipfort_tests: hipfort_tests.timestamp
 mpi4py_tests: mpi4py_tests.timestamp
 hpctoolkit_tests: hpctoolkit_tests.timestamp
 cupy_tests: cupy_tests.timestamp
@@ -170,6 +172,12 @@ hdf5.timestamp:
            --build-hdf5 ${BUILD_HDF5}
 	touch hdf5.timestamp
 
+hipfort.timestamp:
+	extras/scripts/hipfort_setup.sh \
+           --rocm-version ${ROCM_VERSION} \
+           --build-hipfort ${BUILD_HIPFORT}
+	touch hipfort.timestamp
+
 kokkos.timestamp: rocm.timestamp
 	extras/scripts/kokkos_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
@@ -295,6 +303,10 @@ miniforge3_tests.timestamp: miniforge3.timestamp HPCTrainingExamples
 hdf5_tests.timestamp: hdf5.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R HDF5
 	touch hdf5_tests.timestamp
+
+hipfort_tests.timestamp: hipfort.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R HIPFort
+	touch hipfort_tests.timestamp
 
 pytorch_tests.timestamp: pytorch.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Pytorch

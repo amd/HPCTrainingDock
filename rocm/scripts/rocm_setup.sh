@@ -302,7 +302,7 @@ if [ "${DISTRO}" == "ubuntu" ]; then
 # if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
 # if ROCM_VERSION is less than or equal to 6.1.2, the awk command result will be blank
       result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
-      if [[ "${result}" ]]; then
+      if [[ "${result}" ]]; then # ROCM_VERSION >= 6.2
          result=`echo $DISTRO_VERSION | awk '$1>24.00'` && echo $result
          if [[ "${result}" ]]; then
             # rocm-asan not available in Ubuntu 24.04
@@ -313,13 +313,13 @@ if [ "${DISTRO}" == "ubuntu" ]; then
             amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk --no-dkms
             #${SUDO} apt-get install rocm_bandwidth_test
 	 fi
-      else
+      else # ROCM_VERSION < 6.2
          amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms
       fi
 
       if [[ ! -f /opt/rocm-${ROCM_VERSION}/.info/version-dev ]]; then
          # Required by DeepSpeed
-	 #   Exists in Ubuntu 24.04 and not 22.04
+	 # Exists in Ubuntu 24.04 and not 22.04
          ${SUDO} ln -s /opt/rocm-${ROCM_VERSION}/.info/version /opt/rocm-${ROCM_VERSION}/.info/version-dev
       fi
 

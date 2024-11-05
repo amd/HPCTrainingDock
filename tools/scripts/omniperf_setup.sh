@@ -87,10 +87,10 @@ fi
 
 set -v
 if [ "$AMD_STAGING" = 1 ]; then
-   git clone -b amd-staging https://github.com/ROCm/omniperf.git
+   git clone -b amd-staging https://github.com/ROCm/rocprofiler-compute
    cd omniperf
 else
-   wget -q https://github.com/AMDResearch/omniperf/releases/download/v2.0.0-RC1/omniperf-2.0.0-RC1.tar.gz
+   wget -q wget https://github.com/ROCm/rocprofiler-compute/releases/download/v2.0.0-RC1/omniperf-2.0.0-RC1.tar.gz
    tar xfz omniperf-2.0.0-RC1.tar.gz
    cd ./omniperf-2.0.0-RC1
 fi

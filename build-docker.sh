@@ -26,6 +26,7 @@
 : ${BUILD_HDF5:="0"}
 : ${BUILD_X11VNC:="0"}
 : ${BUILD_FLANGNEW:="0"}
+: ${BUILD_HIPFORT:="0"}
 : ${BUILD_ALL_LATEST:="0"}
 : ${RETRY:=3}
 : ${NO_CACHE:=""}
@@ -122,6 +123,7 @@ usage()
     print_default_option build-miniconda3 -- "flag to build version 24.9.2 of Miniconda3" "not included"
     print_default_option build-miniforge3 -- "flag to build version 24.9.0 of Miniforge3" "not included"
     print_default_option build-hdf5 -- "flag to build version 1.14.5 of HDF5" "not included"
+    print_default_option build-hipfort -- "flag to build version 0.4-0 of Hipfort" "not included"
     print_default_option build-cupy -- "flag to build version 13.0.0b1 of CuPy" "not included"
     print_default_option build-jax -- "flag to build version 0.4.32 of JAX" "not included"
     print_default_option build-kokkos -- "flag to build version 4.4.0 of Kokkos" "not included"
@@ -290,6 +292,10 @@ do
             BUILD_FLANGNEW="1"
             reset-last
             ;;
+        "--build-hipfort")
+            BUILD_HIPFORT="1"
+            reset-last
+            ;;
         "--install-grafana")
             INSTALL_GRAFANA="1"
             reset-last
@@ -313,6 +319,7 @@ do
 	    BUILD_HPCTOOLKIT="1"
 	    BUILD_X11VNC="1"
 	    BUILD_FLANGNEW="1"
+	    BUILD_HIPFORT="1"
             reset-last
             ;;
         "--use-cached-apps")
@@ -382,6 +389,10 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
 	    echo "Setting FLANGNEW build"
             BUILD_FLANGNEW=1
 	    ;;
+         "hipfort")
+	    echo "Setting HIPFORT build"
+            BUILD_HIPFORT=1
+	    ;;
          "gcc_latest")
 	    echo "Setting GCC_LATEST build"
             BUILD_GCC_LATEST=1
@@ -443,6 +454,7 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             BUILD_HPCTOOLKIT="1"
             BUILD_X11VNC="1"
             BUILD_FLANGNEW="1"
+            BUILD_HIPFORT="1"
             BUILD_X11VNC=1
 	    ;;
          *)
@@ -557,6 +569,7 @@ do
        --build-arg BUILD_HDF5=${BUILD_HDF5} \
        --build-arg BUILD_X11VNC=${BUILD_X11VNC} \
        --build-arg BUILD_FLANGNEW=${BUILD_FLANGNEW} \
+       --build-arg BUILD_HIPFORT=${BUILD_HIPFORT} \
        --build-arg BUILD_DATE=$(date +'%Y-%m-%dT%H:%M:%SZ') \
        --build-arg OG_BUILD_DATE=$(date -u +'%y-%m-%d') \
        --build-arg BUILD_VERSION=1.1 \

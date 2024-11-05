@@ -7,6 +7,8 @@
 : ${BUILD_JAX:="1"}
 : ${BUILD_SCOREP:="1"}
 : ${BUILD_KOKKOS:="1"}
+: ${BUILD_HIPFORT:="1"}
+: ${BUILD_HDF5:="1"}
 : ${BUILD_MINICONDA3:="1"}
 : ${BUILD_MINIFORGE3:="1"}
 : ${BUILD_HPCTOOLKIT:="1"}
@@ -161,6 +163,10 @@ extras/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --build-minico
 extras/scripts/miniforge3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniforge3 ${BUILD_MINIFORGE3}
 
 extras/scripts/x11vnc_setup.sh --build-x11vnc ${BUILD_X11VNC}
+
+extras/scripts/hipfort_setup.sh --build-x11vnc ${BUILD_HIPFORT}
+
+extras/scripts/hdf5_setup.sh --build-x11vnc ${BUILD_HDF5}
 
 #If ROCm should be installed in a different location
 if [ "${ROCM_INSTALLPATH}" != "/opt/" ]; then

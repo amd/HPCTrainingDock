@@ -9,6 +9,8 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 SUDO="sudo"
+ROCM_VERSION=6.0
+OMNITRACE_REPO="https://github.com/ROCm/omnitrace"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
@@ -141,7 +143,12 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "1" ] ; then
       ${SUDO} apt-get install -y gettext autopoint
    fi
 
-   git clone --depth 1 https://github.com/AMDResearch/omnitrace.git omnitrace-source --recurse-submodules && \
+   result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
+   if [[ "${result}" ]]; then # ROCM_VERSION >= 6.2
+      OMNITRACE_REPO="https://github.com/ROCm/rocprofiler-systems"
+   fi
+
+   git clone --depth 1 ${OMNITRACE_REPO} omnitrace-source --recurse-submodules && \
        cmake                                         \
           -B omnitrace-build                      \
           -D CMAKE_INSTALL_PREFIX=/opt/rocmplus-${ROCM_VERSION}/omnitrace  \
