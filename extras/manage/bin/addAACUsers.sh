@@ -189,7 +189,7 @@ do
          GROUP_ID_EXIST=`getent group $gid_homedir | cut -d: -f3 | wc -l`
          #echo "GROUP_ID_EXIST is $GROUP_ID_EXIST"
          if [[ "${GROUP_ID_EXIST}" != "1" ]]; then
-            GROUP_NAME_HOMEDIR=group${group_homedir}
+            GROUP_NAME_HOMEDIR=${group_homedir}
             echo "Adding missing group for home directory ${GROUP_NAME_HOMEDIR}"
             if (( "${VERBOSE}" > 0 )); then
                echo "  sudo groupadd -f -g $group_homedir ${GROUP_NAME_HOMEDIR}"
