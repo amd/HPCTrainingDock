@@ -127,15 +127,15 @@ else
       git clone --branch enable-flang-new https://github.com/bcornille/hipfort.git
       cd hipfort
 
-      ${SUDO} mkdir build
+      mkdir build
       cd build
 
-      ${SUDO} cmake -DHIPFORT_INSTALL_DIR=${HIPFORT_PATH} ${HIPFORT_COMPILER_FLAGS} ..
+      cmake -DHIPFORT_INSTALL_DIR=${HIPFORT_PATH} ${HIPFORT_COMPILER_FLAGS} ..
 
       ${SUDO} make install
 
       cd ../..
-      ${SUDO} rm -rf hipfort
+      rm -rf hipfort
 
       module unload rocm/${ROCM_VERSION}
       if [ "${USE_FLANGNEW}" = "1" ]; then
