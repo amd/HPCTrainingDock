@@ -40,7 +40,8 @@ fi
 # First see what user ids and group ids are used by files in 
 # the Home directory tree and set the max to 
 echo "Starting scan for last used uid and gid in our range (12050, 12000) respectively"
-sudo find ${HOMEDIR_BASE} -maxdepth 2 -print0 | while read -r -d '' file; do
+while read -r -d '' file
+do
    uid=`sudo stat -c %u $file`
    if [[ ! -z "$uid" ]]; then
       if (( $uid > ${HACKATHONLASTUSER} )); then
@@ -53,8 +54,12 @@ sudo find ${HOMEDIR_BASE} -maxdepth 2 -print0 | while read -r -d '' file; do
          HACKATHONLASTGROUP=$gid
       fi
    fi
-   #echo "User id is $uuid Group id is $gid for file $file"
-done
+   #echo "User id is $uid Group id is $gid for file $file"
+done < <(sudo find ${HOMEDIR_BASE} -maxdepth 2 -print0)
+echo ""
+echo "After home directory scan last User id is $HACKATHONLASTUSER Group id is $HACKATHONLASTGROUP"
+echo ""
+
 echo "Starting scan of /etc/group and /etc/passwd for used gids and uids"
 while IFS='' read -r line; do
    gid=`echo $line | cut -d':' -f 3`
@@ -189,7 +194,7 @@ do
          GROUP_ID_EXIST=`getent group $gid_homedir | cut -d: -f3 | wc -l`
          #echo "GROUP_ID_EXIST is $GROUP_ID_EXIST"
          if [[ "${GROUP_ID_EXIST}" != "1" ]]; then
-            GROUP_NAME_HOMEDIR=group${group_homedir}
+            GROUP_NAME_HOMEDIR=${group_homedir}
             echo "Adding missing group for home directory ${GROUP_NAME_HOMEDIR}"
             if (( "${VERBOSE}" > 0 )); then
                echo "  sudo groupadd -f -g $group_homedir ${GROUP_NAME_HOMEDIR}"
