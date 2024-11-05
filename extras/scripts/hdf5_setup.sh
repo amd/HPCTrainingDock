@@ -183,7 +183,6 @@ else
       mkdir build && cd build
 
       ${SUDO} cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE:STRING=Release \
-                                        -DBUILD_SHARED_LIBS:BOOL=OFF \
   	 			        -DHDF5_BUILD_TOOLS:BOOL=ON -DCMAKE_INSTALL_PREFIX=${HDF5_PATH} \
                                         -DZLIB_ROOT=${HDF5_PATH}/zlib \
                                         -DCMAKE_CXX_COMPILER=${CXX_COMPILER} \
