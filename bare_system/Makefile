@@ -172,7 +172,7 @@ hdf5.timestamp:
            --build-hdf5 ${BUILD_HDF5}
 	touch hdf5.timestamp
 
-hipfort.timestamp:
+hipfort.timestamp: rocm.timestamp
 	extras/scripts/hipfort_setup.sh \
            --rocm-version ${ROCM_VERSION} \
            --build-hipfort ${BUILD_HIPFORT}
