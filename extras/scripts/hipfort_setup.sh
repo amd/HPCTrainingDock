@@ -76,9 +76,9 @@ done
 
 echo ""
 echo "==================================="
-echo "Starting Kokkos Install with"
+echo "Starting Hipfort Install with"
 echo "ROCM_VERSION: $ROCM_VERSION"
-echo "BUILD_KOKKOS: $BUILD_KOKKOS"
+echo "BUILD_HIPFORT: $BUILD_HIPFORT"
 echo "USE_FLANGNEW: $USE_FLANGNEW"
 echo "==================================="
 echo ""
@@ -114,12 +114,6 @@ else
       source /etc/profile.d/z01_lmod.sh
       module load rocm/${ROCM_VERSION}
 
-      HIPFORT_COMPILER_FLAGS=""
-      if [ "${USE_FLANGNEW}" = "1" ]; then
-         module load amdflang-new-beta-drop
-	 HIPFORT_COMPILER_FLAGS="-DHIPFORT_COMPILER_FLAGS='-ffree-form -cpp'"
-      fi
-
       HIPFORT_PATH=/opt/rocmplus-${ROCM_VERSION}/hipfort
       ${SUDO} mkdir -p ${HIPFORT_PATH}
 
@@ -130,7 +124,12 @@ else
       mkdir build
       cd build
 
-      cmake -DHIPFORT_INSTALL_DIR=${HIPFORT_PATH} ${HIPFORT_COMPILER_FLAGS} ..
+      if [ "${USE_FLANGNEW}" = "1" ]; then
+         module load amdflang-new-beta-drop
+         cmake -DHIPFORT_INSTALL_DIR=${HIPFORT_PATH} -DHIPFORT_COMPILER_FLAGS="-ffree-form -cpp" ..
+      else
+         cmake -DHIPFORT_INSTALL_DIR=${HIPFORT_PATH} ..
+      fi
 
       ${SUDO} make install
 

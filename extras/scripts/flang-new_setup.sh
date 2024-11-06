@@ -7,7 +7,7 @@ BUILD_FLANGNEW=0
 ROCM_VERSION=6.0
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-ARCHIVE_NAME="rocm-afar-5891"
+ARCHIVE_NAME="rocm-afar-5891-0.5"
 
 SUDO="sudo"
 
@@ -82,13 +82,17 @@ do
    shift
 done
 
+AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
+CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
+
 echo ""
-echo "==================================="
+echo "========================================="
 echo "Starting flang-new Install with"
 echo "ROCM_VERSION: $ROCM_VERSION"
 echo "BUILD_FLANGNEW: $BUILD_FLANGNEW"
 echo "Searching for archive: $ARCHIVE_NAME.tgz"
-echo "==================================="
+echo "In directory: $CACHE_FILES"
+echo "========================================="
 echo ""
 
 if [ "${BUILD_FLANGNEW}" = "0" ]; then
@@ -96,16 +100,18 @@ if [ "${BUILD_FLANGNEW}" = "0" ]; then
       echo "BUILD_FLANGNEW: $BUILD_FLANGNEW"
       exit 
 else  
-      AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
-      CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
       if [ -f ${CACHE_FILES}/${ARCHIVE_NAME}* ]; then
          echo ""
-         echo "============================="
-         echo " Installing Cached flang-new "
-         echo "============================="
+         echo "================================================"
+         echo " Archive $ARCHIVE_NAME.tgz found in $CACHE_FILES"
+         echo "         Installing Cached flang-new            "
+         echo "================================================"
          echo ""
 	
          #install the cached version
+	 if [ ! -d "/opt/rocmplus-${ROCM_VERSION}" ]; then
+	    ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}
+         fi
          cd /opt/rocmplus-${ROCM_VERSION}
      
          ${SUDO} tar -xvjf ${CACHE_FILES}/${ARCHIVE_NAME}.tgz
