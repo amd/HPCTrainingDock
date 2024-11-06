@@ -134,7 +134,7 @@ else
       ${SUDO} make install
 
       cd ../..
-      rm -rf hipfort
+      ${SUDO} rm -rf hipfort
 
       module unload rocm/${ROCM_VERSION}
       if [ "${USE_FLANGNEW}" = "1" ]; then
