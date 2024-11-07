@@ -11,6 +11,7 @@ FC_COMPILER=gfortran
 HDF5_VERSION=1.14.5
 MPI_MODULE="openmpi"
 HDF5_PATH=/opt/rocmplus-${ROCM_VERSION}/hdf5
+HDF5_PATH_INPUT=""
 
 SUDO="sudo"
 
@@ -66,7 +67,7 @@ do
           ;;
       "--install-path")
           shift
-          HDF5_PATH=${1}
+          HDF5_PATH_INPUT=${1}
           reset-last
           ;;
       "--mpi-module")
@@ -110,18 +111,26 @@ do
    shift
 done
 
+if [ "${HDF5_PATH_INPUT}" != "" ]; then
+   HDF5_PATH=${HDF5_PATH_INPUT}
+else
+   # overwrite path in case ROCM_VERSION has been supplied as input
+   HDF5_PATH=/opt/rocmplus-${ROCM_VERSION}/hdf5
+fi
+
 echo ""
-echo "==================================="
-echo "Starting HDF5 Install with"
-echo "ROCM_VERSION: $ROCM_VERSION"
-echo "BUILD_HDF5: $BUILD_HDF5"
-echo "==================================="
+echo ""
+echo "============================"
+echo "     ------ HDF5 ------"
+echo "============================"
+echo ""
 echo ""
 
 if [ "${BUILD_HDF5}" = "0" ]; then
 
    echo "HDF5 will not be built, according to the specified value of BUILD_HDF5"
    echo "BUILD_HDF5: $BUILD_HDF5"
+   echo "Make sure to set '--build-hdf5 1' when running this install script"
    exit 
 
 else
@@ -140,9 +149,13 @@ else
 
    else
       echo ""
-      echo "============================"
-      echo " Building HDF5"
-      echo "============================"
+      echo "==============================="
+      echo " Installing HDF5"
+      echo " Install directory: $HDF5_PATH"
+      echo " Module directory: $MODULE_PATH"
+      echo " HDF5 Version: $HDF5_VERSION"
+      echo " ROCm Version: $ROCM_VERSION"
+      echo "==============================="
       echo ""
 
       source /etc/profile.d/lmod.sh
