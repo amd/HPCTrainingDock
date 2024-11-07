@@ -6,8 +6,12 @@ MODULE_PATH=/etc/lmod/modules/misc/hdf5
 BUILD_HDF5=0
 ROCM_VERSION=6.0
 C_COMPILER=gcc
+C_COMPILER_INPUT=""
 CXX_COMPILER=g++
+CXX_COMPILER_INPUT=""
 FC_COMPILER=gfortran
+FC_COMPILER_INPUT=""
+ENABLE_PARALLEL_INPUT=""
 HDF5_VERSION=1.14.5
 MPI_MODULE="openmpi"
 HDF5_PATH=/opt/rocmplus-${ROCM_VERSION}/hdf5
@@ -27,6 +31,7 @@ usage()
    echo "  --hdf5-version [ HDF5_VERSION ] default $HDF5_VERSIONS"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
+   echo "  --enable-parallel [ ENABLE_PARALLEL ], set to 1 to enable, enabled by default if MPI is installed"
    echo "  --install-path [ HDF5_PATH ] degault $HDF5_PATH"
    echo "  --c-compiler [ C_COMPILER ] default ${C_COMPILER}"
    echo "  --cxx-compiler [ CXX_COMPILER ] default ${CXX_COMPILER}"
@@ -75,6 +80,11 @@ do
           MPI_MODULE=${1}
           reset-last
           ;;
+      "--enable-parallel")
+          shift
+          ENABLE_PARALLEL_INPUT=${1}
+          reset-last
+          ;;
       "--c-compiler")
           shift
           C_COMPILER=${1}
@@ -114,7 +124,7 @@ done
 if [ "${HDF5_PATH_INPUT}" != "" ]; then
    HDF5_PATH=${HDF5_PATH_INPUT}
 else
-   # overwrite path in case ROCM_VERSION has been supplied as input
+   # override path in case ROCM_VERSION has been supplied as input
    HDF5_PATH=/opt/rocmplus-${ROCM_VERSION}/hdf5
 fi
 
@@ -190,6 +200,23 @@ else
       if [[ `which mpicc | wc -l` -eq 1 ]]; then
 	 # if no mpi is found in the path, fall back to serial hdf5
          ENABLE_PARALLEL="ON"
+	 C_COMPILER=`which mpicc`
+	 CXX_COMPILER=`which mpicxx`
+	 FC_COMPILER=`which mpifort`
+      fi
+
+      # override flags with user defined values if present
+      if [ "${ENABLE_PARALLEL_INPUT}" != "" ]; then
+         ENABLE_PARALLEL=${ENABLE_PARALLEL_INPUT}
+      fi
+      if [ "${C_COMPILER_INPUT}" != "" ]; then
+         C_COMPILER=${C_COMPILER_INPUT}
+      fi
+      if [ "${CXX_COMPILER_INPUT}" != "" ]; then
+         CXX_COMPILER=${CXX_COMPILER_INPUT}
+      fi
+      if [ "${FC_COMPILER_INPUT}" != "" ]; then
+         FC_COMPILER=${FC_COMPILER_INPUT}
       fi
 
       cd ..
