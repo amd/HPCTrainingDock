@@ -7,7 +7,8 @@ BUILD_FLANGNEW=0
 ROCM_VERSION=6.0
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-ARCHIVE_NAME="rocm-afar-5891-ubuntu"
+ARCHIVE_NAME="rocm-afar-5891-drop-4.0.5"
+ARCHIVE_DIR="rocm-afar-5891-0.5"
 
 SUDO="sudo"
 
@@ -100,10 +101,10 @@ if [ "${BUILD_FLANGNEW}" = "0" ]; then
       echo "BUILD_FLANGNEW: $BUILD_FLANGNEW"
       exit 
 else  
-      if [ -f ${CACHE_FILES}/${ARCHIVE_NAME}* ]; then
+      if [ -f ${CACHE_FILES}/${ARCHIVE_NAME}-${DISTRO}* ]; then
          echo ""
          echo "================================================"
-         echo " Archive $ARCHIVE_NAME.tgz found in $CACHE_FILES"
+         echo " Archive $ARCHIVE_NAME-${DISTRO} found in $CACHE_FILES"
          echo "         Installing Cached flang-new            "
          echo "================================================"
          echo ""
@@ -114,12 +115,12 @@ else
          fi
          cd /opt/rocmplus-${ROCM_VERSION}
      
-         ${SUDO} tar -xvjf ${CACHE_FILES}/${ARCHIVE_NAME}.tar.bz2
+         ${SUDO} tar -xvjf ${CACHE_FILES}/${ARCHIVE_NAME}-${DISTRO}.tar.bz2
  
-         ${SUDO} chown -R root:root /opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_NAME}
+         ${SUDO} chown -R root:root /opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_DIR}
 
          if [ "${USER}" != "sysadmin" ]; then
-            ${SUDO} rm ${CACHE_FILES}/${ARCHIVE_NAME}.tar.bz2
+            ${SUDO} rm ${CACHE_FILES}/${ARCHIVE_NAME}-${DISTRO}.tar.bz2
          fi
 
          # Create a module file for flang-new
@@ -130,18 +131,18 @@ else
 		local help_message = [[
 		   PRE-PRODUCTION SOFTWARE:  The software accessible on this page may be a pre-production version, intended to provide advance access to features that may or may not eventually be included into production version of the software.  Accordingly, pre-production software may not be fully functional, may contain errors, and may have reduced or different security, privacy, accessibility, availability, and reliability standards relative to production versions of the software. Use of pre-production software may result in unexpected results, loss of data, project delays or other unpredictable damage or loss.  Pre-production software is not intended for use in production, and your use of pre-production software is at your own risk.
 		]]
-		prepend_path("PATH","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_NAME}/bin")
-		setenv("CC","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_NAME}/bin/amdclang")
-		setenv("CXX","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_NAME}/bin/amdclang++")
-		setenv("FC","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_NAME}/bin/amdflang-new")
-		setenv("F77","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_NAME}/bin/amdflang-new")
+		prepend_path("PATH","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_DIR}/bin")
+		setenv("CC","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_DIR}/bin/amdclang")
+		setenv("CXX","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_DIR}/bin/amdclang++")
+		setenv("FC","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_DIR}/bin/amdflang-new")
+		setenv("F77","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_DIR}/bin/amdflang-new")
 		setenv("F90","/opt/rocmplus-${ROCM_VERSION}/${ARCHVE_NAME}/bin/amdflang-new")
-		prepend_path("PATH","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_NAME}/bin")
-		prepend_path("LD_LIBRARY_PATH","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_NAME}/libexec")
-		prepend_path("LD_LIBRARY_PATH","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_NAME}/lib")
-		prepend_path("MANPATH","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_NAME}/share/man")
-		prepend_path("C_INCLUDE_PATH","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_NAME}/include")
-		prepend_path("CPLUS_INCLUDE_PATH","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_NAME}/include")
+		prepend_path("PATH","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_DIR}/bin")
+		prepend_path("LD_LIBRARY_PATH","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_DIR}/libexec")
+		prepend_path("LD_LIBRARY_PATH","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_DIR}/lib")
+		prepend_path("MANPATH","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_DIR}/share/man")
+		prepend_path("C_INCLUDE_PATH","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_DIR}/include")
+		prepend_path("CPLUS_INCLUDE_PATH","/opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_DIR}/include")
 		load("rocm/${ROCM_VERSION}")
 		family("compiler")
 EOF
