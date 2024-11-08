@@ -7,7 +7,7 @@ BUILD_FLANGNEW=0
 ROCM_VERSION=6.0
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-ARCHIVE_NAME="rocm-afar-5891"
+ARCHIVE_NAME="rocm-afar-5891-ubuntu"
 
 SUDO="sudo"
 
@@ -114,12 +114,12 @@ else
          fi
          cd /opt/rocmplus-${ROCM_VERSION}
      
-         ${SUDO} tar -xvzf ${CACHE_FILES}/${ARCHIVE_NAME}.tgz
+         ${SUDO} tar -xvjf ${CACHE_FILES}/${ARCHIVE_NAME}.tar.bz2
  
          ${SUDO} chown -R root:root /opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_NAME}
 
          if [ "${USER}" != "sysadmin" ]; then
-            ${SUDO} rm ${CACHE_FILES}/${ARCHIVE_NAME}.tgz
+            ${SUDO} rm ${CACHE_FILES}/${ARCHIVE_NAME}.tar.bz2
          fi
 
          # Create a module file for flang-new
