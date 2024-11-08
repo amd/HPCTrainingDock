@@ -23,6 +23,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    apt-get update
    apt-get install -y  net-tools iproute2 openssh-server iputils-ping
    systemctl enable ssh
+   service ssh start
 elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    yum update -y
    yum install -y net-tools iproute openssh-server iputils
