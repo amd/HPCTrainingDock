@@ -93,7 +93,7 @@ mvapich.timestamp: rocm.timestamp
 	   --rocm-version ${ROCM_VERSION}
 	touch mvapich.timestamp
 
-mpi4py.timestamp: rocm.timestamp
+mpi4py.timestamp: openmpi.timestamp rocm.timestamp
 	comm/scripts/mpi4py_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-mpi4py ${BUILD_MPI4PY}

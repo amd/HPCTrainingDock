@@ -113,9 +113,9 @@ else
       echo ""
 
       #install the cached version
+      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/jax
       cd /opt/rocmplus-${ROCM_VERSION}
 
-      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/jax
       ${SUDO} tar -xzpf ${CACHE_FILES}/jax.tgz
 
       ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/jaxlib
