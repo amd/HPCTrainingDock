@@ -146,11 +146,6 @@ else
       #cd hpctoolkit-2024.01.1
       cd hpctoolkit
       git checkout fda401c1f6f4a219f7c07f0606fa1e479f2f341e
-      # xerces-c download tar not updated upstream
-      sed -i -e 's/3.2.5/3.3.0/g' subprojects/xerces-c.wrap
-      OLD_SOURCE_HASH="source_hash = 545cfcce6c4e755207bd1f27e319241e50e37c0c27250f11cda116018f1ef0f5"
-      NEW_SOURCE_HASH="source_hash = 9555f1d06f82987fbb4658862705515740414fd34b4db6ad2ed76a2dc08d3bde"
-      sed -i -e 's/'"${OLD_SOURCE_HASH}"'/'"${NEW_SOURCE_HASH}"'/g' subprojects/xerces-c.wrap
       export CMAKE_PREFIX_PATH=$ROCM_PATH:$CMAKE_PREFIX_PATH
       meson setup -Drocm=enabled --prefix=${HPCTOOLKIT_PATH} --libdir=${HPCTOOLKIT_PATH}/lib build
       cd  build

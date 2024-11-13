@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
-all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort
-.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort
+all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf
+.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
@@ -15,6 +15,7 @@ kokkos: kokkos.timestamp
 miniconda3: miniconda3.timestamp
 miniforge3: miniforge3.timestamp
 hdf5: hdf5.timestamp
+netcdf: netcdf.timestamp
 hipfort: hipfort.timestamp
 tau: tau.timestamp
 scorep: scorep.timestamp
@@ -44,6 +45,7 @@ kokkos_tests: kokkos_tests.timestamp
 miniconda3_tests: miniconda3_tests.timestamp
 miniforge3_tests: miniforge3_tests.timestamp
 hdf5_tests: hdf5_tests.timestamp
+netcdf_tests: netcdf_tests.timestamp
 hipfort_tests: hipfort_tests.timestamp
 mpi4py_tests: mpi4py_tests.timestamp
 hpctoolkit_tests: hpctoolkit_tests.timestamp
@@ -171,6 +173,12 @@ hdf5.timestamp:
            --rocm-version ${ROCM_VERSION} \
            --build-hdf5 ${BUILD_HDF5}
 	touch hdf5.timestamp
+
+netcdf.timestamp: hdf5.timestamp
+	extras/scripts/netcdf_setup.sh \
+           --rocm-version ${ROCM_VERSION} \
+           --build-netcdf ${BUILD_NETCDF}
+	touch netcdf.timestamp
 
 hipfort.timestamp: rocm.timestamp
 	extras/scripts/hipfort_setup.sh \
@@ -303,6 +311,10 @@ miniforge3_tests.timestamp: miniforge3.timestamp HPCTrainingExamples
 hdf5_tests.timestamp: hdf5.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R HDF5
 	touch hdf5_tests.timestamp
+
+netcdf_tests.timestamp: netcdf.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R Netcdf
+	touch netcdf_tests.timestamp
 
 hipfort_tests.timestamp: hipfort.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R HIPFort

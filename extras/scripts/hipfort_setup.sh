@@ -117,8 +117,7 @@ else
       HIPFORT_PATH=/opt/rocmplus-${ROCM_VERSION}/hipfort
       ${SUDO} mkdir -p ${HIPFORT_PATH}
 
-      # clone from main as soon as this PR is merged: https://github.com/ROCm/hipfort/pull/198
-      git clone --branch enable-flang-new https://github.com/bcornille/hipfort.git
+      git clone --branch develop https://github.com/ROCm/hipfort.git
       cd hipfort
 
       mkdir build
@@ -130,6 +129,9 @@ else
       else
          cmake -DHIPFORT_INSTALL_DIR=${HIPFORT_PATH} ..
       fi
+
+      # if compiler is cray ftn
+#      cmake -DHIPFORT_INSTALL_DIR=$HIPFORT_PATH -DHIPFORT_BUILD_TYPE=RELEASE -DHIPFORT_COMPILER=$(which ftn) -DHIPFORT_COMPILER_FLAGS="-ffree -eT" -DHIPFORT_AR=$(which ar) -DHIPFORT_RANLIB=$(which ranlib) ..
 
       ${SUDO} make install
 
@@ -147,7 +149,7 @@ else
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/0.4-0.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/0.4-0-dev.lua
 	whatis(" hipfc: Wrapper to call Fortran compiler with hipfort. Also calls hipcc for non Fortran files. ")
 	load("rocm/${ROCM_VERSION}")
 	prepend_path("PATH","${HIPFORT_PATH}/bin")

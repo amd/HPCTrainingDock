@@ -5,11 +5,11 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 MODULE_PATH=/etc/lmod/modules/misc/hdf5
 BUILD_HDF5=0
 ROCM_VERSION=6.0
-C_COMPILER=gcc
+C_COMPILER=`which gcc`
 C_COMPILER_INPUT=""
-CXX_COMPILER=g++
+CXX_COMPILER=`which g++`
 CXX_COMPILER_INPUT=""
-FC_COMPILER=gfortran
+FC_COMPILER=`which gfortran`
 FC_COMPILER_INPUT=""
 ENABLE_PARALLEL_INPUT=""
 HDF5_VERSION=1.14.5
@@ -26,13 +26,12 @@ fi
 usage()
 {
    echo "Usage:"
-   echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/misc/kokkos"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "  --hdf5-version [ HDF5_VERSION ] default $HDF5_VERSIONS"
+   echo "  --hdf5-version [ HDF5_VERSION ] default $HDF5_VERSION"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
    echo "  --enable-parallel [ ENABLE_PARALLEL ], set to 1 to enable, enabled by default if MPI is installed"
-   echo "  --install-path [ HDF5_PATH ] degault $HDF5_PATH"
+   echo "  --install-path [ HDF5_PATH ] default $HDF5_PATH"
    echo "  --c-compiler [ C_COMPILER ] default ${C_COMPILER}"
    echo "  --cxx-compiler [ CXX_COMPILER ] default ${CXX_COMPILER}"
    echo "  --fc-compiler [ FC_COMPILER ] default ${FC_COMPILER}"
@@ -171,7 +170,16 @@ else
       source /etc/profile.d/lmod.sh
       source /etc/profile.d/z01_lmod.sh
 
+      # don't use sudo if user has write access to install path
+      if [ -w ${HDF5_PATH} ]; then
+         SUDO=""
+      fi
+
       ${SUDO} mkdir -p ${HDF5_PATH}
+      ${SUDO} mkdir -p ${HDF5_PATH}/zlib
+      if [[ "${USER}" != "root" ]]; then
+         ${SUDO} chmod -R a+w ${HDF5_PATH}
+      fi
 
       git clone --branch hdf5_${HDF5_VERSION} https://github.com/HDFGroup/hdf5.git
       cd hdf5
@@ -181,10 +189,9 @@ else
       # get ZLIB
       wget https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
       tar zxf zlib-1.3.1.tar.gz
-      ${SUDO} mkdir -p ${HDF5_PATH}/zlib
       cd zlib-1.3.1
-      ${SUDO} ./configure --prefix=${HDF5_PATH}/zlib
-      ${SUDO} make install
+      ./configure --prefix=${HDF5_PATH}/zlib
+      make install
 
       # get LIBAEC -- support for szip library is currently broken: https://github.com/HDFGroup/hdf5/issues/4614
       #wget https://github.com/MathisRosenhauer/libaec/releases/download/v1.1.3/libaec-1.1.3.tar.gz
@@ -222,29 +229,39 @@ else
       cd ..
       mkdir build && cd build
 
-      ${SUDO} cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE:STRING=Release \
-  	 			        -DHDF5_BUILD_TOOLS:BOOL=ON -DCMAKE_INSTALL_PREFIX=${HDF5_PATH} \
-                                        -DZLIB_ROOT=${HDF5_PATH}/zlib \
-                                        -DCMAKE_CXX_COMPILER=${CXX_COMPILER} \
-                                        -DCMAKE_C_COMPILER=${C_COMPILER} \
-					-DCMAKE_Fortran_COMPILER=${FC_COMPILER} \
-					-DBUILD_TESTING:BOOL=OFF \
-					-DHDF5_ENABLE_PARALLEL:BOOL=${ENABLE_PARALLEL} \
-					-DHDF5_BUILD_FORTRAN:BOOL=ON ..
+      cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE:STRING=Release \
+  			        -DHDF5_BUILD_TOOLS:BOOL=ON -DCMAKE_INSTALL_PREFIX=${HDF5_PATH} \
+                                -DZLIB_ROOT=${HDF5_PATH}/zlib \
+                                -DCMAKE_CXX_COMPILER=${CXX_COMPILER} \
+                                -DCMAKE_C_COMPILER=${C_COMPILER} \
+				-DCMAKE_Fortran_COMPILER=${FC_COMPILER} \
+				-DBUILD_TESTING:BOOL=OFF \
+				-DHDF5_ENABLE_PARALLEL:BOOL=${ENABLE_PARALLEL} \
+				-DHDF5_BUILD_FORTRAN:BOOL=ON ..
 
 
-      ${SUDO} cmake --build . --config Release
+      cmake --build . --config Release
 
-      ${SUDO} cpack -C Release CPackConfig.cmake
+      cpack -C Release CPackConfig.cmake
 
-      ${SUDO} ./HDF5-${HDF5_VERSION}-Linux.sh --prefix=${HDF5_PATH} --skip-license
+      ./HDF5-${HDF5_VERSION}-Linux.sh --prefix=${HDF5_PATH} --skip-license
 
       cd ../..
-      ${SUDO} rm -rf hdf5
+      rm -rf hdf5
+
+      if [[ "${USER}" != "root" ]]; then
+         ${SUDO} find ${HDF5_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${HDF5_PATH} -type d -execdir chown root:root "{}" +
+
+         ${SUDO} chmod go-w ${HDF5_PATH}
+      fi
 
    fi
 
    # Create a module file for hdf5
+   if [ ! -w ${MODULE_PATH} ]; then
+      SUDO="sudo"
+   fi
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
@@ -255,6 +272,10 @@ else
         prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
         prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
         prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+        setenv("HDF5_PATH", base)
+        setenv("HDF5_C_COMPILER", "${C_COMPILER}")
+        setenv("HDF5_FC_COMPILER", "${FC_COMPILER}")
+        setenv("HDF5_CXX_COMPILER", "${CXX_COMPILER}")
         prepend_path("PATH", pathJoin(base, "bin"))
         prepend_path("PATH", base)
 EOF

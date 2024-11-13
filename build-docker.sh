@@ -24,6 +24,7 @@
 : ${BUILD_MINIFORGE3:="0"}
 : ${BUILD_HPCTOOLKIT:="0"}
 : ${BUILD_HDF5:="0"}
+: ${BUILD_NETCDF:="0"}
 : ${BUILD_X11VNC:="0"}
 : ${BUILD_FLANGNEW:="0"}
 : ${BUILD_HIPFORT:="0"}
@@ -123,6 +124,7 @@ usage()
     print_default_option build-miniconda3 -- "flag to build version 24.9.2 of Miniconda3" "not included"
     print_default_option build-miniforge3 -- "flag to build version 24.9.0 of Miniforge3" "not included"
     print_default_option build-hdf5 -- "flag to build version 1.14.5 of HDF5" "not included"
+    print_default_option build-netcdf -- "flag to build version 4.9.3-rc1 of netcdf-c and 4.6.2-rc1 of netcdf-fortran" "not included"
     print_default_option build-hipfort -- "flag to build version 0.4-0 of Hipfort" "not included"
     print_default_option build-cupy -- "flag to build version 13.0.0b1 of CuPy" "not included"
     print_default_option build-jax -- "flag to build version 0.4.32 of JAX" "not included"
@@ -268,6 +270,10 @@ do
             BUILD_HDF5="1"
             reset-last
             ;;
+        "--build-netcdf")
+            BUILD_NETCDF="1"
+            reset-last
+            ;;
         "--build-tau")
             BUILD_TAU="1"
             reset-last
@@ -310,6 +316,7 @@ do
             BUILD_CUPY="1"
             BUILD_JAX="1"
             BUILD_HDF5="1"
+            BUILD_NETCDF="1"
 	    BUILD_KOKKOS="1"
 	    BUILD_MINICONDA3="1"
 	    BUILD_MINIFORGE3="1"
@@ -367,6 +374,10 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
          "hdf5")
 	    echo "Setting hdf5 build"
             BUILD_HDF5=1
+	    ;;
+         "netcdf")
+	    echo "Setting netcdf build"
+            BUILD_NETCDF=1
 	    ;;
          "scorep")
 	    echo "Setting scorep build"
@@ -451,6 +462,7 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             BUILD_SCOREP="1"
             BUILD_MPI4PY="1"
             BUILD_HDF5="1"
+            BUILD_NETCDF="1"
             BUILD_HPCTOOLKIT="1"
             BUILD_X11VNC="1"
             BUILD_FLANGNEW="1"
@@ -567,6 +579,7 @@ do
        --build-arg BUILD_MINICONDA3=${BUILD_MINICONDA3} \
        --build-arg BUILD_MINIFORGE3=${BUILD_MINIFORGE3} \
        --build-arg BUILD_HDF5=${BUILD_HDF5} \
+       --build-arg BUILD_NETCDF=${BUILD_NETCDF} \
        --build-arg BUILD_X11VNC=${BUILD_X11VNC} \
        --build-arg BUILD_FLANGNEW=${BUILD_FLANGNEW} \
        --build-arg BUILD_HIPFORT=${BUILD_HIPFORT} \
