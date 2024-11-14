@@ -140,16 +140,21 @@ else
          ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
       fi
 
-      export JAX_PLATFORMS="rocm,cpu"
+      source /etc/profile.d/lmod.sh
+      source /etc/profile.d/z01_lmod.sh
+      module load rocm/${ROCM_VERSION}
 
-      git clone https://github.com/ROCm/xla.git
+      export JAX_PLATFORMS="rocm,cpu"
+      #JAX_VERSION=0.4.33
+
+      git clone --depth 1 --branch rocm-xla-stable-2024_08_07 https://github.com/ROCm/xla.git
       cd xla
-      git reset --hard 8d53a6c61429310b561f17e08a35d90486055d64
+      #git reset --hard 8d53a6c61429310b561f17e08a35d90486055d64
       export XLA_PATH=$PWD
       cd ..
       git clone https://github.com/ROCm/jax.git
       cd jax
-      git reset --hard 644ac10c92c38bfbeb87ba5698084757a80408a5 
+      git reset --hard 644ac10c92c38bfbeb87ba5698084757a80408a5
       
       # install necessary packages in installation directory
       ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/jaxlib
