@@ -2,8 +2,18 @@
 
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 BUILD_PYTORCH=0
+PYTORCH_VERSION=2.4.0
+TORCHVISION_VERSION=0.19.0
+TORCHVISION_HASH="48b1edf"
+TORCHAUDIO_VERSION=2.4.0
+TORCHAUDIO_HASH="69d4077"
+PILLOW_VERSION=11.0.0
+MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/pytorch
+INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch
+INSTALL_PATH_INPUT=""
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
+USE_WHEEL=0
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -13,6 +23,31 @@ if [  -f /.singularity.d/Singularity ]; then
    DEB_FRONTEND=""
 fi
 
+usage()
+{
+   echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default is $AMDGPU_GFXMODEL"
+   echo "--build-pytorch [ BUILD_PYTORCH ] set to 1 to build jax default is 0"
+   echo "--pytorch-version [ PYTORCH_VERSION ] version of PyTorch, default is $PYTORCH_VERSION"
+   echo "--install-path [ INSTALL_PATH ] directory where PyTorch, Torchaudio and Torchvision will be installed, default is $INSTALL_PATH"
+   echo "--help: this usage information"
+   echo "--module-path [ MODULE_PATH ] default $MODULE_PATH"
+   echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "--use-wheel [ USE_WHEEL ] build with a wheel instead of from source, default is $USE_WHEEL"
+}
+
+send-error()
+{
+    usage
+    echo -e "\nError: ${@}"
+    exit 1
+}
+
+reset-last()
+{
+   last() { send-error "Unsupported argument :: ${1}"; }
+}
+
+
 n=0
 while [[ $# -gt 0 ]]
 do
@@ -20,14 +55,37 @@ do
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
+	  reset-last
           ;;
       "--amdgpu-gfxmodel")
           shift
           AMDGPU_GFXMODEL=${1}
+	  reset-last
           ;;
       "--build-pytorch")
           shift
           BUILD_PYTORCH=${1}
+	  reset-last
+          ;;
+      "--pytorch-version")
+          shift
+          PYTORCH_VERSION=${1}
+	  reset-last
+          ;;
+      "--module-path")
+          shift
+          MODULE_PATH=${1}
+	  reset-last
+          ;;
+      "--install-path")
+          shift
+          INSTALL_PATH_INPUT=${1}
+	  reset-last
+          ;;
+      "--use-wheel")
+          shift
+          USE_WHEEL=${1}
+	  reset-last
           ;;
       *)  
          last ${1}
@@ -37,14 +95,16 @@ do
    shift
 done
 
-echo ""
-echo "==================================="
-echo "Starting Pytorch Install with"
-echo "BUILD_PYTORCH: $BUILD_PYTORCH" 
-echo "ROCM_VERSION: $ROCM_VERSION" 
-echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL" 
-echo "==================================="
-echo ""
+if [ "${INSTALL_PATH_INPUT}" != "" ]; then
+   INSTALL_PATH=${INSTALL_PATH_INPUT}
+else
+   # override path in case ROCM_VERSION has been supplied as input
+   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch
+fi
+
+PYTORCH_PATH=$INSTALL_PATH/pytorch
+TORCHVISION_PATH=$INSTALL_PATH/vision
+TORCHAUDIO_PATH=$INSTALL_PATH/audio
 
 if [ "${BUILD_PYTORCH}" = "0" ]; then
 
@@ -53,6 +113,23 @@ if [ "${BUILD_PYTORCH}" = "0" ]; then
    exit
 
 else
+
+   echo ""
+   echo "======================================"
+   echo "Starting Pytorch Install with"
+   echo "PyTorch Version: $PYTORCH_VERSION"
+   echo "PyTorch Install Directory: $PYTORCH_PATH"
+   echo "Torchvision Version: $TORCHVISION_VERSION"
+   echo "Torchvision Install Directory: $TORCHVISION_PATH"
+   echo "Torchaudio Version: $TORCHAUDIO_VERSION"
+   echo "Torchaudio Install Directory: $TORCHAUDIO_PATH"
+   echo "ROCm Version: $ROCM_VERSION"
+   echo "Module Directory: $MODULE_PATH"
+   echo "Use Wheel to Build?: $USE_WHEEL"
+   echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL"
+   echo "======================================"
+   echo ""
+
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
    if [ -f ${CACHE_FILES}/pytorch.tgz ] && [ -f ${CACHE_FILES}/audio.tgz ] && [ -f ${CACHE_FILES}/vision.tgz ]; then
@@ -70,10 +147,17 @@ else
       if [ "${USER}" != "sysadmin" ]; then
          rm ${CACHE_FILES}/pytorch.tgz ${CACHE_FILES}/audio.tgz ${CACHE_FILES}/vision.tgz
       fi
+
+   elif [ "${USE_WHEEL}" == "1" ]; then
+
+      echo " Build with wheel coming soon, for now please build from source by setting --use-wheel 0"
+
    else
       echo ""
       echo "============================"
-      echo " Building Pytorch"
+      echo " Installing Pytorch, "
+      echo " Torchaudio and Torchivision"
+      echo " from source"
       echo "============================"
       echo ""
 
@@ -101,7 +185,7 @@ else
       unset BUILD_PYTORCH
       unset BUILD_KOKKOS
       
-      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages:$PYTHONPATH
+      export PYTHONPATH=${PYTORCH_PATH}/lib/python3.10/site-packages:$PYTHONPATH
       
       # Install of pre-built pytorch for reference
       #${SUDO} pip3 install --target=/opt/rocmplus-${ROCM_VERSION}/pytorch torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.0
@@ -115,19 +199,27 @@ else
       export USE_MPI=1
       export PYTORCH_ROCM_ARCH=${AMDGPU_GFXMODEL}
       
-      export PYTORCH_INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/pytorch
+      export PYTORCH_INSTALL_DIR=${PYTORCH_PATH}
 
-      ${SUDO} mkdir -p ${PYTORCH_INSTALL_DIR}
-      ${SUDO} chmod a+w ${PYTORCH_INSTALL_DIR}
+      # don't use sudo if user has write access to install path
+      if [ -w ${INSTALL_PATH} ]; then
+         SUDO=""
+      fi
 
-      # PyTorch 2.4, Python 3.12
+      ${SUDO} mkdir -p ${INSTALL_PATH}
+      ${SUDO} mkdir -p ${PYTORCH_PATH}
+      ${SUDO} mkdir -p ${TORCHAUDIO_PATH}
+      ${SUDO} mkdir -p ${TORCHVISION_PATH}
+      if [[ "${USER}" != "root" ]]; then
+         ${SUDO} chmod -R a+w ${INSTALL_PATH}
+      fi
 
       # This block of code is to retry if git clone fails.
       RETRIES=6
       DELAY=30
       COUNT=1
       while [ $COUNT -lt $RETRIES ]; do
-        git clone --recursive --depth 1 --branch v2.4.0 https://github.com/pytorch/pytorch
+        git clone --recursive --depth 1 --branch v${PYTORCH_VERSION} https://github.com/pytorch/pytorch
         if [ $? -eq 0 ]; then
           RETRIES=0
           break
@@ -167,16 +259,14 @@ else
       echo "Starting setup.py install"
       echo "===================="
       echo ""
-      #export CMAKE_PREFIX_PATH=${PYTORCH_INSTALL_DIR}
-      python setup.py install --prefix=${PYTORCH_INSTALL_DIR}
-      #python3 setup.py install --prefix=/opt/rocmplus-${ROCM_VERSION}/pytorch
+      python setup.py install --prefix=${PYTORCH_PATH}
       echo ""
       echo "===================="
       echo "Finished setup.py install"
       echo "===================="
       echo ""
 
-      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages
+      export PYTHONPATH=${PYTORCH_PATH}/lib/python3.10/site-packages
       echo "PYTHONPATH is ${PYTHONPATH}"
       python3 -c 'import torch' 2> /dev/null && echo 'Success' || echo 'Failure'
 
@@ -184,46 +274,38 @@ else
       ${SUDO} rm -rf pytorch
       cd /tmp
 
-      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages
-      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages/torchvision-0.19.0a0+48b1edf-py3.10-linux-x86_64.egg:$PYTHONPATH
-      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages/pillow-10.4.0-py3.10-linux-x86_64.egg:$PYTHONPATH
-      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/audio/lib/python3.10/site-packages/torchaudio-2.4.0a0+69d4077-py3.10-linux-x86_64.egg:$PYTHONPATH
-      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages:$PYTHONPATH
-      export PYTHONPATH=/opt/rocmplus-${ROCM_VERSION}/audio/lib/python3.10/site-packages:$PYTHONPATH
+      export PYTHONPATH=${PYTORCH_PATH}/lib/python3.10/site-packages
+      export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.10/site-packages/torchvision-${TORCHVISION_VERSION}a0+${TORCHVISION_HASH}-py3.10-linux-x86_64.egg:$PYTHONPATH
+      export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.10/site-packages/pillow-${PILLOW_VERSION}-py3.10-linux-x86_64.egg:$PYTHONPATH
+      export PYTHONPATH=${TORCHAUDIO_PATH}/lib/python3.10/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.10-linux-x86_64.egg:$PYTHONPATH
+      export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.10/site-packages:$PYTHONPATH
+      export PYTHONPATH=${TORCHAUDIO_PATH}/lib/python3.10/site-packages:$PYTHONPATH
 
-      # install necessary packages in installation directory
-      export TORCHVISION_INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/vision
-      export TORCHAUDIO_INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/audio
-      ${SUDO} mkdir -p ${TORCHVISION_INSTALL_DIR}
-      ${SUDO} mkdir -p ${TORCHAUDIO_INSTALL_DIR}
-
-      if [[ "${USER}" != "root" ]]; then
-         ${SUDO} chmod a+w ${TORCHVISION_INSTALL_DIR}
-         ${SUDO} chmod a+w ${TORCHAUDIO_INSTALL_DIR}
-      fi
-
-      git clone --recursive --depth 1 --branch v0.19.0 https://github.com/pytorch/vision
+      git clone --recursive --depth 1 --branch v${TORCHVISION_VERSION} https://github.com/pytorch/vision
       cd vision
-      python3 setup.py install --prefix=${TORCHVISION_INSTALL_DIR}
+      python3 setup.py install --prefix=${TORCHVISION_PATH}
       cd ..
 
-      git clone --recursive --depth 1 --branch v2.4.0 https://github.com/pytorch/audio
+      git clone --recursive --depth 1 --branch v${TORCHAUDIO_VERSION} https://github.com/pytorch/audio
       cd audio
-      python3 setup.py install --prefix=${TORCHAUDIO_INSTALL_DIR}
+      python3 setup.py install --prefix=${TORCHAUDIO_PATH}
 
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} find ${PYTORCH_INSTALL_DIR} -type f -execdir chown root:root "{}" +
-         ${SUDO} find ${PYTORCH_INSTALL_DIR} -type d -execdir chown root:root "{}" +
-         ${SUDO} find ${TORCHVISION_INSTALL_DIR} -type f -execdir chown root:root "{}" +
-         ${SUDO} find ${TORCHVISION_INSTALL_DIR} -type d -execdir chown root:root "{}" +
-         ${SUDO} find ${TORCHAUDIO_INSTALL_DIR} -type f -execdir chown root:root "{}" +
-         ${SUDO} find ${TORCHAUDIO_INSTALL_DIR} -type d -execdir chown root:root "{}" +
+         ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${INSTALL_PATH} -type d -execdir chown root:root "{}" +
+         ${SUDO} find ${PYTORCH_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${PYTORCH_PATH} -type d -execdir chown root:root "{}" +
+         ${SUDO} find ${TORCHVISION_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${TORCHVISION_PATH} -type d -execdir chown root:root "{}" +
+         ${SUDO} find ${TORCHAUDIO_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${TORCHAUDIO_PATH} -type d -execdir chown root:root "{}" +
       fi
 
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} chmod go-w ${PYTORCH_INSTALL_DIR}
-         ${SUDO} chmod go-w ${TORCHVISION_INSTALL_DIR}
-         ${SUDO} chmod go-w ${TORCHAUDIO_INSTALL_DIR}
+         ${SUDO} chmod go-w ${INSTALL_PATH}
+         ${SUDO} chmod go-w ${PYTORCH_PATH}
+         ${SUDO} chmod go-w ${TORCHVISION_PATH}
+         ${SUDO} chmod go-w ${TORCHAUDIO_PATH}
       fi
 
       # cleanup
@@ -234,21 +316,22 @@ else
    fi
 fi
 
-# Create a module file for Pytorch
-export MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/pytorch
-
+# Create a module file for pytorch
+if [ ! -w ${MODULE_PATH} ]; then
+   SUDO="sudo"
+fi
 ${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/2.4.lua
-        whatis("HIP version of PyTorch")
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
+        whatis("PyTorch version ${PYTORCH_VERSION} with ROCm Support")
 
         load("rocm/${ROCM_VERSION}")
         conflict("miniconda3")
-	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages/torchvision-0.19.0a0+48b1edf-py3.10-linux-x86_64.egg")
-	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/vision/lib/python3.10/site-packages/pillow-10.4.0-py3.10-linux-x86_64.egg")
-	prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/audio/lib/python3.10/site-packages/torchaudio-2.4.0a0+69d4077-py3.10-linux-x86_64.egg")
-        prepend_path("PYTHONPATH","/opt/rocmplus-${ROCM_VERSION}/pytorch/lib/python3.10/site-packages")
+	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.10/site-packages/torchvision-${TORCHVISION_VERSION}a0+${TORCHVISION_HASH}-py3.10-linux-x86_64.egg")
+	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.10/site-packages/pillow-${PILLOW_VERSION}-py3.10-linux-x86_64.egg")
+	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}/lib/python3.10/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.10-linux-x86_64.egg")
+        prepend_path("PYTHONPATH","${PYTORCH_PATH}/lib/python3.10/site-packages")
 EOF
 
 #pip download --only-binary :all: --dest /opt/wheel_files_6.0/pytorch-rocm --no-cache --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/rocm6.0

@@ -165,7 +165,7 @@ else
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
       tar -xzf CacheFiles/netcdf.tgz
-      chown -R root:root /opt/rocmplus-${ROCM_VERSION}/netcdf
+      chown -R root:root ${NETCDF_PATH}
       ${SUDO} rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/netcdf.tgz
 
    else
@@ -182,7 +182,6 @@ else
       if [ -w ${NETCDF_PATH} ]; then
          SUDO=""
       fi
-      
       ${SUDO} mkdir -p ${NETCDF_PATH}
       ${SUDO} mkdir -p ${NETCDF_PATH}/netcdf-c
       ${SUDO} mkdir -p ${NETCDF_PATH}/netcdf-fortran
@@ -260,6 +259,11 @@ else
    fi
 
    # Create a module file for netcdf-c
+   if [ ! -w ${NETCDF_C_MODULE_PATH} ]; then
+      SUDO="sudo"
+   else
+     SUDO=""
+   fi
    ${SUDO} mkdir -p ${NETCDF_C_MODULE_PATH}
 
    # The - option suppresses tabs
@@ -277,6 +281,11 @@ else
 EOF
 
    # Create a module file for netcdf-fortran
+   if [ ! -w ${NETCDF_FC_MODULE_PATH} ]; then
+      SUDO="sudo"
+   else
+     SUDO=""
+   fi
    ${SUDO} mkdir -p ${NETCDF_FC_MODULE_PATH}
 
    # The - option suppresses tabs

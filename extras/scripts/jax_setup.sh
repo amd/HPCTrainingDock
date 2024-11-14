@@ -19,8 +19,6 @@ if [  -f /.singularity.d/Singularity ]; then
    DEB_FRONTEND=""
 fi
 
-# Autodetect defaults
-
 usage()
 {
    echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected, specify as a ; separated list"
