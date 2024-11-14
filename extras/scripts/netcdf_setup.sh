@@ -134,14 +134,6 @@ else
    NETCDF_PATH=/opt/rocmplus-${ROCM_VERSION}/netcdf
 fi
 
-echo ""
-echo "===================================="
-echo "        ------ NETCDF ------"
-echo "  This script builds netcdf-c first"
-echo "     followed by netcdf-fortran" 
-echo "==================================="
-echo ""
-
 if [ "${BUILD_NETCDF}" = "0" ]; then
 
    echo "NETCDF will not be built, according to the specified value of BUILD_NETCDF"
@@ -150,6 +142,19 @@ if [ "${BUILD_NETCDF}" = "0" ]; then
    exit 
 
 else
+
+   echo ""
+   echo "==============================================="
+   echo " Installing NETCDF"
+   echo " Install directory: $NETCDF_PATH"
+   echo " Netcdf-c Version: $NETCDF_C_VERSION"
+   echo " Netcdf-c Module Directory: $NETCDF_C_MODULE_PATH"
+   echo " Netcdf-fortran Version: $NETCDF_FC_VERSION"
+   echo " Netcdf-fortran Module Directory: $NETCDF_FC_MODULE_PATH"
+   echo " ROCm Version: $ROCM_VERSION"
+   echo "==============================================="
+   echo ""
+
    if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/netcdf.tgz ]; then
       echo ""
       echo "============================"
@@ -165,15 +170,9 @@ else
 
    else
       echo ""
-      echo "==============================================="
-      echo " Installing NETCDF"
-      echo " Install directory: $NETCDF_PATH"
-      echo " Netcdf-c Version: $NETCDF_C_VERSION"
-      echo " Netcdf-c Module Directory: $NETCDF_C_MODULE_PATH"
-      echo " Netcdf-fortran Version: $NETCDF_FC_VERSION"
-      echo " Netcdf-fortran Module Directory: $NETCDF_FC_MODULE_PATH"
-      echo " ROCm Version: $ROCM_VERSION"
-      echo "==============================================="
+      echo "================================"
+      echo " Installing NETCDF from source"
+      echo "================================"
       echo ""
 
       source /etc/profile.d/lmod.sh

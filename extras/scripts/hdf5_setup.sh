@@ -127,13 +127,6 @@ else
    HDF5_PATH=/opt/rocmplus-${ROCM_VERSION}/hdf5
 fi
 
-echo ""
-echo ""
-echo "============================"
-echo "     ------ HDF5 ------"
-echo "============================"
-echo ""
-echo ""
 
 if [ "${BUILD_HDF5}" = "0" ]; then
 
@@ -143,6 +136,17 @@ if [ "${BUILD_HDF5}" = "0" ]; then
    exit 
 
 else
+
+   echo ""
+   echo "==============================="
+   echo " Installing HDF5"
+   echo " Install directory: $HDF5_PATH"
+   echo " Module directory: $MODULE_PATH"
+   echo " HDF5 Version: $HDF5_VERSION"
+   echo " ROCm Version: $ROCM_VERSION"
+   echo "==============================="
+   echo ""
+
    if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/hdf5.tgz ]; then
       echo ""
       echo "============================"
@@ -159,11 +163,7 @@ else
    else
       echo ""
       echo "==============================="
-      echo " Installing HDF5"
-      echo " Install directory: $HDF5_PATH"
-      echo " Module directory: $MODULE_PATH"
-      echo " HDF5 Version: $HDF5_VERSION"
-      echo " ROCm Version: $ROCM_VERSION"
+      echo " Installing HDF5 from source"
       echo "==============================="
       echo ""
 
