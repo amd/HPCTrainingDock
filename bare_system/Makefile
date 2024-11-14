@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
-all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf
-.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf
+all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new
+.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
@@ -11,6 +11,7 @@ omnitrace: omnitrace.timestamp
 omniperf: omniperf.timestamp
 amd_gcc: amd_gcc.timestamp
 aomp: aomp.timestamp
+flang-new: flang-new.timestamp
 kokkos: kokkos.timestamp
 miniconda3: miniconda3.timestamp
 miniforge3: miniforge3.timestamp
@@ -153,6 +154,12 @@ aomp.timestamp: rocm.timestamp
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-aomp-latest ${BUILD_AOMP_LATEST}
 	touch aomp.timestamp
+
+flang-new.timestamp: rocm.timestamp
+	extras/scripts/flang-new_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --build-flang-new ${BUILD_FLANGNEW}
+	touch flang-new.timestamp
 
 miniconda3.timestamp:
 	extras/scripts/miniconda3_setup.sh \
