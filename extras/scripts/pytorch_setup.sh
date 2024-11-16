@@ -2,7 +2,8 @@
 
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 BUILD_PYTORCH=0
-PYTORCH_VERSION=2.4.0
+ZSTD_VERSION=1.5.6
+PYTORCH_VERSION=2.5.1
 TORCHVISION_VERSION=0.19.0
 TORCHVISION_HASH="48b1edf"
 TORCHAUDIO_VERSION=2.4.0
@@ -67,6 +68,9 @@ do
           BUILD_PYTORCH=${1}
 	  reset-last
           ;;
+      "--help")
+         usage
+         ;;
       "--pytorch-version")
           shift
           PYTORCH_VERSION=${1}
@@ -102,6 +106,8 @@ else
    INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch
 fi
 
+ZSTD_PATH=$INSTALL_PATH/zstd
+AOTRITON_PATH=$INSTALL_PATH/aotriton
 PYTORCH_PATH=$INSTALL_PATH/pytorch
 TORCHVISION_PATH=$INSTALL_PATH/vision
 TORCHAUDIO_PATH=$INSTALL_PATH/audio
@@ -114,6 +120,19 @@ if [ "${BUILD_PYTORCH}" = "0" ]; then
 
 else
 
+   PYTORCH_SHORT_VERSION=`echo ${PYTORCH_VERSION} | cut -f1-2 -d'.'`
+   if [ "${PYTORCH_SHORT_VERSION}" == "2.5" ]; then
+      AOTRITON_VERSION="0.7b"
+   elif [ "${PYTORCH_SHORT_VERSION}" == "2.4" ]; then
+      AOTRITON_VERSION="0.6b"
+   elif [ "${PYTORCH_SHORT_VERSION}" == "2.3" ]; then
+      AOTRITON_VERSION="0.4b"
+   else
+      echo " No AOTriton support for requested PyTorch version: https://github.com/ROCm/aotriton "
+      echo " Build aborted, please select a PyTorch version >= 2.3 "
+      exit 1
+   fi
+
    echo ""
    echo "======================================"
    echo "Starting Pytorch Install with"
@@ -123,6 +142,8 @@ else
    echo "Torchvision Install Directory: $TORCHVISION_PATH"
    echo "Torchaudio Version: $TORCHAUDIO_VERSION"
    echo "Torchaudio Install Directory: $TORCHAUDIO_PATH"
+   echo "AOTriton Version: $AOTRITON_VERSION"
+   echo "AOTriton Install Directory: $AOTRITON_PATH"
    echo "ROCm Version: $ROCM_VERSION"
    echo "Module Directory: $MODULE_PATH"
    echo "Use Wheel to Build?: $USE_WHEEL"
@@ -150,9 +171,74 @@ else
 
    elif [ "${USE_WHEEL}" == "1" ]; then
 
+      # TODO	    
+      # install of pre-built pytorch for reference
+      #${SUDO} pip3 install --target=/opt/rocmplus-${ROCM_VERSION}/pytorch torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.0
       echo " Build with wheel coming soon, for now please build from source by setting --use-wheel 0"
 
    else
+
+      source /etc/profile.d/lmod.sh
+      source /etc/profile.d/z01_lmod.sh
+      module load rocm
+
+      ${SUDO} apt-get update
+      ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
+      ${SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
+      wget https://registrationcenter-download.intel.com/akdlm/IRC_NAS/79153e0f-74d7-45af-b8c2-258941adf58a/intel-onemkl-2025.0.0.940.sh
+      ${SUDO} sh ./intel-onemkl-2025.0.0.940.sh
+      export PATH=/opt/intel/oneapi:$PATH
+
+      # don't use sudo if user has write access to install path
+      if [ -w ${INSTALL_PATH} ]; then
+         SUDO=""
+      fi
+
+      ${SUDO} mkdir -p ${INSTALL_PATH}
+      ${SUDO} mkdir -p ${ZSTD_PATH}
+      ${SUDO} mkdir -p ${AOTRITON_PATH}
+      ${SUDO} mkdir -p ${PYTORCH_PATH}
+      ${SUDO} mkdir -p ${TORCHAUDIO_PATH}
+      ${SUDO} mkdir -p ${TORCHVISION_PATH}
+      if [[ "${USER}" != "root" ]]; then
+         ${SUDO} chmod -R a+w ${INSTALL_PATH}
+      fi
+
+      echo ""
+      echo "=================================="
+      echo " Installing AOTriton from source "
+      echo "=================================="
+      echo ""
+
+      git clone --branch v${ZSTD_VERSION} https://github.com/facebook/zstd.git
+      cd zstd/build/cmake
+      cmake -DCMAKE_INSTALL_PREFIX=${ZSTD_PATH}
+      make install
+      export PATH=${ZSTD_PATH}:${ZSTD_PATH}/bin:$PATH
+      cd ../../../
+
+      git clone --branch ${AOTRITON_VERSION}  https://github.com/ROCm/aotriton.git
+
+      cd aotriton
+      git submodule update --init --recursive
+      mkdir build && cd build
+
+      if [[ "${AMDGPU_GFXMODEL}" == "gfx90a" ]]; then
+         TARGET_GPUS="MI200"
+      elif [[ "${AMDGPU_GFXMODEL}" == "gfx942" ]]; then
+	 TARGET_GPUS="MI300X"
+      else
+         echo "Please select either gfx90a or gfx942 as AMDGPU_GFXMODEL"
+	 exit 1
+      fi
+
+      cmake -DAOTRITON_HIPCC_PATH=${ROCM_PATH}/bin -DTARGET_GPUS=${TARGET_GPUS} -DCMAKE_INSTALL_PREFIX=${AOTRITON_PATH} -DCMAKE_BUILD_TYPE=Release -DAOTRITON_GPU_BUILD_TIMEOUT=0 -G Ninja ..
+
+      ninja install
+
+      cd ../..
+      rm -rf aotriton zstd
+
       echo ""
       echo "============================"
       echo " Installing Pytorch, "
@@ -161,35 +247,12 @@ else
       echo "============================"
       echo ""
 
-
-      source /etc/profile.d/lmod.sh
-      source /etc/profile.d/z01_lmod.sh
-      module load rocm
       # Build with GPU aware MPI not working yet
       # Need to use the update-alternatives in openmpi setup to get
       # GPU aware MPI
       #module load openmpi
 
-      ${SUDO} apt-get update
-      ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
-      ${SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
-      
-      # unset environment variables that are not needed for pytorch
-      unset BUILD_AOMP_LATEST
-      unset BUILD_CLACC_LATEST
-      unset BUILD_GCC_LATEST
-      unset BUILD_LLVM_LATEST
-      unset BUILD_OG_LATEST
-      unset USE_CACHED_APPS
-      unset BUILD_CUPY
-      unset BUILD_PYTORCH
-      unset BUILD_KOKKOS
-      
       export PYTHONPATH=${PYTORCH_PATH}/lib/python3.10/site-packages:$PYTHONPATH
-      
-      # Install of pre-built pytorch for reference
-      #${SUDO} pip3 install --target=/opt/rocmplus-${ROCM_VERSION}/pytorch torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.0
-      
       export _GLIBCXX_USE_CXX11_ABI=1
       export ROCM_HOME=${ROCM_PATH}
       export ROCM_SOURCE_DIR=${ROCM_PATH}
@@ -198,23 +261,10 @@ else
       export MAX_JOBS=20
       export USE_MPI=1
       export PYTORCH_ROCM_ARCH=${AMDGPU_GFXMODEL}
-      
       export PYTORCH_INSTALL_DIR=${PYTORCH_PATH}
+      export AOTRITON_INSTALLED_PREFIX=${AOTRITON_PATH}
 
-      # don't use sudo if user has write access to install path
-      if [ -w ${INSTALL_PATH} ]; then
-         SUDO=""
-      fi
-
-      ${SUDO} mkdir -p ${INSTALL_PATH}
-      ${SUDO} mkdir -p ${PYTORCH_PATH}
-      ${SUDO} mkdir -p ${TORCHAUDIO_PATH}
-      ${SUDO} mkdir -p ${TORCHVISION_PATH}
-      if [[ "${USER}" != "root" ]]; then
-         ${SUDO} chmod -R a+w ${INSTALL_PATH}
-      fi
-
-      # This block of code is to retry if git clone fails.
+      # this block of code is to retry if git clone fails.
       RETRIES=6
       DELAY=30
       COUNT=1
@@ -229,29 +279,31 @@ else
       done
 
       cd pytorch
-      if [[ "${USER}" == "root" ]]; then
-         sed -i '266i os.environ["ROCM_HOME"] = '"${ROCM_HOME}"'' setup.py
-         sed -i '266i os.environ["ROCM_SOURCE_DIR"] = '"${ROCM_SOURCE_DIR}"'' setup.py
-         sed -i '266i os.environ["PYTORCH_ROCM_ARCH"] = '"${PYTORCH_ROCM_ARCH}"'' setup.py
-      fi
-      # Pytorch 2.4 needs some patches to build for ROCm
-      # NOT NEEDED ANYMORE:Fix triton build failure due to tritonlang.blob.core.windows.net not available
-      # The download from https://tritonlang.blob.core.windows.net/llvm-builds/ has been
-      # blocked and made private. We substitute https://oaitriton.blob.core.windows.net/public/llvm-builds/
-      # The pytorch head already has this change, but the pytorch 2.4 does not
-      # Patch documentation is at https://github.com/pytorch/pytorch/pull/133694/files
-      # patch .github/scripts/build_triton_wheel.py < /tmp/pytorch_build_triton_wheel_py.patch
-      # The next fix is a ROCm fix. The USE_ROCM define is not passed to the CAFFE2 build
-      # https://github.com/pytorch/pytorch/issues/103312
-      # We comment out the lines within the USE_ROCM block in the torch/csrc/jit/ir/ir.cpp file
-      sed -i -e 's/case cuda/\/\/case cuda/' torch/csrc/jit/ir/ir.cpp
-      # With the next fix we are preventing Caffe2 from writing into /usr/local/
-      sed -i '/install(DIRECTORY ${CMAKE_BINARY_DIR}\/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}/s/^/#/g' caffe2/CMakeLists.txt 
-      sed -i '/FILES_MATCHING PATTERN \"\*\.py")/s/^/#/g' caffe2/CMakeLists.txt
 
-      pip3 install mkl-static mkl-include 
+      if [[ "${USER}" == "root" ]]; then
+	 # we will add the environment variables above the line that says "# set up appropriate env variable" in setup.py
+	 LINE=`sed -n '/# set up appropriate env variable/=' setup.py | grep -n ""`
+	 LINE=`echo ${LINE} | cut -c 3-`
+
+         sed -i ''"${LINE}"'i os.environ["ROCM_HOME"] = '"${ROCM_HOME}"'' setup.py
+         sed -i ''"${LINE}"'i os.environ["ROCM_SOURCE_DIR"] = '"${ROCM_SOURCE_DIR}"'' setup.py
+         sed -i ''"${LINE}"'i os.environ["PYTORCH_ROCM_ARCH"] = '"${PYTORCH_ROCM_ARCH}"'' setup.py
+         sed -i ''"${LINE}"'i os.environ["AOTRITON_INSTALLED_PREFIX"] = '"${AOTRITON_INSTALLED_PREFIX}"'' setup.py
+         sed -i ''"${LINE}"'i os.environ["CMAKE_INCLUDE_PATH"] = '"${CMAKE_INCLUDE_PATH}"'' setup.py
+         sed -i ''"${LINE}"'i os.environ["LIBS"] = '"${LIBS}"'' setup.py
+      fi
+
+      if [ "${PYTORCH_SHORT_VERSION}" == "2.4" ]; then
+         # the USE_ROCM define is not passed to the CAFFE2 build
+         # https://github.com/pytorch/pytorch/issues/103312
+         # We comment out the lines within the USE_ROCM block in the torch/csrc/jit/ir/ir.cpp file
+         sed -i -e 's/case cuda/\/\/case cuda/' torch/csrc/jit/ir/ir.cpp
+         # prevent Caffe2 from writing into /usr/local/
+         sed -i '/install(DIRECTORY ${CMAKE_BINARY_DIR}\/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}/s/^/#/g' caffe2/CMakeLists.txt
+         sed -i '/FILES_MATCHING PATTERN \"\*\.py")/s/^/#/g' caffe2/CMakeLists.txt
+      fi
+
       pip3 install -r requirements.txt
-      
       python3 tools/amd_build/build_amd.py >& /dev/null
       
       echo ""
@@ -266,12 +318,8 @@ else
       echo "===================="
       echo ""
 
-      export PYTHONPATH=${PYTORCH_PATH}/lib/python3.10/site-packages
-      echo "PYTHONPATH is ${PYTHONPATH}"
-      python3 -c 'import torch' 2> /dev/null && echo 'Success' || echo 'Failure'
-
       cd ..
-      ${SUDO} rm -rf pytorch
+      rm -rf pytorch
       cd /tmp
 
       export PYTHONPATH=${PYTORCH_PATH}/lib/python3.10/site-packages
@@ -293,19 +341,10 @@ else
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${INSTALL_PATH} -type d -execdir chown root:root "{}" +
-         ${SUDO} find ${PYTORCH_PATH} -type f -execdir chown root:root "{}" +
-         ${SUDO} find ${PYTORCH_PATH} -type d -execdir chown root:root "{}" +
-         ${SUDO} find ${TORCHVISION_PATH} -type f -execdir chown root:root "{}" +
-         ${SUDO} find ${TORCHVISION_PATH} -type d -execdir chown root:root "{}" +
-         ${SUDO} find ${TORCHAUDIO_PATH} -type f -execdir chown root:root "{}" +
-         ${SUDO} find ${TORCHAUDIO_PATH} -type d -execdir chown root:root "{}" +
       fi
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod go-w ${INSTALL_PATH}
-         ${SUDO} chmod go-w ${PYTORCH_PATH}
-         ${SUDO} chmod go-w ${TORCHVISION_PATH}
-         ${SUDO} chmod go-w ${TORCHAUDIO_PATH}
       fi
 
       # cleanup
@@ -316,13 +355,13 @@ else
    fi
 fi
 
-# Create a module file for pytorch
+# create a module file for pytorch
 if [ ! -w ${MODULE_PATH} ]; then
    SUDO="sudo"
 fi
 ${SUDO} mkdir -p ${MODULE_PATH}
 
-# The - option suppresses tabs
+# the - option suppresses tabs
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
         whatis("PyTorch version ${PYTORCH_VERSION} with ROCm Support")
 
