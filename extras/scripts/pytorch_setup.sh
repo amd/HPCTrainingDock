@@ -186,7 +186,7 @@ else
       ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
       ${SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
       wget https://registrationcenter-download.intel.com/akdlm/IRC_NAS/79153e0f-74d7-45af-b8c2-258941adf58a/intel-onemkl-2025.0.0.940.sh
-      ${SUDO} sh ./intel-onemkl-2025.0.0.940.sh
+      ${SUDO} sh ./intel-onemkl-2025.0.0.940.sh -a -s --eula accept
       export PATH=/opt/intel/oneapi:$PATH
 
       # don't use sudo if user has write access to install path
