@@ -505,7 +505,7 @@ Then, proceed with these steps:
 6. Copy-paste the ssh public key on your local system to the `.ssh/authorized_keys` file in the container.
 7. Test on the local system that `ssh Makefile` let's you log in into the container.
 8. Run from the container: `/usr/local/bin/startvnc.sh` and record the `<port_number>` and `<password>` outputted by this command.
-9. From your local system, open the ssh tunnerl: `-L 5950:localhost:<port_number> -N -f sysadmin@Makefile`, where `<port_number>` is the one recorded at Step 8.
+9. From your local system, open the ssh tunnel: `ssh -L 5950:localhost:<port_number> -N -f sysadmin@Makefile`, where `<port_number>` is the one recorded at Step 8.
 10. Install `remmina` from terminal:
 ```bash
 sudo apt-get update
