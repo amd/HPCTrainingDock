@@ -287,12 +287,13 @@ else
 
         load("hdf5")
         local base = "${NETCDF_PATH}/netcdf-c"
-        local base_pnetcdf = "${NETCDF_PATH}/netcdf-c/pnetcdf"
+        local base_pnetcdf = "${NETCDF_PATH}/pnetcdf"
         prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
         prepend_path("LD_LIBRARY_PATH", pathJoin(base_pnetcdf, "lib"))
         prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
         prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
         prepend_path("PATH", pathJoin(base, "bin"))
+        prepend_path("PATH", pathJoin(base_pnetcdf, "bin"))
         prepend_path("PATH", base)
 	setenv("NETCDF_C_ROOT", base)
 	setenv("PNETCDF_ROOT", base_pnetcdf)
