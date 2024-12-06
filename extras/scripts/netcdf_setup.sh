@@ -185,6 +185,7 @@ else
       ${SUDO} mkdir -p ${NETCDF_PATH}
       ${SUDO} mkdir -p ${NETCDF_PATH}/netcdf-c
       ${SUDO} mkdir -p ${NETCDF_PATH}/netcdf-fortran
+      ${SUDO} mkdir -p ${NETCDF_PATH}/pnetcdf
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod -R a+w ${NETCDF_PATH}
@@ -217,6 +218,14 @@ else
       ${SUDO} apt-get update
       ${SUDO} apt-get install libcurl4-gnutls-dev 
 
+      # install pnetcdf
+      git clone --branch checkpoint.1.14.0 https://github.com/Parallel-NetCDF/PnetCDF.git
+      cd PnetCDF
+      autoreconf -i
+      ./configure --prefix=${NETCDF_PATH}/pnetcdf MPICC=`which mpicc` MPIF90=`which mpifort`
+      ${SUDO} make install
+      cd ..
+
       echo ""
       echo "================================="
       echo " Installing NETCDF-C"
@@ -227,7 +236,7 @@ else
       cd netcdf-c 
       mkdir build && cd build
 
-      cmake -DCMAKE_INSTALL_PREFIX=${NETCDF_PATH}/netcdf-c -DNETCDF_ENABLE_HDF5=ON -DNETCDF_ENABLE_DAP=ON -DNETCDF_BUILD_UTILITIES=ON -DNETCDF_ENABLE_PNETCDF=OFF -DNETCDF_ENABLE_CDF5=ON -DNETCDF_ENABLE_TESTS=OFF -DNETCDF_ENABLE_PARALLEL_TESTS=OFF -DZLIB_INCLUDE_DIR=${HDF5_ROOT}/zlib/include -DCMAKE_C_FLAGS="-I ${HDF5_ROOT}/include/" -DCMAKE_C_COMPILER=${C_COMPILER}  ..
+      cmake -DCMAKE_INSTALL_PREFIX=${NETCDF_PATH}/netcdf-c -DNETCDF_ENABLE_HDF5=ON -DNETCDF_ENABLE_DAP=ON -DNETCDF_BUILD_UTILITIES=ON -DNETCDF_ENABLE_PNETCDF=OFF -DNETCDF_ENABLE_CDF5=ON -DNETCDF_ENABLE_TESTS=OFF -DNETCDF_ENABLE_PARALLEL_TESTS=OFF -DZLIB_INCLUDE_DIR=${HDF5_ROOT}/zlib/include -DCMAKE_C_FLAGS="-I ${HDF5_ROOT}/include/" -DCMAKE_C_COMPILER=${C_COMPILER} -DNETCDF_ENABLE_PNETCDF=ON -DPNETCDF_LIBRARY=${NETCDF_PATH}/pnetcdf/lib/libpnetcdf.so -DPNETCDF_INCLUDE_DIR=${NETCDF_PATH}/pnetcdf/include -DNETCDF_ENABLE_FILTER_SZIP=OFF -DNETCDF_ENABLE_NCZARR=OFF ..
 
       make install
 
@@ -239,8 +248,13 @@ else
 
       git clone --branch v${NETCDF_FC_VERSION} https://github.com/Unidata/netcdf-fortran.git
       cd netcdf-fortran
-      mkdir build && cd build
 
+      # netcdf-fortran is looking for nc_def_var_szip even if SZIP is OFF
+      LINE=`sed -n '/if (NOT HAVE_DEF_VAR_SZIP)/=' CMakeLists.txt | grep -n ""`
+      LINE=`echo ${LINE} | cut -c 3-`
+      sed -i ''"${LINE}"'i set(HAVE_DEF_VAR_SZIP TRUE)' CMakeLists.txt
+
+      mkdir build && cd build
       cmake -DCMAKE_INSTALL_PREFIX=${NETCDF_PATH}/netcdf-fortran -DENABLE_TESTS=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_Fortran_COMPILER=$FC_COMPILER ..
 
       make install
@@ -248,6 +262,7 @@ else
       cd ../..
       rm -rf netcdf-c 
       rm -rf netcdf-fortran
+      ${SUDO} rm -rf PnetCDF
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${NETCDF_PATH} -type f -execdir chown root:root "{}" +

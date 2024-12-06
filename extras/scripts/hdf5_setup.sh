@@ -232,6 +232,7 @@ else
       cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE:STRING=Release \
   			        -DHDF5_BUILD_TOOLS:BOOL=ON -DCMAKE_INSTALL_PREFIX=${HDF5_PATH} \
                                 -DZLIB_ROOT=${HDF5_PATH}/zlib \
+				-DHDF5_ENABLE_SZIP_SUPPORT:BOOL=OFF \
                                 -DCMAKE_CXX_COMPILER=${CXX_COMPILER} \
                                 -DCMAKE_C_COMPILER=${C_COMPILER} \
 				-DCMAKE_Fortran_COMPILER=${FC_COMPILER} \
