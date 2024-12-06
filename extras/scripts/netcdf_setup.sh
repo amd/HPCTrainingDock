@@ -295,6 +295,7 @@ else
         prepend_path("PATH", pathJoin(base, "bin"))
         prepend_path("PATH", base)
 	setenv("NETCDF_C_ROOT", base)
+	setenv("PNETCDF_ROOT", base_pnetcdf)
 EOF
 
    # Create a module file for netcdf-fortran
