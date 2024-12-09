@@ -141,13 +141,10 @@ else
       pipx install 'meson>=1.3.2'
       export PATH=$HOME/.local/bin:$PATH
       git clone https://gitlab.com/hpctoolkit/hpctoolkit.git
-      #wget -q https://gitlab.com/hpctoolkit/hpctoolkit/-/archive/2024.01.1/hpctoolkit-2024.01.1.tar.gz
-      #tar -xzf hpctoolkit-2024.01.1.tar.gz
-      #cd hpctoolkit-2024.01.1
       cd hpctoolkit
-      git checkout fda401c1f6f4a219f7c07f0606fa1e479f2f341e
+      git checkout 0bfc9cd58da73e3e5b973d754677ebfe2b0da55d # previous commit used: fda401c1f6f4a219f7c07f0606fa1e479f2f341e
       export CMAKE_PREFIX_PATH=$ROCM_PATH:$CMAKE_PREFIX_PATH
-      meson setup -Drocm=enabled --prefix=${HPCTOOLKIT_PATH} --libdir=${HPCTOOLKIT_PATH}/lib build
+      meson setup -Drocm=enabled -Dopencl=disabled --prefix=${HPCTOOLKIT_PATH} --libdir=${HPCTOOLKIT_PATH}/lib build
       cd  build
       meson compile
       meson install
@@ -162,7 +159,6 @@ else
       fi
 
       cd ../..
-      #rm -rf hpctoolkit-2024.01.1 hpctoolkit-2024.01.1.tar.gz
       rm -rf hpctoolkit
 
       # ------------ Installing HPCViewer

@@ -169,7 +169,7 @@ else
       wget https://go.fzj.de/scorep-ompt-device-tracing
       mv scorep-ompt-device-tracing scorep-ompt-device-tracing.tar.gz
       tar -xvf scorep-ompt-device-tracing.tar.gz
-      cd sources.00289e4c
+      cd sources.*
       mkdir build
       cd build
       export OMPI_CC=$ROCM_PATH/llvm/bin/clang
@@ -183,7 +183,7 @@ else
       ${SUDO} make install
 
       cd ${CUR_DIR}
-      rm -rf scorep-ompt* sources.00289e4c
+      rm -rf scorep-ompt* sources.*
       rm -rf spack
 
       if [[ "${USER}" != "root" ]]; then
