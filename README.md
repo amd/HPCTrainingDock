@@ -547,7 +547,7 @@ The training environment comes with a variety of modules installed, with their n
    amd-gcc/13.2.0    amdflang-new-beta-drop/4.0    aomp/amdclang-19.0
 
 -------------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-AI ---------------------------------------------------------------------
-   cupy/13.0.0b1    jax/0.4.32.dev    pytorch/2.4
+   cupy/13.0.0b1    jax/0.4.35    pytorch/2.5
 
 ------------------------------------------------------------------------ /etc/lmod/modules/misc ------------------------------------------------------------------------
    hpctoolkit/2024.09.26dev    kokkos/4.4.0    scorep/9.0-dev    tau/dev

@@ -202,7 +202,7 @@ else
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/2024.09.26dev.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/2024.11.27dev.lua
 	whatis("HPCToolkit - integrated suite of tools for measurement and analysis of program performance")
 
 	local base = "${HPCTOOLKIT_PATH}"
