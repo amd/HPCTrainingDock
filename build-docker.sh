@@ -20,6 +20,7 @@
 : ${BUILD_TAU:="0"}
 : ${BUILD_SCOREP:="0"}
 : ${BUILD_MPI4PY:="0"}
+: ${BUILD_FFTW:="0"}
 : ${BUILD_MINICONDA3:="0"}
 : ${BUILD_MINIFORGE3:="0"}
 : ${BUILD_HPCTOOLKIT:="0"}
@@ -286,6 +287,10 @@ do
             BUILD_MPI4PY="1"
             reset-last
             ;;
+        "--build-fftw")
+            BUILD_FFTW="1"
+            reset-last
+            ;;
         "--build-hpctoolkit")
             BUILD_HPCTOOLKIT="1"
             reset-last
@@ -323,6 +328,7 @@ do
 	    BUILD_TAU="1"
 	    BUILD_SCOREP="1"
 	    BUILD_MPI4PY="1"
+	    BUILD_FFTW="1"
 	    BUILD_HPCTOOLKIT="1"
 	    BUILD_X11VNC="1"
 	    BUILD_FLANGNEW="1"
@@ -430,12 +436,17 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
 	    echo "Setting KOKKOS build"
             BUILD_KOKKOS=1
 	    ;;
+	 # optional external libraries
+         "fftw")
+	    echo "Setting FFTW build"
+            BUILD_FFTW=1
+	    ;;
 	 # optional python virtual environments
          "miniconda3")
 	    echo "Setting MINICONDA3 build"
             BUILD_MINICONDA3=1
 	    ;;
-         "minicforge3")
+         "miniforge3")
 	    echo "Setting MINIFORGE3 build"
             BUILD_MINIFORGE3=1
 	    ;;
@@ -459,6 +470,7 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             BUILD_MINICONDA3="1"
             BUILD_MINIFORGE3="1"
             BUILD_TAU="1"
+	    BUILD_FFTW="1"
             BUILD_SCOREP="1"
             BUILD_MPI4PY="1"
             BUILD_HDF5="1"
@@ -581,6 +593,7 @@ do
        --build-arg BUILD_HDF5=${BUILD_HDF5} \
        --build-arg BUILD_NETCDF=${BUILD_NETCDF} \
        --build-arg BUILD_X11VNC=${BUILD_X11VNC} \
+       --build-arg BUILD_FFTW=${BUILD_FFTW} \
        --build-arg BUILD_FLANGNEW=${BUILD_FLANGNEW} \
        --build-arg BUILD_HIPFORT=${BUILD_HIPFORT} \
        --build-arg BUILD_DATE=$(date +'%Y-%m-%dT%H:%M:%SZ') \

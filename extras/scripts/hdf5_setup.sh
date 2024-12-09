@@ -30,7 +30,7 @@ usage()
    echo "  --hdf5-version [ HDF5_VERSION ] default $HDF5_VERSION"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
-   echo "  --enable-parallel [ ENABLE_PARALLEL ], set to 1 to enable, enabled by default if MPI is installed"
+   echo "  --enable-parallel [ ENABLE_PARALLEL ], set to ON or OFF, ON by default if MPI is installed"
    echo "  --install-path [ HDF5_PATH ] default $HDF5_PATH"
    echo "  --c-compiler [ C_COMPILER ] default ${C_COMPILER}"
    echo "  --cxx-compiler [ CXX_COMPILER ] default ${CXX_COMPILER}"
@@ -201,11 +201,11 @@ else
       #${SUDO} ./configure --prefix=${HDF5_PATH}/libaec
       #${SUDO} make install
 
-      # default build is parallel hdf5
+      # default build is serial hdf5
       ENABLE_PARALLEL="OFF"
       module load ${MPI_MODULE}
       if [[ `which mpicc | wc -l` -eq 1 ]]; then
-	 # if no mpi is found in the path, fall back to serial hdf5
+	 # if mpicc is found in the path, build hdf5 parallel
          ENABLE_PARALLEL="ON"
 	 C_COMPILER=`which mpicc`
 	 CXX_COMPILER=`which mpicxx`

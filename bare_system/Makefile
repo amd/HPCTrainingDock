@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
-all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new
-.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new
+all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw
+.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
@@ -11,6 +11,7 @@ omnitrace: omnitrace.timestamp
 omniperf: omniperf.timestamp
 amd_gcc: amd_gcc.timestamp
 aomp: aomp.timestamp
+fftw: fftw.timestamp
 flang-new: flang-new.timestamp
 kokkos: kokkos.timestamp
 miniconda3: miniconda3.timestamp
@@ -220,6 +221,12 @@ jax.timestamp: rocm.timestamp
 	   --build-jax ${BUILD_JAX}
 	touch jax.timestamp
 
+fftw.timestamp:
+	extras/scripts/fftw_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+           --build-fftw ${BUILD_FFTW}
+	touch fftw.timestamp
+
 x11vnc.timestamp:
 	extras/scripts/x11vnc_setup.sh \
            --build-x11vnc ${BUILD_X11VNC}
@@ -322,6 +329,10 @@ hdf5_tests.timestamp: hdf5.timestamp HPCTrainingExamples
 netcdf_tests.timestamp: netcdf.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Netcdf
 	touch netcdf_tests.timestamp
+
+fftw_tests.timestamp: fftw.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R FFTW
+	touch fftw_tests.timestamp
 
 hipfort_tests.timestamp: hipfort.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R HIPFort
