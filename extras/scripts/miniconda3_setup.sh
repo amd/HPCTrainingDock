@@ -6,6 +6,7 @@ SUDO="sudo"
 PYTHON_VERSION="10"
 ROCM_VERSION=6.0
 BUILD_MINICONDA3=0
+MINICONDA3_VERSION="24.9.2"
 
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -92,15 +93,14 @@ else
    echo ""
 
    if [ "${DISTRO}" = "ubuntu" ] ; then
-      # getting version 24.9.2
-      wget -q https://repo.anaconda.com/miniconda/Miniconda3-py3${PYTHON_VERSION}_24.9.2-0-Linux-x86_64.sh -O /tmp/miniconda-installer.sh
+      wget -q https://repo.anaconda.com/miniconda/Miniconda3-py3${PYTHON_VERSION}_${MINICONDA3_VERSION}-0-Linux-x86_64.sh -O /tmp/miniconda-installer.sh
       chmod +x /tmp/miniconda-installer.sh
       MINICONDA3_PATH=/opt/rocmplus-${ROCM_VERSION}/miniconda3
       ${SUDO} mkdir -p ${MINICONDA3_PATH}
       ${SUDO} /tmp/miniconda-installer.sh -b -u -p ${MINICONDA3_PATH}
       export PATH="${MINICONDA3_PATH}/bin:${PATH}"
       conda config --set always_yes yes --set changeps1 no
-      conda update -c defaults -n base conda
+      # conda update -c defaults -n base conda
       ${SUDO} mkdir -p ${MINICONDA3_PATH}/envs/py3.${PYTHON_VERSION}
       ${SUDO} chown -R ${USER}:${USER} ${MINICONDA3_PATH}/*
       conda create -p ${MINICONDA3_PATH}/envs/py3.${PYTHON_VERSION} -c defaults -c conda-forge python=3.${PYTHON_VERSION} pip
@@ -117,7 +117,7 @@ else
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/24.9.2.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${MINICONDA3_VERSION}.lua
            conflict("miniforge3")
            local root = "${MINICONDA3_PATH}"
            local python_version = capture(root .. "/bin/python -V | awk '{print $2}'")
