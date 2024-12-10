@@ -3,6 +3,7 @@
 # Variables controlling setup process
 MODULE_PATH=/etc/lmod/modules/misc/hipifly
 HIPIFLY_MODULE=0
+HIPIFLY_HEADER_PATH=`pwd`
 ROCM_VERSION=6.0
 
 SUDO="sudo"
@@ -17,6 +18,7 @@ usage()
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --hipifly-module [ HIPIFLY_MODULE ], set to 1 to create hipifly, default is $HIPIFLY_MODULE"
+   echo "  --hipifly-header-path [ HIPIFLY_HEADER_PATH ], location to copy the hipifly.h header from, default $HIPIFLY_HEADER_PATH"
    echo "  --help: this usage information"
    exit 1
 }
@@ -40,6 +42,11 @@ do
       "--hipifly-module")
           shift
           HIPIFLY_MODULE=${1}
+          reset-last
+          ;;
+      "--hipifly-header-path")
+          shift
+          HIPIFLY_HEADER_PATH=${1}
           reset-last
           ;;
       "--help")
@@ -67,10 +74,12 @@ do
 done
 
 echo ""
-echo "==================================="
+echo "==========================================="
 echo "Setting Up the HIPIFLY Module"
 echo "HIPIFLY_MODULE: $HIPIFLY_MODULE"
-echo "==================================="
+echo "HIPIFLY_HEADER_PATH: $HIPIFLY_HEADER_PATH"
+echo "MODULE_PATH: $MODULE_PATH"
+echo "============================================"
 echo ""
 
 if [ "${HIPIFLY_MODULE}" = "0" ]; then
@@ -82,7 +91,7 @@ if [ "${HIPIFLY_MODULE}" = "0" ]; then
 else
       HIPIFLY_PATH=/opt/rocmplus-${ROCM_VERSION}/hipifly
       ${SUDO} mkdir -p ${HIPIFLY_PATH}
-      ${SUDO} cp extras/sources/hipifly/hipifly.h ${HIPIFLY_PATH}
+      ${SUDO} cp ${HIPIFLY_HEADER_PATH}/hipifly.h ${HIPIFLY_PATH}
 
       ${SUDO} mkdir -p ${MODULE_PATH}
 

@@ -10,12 +10,14 @@
 : ${BUILD_HIPFORT:="1"}
 : ${BUILD_HDF5:="1"}
 : ${BUILD_NETCDF:="1"}
+: ${BUILD_FFTW:="1"}
 : ${BUILD_MINICONDA3:="1"}
 : ${BUILD_MINIFORGE3:="1"}
 : ${BUILD_HPCTOOLKIT:="1"}
 : ${BUILD_MPI4PY:="1"}
 : ${BUILD_TAU:="1"}
 : ${BUILD_X11VNC:="1"}
+: ${HIPIFLY_MODULE:="1"}
 : ${PYTHON_VERSION:="10"} # python3 minor release
 : ${USE_MAKEFILE:="0"}
 
@@ -165,9 +167,13 @@ extras/scripts/miniforge3_setup.sh --rocm-version ${ROCM_VERSION} --build-minifo
 
 extras/scripts/hipfort_setup.sh --rocm-version ${ROCM_VERSION} --build-hipfort ${BUILD_HIPFORT}
 
+extras/scripts/hipifly_setup.sh --rocm-version ${ROCM_VERSION} --hipifly-module ${HIPIFLY_MODULE} --hipifly-header-path extras/sources/hipifly/
+
 extras/scripts/hdf5_setup.sh --rocm-version ${ROCM_VERSION} --build-hdf5 ${BUILD_HDF5}
 
-extras/scripts/netcdf_setup.sh --rocm-version ${ROCM_VERSION} --build-netcdf ${BUILD_HDF5}
+extras/scripts/netcdf_setup.sh --rocm-version ${ROCM_VERSION} --build-netcdf ${BUILD_NETCDF}
+
+extras/scripts/fftw_setup.sh --rocm-version ${ROCM_VERSION} --build-fftw ${BUILD_FFTW}
 
 extras/scripts/x11vnc_setup.sh --build-x11vnc ${BUILD_X11VNC}
 
