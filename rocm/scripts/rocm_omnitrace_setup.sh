@@ -55,9 +55,24 @@ do
    shift
 done
 
+# if ROCM_VERSION is less 6.3.0, the awk command will give the ROCM_VERSION number
+# if ROCM_VERSION is greater than or equal to 6.1.2, the awk command result will be blank
+result=`echo $ROCM_VERSION | awk '$1<6.3.0'` && echo $result
+if [[ "${result}" ]]; then # ROCM_VERSION < 6.3
+   TOOL_NAME=rocprofiler-systems
+   TOOL_EXEC_NAME=rocprof-sys-avail
+   TOOL_NAME_MC=Rocprofiler-compute
+   TOOL_NAME_UC=ROCPROFILER_SYSTEMS
+else
+   TOOL_NAME=omnitrace
+   TOOL_EXEC_NAME=omnitrace
+   TOOL_NAME_MC=Omnitrace
+   TOOL_NAME_UC=OMNITRACE
+fi
+
 echo ""
 echo "=================================="
-echo "Starting ROCm Omnitrace Install with"
+echo "Starting ROCm ${TOOL_NAME_MC} Install with"
 echo "DISTRO: $DISTRO"
 echo "DISTRO_VERSION: $DISTRO_VERSION"
 echo "ROCM_VERSION: $ROCM_VERSION"
@@ -70,37 +85,30 @@ echo ""
 # if ROCM_VERSION is less than or equalt to 6.1.2, the awk command result will be blank
 result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
 if [[ "${result}" == "" ]]; then
-   echo "ROCm built-in Omnitrace version cannot be installed on ROCm versions before 6.2.0"
+   echo "ROCm built-in ${TOOL_NAME_MC} version cannot be installed on ROCm versions before 6.2.0"
    exit
 fi
-if [[ -f /opt/rocm-${ROCM_VERSION}/bin/omnitrace ]] ; then
-   echo "ROCm built-in Omnitrace already installed"
+if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
+   echo "ROCm built-in ${TOOL_NAME_MC} already installed"
 else
    if [ "${DISTRO}" == "ubuntu" ]; then
-# if ROCM_VERSION is less 6.3.0, the awk command will give the ROCM_VERSION number
-# if ROCM_VERSION is greater than or equal to 6.1.2, the awk command result will be blank
-      result=`echo $ROCM_VERSION | awk '$1<6.3.0'` && echo $result
-      if [[ "${result}" ]]; then # ROCM_VERSION < 6.3
-         ${SUDO} ${DEB_FRONTEND} apt-get install -q -y omnitrace
-      else
-         ${SUDO} ${DEB_FRONTEND} apt-get install -q -y rocprofiler-systems
-      fi
+      ${SUDO} ${DEB_FRONTEND} apt-get install -q -y ${TOOL_NAME}
    fi
 fi
 
-if [[ -f /opt/rocm-${ROCM_VERSION}/bin/omnitrace ]] ; then
-   export MODULE_PATH=/etc/lmod/modules/ROCm/omnitrace
+if [[ -f /opt/rocm-${ROCM_VERSION}/bin//${TOOL_EXEC_NAME} ]] ; then
+   export MODULE_PATH=/etc/lmod/modules/ROCm/${TOOL_NAME}
    ${SUDO} mkdir -p ${MODULE_PATH}
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
-	whatis("Name: omnitrace")
+	whatis("Name: ${TOOL_NAME}")
 	whatis("Version: ${ROCM_VERSION}")
 	whatis("Category: AMD")
-	whatis("omnitrace")
+	whatis("${TOOL_NAME}")
 
 	local base = "/opt/rocm-${ROCM_VERSION}"
 
-	setenv("OMNITRACE_PATH", base)
+	setenv("${TOOL_NAME_UC}_PATH", base)
 	load("rocm/${ROCM_VERSION}")
 	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
 EOF

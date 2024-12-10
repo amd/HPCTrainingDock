@@ -61,7 +61,7 @@ result=`echo $ROCM_VERSION | awk '$1<6.3.0'` && echo $result
 if [[ "${result}" ]]; then # ROCM_VERSION < 6.3
    TOOL_NAME=rocprofiler-compute
    TOOL_EXEC_NAME=rocprof-compute
-   TOOL_NAME_MC=rocprofiler-compute
+   TOOL_NAME_MC=Rocprofiler-compute
    TOOL_NAME_UC=ROCPROFILER_COMPUTE
    ROOFLINE_PATH=/opt/rocm-${ROCM_VERSION}/libexec/rocprofiler-compute/rocprof_compute_soc/profile_configs/gfx940/roofline
 else
