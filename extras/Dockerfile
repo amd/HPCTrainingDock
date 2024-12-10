@@ -159,7 +159,7 @@ RUN /tmp/hdf5_setup.sh --rocm-version ${ROCM_VERSION} --build-hdf5 ${BUILD_HDF5}
 
 # Install netcdf
 #
-COPY extras/scripts/netcdf_setup.sh /tmp/betcdf_setup.sh
+COPY extras/scripts/netcdf_setup.sh /tmp/netcdf_setup.sh
 RUN /tmp/netcdf_setup.sh --rocm-version ${ROCM_VERSION} --build-netcdf ${BUILD_NETCDF} && rm /tmp/netcdf_setup.sh
 
 #
