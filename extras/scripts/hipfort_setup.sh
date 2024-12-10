@@ -18,7 +18,7 @@ usage()
    echo "Usage:"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "  --build-hipfort [ BUILD_HIPFORT ], set to 1 to build hipfort, default is 0"
+   echo "  --build-hipfort [ BUILD_HIPFORT ], set to 1 to build hipfort, default is $BUILD_HIPFORT"
    echo "  --use-flang-new [ USE_FLANGNEW ], , default is $USE_FLANGNEW"
    echo "  --help: this usage information"
    exit 1
