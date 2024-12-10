@@ -126,7 +126,7 @@ COPY extras/scripts/hipfort_setup.sh /tmp/hipfort_setup.sh
 RUN /tmp/hipfort_setup.sh --build-hipfort ${BUILD_HIPFORT} --rocm-version ${ROCM_VERSION} && rm /tmp/hipfort_setup.sh
 
 # create hipifly module
-COPY extras/scripts/hipfort_setup.sh /tmp/hipfort_setup.sh
+COPY extras/scripts/hipifly_setup.sh /tmp/hipifly_setup.sh
 RUN /tmp/hipifly_setup.sh --hipifly_module ${HIPIFLY_MODULE} --rocm-version ${ROCM_VERSION} && rm /tmp/hipifly_setup.sh
  
 # install fftw
