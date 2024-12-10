@@ -306,11 +306,11 @@ if [ "${DISTRO}" == "ubuntu" ]; then
          result=`echo $DISTRO_VERSION | awk '$1>24.00'` && echo $result
          if [[ "${result}" ]]; then
             # rocm-asan not available in Ubuntu 24.04
-            amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk --no-dkms
+            amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,rocmdevtools,lrt,openclsdk,openmpsdk,mlsdk --no-dkms
 	 else
             # removing asan to reduce image size
             #amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk,asan --no-dkms
-            amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk --no-dkms
+            amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,,rocmdevtools,lrt,openclsdk,openmpsdk,mlsdk --no-dkms
             #${SUDO} apt-get install rocm_bandwidth_test
 	 fi
       else # ROCM_VERSION < 6.2

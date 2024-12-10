@@ -4,6 +4,8 @@ all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py 
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
+rocm_omniperf: rocm_omniperf.timestamp
+rocm_omnitrace: rocm_omniperf.timestamp
 openmpi: openmpi.timestamp
 mvapich: mvapich.timestamp
 slurm: slurm.timestamp
