@@ -30,6 +30,7 @@
 : ${BUILD_FLANGNEW:="0"}
 : ${BUILD_HIPFORT:="0"}
 : ${BUILD_ALL_LATEST:="0"}
+: ${HIPIFLY_MODULE:="1"}
 : ${RETRY:=3}
 : ${NO_CACHE:=""}
 : ${OMNITRACE_BUILD_FROM_SOURCE:=0}
@@ -595,6 +596,7 @@ do
        --build-arg BUILD_X11VNC=${BUILD_X11VNC} \
        --build-arg BUILD_FFTW=${BUILD_FFTW} \
        --build-arg BUILD_FLANGNEW=${BUILD_FLANGNEW} \
+       --build-arg HIPIFLY_MODULE=${HIPIFLY_MODULE} \
        --build-arg BUILD_HIPFORT=${BUILD_HIPFORT} \
        --build-arg BUILD_DATE=$(date +'%Y-%m-%dT%H:%M:%SZ') \
        --build-arg OG_BUILD_DATE=$(date -u +'%y-%m-%d') \

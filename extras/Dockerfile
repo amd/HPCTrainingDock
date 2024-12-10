@@ -30,8 +30,12 @@ ARG BUILD_KOKKOS
 ARG BUILD_MINIFORGE3
 ARG BUILD_MINICONDA3
 ARG BUILD_HDF5
+ARG BUILD_NETCDF
 ARG BUILD_JAX
 ARG BUILD_X11VNC
+ARG BUILD_HIPFORT
+ARG BUILD_FFTW
+ARG HIPIFLY_MODULE
 ARG BUILD_FLANGNEW
 ARG USE_CACHED_APPS
 ARG AMDGPU_GFXMODEL=gfx90a
@@ -117,6 +121,18 @@ RUN echo "At end of aomp install" && cd /app && ls -l && cd /tmp && ls -l && cd 
 COPY extras/scripts/flang-new_setup.sh /tmp/flang-new_setup.sh
 RUN /tmp/flang-new_setup.sh --build-flang-new ${BUILD_FLANGNEW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/flang-new_setup.sh
  
+# install hipfort
+COPY extras/scripts/hipfort_setup.sh /tmp/hipfort_setup.sh
+RUN /tmp/hipfort_setup.sh --build-hipfort ${BUILD_HIPFORT} --rocm-version ${ROCM_VERSION} && rm /tmp/hipfort_setup.sh
+
+# create hipifly module
+COPY extras/scripts/hipfort_setup.sh /tmp/hipfort_setup.sh
+RUN /tmp/hipifly_setup.sh --hipifly_module ${HIPIFLY_MODULE} --rocm-version ${ROCM_VERSION} && rm /tmp/hipifly_setup.sh
+ 
+# install fftw
+COPY extras/scripts/fftw_setup.sh /tmp/fftw_setup.sh
+RUN /tmp/fftw_setup.sh --build-fftw ${BUILD_FFTW} --rocm-version ${ROCM_VERSION} && rm /tmp/fftw_setup.sh
+
 # install latest llvm
 COPY extras/scripts/llvm-build.sh /tmp/llvm-build.sh
 RUN /tmp/llvm-build.sh --build-llvm-latest ${BUILD_LLVM_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/llvm-build.sh
@@ -133,16 +149,18 @@ WORKDIR /tmp
 # Install kokkos
 #
 COPY extras/scripts/kokkos_setup.sh /tmp/kokkos_setup.sh
-
 RUN /tmp/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-kokkos ${BUILD_KOKKOS} && rm /tmp/kokkos_setup.sh
 
 #
 # Install hdf5
 #
 COPY extras/scripts/hdf5_setup.sh /tmp/hdf5_setup.sh
-
 RUN /tmp/hdf5_setup.sh --rocm-version ${ROCM_VERSION} --build-hdf5 ${BUILD_HDF5} && rm /tmp/hdf5_setup.sh
 
+# Install netcdf
+#
+COPY extras/scripts/netcdf_setup.sh /tmp/betcdf_setup.sh
+RUN /tmp/netcdf_setup.sh --rocm-version ${ROCM_VERSION} --build-netcdf ${BUILD_NETCDF} && rm /tmp/netcdf_setup.sh
 
 #
 # Moved into scripts that need these

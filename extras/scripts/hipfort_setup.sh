@@ -1,7 +1,6 @@
 #/bin/bash
 
 # Variables controlling setup process
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/hipfort
 BUILD_HIPFORT=0
 ROCM_VERSION=6.0
