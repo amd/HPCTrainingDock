@@ -277,6 +277,8 @@ else
         setenv("HDF5_C_COMPILER", "${C_COMPILER}")
         setenv("HDF5_FC_COMPILER", "${FC_COMPILER}")
         setenv("HDF5_CXX_COMPILER", "${CXX_COMPILER}")
+        setenv("HDF5_ENABLE_PARALLEL", "${ENABLE_PARALLEL}")
+        setenv("HDF5_MPI_MODULE", "${MPI_MODULE}")
         prepend_path("PATH", pathJoin(base, "bin"))
         prepend_path("PATH", base)
 EOF

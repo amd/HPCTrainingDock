@@ -178,6 +178,10 @@ else
       source /etc/profile.d/lmod.sh
       source /etc/profile.d/z01_lmod.sh
 
+      # install libcurl
+      ${SUDO} apt-get update
+      ${SUDO} apt-get install libcurl4-gnutls-dev
+
       # don't use sudo if user has write access to install path
       if [ -w ${NETCDF_PATH} ]; then
          SUDO=""
@@ -214,17 +218,16 @@ else
          FC_COMPILER=${FC_COMPILER_INPUT}
       fi
 
-      # install libcurl 
-      ${SUDO} apt-get update
-      ${SUDO} apt-get install libcurl4-gnutls-dev 
-
-      # install pnetcdf
-      git clone --branch checkpoint.1.14.0 https://github.com/Parallel-NetCDF/PnetCDF.git
-      cd PnetCDF
-      autoreconf -i
-      ./configure --prefix=${NETCDF_PATH}/pnetcdf MPICC=`which mpicc` MPIF90=`which mpifort`
-      ${SUDO} make install
-      cd ..
+      if [ "${HDF5_ENABLE_PARALLEL}" = "ON" ]; then
+	 module load ${HD5_MPI_MODULE}
+         # install pnetcdf
+         git clone --branch checkpoint.1.14.0 https://github.com/Parallel-NetCDF/PnetCDF.git
+         cd PnetCDF
+         autoreconf -i
+         ./configure --prefix=${NETCDF_PATH}/pnetcdf MPICC=`which mpicc` MPIF90=`which mpifort`
+         make install
+         cd ..
+      fi
 
       echo ""
       echo "================================="
