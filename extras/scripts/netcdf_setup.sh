@@ -17,6 +17,7 @@ NETCDF_FC_VERSION="4.6.2-rc1"
 HDF5_MODULE="hdf5"
 NETCDF_PATH=/opt/rocmplus-${ROCM_VERSION}/netcdf
 NETCDF_PATH_INPUT=""
+ENABLE_PNETCDF="OFF"
 
 SUDO="sudo"
 
@@ -219,6 +220,7 @@ else
       fi
 
       if [ "${HDF5_ENABLE_PARALLEL}" = "ON" ]; then
+         ENABLE_PNETCDF="ON"
 	 module load ${HD5_MPI_MODULE}
          # install pnetcdf
          git clone --branch checkpoint.1.14.0 https://github.com/Parallel-NetCDF/PnetCDF.git
@@ -246,7 +248,7 @@ else
 	    -DZLIB_INCLUDE_DIR=${HDF5_ROOT}/zlib/include \
 	    -DCMAKE_C_FLAGS="-I ${HDF5_ROOT}/include/" \
 	    -DCMAKE_C_COMPILER=${C_COMPILER} \
-	    -DNETCDF_ENABLE_PNETCDF=ON \
+	    -DNETCDF_ENABLE_PNETCDF=${ENABLE_PNETCDF} \
 	    -DPNETCDF_LIBRARY=${NETCDF_PATH}/pnetcdf/lib/libpnetcdf.so \
 	    -DPNETCDF_INCLUDE_DIR=${NETCDF_PATH}/pnetcdf/include \
 	    -DNETCDF_ENABLE_FILTER_SZIP=OFF -DNETCDF_ENABLE_NCZARR=OFF ..
