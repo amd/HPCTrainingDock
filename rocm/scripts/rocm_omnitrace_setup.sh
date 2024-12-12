@@ -58,7 +58,7 @@ done
 # if ROCM_VERSION is less 6.3.0, the awk command will give the ROCM_VERSION number
 # if ROCM_VERSION is greater than or equal to 6.1.2, the awk command result will be blank
 result=`echo $ROCM_VERSION | awk '$1<6.3.0'` && echo $result
-if [[ "${result}" ]]; then # ROCM_VERSION < 6.3
+if [[ "${result}" == "" ]]; then # ROCM_VERSION < 6.3
    TOOL_NAME=rocprofiler-systems
    TOOL_EXEC_NAME=rocprof-sys-avail
    TOOL_NAME_MC=Rocprofiler-compute
