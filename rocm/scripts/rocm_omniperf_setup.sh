@@ -59,17 +59,17 @@ done
 # if ROCM_VERSION is greater than or equal to 6.1.2, the awk command result will be blank
 result=`echo $ROCM_VERSION | awk '$1<6.3.0'` && echo $result
 if [[ "${result}" == "" ]]; then # ROCM_VERSION < 6.3
-   TOOL_NAME=rocprofiler-compute
-   TOOL_EXEC_NAME=rocprof-compute
-   TOOL_NAME_MC=Rocprofiler-compute
-   TOOL_NAME_UC=ROCPROFILER_COMPUTE
-   ROOFLINE_PATH=/opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/rocprof_compute_soc/profile_configs/gfx940/roofline
-else
    TOOL_NAME=omniperf
    TOOL_EXEC_NAME=omniperf
    TOOL_NAME_MC=Omniperf
    TOOL_NAME_UC=OMNIPERF
    ROOFLINE_PATH=/opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/bin/utils/rooflines/roofline-ubuntu20_04-mi200-rocm5
+else
+   TOOL_NAME=rocprofiler-compute
+   TOOL_EXEC_NAME=rocprof-compute
+   TOOL_NAME_MC=Rocprofiler-compute
+   TOOL_NAME_UC=ROCPROFILER_COMPUTE
+   ROOFLINE_PATH=/opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/rocprof_compute_soc/profile_configs/gfx940/roofline
 fi
 
 echo ""

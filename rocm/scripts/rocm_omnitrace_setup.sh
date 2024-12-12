@@ -59,15 +59,15 @@ done
 # if ROCM_VERSION is greater than or equal to 6.1.2, the awk command result will be blank
 result=`echo $ROCM_VERSION | awk '$1<6.3.0'` && echo $result
 if [[ "${result}" == "" ]]; then # ROCM_VERSION < 6.3
-   TOOL_NAME=rocprofiler-systems
-   TOOL_EXEC_NAME=rocprof-sys-avail
-   TOOL_NAME_MC=Rocprofiler-compute
-   TOOL_NAME_UC=ROCPROFILER_SYSTEMS
-else
    TOOL_NAME=omnitrace
    TOOL_EXEC_NAME=omnitrace
    TOOL_NAME_MC=Omnitrace
    TOOL_NAME_UC=OMNITRACE
+else
+   TOOL_NAME=rocprofiler-systems
+   TOOL_EXEC_NAME=rocprof-sys-avail
+   TOOL_NAME_MC=Rocprofiler-compute
+   TOOL_NAME_UC=ROCPROFILER_SYSTEMS
 fi
 
 echo ""
