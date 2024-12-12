@@ -201,8 +201,8 @@ hipfort.timestamp: rocm.timestamp
 hipifly.timestamp: rocm.timestamp
 	extras/scripts/hipifly_setup.sh \
            --rocm-version ${ROCM_VERSION} \
-           --hipifly-module ${HIPIFLY_MODULE} \
-	   --hipifly-header-path extras/sources/hipifly
+	   --hipifly-header-path extras/sources/hipifly \
+           --hipifly-module ${HIPIFLY_MODULE}
 	touch hipifly.timestamp
 
 kokkos.timestamp: rocm.timestamp
