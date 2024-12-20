@@ -221,7 +221,7 @@ else
 
       if [ "${HDF5_ENABLE_PARALLEL}" = "ON" ]; then
          ENABLE_PNETCDF="ON"
-	 module load ${HD5_MPI_MODULE}
+	 module load ${HDF5_MPI_MODULE}
          # install pnetcdf
          git clone --branch checkpoint.1.14.0 https://github.com/Parallel-NetCDF/PnetCDF.git
          cd PnetCDF
