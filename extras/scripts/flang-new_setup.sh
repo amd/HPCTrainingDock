@@ -7,8 +7,8 @@ BUILD_FLANGNEW=0
 ROCM_VERSION=6.0
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-ARCHIVE_NAME="rocm-afar-5891-drop-4.0.5"
-ARCHIVE_DIR="rocm-afar-5891-0.5"
+ARCHIVE_NAME="rocm-afar-6711-drop-5.1.0"
+ARCHIVE_DIR="rocm-afar-6711-0.5"
 
 SUDO="sudo"
 
