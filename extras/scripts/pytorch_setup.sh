@@ -1,5 +1,6 @@
 #!/bin/bash
 
+ROCM_VERSION=6.0
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 BUILD_PYTORCH=0
 ZSTD_VERSION=1.5.6
@@ -227,8 +228,12 @@ else
          TARGET_GPUS="MI200"
       elif [[ "${AMDGPU_GFXMODEL}" == "gfx942" ]]; then
 	 TARGET_GPUS="MI300X"
+      elif [[ "${AMDGPU_GFXMODEL}" == "gfx942;gfx90a" ]]; then
+	 TARGET_GPUS="MI300X;MI200"
+      elif [[ "${AMDGPU_GFXMODEL}" == "gfx90a;gfx942" ]]; then
+	 TARGET_GPUS="MI200;MI300X"
       else
-         echo "Please select either gfx90a or gfx942 as AMDGPU_GFXMODEL"
+         echo "Please select gfx90a, gfx942, or both separated with a ; as AMDGPU_GFXMODEL"
 	 exit 1
       fi
 
