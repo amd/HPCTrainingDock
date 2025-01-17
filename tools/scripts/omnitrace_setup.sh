@@ -3,6 +3,7 @@
 # Variables controlling setup process
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AMDResearchTools/omnitrace
 OMNITRACE_BUILD_FROM_SOURCE=0
+INSTALL_OMNITRACE_RESEARCH=0
 
 # Autodetect defaults
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
@@ -22,6 +23,7 @@ usage()
    echo "Usage:"
    echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-AMDResearchTools/omnitrace" 
    echo "  --omnitrace-build-from-source [OMNITRACE_BUILD_FROM_SOURCE]"
+   echo "  --install_omnitrace-research [INSTALL_OMNITRACE_RESEARCH]"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
    echo "  --help: this usage information"
@@ -52,6 +54,11 @@ do
       "--help")
           usage
 	  ;;
+      "--install-omnitrace_research")
+          shift
+          INSTALL_OMNITRACE_RESEARCH=${1}
+          reset-last
+          ;;
       "--module-path")
           shift
           MODULE_PATH=${1}
@@ -91,6 +98,10 @@ echo "AMDGPU_GFXMODEL is $AMDGPU_GFXMODEL"
 echo "OMNITRACE_BUILD_FROM_SOURCE is $OMNITRACE_BUILD_FROM_SOURCE"
 echo "============================"
 echo ""
+
+if [[ "$INSTALL_OMNITRACE_RESEARCH" == "0" ]];then
+   exit
+fi
 
 if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "0" ] ; then
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`

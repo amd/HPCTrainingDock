@@ -39,6 +39,8 @@
 : ${USE_CACHED_APPS:=0}
 : ${AMDGPU_GFXMODEL:=""}
 : ${INSTALL_GRAFANA:=0}
+: ${INSTALL_OMNIPERF_RESEARCH:=0}
+: ${INSTALL_OMNITRACE_RESEARCH:=0}
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -200,6 +202,14 @@ do
             ;;
         "--omnitrace-build-from-source")
             OMNITRACE_BUILD_FROM_SOURCE=1
+            reset-last
+            ;;
+        "--install-omnitrace-research")
+            INSTALL_OMNITRACE_RESEARCH=1
+            reset-last
+            ;;
+        "--install-omniperf-research")
+            INSTALL_OMNIPERF_RESEARCH=1
             reset-last
             ;;
         "--push")
@@ -574,6 +584,8 @@ do
        --build-arg BUILD_HPCTOOLKIT=${BUILD_HPCTOOLKIT}  \
        --build-arg BUILD_TAU=${BUILD_TAU}  \
        --build-arg BUILD_SCOREP=${BUILD_SCOREP} \
+       --build-arg INSTALL_OMNITRACE_RESEARCH=${INSTALL_OMNITRACE_RESEARCH} \
+       --build-arg INSTALL_OMNIPERF_RESEARCH=${INSTALL_OMNIPERF_RESEARCH} \
        -t ${DOCKER_USER}/tools:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        -f tools/Dockerfile .
 

@@ -3,6 +3,7 @@
 ROCM_VERSION=6.0
 AMD_STAGING=0
 REPLACE=0
+INSTALL_OMNIPERF_RESEARCH=0
 SUDO="sudo"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -13,6 +14,7 @@ usage()
 {
    echo "Usage:"
    echo "  --help: display this usage information"
+   echo "  --install_omniperf_research: [INSTALL_OMNIPERF_RESEARCH default is false]"
    echo "  --rocm-version: default is $ROCM_VERSION"
    echo "  --amd-staging: set to 1 to build the amd-staging branch, default is 0"
    echo "  --replace: set to 1 to remove existing installation directory, default is 0"
@@ -40,6 +42,11 @@ do
           shift
           usage
 	  ;;
+      "--install-omniperf_research")
+          shift
+          INSTALL_OMNIPERF_RESEARCH=${1}
+          reset-last
+          ;;
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
@@ -72,6 +79,10 @@ echo "Installing OmniPerf:"
 echo "ROCM_VERSION is $ROCM_VERSION"
 echo "====================================="
 echo ""
+
+if [[ "$INSTALL_OMNIPERF_RESEARCH" == "0" ]];then
+   exit
+fi
 
 INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0
 

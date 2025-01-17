@@ -19,12 +19,15 @@ ARG INSTALL_GRAFANA=0
 ARG BUILD_HPCTOOLKIT
 ARG BUILD_TAU
 ARG BUILD_SCOREP
+ARG INSTALL_OMNITRACE_RESEARCH
+ARG INSTALL_OMNIPERF_RESEARCH
 
 LABEL maintainer="bob.robey@amd.com"
 
 COPY tools/scripts/omnitrace_setup.sh /tmp/omnitrace_setup.sh
 
 RUN /tmp/omnitrace_setup.sh \
+        --install-omnitrace_research ${INSTALL_OMNITRACE_RESEARCH} \
        --rocm-version ${ROCM_VERSION} \
        --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
        --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE} && \
@@ -61,7 +64,9 @@ ENV PATH=$HOME/.yarn/bin:$HOME/.config/yarn/global/node_modules/.bin:$PATH
 
 COPY tools/scripts/omniperf_setup.sh /tmp/omniperf_setup.sh
 
-RUN  /tmp/omniperf_setup.sh --rocm-version ${ROCM_VERSION} && \
+RUN  /tmp/omniperf_setup.sh \
+        --install-omniperf_research ${INSTALL_OMNIPERF_RESEARCH} \
+        --rocm-version ${ROCM_VERSION} && \
      rm /tmp/omniperf_setup.sh
 
 # Overwrite grafana ini file
