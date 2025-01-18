@@ -255,6 +255,7 @@ else
 
       git clone --branch v${NETCDF_C_VERSION} https://github.com/Unidata/netcdf-c.git
       cd netcdf-c 
+      sed -i 's/if\ (H5FD_HTTP_g)/if\ (H5FD_HTTP_g\ \&\&\ (H5Iis_valid(H5FD_HTTP_g)\ >\ 0))/g' libhdf5/H5FDhttp.c
       mkdir build && cd build
 
       cmake -DCMAKE_INSTALL_PREFIX=${NETCDF_PATH}/netcdf-c \
