@@ -152,7 +152,7 @@ else
       # cloning the latest version of TAU
       git clone https://github.com/UO-OACISS/tau2.git
       cd tau2
-      git checkout 64ce21db229664ebf49295fd78b3a7a0fd0677a6
+      git checkout 9d241f921bb66e43ceac3ee34deb93effee3bd01
 
       # install third pary dependencies
       wget http://tau.uoregon.edu/ext.tgz
