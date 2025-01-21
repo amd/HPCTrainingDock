@@ -141,6 +141,7 @@ else
       git clone -q --depth 1 --recursive https://github.com/ROCm/cupy.git
       cd cupy
       
+      python3 -m pip install argcomplete==1.9.4
       # use version 1.25 of numpy – need to test with later numpy version
       sed -i -e '/numpy/s/1.27/1.25/' setup.py
       # set python path to installation directory
@@ -154,7 +155,7 @@ else
          ${SUDO} chmod a+w /opt/rocmplus-${ROCM_VERSION}/cupy
       fi
       pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/cupy pytest mock
-      pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/cupy dist/cupy-13.0.0b1-cp310-cp310-linux_x86_64.whl
+      pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/cupy dist/*.whl
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/cupy -type f -execdir chown root:root "{}" +
          ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/cupy -type d -execdir chown root:root "{}" +
