@@ -66,7 +66,7 @@ if [[ "${result}" == "" ]]; then # ROCM_VERSION < 6.3
 else
    TOOL_NAME=rocprofiler-systems
    TOOL_EXEC_NAME=rocprof-sys-avail
-   TOOL_NAME_MC=Rocprofiler-compute
+   TOOL_NAME_MC=Rocprofiler-systems
    TOOL_NAME_UC=ROCPROFILER_SYSTEMS
 fi
 
