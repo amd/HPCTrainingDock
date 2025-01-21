@@ -111,6 +111,9 @@ if [[ -f /opt/rocm-${ROCM_VERSION}/bin//${TOOL_EXEC_NAME} ]] ; then
 	setenv("${TOOL_NAME_UC}_PATH", base)
 	load("rocm/${ROCM_VERSION}")
 	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
+        set_shell_function("omnitrace-avail",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-avail "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-avail $*")
+        set_shell_function("omnitrace-instrument",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-instrument "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-instrument $*")
+        set_shell_function("omnitrace-run",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-run "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-run $*")
 EOF
 
 fi
