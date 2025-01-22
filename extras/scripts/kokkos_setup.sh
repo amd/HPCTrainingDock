@@ -5,6 +5,9 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 MODULE_PATH=/etc/lmod/modules/misc/kokkos
 BUILD_KOKKOS=0
 ROCM_VERSION=6.0
+KOKKOS_ARCH_AMD_GFX942="OFF"
+KOKKOS_ARCH_AMD_GFX90A="OFF"
+KOKKOS_ARCH_VEGA90A="OFF"
 
 SUDO="sudo"
 
@@ -102,6 +105,14 @@ else
       echo "============================"
       echo ""
 
+      if [ "${AMDGPU_GFXMODEL}" = "gfx90a" ]; then
+         KOKKOS_ARCH_AMD_GFX90A="ON"
+      elif [ "${AMDGPU_GFXMODEL}" = "gfx942" ]; then
+         KOKKOS_ARCH_AMD_GFX942="ON"
+      elif [ "${AMDGPU_GFXMODEL}" = "gfx900" ]; then
+         KOKKOS_ARCH_VEGA90A="ON"
+      fi
+
       source /etc/profile.d/lmod.sh
       source /etc/profile.d/z01_lmod.sh
       module load rocm/${ROCM_VERSION}
@@ -109,7 +120,7 @@ else
       KOKKOS_PATH=/opt/rocmplus-${ROCM_VERSION}/kokkos
       ${SUDO} mkdir -p ${KOKKOS_PATH}
 
-      git clone --branch 4.4.00 https://github.com/kokkos/kokkos
+      git clone --branch 4.5.01 https://github.com/kokkos/kokkos
       cd kokkos
 
       ${SUDO} mkdir build
@@ -119,8 +130,11 @@ else
                  -DCMAKE_PREFIX_PATH=/opt/rocm-${ROCM_VERSION} \
                  -DKokkos_ENABLE_SERIAL=ON \
                  -DKokkos_ENABLE_HIP=ON \
+		 -DKokkos_ENABLE_OPENMP=ON \
+                 -DKokkos_ARCH_AMD_GFX942=${KOKKOS_ARCH_AMD_GFX942} \
+                 -DKokkos_ARCH_AMD_GFX90A=${KOKKOS_ARCH_AMD_GFX90A} \
+                 -DKokkos_ARCH_VEGA90A=${KOKKOS_ARCH_VEGA90A} \
                  -DKokkos_ARCH_ZEN=ON \
-                 -DKokkos_ARCH_VEGA90A=ON \
                  -DCMAKE_CXX_COMPILER=hipcc ..
 
       ${SUDO} make -j
