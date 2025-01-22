@@ -343,6 +343,8 @@ else
       cd audio
       python3 setup.py install --prefix=${TORCHAUDIO_PATH}
 
+      pip3 install transformers --prefix=${PYTORCH_PATH}
+
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${INSTALL_PATH} -type d -execdir chown root:root "{}" +
