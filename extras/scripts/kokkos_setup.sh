@@ -8,6 +8,7 @@ ROCM_VERSION=6.0
 KOKKOS_ARCH_AMD_GFX942="OFF"
 KOKKOS_ARCH_AMD_GFX90A="OFF"
 KOKKOS_ARCH_VEGA90A="OFF"
+KOKKOS_VERSION="4.5.01"
 
 SUDO="sudo"
 
@@ -120,7 +121,7 @@ else
       KOKKOS_PATH=/opt/rocmplus-${ROCM_VERSION}/kokkos
       ${SUDO} mkdir -p ${KOKKOS_PATH}
 
-      git clone --branch 4.5.01 https://github.com/kokkos/kokkos
+      git clone --branch ${KOKKOS_VERSION} https://github.com/kokkos/kokkos
       cd kokkos
 
       ${SUDO} mkdir build
@@ -151,8 +152,8 @@ else
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/4.4.0.lua
-	whatis("Kokkos - Performance Portability Language")
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${KOKKOS_VERSION}.lua
+	whatis("Kokkos version ${KOKKOS_VERSION} - Performance Portability Language")
 
 	load("rocm/${ROCM_VERSION}")
 	prepend_path("PATH","${KOKKOS_PATH}")
