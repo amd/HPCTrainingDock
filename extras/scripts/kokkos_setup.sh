@@ -6,6 +6,7 @@ MODULE_PATH=/etc/lmod/modules/misc/kokkos
 BUILD_KOKKOS=0
 ROCM_VERSION=6.0
 KOKKOS_ARCH_AMD_GFX942="OFF"
+KOKKOS_ARCH_AMD_GFX942_APU="OFF"
 KOKKOS_ARCH_AMD_GFX90A="OFF"
 KOKKOS_ARCH_VEGA90A="OFF"
 KOKKOS_VERSION="4.5.01"
@@ -109,7 +110,15 @@ else
       if [ "${AMDGPU_GFXMODEL}" = "gfx90a" ]; then
          KOKKOS_ARCH_AMD_GFX90A="ON"
       elif [ "${AMDGPU_GFXMODEL}" = "gfx942" ]; then
-         KOKKOS_ARCH_AMD_GFX942="ON"
+	 # check if on APU
+	 XNACK_COUNT=`rocminfo | grep xnack | wc -l`
+         if [ ${XNACK_COUNT} -lt 1 ]; then
+	    # MI300X
+            KOKKOS_ARCH_AMD_GFX942="ON"
+         else
+	    # MI300A
+            KOKKOS_ARCH_AMD_GFX942_APU="ON"
+         fi
       elif [ "${AMDGPU_GFXMODEL}" = "gfx900" ]; then
          KOKKOS_ARCH_VEGA90A="ON"
       fi
@@ -133,6 +142,7 @@ else
                  -DKokkos_ENABLE_HIP=ON \
 		 -DKokkos_ENABLE_OPENMP=ON \
                  -DKokkos_ARCH_AMD_GFX942=${KOKKOS_ARCH_AMD_GFX942} \
+                 -DKokkos_ARCH_AMD_GFX942_APU=${KOKKOS_ARCH_AMD_GFX942_APU} \
                  -DKokkos_ARCH_AMD_GFX90A=${KOKKOS_ARCH_AMD_GFX90A} \
                  -DKokkos_ARCH_VEGA90A=${KOKKOS_ARCH_VEGA90A} \
                  -DKokkos_ARCH_ZEN=ON \
