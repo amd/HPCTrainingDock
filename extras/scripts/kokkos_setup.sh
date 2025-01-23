@@ -112,7 +112,7 @@ else
       elif [ "${AMDGPU_GFXMODEL}" = "gfx942" ]; then
 	 # check if on APU
 	 XNACK_COUNT=`rocminfo | grep xnack | wc -l`
-         if [ ${XNACK_COUNT} -lt 1 ]; then
+         if [ ${XNACK_COUNT} -gt 1 ]; then
 	    # MI300X
             KOKKOS_ARCH_AMD_GFX942="ON"
          else
