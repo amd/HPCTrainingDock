@@ -124,7 +124,7 @@ else
 
       if [ "${USE_FLANGNEW}" = "1" ]; then
          module load amdflang-new-beta-drop
-         cmake -DHIPFORT_INSTALL_DIR=${HIPFORT_PATH} -DHIPFORT_COMPILER_FLAGS="-ffree-form -cpp" ..
+         cmake -DHIPFORT_INSTALL_DIR=${HIPFORT_PATH} -DHIPFORT_COMPILER=$FC -DHIPFORT_COMPILER_FLAGS="-ffree-form -cpp" ..
       else
          cmake -DHIPFORT_INSTALL_DIR=${HIPFORT_PATH} ..
       fi
