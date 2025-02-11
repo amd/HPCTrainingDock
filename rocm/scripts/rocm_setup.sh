@@ -427,7 +427,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${AMDCLANG_VERSION}-${ROCM_VERSION}.lua
 	setenv("FC", pathJoin(base, "bin/amdflang"))
 	setenv("F77", pathJoin(base, "bin/amdflang"))
 	setenv("F90", pathJoin(base, "bin/amdflang"))
-        setenv("STDPAR_PATH", pathJoin(base, "include"))
+	setenv("STDPAR_PATH", "/opt/rocm-${ROCM_VERSION}/include/thrust/system/hip/hipstdpar")
         setenv("STDPAR_CXX", pathJoin(base, "bin/clang++"))
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
