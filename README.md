@@ -42,7 +42,7 @@ Once this command has completed, run `bare_metal/main_setup.sh +options` as expl
 The final step is to create a Singularity image from the `singularity_dir` directory:
 
 ```bash
-singularity build ${SINGULARITY_DIR_PATH}/singularity_dir ${SINGULARITY_DIR_PATH}/singularity_image.sif
+singularity build ${SINGULARITY_DIR_PATH}/singularity_image.sif ${SINGULARITY_DIR_PATH}/singularity_dir
 ```
 
 The above command will create the image `singularity_image.sif` and place it in `SINGULARITY_DIR_PATH`. To run the image do:
