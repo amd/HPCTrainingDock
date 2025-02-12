@@ -24,7 +24,7 @@ export SINGULARITY_DIR_PATH=$PWD
 Note that the location where you created the above directory needs to have enough storage space available. Then, start up a Singularity image with the `--sandbox` option, pulling from a plain Docker image for Ubuntu 22.04 (for instance):
 
 ```bash
-singularity build --sandbox container docker://ubuntu:22.04
+singularity build --sandbox ${SINGULARITY_DIR_PATH}/singularity_dir docker://ubuntu:22.04
 ```
 
 The next step is to install software in the directory:
