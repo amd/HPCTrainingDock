@@ -5,10 +5,10 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 BUILD_PYTORCH=0
 ZSTD_VERSION=1.5.6
 PYTORCH_VERSION=2.6.0
-TORCHVISION_VERSION=0.19.0
-TORCHVISION_HASH="48b1edf"
-TORCHAUDIO_VERSION=2.4.0
-TORCHAUDIO_HASH="69d4077"
+TORCHVISION_VERSION=0.21.0
+TORCHVISION_HASH="7af6987"
+TORCHAUDIO_VERSION=2.6.0
+TORCHAUDIO_HASH="d883142"
 PILLOW_VERSION=11.1.0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/pytorch
 INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch
@@ -380,7 +380,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 
         load("rocm/${ROCM_VERSION}")
         conflict("miniconda3")
-	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.10/site-packages/torchvision-${TORCHVISION_VERSION}a0+${TORCHVISION_HASH}-py3.10-linux-x86_64.egg")
+	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.10/site-packages/torchvision-${TORCHVISION_VERSION}+${TORCHVISION_HASH}-py3.10-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.10/site-packages/pillow-${PILLOW_VERSION}-py3.10-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}/lib/python3.10/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.10-linux-x86_64.egg")
         prepend_path("PYTHONPATH","${TRANSFORMERS_PATH}")
