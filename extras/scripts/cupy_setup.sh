@@ -140,6 +140,7 @@ else
       # Get source from the ROCm repository of CuPy.
       git clone -q --depth 1 --recursive https://github.com/ROCm/cupy.git
       cd cupy
+      git reset --hard 9cdff1737eaa44aba657cb17f7e0cc421d7cca34
       
       python3 -m pip install argcomplete==1.9.4
       # use version 1.25 of numpy – need to test with later numpy version
@@ -174,7 +175,7 @@ else
    ${SUDO} mkdir -p ${MODULE_PATH}
    
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/13.0.0b1.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/14.0.0a1.lua
 	whatis("HIP version of CuPy")
 
 	load("rocm/${ROCM_VERSION}")

@@ -22,6 +22,8 @@
 : ${USE_MAKEFILE:="0"}
 
 OMNITRACE_BUILD_FROM_SOURCE=0
+INSTALL_OMNITRACE_RESEARCH=0
+INSTALL_OMNIPERF_RESEARCH=0
 SUDO="sudo"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -49,7 +51,9 @@ usage()
    echo "  --rocm-install-path [ ROCM_INSTALL_PATH ]:  default is $ROCM_INSTALLPATH"
    echo "  --python-version [ PYTHON_VERSION ]: python3 minor release, default is $PYTHON_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: if not provided, rocminfo is used to assign a value" 
-   echo "  --omnitrace-build-from-source [0 or 1]:  default is 0 (false)"
+   echo "  --install-omniperf-research [0 or 1]:  default is $INSTALL_OMNIPERF_RESEARCH (false)"
+   echo "  --install-omnitrace-research [0 or 1]:  default is $INSTALL_OMNITRACE_RESEARCH (false)"
+   echo "  --omnitrace-build-from-source [0 or 1]:  default is $OMNITRACE_BUILD_FROM_SOURCE (false)"
    echo "  --distro [DISTRO: ubuntu|rockylinux|opensuse/leap]: autodetected by looking into /etc/os-release"
    echo "  --distro-versions [DISTRO_VERSION]: autodetected by looking into /etc/os-release"
    echo "  --use-makefile [0 or 1]:  default is 0 (false)"
@@ -81,9 +85,19 @@ do
           AMDGPU_GFXMODEL=${1}
           reset-last
           ;;
+      "--install-omnitrace-research")
+          shift
+          INSTALL_OMNITRACE_RESEARCH=${1}
+          reset-last
+          ;;
       "--omnitrace-build-from-source")
           shift
           OMNITRACE_BUILD_FROM_SOURCE=${1}
+          reset-last
+          ;;
+      "--install-omniperf-research")
+          shift
+          INSTALL_OMNIPERF_RESEARCH=${1}
           reset-last
           ;;
       "--use-makefile")
@@ -135,11 +149,11 @@ comm/scripts/mpi4py_setup.sh --rocm-version ${ROCM_VERSION} --build-mpi4py ${BUI
 
 comm/scripts/mvapich_setup.sh --rocm-version ${ROCM_VERSION}
 
-tools/scripts/omnitrace_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE}
+tools/scripts/omnitrace_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE} --install-omnitrace-research ${INSTALL_OMNITRACE_RESEARCH}
 
 tools/scripts/grafana_setup.sh
 
-tools/scripts/omniperf_setup.sh --rocm-version ${ROCM_VERSION}
+tools/scripts/omniperf_setup.sh --rocm-version ${ROCM_VERSION} --install-omniperf-research ${INSTALL_OMNIPERF_RESEARCH}
 
 tools/scripts/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_HPCTOOLKIT}
 

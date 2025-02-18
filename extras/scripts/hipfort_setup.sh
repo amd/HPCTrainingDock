@@ -3,7 +3,7 @@
 # Variables controlling setup process
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/hipfort
 BUILD_HIPFORT=0
-ROCM_VERSION=6.0
+ROCM_VERSION=6.0.0
 USE_FLANGNEW=0
 
 SUDO="sudo"
@@ -116,7 +116,7 @@ else
       HIPFORT_PATH=/opt/rocmplus-${ROCM_VERSION}/hipfort
       ${SUDO} mkdir -p ${HIPFORT_PATH}
 
-      git clone --branch develop https://github.com/ROCm/hipfort.git
+      git clone --branch rocm-${ROCM_VERSION} https://github.com/ROCm/hipfort.git
       cd hipfort
 
       mkdir build
@@ -148,7 +148,7 @@ else
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/0.4-0-dev.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis(" hipfc: Wrapper to call Fortran compiler with hipfort. Also calls hipcc for non Fortran files. ")
 	load("rocm/${ROCM_VERSION}")
 	prepend_path("PATH","${HIPFORT_PATH}/bin")

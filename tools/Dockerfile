@@ -24,6 +24,10 @@ ARG INSTALL_OMNIPERF_RESEARCH
 
 LABEL maintainer="bob.robey@amd.com"
 
+#
+# Install Rocprof-systems (Omnitrace)
+#
+
 COPY tools/scripts/omnitrace_setup.sh /tmp/omnitrace_setup.sh
 
 RUN /tmp/omnitrace_setup.sh \
@@ -59,7 +63,7 @@ RUN  /tmp/grafana_setup.sh --install-grafana ${INSTALL_GRAFANA} && \
 ENV PATH=$HOME/.yarn/bin:$HOME/.config/yarn/global/node_modules/.bin:$PATH
 
 #
-# Install Omniperf
+# Install Rocprof-compute (Omniperf)
 #
 
 COPY tools/scripts/omniperf_setup.sh /tmp/omniperf_setup.sh

@@ -4,12 +4,12 @@ ROCM_VERSION=6.0
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 BUILD_PYTORCH=0
 ZSTD_VERSION=1.5.6
-PYTORCH_VERSION=2.5.1
+PYTORCH_VERSION=2.6.0
 TORCHVISION_VERSION=0.19.0
 TORCHVISION_HASH="48b1edf"
 TORCHAUDIO_VERSION=2.4.0
 TORCHAUDIO_HASH="69d4077"
-PILLOW_VERSION=11.0.0
+PILLOW_VERSION=11.1.0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/pytorch
 INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch
 INSTALL_PATH_INPUT=""
@@ -108,6 +108,7 @@ else
 fi
 
 ZSTD_PATH=$INSTALL_PATH/zstd
+TRANSFORMERS_PATH=$INSTALL_PATH/transformers
 AOTRITON_PATH=$INSTALL_PATH/aotriton
 PYTORCH_PATH=$INSTALL_PATH/pytorch
 TORCHVISION_PATH=$INSTALL_PATH/vision
@@ -122,7 +123,10 @@ if [ "${BUILD_PYTORCH}" = "0" ]; then
 else
 
    PYTORCH_SHORT_VERSION=`echo ${PYTORCH_VERSION} | cut -f1-2 -d'.'`
-   if [ "${PYTORCH_SHORT_VERSION}" == "2.5" ]; then
+   if [ "${PYTORCH_SHORT_VERSION}" == "2.6" ]; then
+      AOTRITON_VERSION="0.8b"
+      ${SUDO} ${DEB_FRONTEND} apt-get install liblzma-dev
+   elif [ "${PYTORCH_SHORT_VERSION}" == "2.5" ]; then
       AOTRITON_VERSION="0.7b"
    elif [ "${PYTORCH_SHORT_VERSION}" == "2.4" ]; then
       AOTRITON_VERSION="0.6b"
@@ -196,6 +200,7 @@ else
       fi
 
       ${SUDO} mkdir -p ${INSTALL_PATH}
+      ${SUDO} mkdir -p ${TRANSFORMERS_PATH}
       ${SUDO} mkdir -p ${ZSTD_PATH}
       ${SUDO} mkdir -p ${AOTRITON_PATH}
       ${SUDO} mkdir -p ${PYTORCH_PATH}
@@ -343,7 +348,7 @@ else
       cd audio
       python3 setup.py install --prefix=${TORCHAUDIO_PATH}
 
-      pip3 install transformers --prefix=${PYTORCH_PATH}
+      pip3 install --target=${TRANSFORMERS_PATH} transformers
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
@@ -378,6 +383,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.10/site-packages/torchvision-${TORCHVISION_VERSION}a0+${TORCHVISION_HASH}-py3.10-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.10/site-packages/pillow-${PILLOW_VERSION}-py3.10-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}/lib/python3.10/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.10-linux-x86_64.egg")
+        prepend_path("PYTHONPATH","${TRANSFORMERS_PATH}")
         prepend_path("PYTHONPATH","${PYTORCH_PATH}/lib/python3.10/site-packages")
 EOF
 

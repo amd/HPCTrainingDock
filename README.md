@@ -535,22 +535,22 @@ The training environment comes with a variety of modules installed, with their n
    clang/base    clang/14 (D)    clang/15    gcc/base    gcc/11 (D)    gcc/12    gcc/13    miniconda3/24.9.2    miniforge3/24.9.0
 
 ------------------------------------------------------------------------ /etc/lmod/modules/ROCm ------------------------------------------------------------------------
-   amdclang/-6.2.1    hipfort/6.2.1    omniperf/6.2.1 (D)    omnitrace/6.2.1 (D)    opencl/6.2.1    rocm/6.2.1
+   amdclang/-6.3.2    hipfort/6.3.2    omniperf/6.3.2 (D)    omnitrace/6.3.2 (D)    opencl/6.3.2    rocm/6.3.2
 
 -------------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-MPI --------------------------------------------------------------------
-   mpi4py/dev    mvapich/3.0    openmpi/5.0.5-ucc1.3.0-ucx1.17.0-xpmem2.7.3    
+   mpi4py/4.0.1    mvapich/3.0    openmpi/5.0.6-ucc1.3.0-ucx1.17.0-xpmem2.7.3    
 
 ------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-AMDResearchTools --------------------------------------------------------------
    omniperf/2.0.0    omnitrace/1.11.3
 
 -------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-LatestCompilers --------------------------------------------------------------
-   amd-gcc/13.2.0    amdflang-new-beta-drop/4.0    aomp/amdclang-19.0
+   amd-gcc/13.2.0    amdflang-new-beta-drop/rocm-afar-6711-drop-5.1.0    aomp/amdclang-19.0
 
 -------------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-AI ---------------------------------------------------------------------
-   cupy/13.0.0b1    jax/0.4.35    pytorch/2.5
+   cupy/14.0.0a1    jax/0.4.35    pytorch/2.6
 
 ------------------------------------------------------------------------ /etc/lmod/modules/misc ------------------------------------------------------------------------
-   hpctoolkit/2024.09.26dev    kokkos/4.4.0    scorep/9.0-dev    tau/dev
+   hpctoolkit/2024.09.26dev    kokkos/4.5.01    scorep/9.0-dev    tau/dev
 
   Where:
    D:  Default Module
