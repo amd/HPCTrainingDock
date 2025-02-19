@@ -209,7 +209,7 @@ else
       # build the wheel for jaxlib
       python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
 	                     --bazel_options=--override_repository=xla=$XLA_PATH \
-			     --rocm_amdgpu_target=$AMDGPU_GFXMODEL \
+			     --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
 			     --bazel_options=--action_env=CC=/usr/bin/gcc --nouse_clang \
 			     --build_gpu_plugin --gpu_plugin_rocm_version=60 --build_gpu_kernel_plugin=rocm \
 			     --bazel_options=--jobs=128 \
