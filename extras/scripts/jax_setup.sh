@@ -21,7 +21,7 @@ fi
 
 usage()
 {
-   echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected, specify as a ; separated list"
+   echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected, specify as a comma separated list"
    echo "--build-jax [ BUILD_JAX ] set to 1 to build jax default is 0"
    echo "--jax-version [ JAX_VERSION ] version of JAX, XLA, and JAXLIB, default is $JAX_VERSION"
    echo "--jax-install-path [ JAX_PATH ] directory where JAX will be installed, default is $JAX_PATH"
