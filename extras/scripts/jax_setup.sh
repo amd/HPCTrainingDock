@@ -191,6 +191,8 @@ else
 
       export JAX_PLATFORMS="rocm,cpu"
 
+      AMDGPU_GFXMODEL=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/,/g'`
+
       git clone --depth 1 --branch rocm-jaxlib-v0.${JAX_VERSION} https://github.com/ROCm/xla.git
       cd xla
       export XLA_PATH=$PWD
