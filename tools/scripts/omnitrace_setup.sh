@@ -266,7 +266,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${TOOL_VERSION}.lua
 	whatis("Category: AMD")
 	whatis("${TOOL_NAME}")
 
-	local base = "${INSTALL_PATH}
+	local base = "${INSTALL_PATH}"
 
 	load("rocm/${ROCM_VERSION}")
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
@@ -275,7 +275,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${TOOL_VERSION}.lua
 	prepend_path("CPATH", pathJoin(base, "include"))
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("INCLUDE", pathJoin(base, "include"))
-	setenv("${TOOL_NAME}_PATH", base)
+	setenv("${TOOL_CONFIG}_PATH", base)
 	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
 EOF
 
