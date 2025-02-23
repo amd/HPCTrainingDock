@@ -108,7 +108,7 @@ if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
 	${TOOL_NAME_MC} is an open-source performance analysis tool for profiling
 	machine learning/HPC workloads running on AMD MI GPUs.
 
-	Version 6.2.0
+	Version ${ROCM_VERSION}
 	]]
 
 	help(help_message,"\n")
@@ -144,7 +144,7 @@ if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
 	--  prereq("mongodb-tools")
 	local home = os.getenv("HOME")
 	setenv("MPLCONFIGDIR",pathJoin(home,".matplotlib"))
-        set_shell_function("omniperf",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-compute "$@"',"/opt/rocm-6.3.1/bin/rocprof-compute $*")
+        set_shell_function("omniperf",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-compute "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-compute $*")
 
 EOF
 
