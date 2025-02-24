@@ -19,6 +19,7 @@ MODULE_PATH="/etc/lmod/modules/ROCmPlus-AMDResearchTools/${TOOL_NAME}"
 MODULE_PATH_INPUT=""
 INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/${TOOL_NAME}"
 INSTALL_PATH_INPUT=""
+GITHUB_BRANCH="amd-staging"
 
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -29,12 +30,13 @@ fi
 usage()
 {
    echo "Usage:"
-   echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
+   echo "  --module-path [ MODULE_PATH ] default is $MODULE_PATH "
+   echo "  --github-branch [GITHUB_BRANCH] default is $GITHUB_BRANCH "
    echo "  --mpi-module [ MPI_MODULE ] default is $MPI_MODULE "
    echo "  --omnitrace-build-from-source [OMNITRACE_BUILD_FROM_SOURCE] default is $OMNITRACE_BUILD_FROM_SOURCE "
    echo "  --install-path [INSTALL_PATH ] default is $INSTALL_PATH "
    echo "  --install-omnitrace-research [INSTALL_OMNITRACE_RESEARCH] default is $INSTALL_OMNITRACE_RESEARCH "
-   echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
+   echo "  --rocm-version [ ROCM_VERSION ] default is $ROCM_VERSION "
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default is $AMDGPU_GFXMODEL "
    echo "  --help: this usage information"
    exit 1
@@ -73,6 +75,11 @@ do
       "--module-path")
           shift
           MODULE_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--github-branch")
+          shift
+          GITHUB_BRANCH=${1}
           reset-last
           ;;
       "--install-path")
@@ -224,7 +231,7 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "1" ] ; then
 
    ${SUDO} mkdir -p ${INSTALL_PATH}
 
-   git clone --depth 1 --branch amd-staging ${TOOL_REPO} tool-source --recurse-submodules && \
+   git clone --depth 1 --branch ${GITHUB_BRANCH} ${TOOL_REPO} tool-source --recurse-submodules && \
        cmake                                         \
           -B tool-build                      \
           -D CMAKE_INSTALL_PREFIX=${INSTALL_PATH}  \

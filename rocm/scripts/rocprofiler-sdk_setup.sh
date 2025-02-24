@@ -78,9 +78,10 @@ do
    shift
 done
 
-result=`echo $ROCM_VERSION | awk '$1<6.2.0'` && echo $result
+result=`echo $ROCM_VERSION | awk '$1>6.2.0'` && echo $result
 if [[ "${result}" == "" ]]; then # ROCM_VERSION < 6.2.0 
    echo "The rocprofiler-sdk library can be installed only for ROCm versions greater than or equal to 6.2.0"
+   echo "You selected this as ROCm version: $ROCM_VERSION"
    echo "Select appropriate ROCm version by specifying --rocm-version $ROCM_VERSION, with $ROCM_VERSION >= 6.2.0"
    exit 1
 fi   
@@ -125,7 +126,7 @@ echo ""
 
 ${SUDO} mkdir -p $INSTALL_PATH
 
-git clone --branch $GITHUB_REPO https://github.com/ROCm/rocprofiler-sdk.git 
+git clone --branch $GITHUB_BRANCH https://github.com/ROCm/rocprofiler-sdk.git
 
 cd rocprofiler-sdk
 
