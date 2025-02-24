@@ -222,6 +222,8 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "1" ] ; then
       CPU_TYPE=zen4
    fi
 
+   ${SUDO} mkdir -p ${INSTALL_PATH}
+
    git clone --depth 1 --branch amd-staging ${TOOL_REPO} tool-source --recurse-submodules && \
        cmake                                         \
           -B tool-build                      \
@@ -256,8 +258,7 @@ if [ ! -w ${MODULE_PATH} ]; then
    SUDO="sudo"
 fi
 
-# In either case, create a module file for Omnitrace
-${SUDO} mkdir -p ${MODULE_PATH}/${TOOL_NAME}
+${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${TOOL_VERSION}.lua
