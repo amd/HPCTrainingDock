@@ -97,21 +97,31 @@ LIBDW_FLAGS=""
 # don't use sudo if user has write access to install path
 if [ -w ${INSTALL_PATH} ]; then
    SUDO=""
-   export LIBDW_PATH=$INSTALL_PATH/libdw
-   mkdir libdw_install
-   cd libdw_install
-   apt-get source libdw-dev
-   cd elfutils-*
-   ./configure --prefix=$LIBDW_PATH --disable-libdebuginfod --disable-debuginfod
-   make -j
-   make install
-   export PATH=$PATH:$LIBDW_PATH:$LIBDW_PATH/bin
-   cd ../../
-   rm -rf libdw_install
-   LIBDW_FLAGS="-I$LIBDW_PATH/include -L$LIBDW_PATH/lib -ldw"
+   if [ "${DISTRO}" == "ubuntu" ]; then
+      export LIBDW_PATH=$INSTALL_PATH/libdw
+      mkdir libdw_install
+      cd libdw_install
+      apt-get source libdw-dev
+      cd elfutils-*
+      ./configure --prefix=$LIBDW_PATH --disable-libdebuginfod --disable-debuginfod
+      make -j
+      make install
+      export PATH=$PATH:$LIBDW_PATH:$LIBDW_PATH/bin
+      cd ../../
+      rm -rf libdw_install
+      LIBDW_FLAGS="-I$LIBDW_PATH/include -L$LIBDW_PATH/lib -ldw"
+   else
+      echo " ------ WARNING: your distribution is not ubuntu ------ "
+      echo " ------ WARNING: install will fail if libdw is not found ------ "
+   fi
 else
-   sudo apt-get update
-   sudo apt-get install -y libdw-dev
+   if [ "${DISTRO}" == "ubuntu" ]; then
+      sudo apt-get update
+      sudo apt-get install -y libdw-dev
+   else
+      echo " ------ WARNING: your distribution is not ubuntu ------"
+      echo " ------ WARNING: install will fail if libdw is not found ------ "
+   fi
 fi
 
 echo ""
