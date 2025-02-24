@@ -93,6 +93,7 @@ else
    INSTALL_PATH="/opt/rocm-${ROCM_VERSION}/rocprofiler-sdk"
 fi
 
+LIBDW_FLAGS=""
 # don't use sudo if user has write access to install path
 if [ -w ${INSTALL_PATH} ]; then
    SUDO=""
@@ -107,9 +108,10 @@ if [ -w ${INSTALL_PATH} ]; then
    export PATH=$PATH:$LIBDW_PATH:$LIBDW_PATH/bin
    cd ../../
    rm -rf libdw_install
+   LIBDW_FLAGS="-I$LIBDW_PATH/include -L$LIBDW_PATH/lib -ldw"
 else
    sudo apt-get update
-   sudo apt-get install libdw-dev   
+   sudo apt-get install -y libdw-dev
 fi
 
 echo ""
@@ -132,7 +134,7 @@ cd rocprofiler-sdk
 
 mkdir build && cd build
 
-cmake   -DROCPROFILER_BUILD_TESTS=ON -DROCPROFILER_BUILD_SAMPLES=ON -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH ..
+cmake   -DROCPROFILER_BUILD_TESTS=ON -DROCPROFILER_BUILD_SAMPLES=ON -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH -DCMAKE_CXX_FLAGS=$LIBDW_FLAGS ..
 make -j
 ${SUDO} make install
 
@@ -151,7 +153,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
         whatis("Name: Rocprofiler-sdk")
         whatis("ROCm Version: ${ROCM_VERSION}")
         whatis("Category: AMD")
-        whatis("Github Branch: ${GITHUB_BRANCH})
+        whatis("Github Branch: ${GITHUB_BRANCH}")
 
         local base = "${INSTALL_PATH}"
 
