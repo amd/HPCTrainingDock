@@ -132,7 +132,6 @@ else
          source /etc/profile.d/z01_lmod.sh
          module load rocm/${ROCM_VERSION}
 
-         HIPFORT_PATH=/opt/rocmplus-${ROCM_VERSION}/hipfort
          ${SUDO} mkdir -p ${HIPFORT_PATH}
 
          git clone --branch rocm-${ROCM_VERSION} https://github.com/ROCm/hipfort.git
