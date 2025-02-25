@@ -126,7 +126,12 @@ else
       echo "============================"
       echo ""
 
-      if  [ "${BUILD_HIPFORT}" = "0" ]; then
+      # don't use sudo if user has write access to install path
+      if [ -w ${HIPFORT_PATH} ]; then
+         SUDO=""
+      fi
+
+      if  [ "${BUILD_HIPFORT}" = "1" ]; then
 
          source /etc/profile.d/lmod.sh
          source /etc/profile.d/z01_lmod.sh
