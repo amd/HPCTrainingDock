@@ -128,36 +128,37 @@ else
 
       if  [ "${BUILD_HIPFORT}" = "0" ]; then
 
-      source /etc/profile.d/lmod.sh
-      source /etc/profile.d/z01_lmod.sh
-      module load rocm/${ROCM_VERSION}
+         source /etc/profile.d/lmod.sh
+         source /etc/profile.d/z01_lmod.sh
+         module load rocm/${ROCM_VERSION}
 
-      HIPFORT_PATH=/opt/rocmplus-${ROCM_VERSION}/hipfort
-      ${SUDO} mkdir -p ${HIPFORT_PATH}
+         HIPFORT_PATH=/opt/rocmplus-${ROCM_VERSION}/hipfort
+         ${SUDO} mkdir -p ${HIPFORT_PATH}
 
-      git clone --branch rocm-${ROCM_VERSION} https://github.com/ROCm/hipfort.git
-      cd hipfort
+         git clone --branch rocm-${ROCM_VERSION} https://github.com/ROCm/hipfort.git
+         cd hipfort
 
-      mkdir build
-      cd build
+         mkdir build && cd build
 
-      if [ "${FC_COMPILER}" = "gfortran" ]; then
-         cmake -DHIPFORT_INSTALL_DIR=${HIPFORT_PATH} ..
-      elif [ "${FC_COMPILER}" = "amdflang-new" ]; then
-         module load amdflang-new-beta-drop
-         cmake -DHIPFORT_INSTALL_DIR=${HIPFORT_PATH} -DHIPFORT_COMPILER=$FC -DHIPFORT_COMPILER_FLAGS="-ffree-form -cpp" ..
-      elif [ "${FC_COM{ILER}" = "cray-ftn" ]; then
-         cmake -DHIPFORT_INSTALL_DIR=$HIPFORT_PATH -DHIPFORT_BUILD_TYPE=RELEASE -DHIPFORT_COMPILER=$(which ftn) -DHIPFORT_COMPILER_FLAGS="-ffree -eT" -DHIPFORT_AR=$(which ar) -DHIPFORT_RANLIB=$(which ranlib) ..
-      else
-         echo " ERROR: requested compiler is not currently among the available options "
-         echo " Please choose one among: gfortran (default), amdflang-new, cray-ftn "
-         exit 1
+         if [ "${FC_COMPILER}" = "gfortran" ]; then
+            cmake -DHIPFORT_INSTALL_DIR=${HIPFORT_PATH} ..
+         elif [ "${FC_COMPILER}" = "amdflang-new" ]; then
+            module load amdflang-new-beta-drop
+            cmake -DHIPFORT_INSTALL_DIR=${HIPFORT_PATH} -DHIPFORT_COMPILER=$FC -DHIPFORT_COMPILER_FLAGS="-ffree-form -cpp" ..
+         elif [ "${FC_COMPILER}" = "cray-ftn" ]; then
+            cmake -DHIPFORT_INSTALL_DIR=$HIPFORT_PATH -DHIPFORT_BUILD_TYPE=RELEASE -DHIPFORT_COMPILER=$(which ftn) -DHIPFORT_COMPILER_FLAGS="-ffree -eT" -DHIPFORT_AR=$(which ar) -DHIPFORT_RANLIB=$(which ranlib) ..
+         else
+            echo " ERROR: requested compiler is not currently among the available options "
+            echo " Please choose one among: gfortran (default), amdflang-new, cray-ftn "
+            exit 1
+         fi
+
+         ${SUDO} make install
+
+         cd ../..
+         ${SUDO} rm -rf hipfort
+
       fi
-
-      ${SUDO} make install
-
-      cd ../..
-      ${SUDO} rm -rf hipfort
 
    fi
 
@@ -171,11 +172,11 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis(" hipfc: Wrapper to call Fortran compiler with hipfort. Also calls hipcc for non Fortran files. ")
         whatis(" this hipfort build has been compiled with: $FC_COMPILER. ")
+	load("rocm/${ROCM_VERSION}")
         local fc-compiler = $FC_COMPILER
         if fc-compiler == "amdflang-new" then
 		load("amdflang-new-beta-drop")
         end
-	load("rocm/${ROCM_VERSION}")
 	prepend_path("PATH","${HIPFORT_PATH}/bin")
 EOF
 
