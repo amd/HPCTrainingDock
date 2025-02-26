@@ -177,8 +177,11 @@ else
 	whatis(" hipfc: Wrapper to call Fortran compiler with hipfort. Also calls hipcc for non Fortran files. ")
         whatis(" this hipfort build has been compiled with: $FC_COMPILER. ")
 	load("rocm/${ROCM_VERSION}")
-        local fc-compiler = $FC_COMPILER
-        if fc-compiler == "amdflang-new" then
+        append_path("LD_LIBRARY_PATH","${HIPFORT_PATH}/lib")
+        setenv("LIBS","-L${HIPFORT_PATH}/lib -lhipfort-amdgcn.a")
+        setenv("HIPFORT_PATH","${HIPFORT_PATH}")
+        local fc_compiler = "${FC_COMPILER}"
+        if fc_compiler == "amdflang-new" then
 		load("amdflang-new-beta-drop")
         end
 	prepend_path("PATH","${HIPFORT_PATH}/bin")
