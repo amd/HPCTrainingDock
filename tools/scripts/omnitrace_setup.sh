@@ -282,6 +282,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${TOOL_VERSION}.lua
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPATH", pathJoin(base, "include"))
 	prepend_path("PATH", pathJoin(base, "bin"))
+        prepend_path("PYTHONPATH",pathJoin(base,"lib/python3.10/site-packages"))
 	prepend_path("INCLUDE", pathJoin(base, "include"))
 	setenv("${TOOL_CONFIG}_PATH", base)
 	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
