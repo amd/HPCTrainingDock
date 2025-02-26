@@ -174,7 +174,7 @@ else
 
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
-	whatis(" hipfc: Wrapper to call Fortran compiler with hipfort. Also calls hipcc for non Fortran files. ")
+	whatis(" hipfort module ")
         whatis(" this hipfort build has been compiled with: $FC_COMPILER. ")
 	load("rocm/${ROCM_VERSION}")
         append_path("LD_LIBRARY_PATH","${HIPFORT_PATH}/lib")
