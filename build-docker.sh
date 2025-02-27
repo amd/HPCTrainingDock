@@ -589,6 +589,7 @@ do
        --build-arg BUILD_HPCTOOLKIT=${BUILD_HPCTOOLKIT}  \
        --build-arg BUILD_TAU=${BUILD_TAU}  \
        --build-arg BUILD_SCOREP=${BUILD_SCOREP} \
+       --build-arg PYTHON_VERSION=${PYTHON_VERSION}  \
        --build-arg INSTALL_OMNITRACE_RESEARCH=${INSTALL_OMNITRACE_RESEARCH} \
        --build-arg INSTALL_OMNIPERF_RESEARCH=${INSTALL_OMNIPERF_RESEARCH} \
        -t ${DOCKER_USER}/tools:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \

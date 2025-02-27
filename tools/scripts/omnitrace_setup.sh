@@ -10,6 +10,7 @@ DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | t
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 SUDO="sudo"
 ROCM_VERSION=6.0
+PYTHON_VERSION=3.12
 OMNITRACE_VERSION=1.11.3
 TOOL_REPO="https://github.com/ROCm/omnitrace"
 TOOL_NAME="omnitrace"
@@ -90,6 +91,11 @@ do
       "--mpi-module")
           shift
           MPI_MODULE=${1}
+          reset-last
+	  ;;
+      "--python-version")
+          shift
+          PYTHON_VERSION=${1}
           reset-last
 	  ;;
       "--omnitrace-build-from-source")
@@ -282,7 +288,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${TOOL_VERSION}.lua
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPATH", pathJoin(base, "include"))
 	prepend_path("PATH", pathJoin(base, "bin"))
-        prepend_path("PYTHONPATH",pathJoin(base,"lib/python3.10/site-packages"))
+        prepend_path("PYTHONPATH",pathJoin(base,"lib/${PYTHON_VERSION}/site-packages"))
 	prepend_path("INCLUDE", pathJoin(base, "include"))
 	setenv("${TOOL_CONFIG}_PATH", base)
 	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))

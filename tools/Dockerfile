@@ -13,6 +13,7 @@ ARG DOCKER_USER
 # which is the omnitrace image built before this one
 FROM ${DOCKER_USER}/comm:release-base-ubuntu-${DISTRO_VERSION}-rocm-${ROCM_VERSION}
 ARG ROCM_VERSION
+ARG PYTHON_VERSION
 ARG OMNITRACE_BUILD_FROM_SOURCE
 ARG AMDGPU_GFXMODEL
 ARG INSTALL_GRAFANA=0
@@ -33,6 +34,7 @@ COPY tools/scripts/omnitrace_setup.sh /tmp/omnitrace_setup.sh
 RUN /tmp/omnitrace_setup.sh \
         --install-omnitrace_research ${INSTALL_OMNITRACE_RESEARCH} \
        --rocm-version ${ROCM_VERSION} \
+       --python-version ${PYTHON_VERSION} \
        --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
        --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE} && \
     rm /tmp/omnitrace_setup.sh
