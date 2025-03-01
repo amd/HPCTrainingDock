@@ -162,6 +162,8 @@ fi
 # [omnitrace][116] In order to enable PAPI support, run 'echo N | ${SUDO} tee /proc/sys/kernel/perf_event_paranoid' where                   N is <= 2
 if (( `cat /proc/sys/kernel/perf_event_paranoid` > 0 )); then echo "Please do:  echo 0  | ${SUDO} tee /proc/sys/kernel/perf_event_paranoid"; fi
 
+PYTHON_VERSION="3.${PYTHON_VERSION}"
+
 echo ""
 echo "============================"
 echo " Installing ${TOOL_NAME} with:"

@@ -46,13 +46,6 @@ DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | t
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 
-if [[ "${DISTRO}" == "ubuntu" ]]; then
-   if [[ "${DISTRO_VERSION}" == "24.04" ]]; then
-      PYTHON_VERSION="12"
-   fi
-fi
-
-
 tolower()
 {
     echo "$@" | awk -F '\\|~\\|' '{print tolower($1)}';
@@ -365,6 +358,12 @@ do
     n=$((${n} + 1))
     shift
 done
+
+if [[ "${DISTRO}" == "ubuntu" ]]; then
+   if [[ "${DISTRO_VERSION}" == "24.04" ]]; then
+      PYTHON_VERSION="12"
+   fi
+fi
 
 if [ "${BUILD_OPTIONS}" != "" ]; then
    echo "Requesting additional \"${BUILD_OPTIONS}\" build options"
