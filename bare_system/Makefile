@@ -1,11 +1,12 @@
 SHELL:=/bin/bash
-all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly
-.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly
+all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk
+.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
 rocm_omniperf: rocm_omniperf.timestamp
 rocm_omnitrace: rocm_omnitrace.timestamp
+rocprofiler-sdk: rocprofiler-sdk.timestamp
 openmpi: openmpi.timestamp
 mvapich: mvapich.timestamp
 slurm: slurm.timestamp
@@ -84,6 +85,11 @@ rocm_omniperf.timestamp: baseospackages.timestamp rocm.timestamp
 	rocm/scripts/rocm_omniperf_setup.sh \
 	   --rocm-version ${ROCM_VERSION}
 	touch rocm_omniperf.timestamp
+
+rocprofiler-sdk.timestamp: rocm.timestamp
+	rocm/scripts/rocprofiler-sdk_setup.sh \
+	   --rocm-version ${ROCM_VERSION}
+	touch rocprofiler-sdk.timestamp
 
 slurm.timestamp:
 	rocm/scripts/slurm_setup.sh
@@ -269,9 +275,13 @@ hip_tests.timestamp: rocm.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R "HIP_Vector|HIP_Jacobi|^HIP_Stream|HIP_Saxpy"
 	touch hip_tests.timestamp
 
-rocprof_tests.timestamp: rocm.timestamp HPCTrainingExamples
-	cd HPCTrainingExamples/tests/build && ctest -R Rocprof
-	touch rocprof_tests.timestamp
+rocprofv3_tests.timestamp: rocm.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R Rocprofv3
+	touch rocprofv3_tests.timestamp
+
+rocprofiler-sdk_tests.timestamp: rocprofiler-sdk.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R Rocprofv3
+	touch rocprofv3_tests.timestamp
 
 openmp_tests.timestamp: rocm.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R "^OpenMP_"
