@@ -10,7 +10,7 @@ DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | t
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 SUDO="sudo"
 ROCM_VERSION=6.0
-PYTHON_VERSION=3.12
+PYTHON_VERSION=12
 OMNITRACE_VERSION=1.11.3
 TOOL_REPO="https://github.com/ROCm/omnitrace"
 TOOL_NAME="omnitrace"
@@ -36,6 +36,7 @@ usage()
    echo "  --mpi-module [ MPI_MODULE ] default is $MPI_MODULE "
    echo "  --omnitrace-build-from-source [OMNITRACE_BUILD_FROM_SOURCE] default is $OMNITRACE_BUILD_FROM_SOURCE "
    echo "  --install-path [INSTALL_PATH ] default is $INSTALL_PATH "
+   echo "  --python-version [PYTHON_VERSION ] minor version of Python3, default is $PYTHON_VERSION "
    echo "  --install-omnitrace-research [INSTALL_OMNITRACE_RESEARCH] default is $INSTALL_OMNITRACE_RESEARCH "
    echo "  --rocm-version [ ROCM_VERSION ] default is $ROCM_VERSION "
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default is $AMDGPU_GFXMODEL "
@@ -172,6 +173,7 @@ echo "AMDGPU_GFXMODEL is $AMDGPU_GFXMODEL"
 echo "OMNITRACE_BUILD_FROM_SOURCE is $OMNITRACE_BUILD_FROM_SOURCE"
 echo "INSTALL_PATH is $INSTALL_PATH"
 echo "MODULE_PATH is $MODULE_PATH"
+echo "PYTHON_VERSION is 3.$PYTHON_VERSION"
 echo "============================"
 echo ""
 
@@ -208,7 +210,7 @@ if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "0" ] ; then
 	 exit 1
       else
          if  wget -q https://github.com/AMDResearch/omnitrace/releases/download/v${OMNITRACE_VERSION}/omnitrace-install.py && \
-         python3 ./omnitrace-install.py --prefix /opt/rocmplus-${ROCM_VERSION}/omnitrace --rocm "${ROCM_VERSION}" -d ubuntu -v "${DISTRO_VERSION}"; then
+         python3.${PYTHON_VERSION} ./omnitrace-install.py --prefix /opt/rocmplus-${ROCM_VERSION}/omnitrace --rocm "${ROCM_VERSION}" -d ubuntu -v "${DISTRO_VERSION}"; then
             OMNITRACE_PREBUILT_DOWNLOADED=1
          else
             OMNITRACE_PREBUILT_DOWNLOADED=0

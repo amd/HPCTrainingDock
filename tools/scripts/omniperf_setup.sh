@@ -1,10 +1,17 @@
 #!/bin/bash
 
 ROCM_VERSION=6.0
-AMD_STAGING=0
+GITHUB_BRANCH="amd-staging"
 REPLACE=0
-INSTALL_OMNIPERF_RESEARCH=0
+INSTALL_ROCPROF_COMPUTE_FROM_SOURCE=0
+PYTHON_VERSION=12
 SUDO="sudo"
+TOOL_NAME="rocprofiler-compute"
+TOOL_REPO="https://github.com/ROCm/${TOOL_NAME}"
+MODULE_PATH="/etc/lmod/modules/ROCmPlus-AMDResearchTools/${TOOL_NAME}"
+MODULE_PATH_INPUT=""
+INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/${TOOL_NAME}-${GITHUB_BRANCH}"
+INSTALL_PATH_INPUT=""
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
@@ -14,10 +21,12 @@ usage()
 {
    echo "Usage:"
    echo "  --help: display this usage information"
-   echo "  --install_omniperf_research: [INSTALL_OMNIPERF_RESEARCH default is false]"
+   echo "  --install-path: default is: $INSTALL_PATH"
+   echo "  --python-version: minor version of Python3, default is: $PYTHON_VERSION"
+   echo "  --module-path: default is: $MODULE_PATH"
+   echo "  --install-rocprof-compute-from-source: default is $INSTALL_ROCPROF_COMPUTE_FROM_SOURCE"
    echo "  --rocm-version: default is $ROCM_VERSION"
-   echo "  --amd-staging: set to 1 to build the amd-staging branch, default is 0"
-   echo "  --replace: set to 1 to remove existing installation directory, default is 0"
+   echo "  --github-branch: default is $GITHUB_BRANCH"
    exit 1
 }
 
@@ -42,9 +51,9 @@ do
           shift
           usage
 	  ;;
-      "--install-omniperf_research")
+      "--install-rocporf-compute-from-source")
           shift
-          INSTALL_OMNIPERF_RESEARCH=${1}
+          INSTALL_ROCPROF_COMPUTE_FROM_SOURCE=${1}
           reset-last
           ;;
       "--rocm-version")
@@ -52,14 +61,24 @@ do
           ROCM_VERSION=${1}
 	  reset-last
           ;;
-      "--amd-staging")
+      "--install-path")
           shift
-          AMD_STAGING=${1}
-          reset-last
+          INSTALL_PATH=${1}
+	  reset-last
           ;;
-      "--replace")
+      "--module-path")
           shift
-          REPLACE=${1}
+          MODULE_PATH=${1}
+	  reset-last
+          ;;
+      "--python-version")
+          shift
+          PYTHON_VERSION=${1}
+	  reset-last
+          ;;
+      "--github-branch")
+          shift
+          GITHUB_BRANCH=${1}
           reset-last
           ;;
       "--*")
@@ -73,112 +92,107 @@ do
    shift
 done
 
+if [ "${INSTALL_PATH_INPUT}" != "" ]; then
+   INSTALL_PATH=${INSTALL_PATH_INPUT}
+else
+   # override path in case ROCM_VERSION has been supplied as input
+   INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/${TOOL_NAME}"
+fi
+
+if [ "${MODULE_PATH_INPUT}" != "" ]; then
+   MODULE_PATH=${MODULE_PATH_INPUT}
+fi
+
+# don't use sudo if user has write access to install path
+if [ -w ${INSTALL_PATH} ]; then
+   SUDO=""
+fi
+
 echo ""
 echo "====================================="
-echo "Installing OmniPerf:"
+echo "Installing ${TOOL_NAME}:"
 echo "ROCM_VERSION is $ROCM_VERSION"
+echo "INSTALL_PATH is $INSTALL_PATH"
+echo "MODULE_PATH is $MODULE_PATH"
+echo "GITHUB_BRANCH is $GITHUB_BRANCH"
+echo "PYTHON_VERSION is 3.$PYTHON_VERSION"
 echo "====================================="
 echo ""
 
-if [[ "$INSTALL_OMNIPERF_RESEARCH" == "0" ]];then
+if [[ "$INSTALL_ROCPROF_COMPUTE_FROM_SOURCE" == "0" ]];then
+   echo " The script is aborting due to the value of the INSTALL_ROCPORF_COMPUTE_FROM_SOURCE flag: $INSTALL_ROCPROF_COMPUTE_FROM_SOURCE	"
+   echo " Please supply this option when running the script: --install-rocprof-compute-from-source 1"
    exit
 fi
 
-INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0
+git clone -b ${GITHUB_BRANCH} https://github.com/ROCm/rocprofiler-compute
+cd rocprofiler-compute
 
-if [ -d "$INSTALL_DIR" ]; then
-   if [ "$REPLACE" != 1 ]; then
-      echo "Installation directory $INSTALLATION_DIR exists and replace option is false"
-      echo "Exiting"
-      exit
-   else
-      ${SUDO} rm -rf ${INSTALLATION_DIR}
-   fi
-fi
-
-set -v
-if [ "$AMD_STAGING" = 1 ]; then
-   git clone -b amd-staging https://github.com/ROCm/rocprofiler-compute
-   cd omniperf
-else
-   wget -q wget https://github.com/ROCm/rocprofiler-compute/releases/download/v2.0.0-RC1/omniperf-2.0.0-RC1.tar.gz
-   tar xfz omniperf-2.0.0-RC1.tar.gz
-   cd ./omniperf-2.0.0-RC1
-fi
-
-${SUDO} mkdir -p ${INSTALL_DIR}
+${SUDO} mkdir -p ${INSTALL_PATH}
 if [[ "${USER}" != "root" ]]; then
-   ${SUDO} chmod a+w ${INSTALL_DIR}
+   ${SUDO} chmod a+w ${INSTALL_PATH}
 fi
 
-sed -i '152i \                                            .astype(str)' src/utils/tty.py
-python3 -m pip install -t ${INSTALL_DIR}/python-libs -r requirements.txt --upgrade
-python3 -m pip install -t ${INSTALL_DIR}/python-libs pytest --upgrade
+python3.${PYTHON_VERSION} -m pip install -t ${INSTALL_PATH}/python-libs -r requirements.txt --upgrade
+python3.${PYTHON_VERSION} -m pip install -t ${INSTALL_PATH}/python-libs pytest --upgrade
 mkdir build && cd build
-cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}/ \
+cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_PATH}/ \
       -DCMAKE_BUILD_TYPE=Release \
-      -DPYTHON_DEPS=${INSTALL_DIR}/python-libs \
-      -DMOD_INSTALL_PATH=${INSTALL_DIR}/modulefiles ..
+      -DPYTHON_DEPS=${INSTALL_PATH}/python-libs \
+      -DMOD_INSTALL_PATH=${INSTALL_PATH}/modulefiles ..
 ${SUDO} make install
 cd ../..
-rm -rf omniperf-2.0.0-RC1 omniperf-2.0.0-RC1.tar.gz omniperf
+rm -rf rocprofiler-compute
 
 if [[ "${USER}" != "root" ]]; then
-   ${SUDO} chmod go-w ${INSTALL_DIR}
+   ${SUDO} chmod go-w ${INSTALL_PATH}
 fi
 
-${SUDO} sed -i -e 's/ascii/utf-8/' /opt/rocmplus-*/omniperf-*/bin/utils/specs.py
+# install roofline binary
+export ROOFLINE_BIN=$INSTALL_PATH/roofline
+git clone https://github.com/ROCm/rocm-amdgpu-bench.git
+cd rocm-amdgpu-bench
+mkdir build && cd build
+cmake -DCMAKE_INSTALL_PREFIX=$ROOFLINE_BIN ..
+make
+${SUDO} make install
+cd ../..
+rm -rf rocm-amdgpu-bench
 
-# Create a module file for Mvapich
-export MODULE_PATH=/etc/lmod/modules/ROCmPlus-AMDResearchTools/omniperf
-
-if [ -d "$MODULE_PATH" ]; then
-   if [ "$REPLACE" != 1 ]; then
-      echo "Installation directory $MODULE_PATH exists and replace option is false"
-      echo "Exiting"
-      exit
-   else
-      ${SUDO} rm -rf ${MODULE_PATH}/2.0.0*.lua 
-   fi
+# Create a module file for ${TOOL_NAME}
+if [ ! -w ${MODULE_PATH} ]; then
+   SUDO="sudo"
 fi
-
 
 ${SUDO} mkdir -p ${MODULE_PATH}
 
-if [ "$AMD_STAGING" = 1 ]; then
-   MODULE_VERSION=2.0.0-dev.lua
-else
-   MODULE_VERSION=2.0.0.lua
-fi
-
-# The - option suppresses tabs
-cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${MODULE_VERSION}
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GITHUB_BRANCH}
 	local help_message = [[
 
-	Omniperf is an open-source performance analysis tool for profiling
+	${TOOL_NAME} is an open-source performance analysis tool for profiling
 	machine learning/HPC workloads running on AMD MI GPUs.
 
-	Version 2.0.0
+	Source cloned from branch ${GITHUB_BRANCH}
 	]]
 
 	help(help_message,"\n")
 
-	whatis("Name: omniperf")
-	whatis("Version: 2.0.0")
+	whatis("Name: ${TOOL_NAME}")
+	whatis("Github Branch: ${GITHUB_BRANCH}")
 	whatis("Keywords: Profiling, Performance, GPU")
 	whatis("Description: tool for GPU performance profiling")
-	whatis("URL: https://github.com/AMDResearch/omniperf")
+	whatis("URL: https://github.com/ROCm/rocprofiler-compute")
 
 	-- Export environmental variables
-	local topDir="/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0"
-	local binDir="/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0/bin"
-	local shareDir="/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0/share"
-	local pythonDeps="/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0/python-libs"
-	local roofline="/opt/rocmplus-${ROCM_VERSION}/omniperf-2.0.0/bin/utils/rooflines/roofline-ubuntu20_04-mi200-rocm5"
+	local topDir="${INSTALL_PATH}
+	local binDir="${INSTALL_PATH}/bin"
+	local shareDir="${INSTALL_PATH}/share"
+	local pythonDeps="${INSTALL_PATH}/python-libs"
+	local roofline="${ROOFLINE_BIN}"
 
-	setenv("OMNIPERF_DIR",topDir)
-	setenv("OMNIPERF_BIN",binDir)
-	setenv("OMNIPERF_SHARE",shareDir)
+	setenv("${TOOL_NAME}_DIR",topDir)
+	setenv("${TOOL_NAME}_BIN",binDir)
+	setenv("${TOOL_NAME}_SHARE",shareDir)
 	setenv("ROOFLINE_BIN",roofline)
 
 	-- Update relevant PATH variables
