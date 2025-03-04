@@ -10,34 +10,32 @@ ARG ROCM_VERSION
 ARG DOCKER_USER
 
 # This image will be built on top of the image below
-# which is the omnitrace image built before this one
+# which is the communication packages image built before this one
 FROM ${DOCKER_USER}/comm:release-base-ubuntu-${DISTRO_VERSION}-rocm-${ROCM_VERSION}
 ARG ROCM_VERSION
 ARG PYTHON_VERSION
-ARG OMNITRACE_BUILD_FROM_SOURCE
 ARG AMDGPU_GFXMODEL
 ARG INSTALL_GRAFANA=0
 ARG BUILD_HPCTOOLKIT
 ARG BUILD_TAU
 ARG BUILD_SCOREP
-ARG INSTALL_OMNITRACE_RESEARCH
-ARG INSTALL_OMNIPERF_RESEARCH
+ARG INSTALL_ROCPROF_SYS_FROM_SOURCE
+ARG INSTALL_ROCPROF_COMPUTE_FROM_SOURCE
 
 LABEL maintainer="bob.robey@amd.com"
 
 #
-# Install Rocprof-systems (Omnitrace)
+# Install rocprof-sys (or omnitrace depending on ROCm version)
 #
 
-COPY tools/scripts/omnitrace_setup.sh /tmp/omnitrace_setup.sh
+COPY tools/scripts/rocprof-sys_setup.sh /tmp/rocprof-sys_setup.sh
 
-RUN /tmp/omnitrace_setup.sh \
-        --install-omnitrace_research ${INSTALL_OMNITRACE_RESEARCH} \
+RUN /tmp/rocprof-sys_setup.sh \
        --rocm-version ${ROCM_VERSION} \
        --python-version ${PYTHON_VERSION} \
        --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
-       --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE} && \
-    rm /tmp/omnitrace_setup.sh
+       --install-rocprof-sys-from-source ${INSTALL_ROCPROF_SYS_FROM_SOURCE} && \
+    rm /tmp/rocprof-sys_setup.sh
 
 ENV LC_ALL C.UTF-8
 
@@ -65,15 +63,16 @@ RUN  /tmp/grafana_setup.sh --install-grafana ${INSTALL_GRAFANA} && \
 ENV PATH=$HOME/.yarn/bin:$HOME/.config/yarn/global/node_modules/.bin:$PATH
 
 #
-# Install Rocprof-compute (Omniperf)
+# Install rocprof-compute (omniperf)
 #
 
-COPY tools/scripts/omniperf_setup.sh /tmp/omniperf_setup.sh
+COPY tools/scripts/rocprof-compute_setup.sh /tmp/rocprof-compute_setup.sh
 
-RUN  /tmp/omniperf_setup.sh \
-        --install-omniperf_research ${INSTALL_OMNIPERF_RESEARCH} \
-        --rocm-version ${ROCM_VERSION} && \
-     rm /tmp/omniperf_setup.sh
+RUN  /tmp/rocprof-compute_setup.sh \
+        --rocm-version ${ROCM_VERSION} \
+        --python-version ${PYTHON_VERSION} \
+        --install-rocprof-sys-from-source ${INSTALL_ROCPROF_SYS_FROM_SOURCE} && \
+     rm /tmp/rocprof-compute_setup.sh
 
 # Overwrite grafana ini file
 COPY tools/docker/grafana.ini /etc/grafana

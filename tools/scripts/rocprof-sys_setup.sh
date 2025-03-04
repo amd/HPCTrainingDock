@@ -1,9 +1,5 @@
 #!/bin/bash
 
-# Variables controlling setup process
-OMNITRACE_BUILD_FROM_SOURCE=0
-INSTALL_OMNITRACE_RESEARCH=0
-
 # Autodetect defaults
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -11,7 +7,6 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 SUDO="sudo"
 ROCM_VERSION=6.0
 PYTHON_VERSION=12
-OMNITRACE_VERSION=1.11.3
 TOOL_REPO="https://github.com/ROCm/omnitrace"
 TOOL_NAME="omnitrace"
 TOOL_CONFIG="OMNITRACE"
@@ -21,6 +16,7 @@ MODULE_PATH_INPUT=""
 INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/${TOOL_NAME}"
 INSTALL_PATH_INPUT=""
 GITHUB_BRANCH="amd-staging"
+INSTALL_ROCPROF_SYS_FROM_SOURCE=0
 
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -32,12 +28,11 @@ usage()
 {
    echo "Usage:"
    echo "  --module-path [ MODULE_PATH ] default is $MODULE_PATH "
-   echo "  --github-branch [GITHUB_BRANCH] default is $GITHUB_BRANCH "
+   echo "  --github-branch [ GITHUB_BRANCH] default is $GITHUB_BRANCH "
    echo "  --mpi-module [ MPI_MODULE ] default is $MPI_MODULE "
-   echo "  --omnitrace-build-from-source [OMNITRACE_BUILD_FROM_SOURCE] default is $OMNITRACE_BUILD_FROM_SOURCE "
-   echo "  --install-path [INSTALL_PATH ] default is $INSTALL_PATH "
-   echo "  --python-version [PYTHON_VERSION ] minor version of Python3, default is $PYTHON_VERSION "
-   echo "  --install-omnitrace-research [INSTALL_OMNITRACE_RESEARCH] default is $INSTALL_OMNITRACE_RESEARCH "
+   echo "  --install-path [ INSTALL_PATH ] default is $INSTALL_PATH "
+   echo "  --python-version [ PYTHON_VERSION ] minor version of Python3, default is $PYTHON_VERSION "
+   echo "  --install-rocprof-sys-from-source [ INSTALL_ROCPROF_SYS_FROM_SOURCE ] default is $INSTALL_ROCPROF_SYS_FROM_SOURCE "
    echo "  --rocm-version [ ROCM_VERSION ] default is $ROCM_VERSION "
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default is $AMDGPU_GFXMODEL "
    echo "  --help: this usage information"
@@ -69,9 +64,9 @@ do
       "--help")
           usage
 	  ;;
-      "--install-omnitrace-research")
+      "--install-rocprof-sys-from-source")
           shift
-          INSTALL_OMNITRACE_RESEARCH=${1}
+          INSTALL_ROCPROF_SYS_FROM_SOURCE=${1}
           reset-last
           ;;
       "--module-path")
@@ -99,11 +94,6 @@ do
           PYTHON_VERSION=${1}
           reset-last
 	  ;;
-      "--omnitrace-build-from-source")
-          shift
-          OMNITRACE_BUILD_FROM_SOURCE=${1}
-          reset-last
-          ;;
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
@@ -163,70 +153,30 @@ fi
 # [omnitrace][116] In order to enable PAPI support, run 'echo N | ${SUDO} tee /proc/sys/kernel/perf_event_paranoid' where                   N is <= 2
 if (( `cat /proc/sys/kernel/perf_event_paranoid` > 0 )); then echo "Please do:  echo 0  | ${SUDO} tee /proc/sys/kernel/perf_event_paranoid"; fi
 
-PYTHON_VERSION="3.${PYTHON_VERSION}"
-
 echo ""
 echo "============================"
 echo " Installing ${TOOL_NAME} with:"
 echo "ROCM_VERSION is $ROCM_VERSION"
 echo "AMDGPU_GFXMODEL is $AMDGPU_GFXMODEL"
-echo "OMNITRACE_BUILD_FROM_SOURCE is $OMNITRACE_BUILD_FROM_SOURCE"
+echo "INSTALL_ROCPROF_SYS_FROM_SOURCE is $INSTALL_ROCPROF_SYS_FROM_SOURCE"
 echo "INSTALL_PATH is $INSTALL_PATH"
 echo "MODULE_PATH is $MODULE_PATH"
 echo "PYTHON_VERSION is 3.$PYTHON_VERSION"
 echo "============================"
 echo ""
 
-if [[ "$INSTALL_OMNITRACE_RESEARCH" == "0" ]];then
-   echo " Exiting due to value of INSTALL_OMNITRACE_RESEARCH being: $INSTALL_OMNITRACE_RESEARCH "
-   echo " Use --install-omnitrace-research 1 as input to enable this installation"
+if [[ "$INSTALL_ROCPROF_SYS_FROM_SOURCE" == "0" ]];then
+   echo " Exiting due to value of INSTALL_ROCPROF_SYS_FROM_SOURCE being: $INSTALL_ROCPROF_SYS_FROM_SOURCE "
+   echo " Use '--install-rocprof-sys-from source 1' as input to enable this installation"
    exit
 fi
 
-if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "0" ] ; then
-   AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
-   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   if [ -f ${CACHE_FILES}/${TOOL_NAME}.tgz ]; then
-      echo ""
-      echo "============================"
-      echo " Installing Cached ${TOOL_NAME}"
-      echo "============================"
-      echo ""
-
-      #install the cached version
-      cd /opt/rocmplus-${ROCM_VERSION}
-      ${SUDO} tar -pxzf ${CACHE_FILES}/${TOOL_NAME}.tgz
-      #${SUDO} chown -R root:root /opt/rocmplus-${ROCM_VERSION}/${TOOL_NAME}
-      if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm ${CACHE_FILES}/${TOOL_NAME}.tgz
-      fi
-   else
-      result=`echo ${ROCM_VERSION} | awk '$1>6.2.9'` && echo $result
-      if [[ "${result}" ]]; then
-	 echo " ---------------- ERROR ---------------- "
-         echo " You are checking for a pre-build omnitrace but ROCm version is above 6.2.4 "
-	 echo " You should either install rocprofiler-systems with sudo apt-get roprofiler-systems "
-	 echo " Or from source with this script specifying --omnitrace-build-from-source 1 "
-	 exit 1
-      else
-         if  wget -q https://github.com/AMDResearch/omnitrace/releases/download/v${OMNITRACE_VERSION}/omnitrace-install.py && \
-         python3.${PYTHON_VERSION} ./omnitrace-install.py --prefix /opt/rocmplus-${ROCM_VERSION}/omnitrace --rocm "${ROCM_VERSION}" -d ubuntu -v "${DISTRO_VERSION}"; then
-            OMNITRACE_PREBUILT_DOWNLOADED=1
-         else
-            OMNITRACE_PREBUILT_DOWNLOADED=0
-            OMNITRACE_BUILD_FROM_SOURCE=1
-         fi
-      fi
-   fi
-fi
-
-if [ "${OMNITRACE_BUILD_FROM_SOURCE}" = "1" ] ; then
+if [ "${INSTALL_ROCPROF_SYS_FROM_SOURCE}" = "1" ] ; then
    # Load the ROCm version for this build
    source /etc/profile.d/lmod.sh
    source /etc/profile.d/z01_lmod.sh
    module load rocm/${ROCM_VERSION}
    module load ${MPI_MODULE}
-   TOOL_VERSION="amd-staging"
 
    CPU_TYPE=zen3
    if [ "${AMDGFX_GFXMODEL}" = "gfx1030" ]; then
@@ -278,9 +228,9 @@ fi
 ${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${TOOL_VERSION}.lua
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GITHUB_BRANCH}.lua
 	whatis("Name: ${TOOL_NAME}")
-	whatis("Version: ${TOOL_VERSION}")
+	whatis("Installed from Github branch: ${GITHUB_BRANCH}")
 	whatis("Category: AMD")
 	whatis("${TOOL_NAME}")
 
@@ -292,7 +242,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${TOOL_VERSION}.lua
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPATH", pathJoin(base, "include"))
 	prepend_path("PATH", pathJoin(base, "bin"))
-        prepend_path("PYTHONPATH",pathJoin(base,"lib/${PYTHON_VERSION}/site-packages"))
+        prepend_path("PYTHONPATH",pathJoin(base,"lib/python3.${PYTHON_VERSION}/site-packages"))
 	prepend_path("INCLUDE", pathJoin(base, "include"))
 	setenv("${TOOL_CONFIG}_PATH", base)
 	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))

@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
-all: rocm openmpi rocprof-sys rocprof-compute kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk
-.PHONY: baseospackages rocm openmpi mvapich slurm rocprof-sys amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk rocprof-compute
+all: rocm openmpi rocprof-sys_rocm rocprof-sys_source rocprof-compute_rocm rocprof-compute_source kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk
+.PHONY: baseospackages rocm openmpi mvapich slurm rocprof-sys_rocm rocprof-sys_source amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk rocprof-compute_rocm rocprof-compute_source
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
@@ -77,12 +77,12 @@ rocm.timestamp: baseospackages.timestamp # lmod.timestamp
 	touch rocm.timestamp
 
 rocprof-sys_rocm.timestamp: rocm.timestamp
-	rocm/scripts/rocm_omnitrace_setup.sh \
+	rocm/scripts/rocm_rocprof-sys_setup.sh \
 	   --rocm-version ${ROCM_VERSION}
 	touch rocprof-sys_rocm.timestamp
 
 rocprof-compute_rocm.timestamp: rocm.timestamp
-	rocm/scripts/rocm_omniperf_setup.sh \
+	rocm/scripts/rocm_rocprof-compute_setup.sh \
 	   --rocm-version ${ROCM_VERSION}
 	touch rocprof-compute_rocm.timestamp
 
@@ -110,23 +110,23 @@ mvapich.timestamp: rocm.timestamp
 mpi4py.timestamp: openmpi.timestamp rocm.timestamp
 	comm/scripts/mpi4py_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-	   --build-mpi4py ${BUILD_MPI4PY}
+	   --build-mpi4py 1
 	touch mpi4py.timestamp
 
 # From Tools layer
 
 rocprof-sys_source.timestamp: openmpi.timestamp
-	tools/scripts/omnitrace_setup.sh \
+	tools/scripts/rocprof-sys_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
-	   --omnitrace-build-from-source 1\
+	   --install-rocprof-sys-from-source 1
 	touch rocprof-sys_source.timestamp
 
 grafana.timestamp:
 	tools/scripts/grafana_setup.sh
 
 rocprof-compute_source.timestamp: rocm.timestamp
-	tools/scripts/omniperf_setup.sh \
+	tools/scripts/rocprof-compute_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --install-rocprof-compute-from-source 1
 	touch rocprof-compute_source.timestamp
@@ -134,19 +134,19 @@ rocprof-compute_source.timestamp: rocm.timestamp
 tau.timestamp: rocm.timestamp
 	tools/scripts/tau_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-	   --build-tau ${BUILD_TAU}
+	   --build-tau 1
 	touch tau.timestamp
 
 scorep.timestamp: rocm.timestamp
 	tools/scripts/scorep_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-	   --build-scorep ${BUILD_SCOREP}
+	   --build-scorep 1
 	touch scorep.timestamp
 
 hpctoolkit.timestamp: rocm.timestamp
 	tools/scripts/hpctoolkit_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-	   --build-hpctoolkit ${BUILD_HPCTOOLKIT}
+	   --build-hpctoolkit 1
 	touch hpctoolkit.timestamp
 
 # From Training layer
@@ -158,96 +158,96 @@ compiler_setup.sh:
 amd_gcc.timestamp: rocm.timestamp
 	extras/scripts/amd_gcc_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-	   --build-gcc-latest ${BUILD_GCC_LATEST}
+	   --build-gcc-latest 1
 	touch amd_gcc.timestamp
 
 aomp.timestamp: rocm.timestamp
 	extras/scripts/aomp_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-	   --build-aomp-latest ${BUILD_AOMP_LATEST}
+	   --build-aomp-latest 1
 	touch aomp.timestamp
 
 flang-new.timestamp: rocm.timestamp
 	extras/scripts/flang-new_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-	   --build-flang-new ${BUILD_FLANGNEW}
+	   --build-flang-new 1
 	touch flang-new.timestamp
 
 miniconda3.timestamp:
 	extras/scripts/miniconda3_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --python-version ${PYTHON_VERSION} \
-	   --build-miniconda3 ${BUILD_MINICONDA3}
+	   --build-miniconda3 1
 	touch miniconda3.timestamp
 
 miniforge3.timestamp:
 	extras/scripts/miniforge3_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --python-version ${PYTHON_VERSION} \
-	   --build-miniforge3 ${BUILD_MINIFORGE3}
+	   --build-miniforge3 1
 	touch miniforge3.timestamp
 
 hdf5.timestamp:
 	extras/scripts/hdf5_setup.sh \
            --rocm-version ${ROCM_VERSION} \
-           --build-hdf5 ${BUILD_HDF5}
+           --build-hdf5 1
 	touch hdf5.timestamp
 
 netcdf.timestamp: hdf5.timestamp
 	extras/scripts/netcdf_setup.sh \
            --rocm-version ${ROCM_VERSION} \
-           --build-netcdf ${BUILD_NETCDF}
+           --build-netcdf 1
 	touch netcdf.timestamp
 
 hipfort.timestamp: rocm.timestamp
 	extras/scripts/hipfort_setup.sh \
            --rocm-version ${ROCM_VERSION} \
-           --build-hipfort ${BUILD_HIPFORT}
+           --build-hipfort 1
 	touch hipfort.timestamp
 
 hipifly.timestamp: rocm.timestamp
 	extras/scripts/hipifly_setup.sh \
            --rocm-version ${ROCM_VERSION} \
 	   --hipifly-header-path extras/sources/hipifly \
-           --hipifly-module ${HIPIFLY_MODULE}
+           --hipifly-module 1
 	touch hipifly.timestamp
 
 kokkos.timestamp: rocm.timestamp
 	extras/scripts/kokkos_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-	   --build-kokkos ${BUILD_KOKKOS}
+	   --build-kokkos 1
 	touch kokkos.timestamp
 
 cupy.timestamp: rocm.timestamp
 	extras/scripts/cupy_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
-	   --build-cupy ${BUILD_CUPY}
+	   --build-cupy 1
 	touch cupy.timestamp
 
 pytorch.timestamp: rocm.timestamp
 	extras/scripts/pytorch_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
-	   --build-pytorch ${BUILD_PYTORCH}
+	   --build-pytorch 1
 	touch pytorch.timestamp
 
 jax.timestamp: rocm.timestamp
 	extras/scripts/jax_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
-	   --build-jax ${BUILD_JAX}
+	   --build-jax 1
 	touch jax.timestamp
 
 fftw.timestamp:
 	extras/scripts/fftw_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-           --build-fftw ${BUILD_FFTW}
+           --build-fftw 1
 	touch fftw.timestamp
 
 x11vnc.timestamp:
 	extras/scripts/x11vnc_setup.sh \
-           --build-x11vnc ${BUILD_X11VNC}
+           --build-x11vnc 1
 	touch x11vnc.timestamp
 
 apps_setup.timestamp:

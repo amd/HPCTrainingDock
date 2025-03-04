@@ -33,14 +33,13 @@
 : ${HIPIFLY_MODULE:="1"}
 : ${RETRY:=3}
 : ${NO_CACHE:=""}
-: ${OMNITRACE_BUILD_FROM_SOURCE:=0}
 : ${ADMIN_USERNAME:="admin"}
 : ${ADMIN_PASSWORD:=""}
 : ${USE_CACHED_APPS:=0}
 : ${AMDGPU_GFXMODEL:=""}
 : ${INSTALL_GRAFANA:=0}
-: ${INSTALL_OMNIPERF_RESEARCH:=0}
-: ${INSTALL_OMNITRACE_RESEARCH:=0}
+: ${INSTALL_ROCPROF_SYS_FROM_SOURCE:=0}
+: ${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE:=0}
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -135,9 +134,8 @@ usage()
     print_default_option install-grafana "[INSTALL_GRAFANA: 0 or 1]" "install Grafana" "${INSTALL_GRAFANA} (false)"
     print_default_option build-all-latest "[BUILD_ALL_LATEST: 0 or 1]" "build all the additional libraries that need a flag to be built except LLVM latest, GCC latest and CLACC latest" "${BUILD_ALL_LATEST} (false)"
     print_default_option use_cached-apps "[USE_CACHED_APPS: 0 or 1]" "use pre-built gcc and aomp located in CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} directory" "${USE_CACHED_APPS} (false)"
-    print_default_option install-omnitrace-research "[INSTALL_OMNITRACE_RESEARCH: 0 or 1]" "build omnitrace research using pre-built versions" "${INSTALL_OMNITRACE_RESEARCH} (false)"
-    print_default_option omnitrace-build-from-source "[OMNITRACE_BUILD_FROM_SOURCE: 0 or 1]" "build omnitrace research from source instead of using pre-built versions" "${OMNITRACE_BUILD_FROM_SOURCE} (false)"
-    print_default_option install-omniperf-research "[INSTALL_OMNIPERF_RESEARCH: 0 or 1]" "build omniperf research from source" "${INSTALL_OMNIPERF_RESEARCH} (false)"
+    print_default_option install-rocprof-sys-from-source "[INSTALL_ROCPROF_SYS_FROM_SOURCE: 0 or 1]" "build rocprof-sys from source, the default branch is amd-staging" "${INSTALL_ROCPROF_SYS_FROM_SOURCE} (false)"
+    print_default_option install-rocprof-compute-from-source "[INSTALL_ROCPROF_COMPUTE_FROM_SOURCE: 0 or 1]" "build rocprof-compute from source, the default branch is amd-staging" "${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE} (false)"
     print_default_option output-verbosity "[OUTPUT_VERBOSITY]" "show more docker build output" "not set"
     print_default_option distro "[DISTRO: ubuntu|rockylinux|opensuse/leap]" "OS distribution" "autodetected -> ${DISTRO}"
     print_default_option distro-versions "[DISTRO_VERSION] [VERSION...]" "Ubuntu, OpenSUSE, or RHEL release" "autodetected -> ${DISTRO_VERSION}"
@@ -198,16 +196,12 @@ do
             AMDGPU_GFXMODEL="${1}"
             reset-last
             ;;
-        "--omnitrace-build-from-source")
-            OMNITRACE_BUILD_FROM_SOURCE=1
+        "--install-rocprof-sys-from-source")
+            INSTALL_ROCPROF_SYS_FROM_SOURCE=1
             reset-last
             ;;
-        "--install-omnitrace-research")
-            INSTALL_OMNITRACE_RESEARCH=1
-            reset-last
-            ;;
-        "--install-omniperf-research")
-            INSTALL_OMNIPERF_RESEARCH=1
+        "--install-rocprof-compute-from-source")
+            INSTALL_ROCPROF_COMPUTE_FROM_SOURCE=1
             reset-last
             ;;
         "--push")
@@ -384,13 +378,13 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
 	    echo "Setting hpctoolkit build"
             BUILD_HPCTOOLKIT=1
 	    ;;
-         "omnitrace_research")
-	    echo "Setting omnitrace research build"
-            BUILD_OMNITRACE_RESEARCH=1
+         "rocprof-sys")
+	    echo "Setting rocprof-sys install from source"
+            INSTALL_ROCPROF_SYS_FROM_SOURCE=1
 	    ;;
-         "omniperf_research")
-	    echo "Setting omniperf research build"
-            BUILD_OMNIPERF_RESEARCH=1
+         "rocprof-compute")
+	    echo "Setting rocprof-compute install from source"
+            INSTALL_ROCPROF_COMPUTE_FROM_SOURCE=1
 	    ;;
          "hdf5")
 	    echo "Setting hdf5 build"
@@ -504,8 +498,8 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
 	    echo " # optional tool packages"
             echo "   grafana"
             echo "   hpctoolkit"
-            echo "   omnitrace_research"
-            echo "   omniperf_research"
+            echo "   rocprof-sys"
+            echo "   rocprof-compute"
             echo "   scorep"
             echo "   tau"
 	    echo " # optional compiler packages"
@@ -584,13 +578,12 @@ do
     verbose-build docker build ${GENERAL_DOCKER_OPTS} \
        --build-arg AMDGPU_GFXMODEL=\"${AMDGPU_GFXMODEL}\" \
        --build-arg INSTALL_GRAFANA="${INSTALL_GRAFANA}" \
-       --build-arg OMNITRACE_BUILD_FROM_SOURCE=\"${OMNITRACE_BUILD_FROM_SOURCE}\"  \
        --build-arg BUILD_HPCTOOLKIT=${BUILD_HPCTOOLKIT}  \
        --build-arg BUILD_TAU=${BUILD_TAU}  \
        --build-arg BUILD_SCOREP=${BUILD_SCOREP} \
        --build-arg PYTHON_VERSION=${PYTHON_VERSION}  \
-       --build-arg INSTALL_OMNITRACE_RESEARCH=${INSTALL_OMNITRACE_RESEARCH} \
-       --build-arg INSTALL_OMNIPERF_RESEARCH=${INSTALL_OMNIPERF_RESEARCH} \
+       --build-arg INSTALL_ROCPROF_SYS_FROM_SOURCE=${INSTALL_ROCPROF_SYS_FROM_SOURCE} \
+       --build-arg INSTALL_ROCPROF_COMPUTE_FROM_SOURCE=${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE} \
        -t ${DOCKER_USER}/tools:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        -f tools/Dockerfile .
 

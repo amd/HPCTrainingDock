@@ -16,6 +16,7 @@ usage()
 {
    echo "Usage:"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --python-version [ PYTHON_VERSION ] Python3 minor version, default $PYTHON_VERSION"
    echo "  --help: this usage information"
    exit 1
 }
@@ -91,7 +92,7 @@ if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_NAME} ]] ; then
 else
    if [ "${DISTRO}" == "ubuntu" ]; then
       ${SUDO} ${DEB_FRONTEND} apt-get install -q -y ${TOOL_NAME}
-      ${SUDO} python3 -m pip install -t /opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/python-libs -r /opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/requirements.txt
+      ${SUDO} python3.{$PYTHON_VERSION} -m pip install -t /opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/python-libs -r /opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/requirements.txt
    fi
 fi
 

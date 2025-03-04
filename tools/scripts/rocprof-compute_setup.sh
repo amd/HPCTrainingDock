@@ -121,7 +121,7 @@ echo ""
 
 if [[ "$INSTALL_ROCPROF_COMPUTE_FROM_SOURCE" == "0" ]];then
    echo " The script is aborting due to the value of the INSTALL_ROCPORF_COMPUTE_FROM_SOURCE flag: $INSTALL_ROCPROF_COMPUTE_FROM_SOURCE	"
-   echo " Please supply this option when running the script: --install-rocprof-compute-from-source 1"
+   echo " Please supply this option when running the script: '--install-rocprof-compute-from-source 1'"
    exit
 fi
 
