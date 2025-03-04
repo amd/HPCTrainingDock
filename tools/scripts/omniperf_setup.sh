@@ -51,7 +51,7 @@ do
           shift
           usage
 	  ;;
-      "--install-rocporf-compute-from-source")
+      "--install-rocprof-compute-from-source")
           shift
           INSTALL_ROCPROF_COMPUTE_FROM_SOURCE=${1}
           reset-last

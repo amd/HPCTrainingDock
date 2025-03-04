@@ -1,17 +1,17 @@
 SHELL:=/bin/bash
-all: rocm openmpi omnitrace omniperf kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk
-.PHONY: baseospackages rocm openmpi mvapich slurm omnitrace amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk
+all: rocm openmpi rocprof-sys rocprof-compute kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk
+.PHONY: baseospackages rocm openmpi mvapich slurm rocprof-sys amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk rocprof-compute
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
-rocm_omniperf: rocm_omniperf.timestamp
-rocm_omnitrace: rocm_omnitrace.timestamp
+rocprof-compute_rocm: rocprof-compute_rocm.timestamp
+rocprof-sys_rocm: rocprof-sys_rocm.timestamp
 rocprofiler-sdk: rocprofiler-sdk.timestamp
 openmpi: openmpi.timestamp
 mvapich: mvapich.timestamp
 slurm: slurm.timestamp
-omnitrace: omnitrace.timestamp
-omniperf: omniperf.timestamp
+rocprof-sys_source: rocprof-sys_source.timestamp
+rocprof-compute_source: rocprof-compute_source.timestamp
 amd_gcc: amd_gcc.timestamp
 aomp: aomp.timestamp
 fftw: fftw.timestamp
@@ -38,8 +38,8 @@ env_check: env_check.timestamp
 rocm_bandwidth_test: rocm_bandwidth_test.timestamp
 hip_tests: hip_tests.timestamp
 rocprof_tests: rocprof_tests.timestamp
-omniperf_tests: omniperf_tests.timestamp
-omnitrace_tests: omnitrace_tests.timestamp
+rocprof-compute_tests: rocprof-compute_tests.timestamp
+rocprof-sys_tests: rocprof-sys_tests.timestamp
 openmp_tests: openmp_tests.timestamp
 hipstdpar_tests: hipstdpar_tests.timestamp
 rocm_tests: rocm_tests.timestamp
@@ -62,7 +62,7 @@ jax_tests: jax_tests.timestamp
 
 rocm_package: rocm_package.timestamp
 openmpi_package: openmpi_package.timestamp
-omnitrace_package: omnitrace_package.timestamp
+rocprof-sys_source_package: rocprof-sys_source_package.timestamp
 cupy_package: cupy_package.timestamp
 all_packages: all_packages.timestamp
 
@@ -73,18 +73,18 @@ baseospackages.timestamp:
 
 rocm.timestamp: baseospackages.timestamp # lmod.timestamp
 	rocm/scripts/rocm_setup.sh \
-	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' --rocm-version ${ROCM_VERSION} 
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' --rocm-version ${ROCM_VERSION}
 	touch rocm.timestamp
 
-rocm_omnitrace.timestamp: baseospackages.timestamp rocm.timestamp
+rocprof-sys_rocm.timestamp: rocm.timestamp
 	rocm/scripts/rocm_omnitrace_setup.sh \
 	   --rocm-version ${ROCM_VERSION}
-	touch rocm_omnitrace.timestamp
+	touch rocprof-sys_rocm.timestamp
 
-rocm_omniperf.timestamp: baseospackages.timestamp rocm.timestamp
+rocprof-compute_rocm.timestamp: rocm.timestamp
 	rocm/scripts/rocm_omniperf_setup.sh \
 	   --rocm-version ${ROCM_VERSION}
-	touch rocm_omniperf.timestamp
+	touch rocprof-compute_rocm.timestamp
 
 rocprofiler-sdk.timestamp: rocm.timestamp
 	rocm/scripts/rocprofiler-sdk_setup.sh \
@@ -115,20 +115,21 @@ mpi4py.timestamp: openmpi.timestamp rocm.timestamp
 
 # From Tools layer
 
-omnitrace.timestamp: openmpi.timestamp
+rocprof-sys_source.timestamp: openmpi.timestamp
 	tools/scripts/omnitrace_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
-	   --omnitrace-build-from-source ${OMNITRACE_BUILD_FROM_SOURCE}
-	touch omnitrace.timestamp
+	   --omnitrace-build-from-source 1\
+	touch rocprof-sys_source.timestamp
 
 grafana.timestamp:
 	tools/scripts/grafana_setup.sh
 
-omniperf.timestamp: rocm.timestamp
+rocprof-compute_source.timestamp: rocm.timestamp
 	tools/scripts/omniperf_setup.sh \
-	   --rocm-version ${ROCM_VERSION}
-	touch omniperf.timestamp
+	   --rocm-version ${ROCM_VERSION} \
+	   --install-rocprof-compute-from-source 1
+	touch rocprof-compute_source.timestamp
 
 tau.timestamp: rocm.timestamp
 	tools/scripts/tau_setup.sh \
@@ -303,13 +304,21 @@ tau_tests.timestamp: tau.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R TAU
 	touch tau_tests.timestamp
 
-omniperf_tests.timestamp: omniperf.timestamp HPCTrainingExamples
-	cd HPCTrainingExamples/tests/build && ctest -R Omniperf
-	touch omniperf_tests.timestamp
+rocprof-compute_rocm_tests.timestamp: rocprof-compute_rocm.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R Rocprof-compute
+	touch rocprof-compute_rocm_tests.timestamp
 
-omnitrace_tests.timestamp: omnitrace.timestamp HPCTrainingExamples
-	cd HPCTrainingExamples/tests/build && ctest -R Omnitrace
-	touch omnitrace_tests.timestamp
+rocprof-compute_source_tests.timestamp: rocprof-compute_source.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R Rocprof-compute
+	touch rocprof-compute_source_tests.timestamp
+
+rocprof-sys_rocm_tests.timestamp: rocprof-sys_rocm.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R Rocprof-sys
+	touch rocprof-sys_rocm_tests.timestamp
+
+rocprof-sys_source_tests.timestamp: rocprof-sys_source.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R Rocprof-sys
+	touch rocprof-sys_source_tests.timestamp
 
 scorep_tests.timestamp: scorep.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Score-P
@@ -382,13 +391,13 @@ openmpi_package.timestamp: openmpi.timestamp
 	bare_system/deploy_package.sh --selection-string openmpi
 	touch openmpi_package.timestamp
 
-omnitrace_package.timestamp: omnitrace.timestamp
-	bare_system/deploy_package.sh --selection-string omnitrace
-	touch omnitrace_package.timestamp
+rocprof-sys_source_package.timestamp: rocprof-sys_source.timestamp
+	bare_system/deploy_package.sh --selection-string rocprof-sys
+	touch rocprof-sys_source_package.timestamp
 
 cupy_package.timestamp: cupy.timestamp
 	bare_system/deploy_package.sh --selection-string cupy
 	touch cupy_package.timestamp
 
-all_packages.timestamp: rocm_package.timestamp openmpi_package.timestamp omnitrace_package.timestamp cupy_package.timestamp
+all_packages.timestamp: rocm_package.timestamp openmpi_package.timestamp rocprof-sys_source_package.timestamp cupy_package.timestamp
 	touch all_packages.timestamp
