@@ -71,7 +71,7 @@ COPY tools/scripts/rocprof-compute_setup.sh /tmp/rocprof-compute_setup.sh
 RUN  /tmp/rocprof-compute_setup.sh \
         --rocm-version ${ROCM_VERSION} \
         --python-version ${PYTHON_VERSION} \
-        --install-rocprof-sys-from-source ${INSTALL_ROCPROF_SYS_FROM_SOURCE} && \
+        --install-rocprof-compute-from-source ${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE} && \
      rm /tmp/rocprof-compute_setup.sh
 
 # Overwrite grafana ini file

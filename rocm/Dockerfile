@@ -56,7 +56,7 @@ RUN  /tmp/rocm_rocprof_sys_setup.sh --rocm-version ${ROCM_VERSION} --python-vers
 
 COPY rocm/scripts/rocm_rocprof-compute_setup.sh /tmp/rocm_rocprof-compute_setup.sh
 
-RUN  /tmp/rocm_rocprof-compute_setup.sh --rocm-version ${ROCM_VERSION} && \
+RUN  /tmp/rocm_rocprof-compute_setup.sh --rocm-version ${ROCM_VERSION} --python-version ${PYTHON_VERSION} && \
      rm /tmp/rocm_rocprof-compute_setup.sh
 
 USER root
