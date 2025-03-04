@@ -45,6 +45,11 @@ do
           ROCM_VERSION=${1}
           reset-last
           ;;
+      "--python-version")
+          shift
+          PYTHON_VERSION=${1}
+          reset-last
+          ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
