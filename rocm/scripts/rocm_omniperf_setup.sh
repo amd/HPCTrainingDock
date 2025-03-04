@@ -63,13 +63,11 @@ if [[ "${result}" == "" ]]; then # ROCM_VERSION < 6.3
    TOOL_EXEC_NAME=omniperf
    TOOL_NAME_MC=Omniperf
    TOOL_NAME_UC=OMNIPERF
-   ROOFLINE_PATH=/opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/bin/utils/rooflines/roofline-ubuntu20_04-mi200-rocm5
 else
    TOOL_NAME=rocprofiler-compute
    TOOL_EXEC_NAME=rocprof-compute
    TOOL_NAME_MC=Rocprofiler-compute
    TOOL_NAME_UC=ROCPROFILER_COMPUTE
-   ROOFLINE_PATH=/opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/rocprof_compute_soc/profile_configs/gfx940/roofline
 fi
 
 echo ""
@@ -96,6 +94,17 @@ else
       ${SUDO} python3 -m pip install -t /opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/python-libs -r /opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/requirements.txt
    fi
 fi
+
+# install roofline binary
+export ROOFLINE_BIN=/opt/rocm-${ROCM_VERSION}/roofline
+git clone https://github.com/ROCm/rocm-amdgpu-bench.git
+cd rocm-amdgpu-bench
+mkdir build && cd build
+cmake -DCMAKE_INSTALL_PREFIX=$ROOFLINE_BIN ..
+make
+${SUDO} make install
+cd ../..
+rm -rf rocm-amdgpu-bench
 
 
 if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
@@ -124,7 +133,7 @@ if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
 	local binDir="/opt/rocm-${ROCM_VERSION}/bin"
 	local shareDir="/opt/rocm-${ROCM_VERSION}/share/${TOOL_NAME}"
 	local pythonDeps="/opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/python-libs"
-	local roofline="${ROOFLINE_PATH}"
+	local roofline="${ROOFLINE_BIN}"
 
 	setenv("${TOOL_NAME_UC}_DIR",topDir)
 	setenv("${TOOL_NAME_UC}_BIN",binDir)
