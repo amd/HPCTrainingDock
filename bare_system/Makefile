@@ -38,8 +38,10 @@ env_check: env_check.timestamp
 rocm_bandwidth_test: rocm_bandwidth_test.timestamp
 hip_tests: hip_tests.timestamp
 rocprof_tests: rocprof_tests.timestamp
-rocprof-compute_tests: rocprof-compute_tests.timestamp
-rocprof-sys_tests: rocprof-sys_tests.timestamp
+rocprof-compute_rocm_tests: rocprof-compute_rocm_tests.timestamp
+rocprof-compute_source_tests: rocprof-compute_source_tests.timestamp
+rocprof-sys_rocm_tests: rocprof-sys_rocm_tests.timestamp
+rocprof-sys_source_tests: rocprof-sys_source_tests.timestamp
 openmp_tests: openmp_tests.timestamp
 hipstdpar_tests: hipstdpar_tests.timestamp
 rocm_tests: rocm_tests.timestamp
@@ -305,19 +307,19 @@ tau_tests.timestamp: tau.timestamp HPCTrainingExamples
 	touch tau_tests.timestamp
 
 rocprof-compute_rocm_tests.timestamp: rocprof-compute_rocm.timestamp HPCTrainingExamples
-	cd HPCTrainingExamples/tests/build && ctest -R Rocprof-compute
+	cd HPCTrainingExamples/tests/build && ctest -R Rocprof-compute_ROCm
 	touch rocprof-compute_rocm_tests.timestamp
 
 rocprof-compute_source_tests.timestamp: rocprof-compute_source.timestamp HPCTrainingExamples
-	cd HPCTrainingExamples/tests/build && ctest -R Rocprof-compute
+	cd HPCTrainingExamples/tests/build && ctest -R Rocprof-compute_Source
 	touch rocprof-compute_source_tests.timestamp
 
 rocprof-sys_rocm_tests.timestamp: rocprof-sys_rocm.timestamp HPCTrainingExamples
-	cd HPCTrainingExamples/tests/build && ctest -R Rocprof-sys
+	cd HPCTrainingExamples/tests/build && ctest -R Rocprof-sys_ROCm
 	touch rocprof-sys_rocm_tests.timestamp
 
 rocprof-sys_source_tests.timestamp: rocprof-sys_source.timestamp HPCTrainingExamples
-	cd HPCTrainingExamples/tests/build && ctest -R Rocprof-sys
+	cd HPCTrainingExamples/tests/build && ctest -R Rocprof-sys_Source
 	touch rocprof-sys_source_tests.timestamp
 
 scorep_tests.timestamp: scorep.timestamp HPCTrainingExamples
