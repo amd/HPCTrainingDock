@@ -5,7 +5,7 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 BUILD_PYTORCH=0
 ZSTD_VERSION=1.5.6
 PYTORCH_VERSION=2.6.0
-PYTHON_VERSION=3.12
+PYTHON_VERSION=10
 TORCHVISION_VERSION=0.21.0
 TORCHVISION_HASH="7af6987"
 TORCHAUDIO_VERSION=2.6.0
@@ -31,7 +31,7 @@ usage()
    echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default is $AMDGPU_GFXMODEL"
    echo "--build-pytorch [ BUILD_PYTORCH ] set to 1 to build jax default is 0"
    echo "--pytorch-version [ PYTORCH_VERSION ] version of PyTorch, default is $PYTORCH_VERSION"
-   echo "--python-version [ PYTHON_VERSION ] version of Python, default is $PYTHON_VERSION"
+   echo "--python-version [ PYTHON_VERSION ] minor version of Python3, default is $PYTHON_VERSION"
    echo "--install-path [ INSTALL_PATH ] directory where PyTorch, Torchaudio and Torchvision will be installed, default is $INSTALL_PATH"
    echo "--help: this usage information"
    echo "--module-path [ MODULE_PATH ] default $MODULE_PATH"
