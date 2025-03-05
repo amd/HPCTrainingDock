@@ -7,6 +7,7 @@ INSTALL_ROCPROF_COMPUTE_FROM_SOURCE=0
 PYTHON_VERSION=10
 SUDO="sudo"
 TOOL_NAME="rocprofiler-compute"
+TOOL_CONFIG="ROCPROF_COMPUTE"
 TOOL_REPO="https://github.com/ROCm/${TOOL_NAME}"
 MODULE_PATH="/etc/lmod/modules/ROCmPlus-AMDResearchTools/${TOOL_NAME}"
 MODULE_PATH_INPUT=""
@@ -63,12 +64,12 @@ do
           ;;
       "--install-path")
           shift
-          INSTALL_PATH=${1}
+          INSTALL_PATH_INPUT=${1}
 	  reset-last
           ;;
       "--module-path")
           shift
-          MODULE_PATH=${1}
+          MODULE_PATH_INPUT=${1}
 	  reset-last
           ;;
       "--python-version")
@@ -96,7 +97,7 @@ if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
    # override path in case ROCM_VERSION has been supplied as input
-   INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/${TOOL_NAME}"
+   INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/${TOOL_NAME}-${GITHUB_BRANCH}"
 fi
 
 if [ "${MODULE_PATH_INPUT}" != "" ]; then
@@ -120,7 +121,7 @@ echo "====================================="
 echo ""
 
 if [[ "$INSTALL_ROCPROF_COMPUTE_FROM_SOURCE" == "0" ]];then
-   echo " The script is aborting due to the value of the INSTALL_ROCPORF_COMPUTE_FROM_SOURCE flag: $INSTALL_ROCPROF_COMPUTE_FROM_SOURCE	"
+   echo " The script is aborting due to the value of the INSTALL_ROCPROF_COMPUTE_FROM_SOURCE flag: $INSTALL_ROCPROF_COMPUTE_FROM_SOURCE	"
    echo " Please supply this option when running the script: '--install-rocprof-compute-from-source 1'"
    exit
 fi
@@ -144,10 +145,6 @@ ${SUDO} make install
 cd ../..
 rm -rf rocprofiler-compute
 
-if [[ "${USER}" != "root" ]]; then
-   ${SUDO} chmod go-w ${INSTALL_PATH}
-fi
-
 # install roofline binary
 export ROOFLINE_BIN=$INSTALL_PATH/roofline
 git clone https://github.com/ROCm/rocm-amdgpu-bench.git
@@ -158,6 +155,10 @@ make
 ${SUDO} make install
 cd ../..
 rm -rf rocm-amdgpu-bench
+
+if [[ "${USER}" != "root" ]]; then
+   ${SUDO} chmod go-w ${INSTALL_PATH}
+fi
 
 # Create a module file for ${TOOL_NAME}
 if [ ! -w ${MODULE_PATH} ]; then
@@ -184,15 +185,15 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GITHUB_BRANCH}
 	whatis("URL: https://github.com/ROCm/rocprofiler-compute")
 
 	-- Export environmental variables
-	local topDir="${INSTALL_PATH}
+	local topDir="${INSTALL_PATH}"
 	local binDir="${INSTALL_PATH}/bin"
 	local shareDir="${INSTALL_PATH}/share"
 	local pythonDeps="${INSTALL_PATH}/python-libs"
 	local roofline="${ROOFLINE_BIN}"
 
-	setenv("${TOOL_NAME}_DIR",topDir)
-	setenv("${TOOL_NAME}_BIN",binDir)
-	setenv("${TOOL_NAME}_SHARE",shareDir)
+	setenv("${TOOL_CONFIG}_DIR",topDir)
+	setenv("${TOOL_CONFIG}_BIN",binDir)
+	setenv("${TOOL_CONFIG}_SHARE",shareDir)
 	setenv("ROOFLINE_BIN",roofline)
 
 	-- Update relevant PATH variables
