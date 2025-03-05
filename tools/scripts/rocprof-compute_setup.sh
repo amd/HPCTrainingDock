@@ -147,6 +147,7 @@ rm -rf rocprofiler-compute
 
 # install roofline binary
 export ROOFLINE_BIN=$INSTALL_PATH/roofline
+${SUDO} mkdir -p $ROOFLINE_BIN
 git clone https://github.com/ROCm/rocm-amdgpu-bench.git
 cd rocm-amdgpu-bench
 mkdir build && cd build
@@ -167,7 +168,7 @@ fi
 
 ${SUDO} mkdir -p ${MODULE_PATH}
 
-cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GITHUB_BRANCH}
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GITHUB_BRANCH}.lua
 	local help_message = [[
 
 	${TOOL_NAME} is an open-source performance analysis tool for profiling
