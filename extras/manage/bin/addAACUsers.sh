@@ -349,10 +349,10 @@ do
       if (( "${VERBOSE}" > 2 )); then
          echo "Add groups for access to the GPU (see /dev/dri /dev/kfd)"
          #sudo usermod -a -G video,audio,render,renderalt ${user_name}
-         echo "  sudo usermod -a -G video,audio,render ${user_name}"
+         echo "  sudo usermod -a -G video,audio,render,renderalt ${user_name}"
       fi
       if [ "${DRYRUN}" != 1 ]; then
-         sudo usermod -a -G video,audio,render ${user_name}
+         sudo usermod -a -G video,audio,render,renderalt ${user_name}
       fi
    fi
    # add the ssh key to the users authorized_keys file

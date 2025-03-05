@@ -49,10 +49,10 @@ RUN  /tmp/rocm_setup.sh --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --rocm-version ${RO
 COPY rocm/sources/lua/bash.bashrc /tmp/bash.bashrc
 RUN cat /tmp/bash.bashrc >> /etc/bash.bashrc && rm -f /tmp/bash.bashrc
 
-COPY rocm/scripts/rocm_rocprof_sys_setup.sh /tmp/rocm_rocprof_sys_setup.sh
+COPY rocm/scripts/rocm_rocprof-sys_setup.sh /tmp/rocm_rocprof-sys_setup.sh
 
-RUN  /tmp/rocm_rocprof_sys_setup.sh --rocm-version ${ROCM_VERSION} --python-version ${PYTHON_VERSION} && \
-     rm /tmp/rocm_rocprof_sys_setup.sh
+RUN  /tmp/rocm_rocprof-sys_setup.sh --rocm-version ${ROCM_VERSION} && \
+     rm /tmp/rocm_rocprof-sys_setup.sh
 
 COPY rocm/scripts/rocm_rocprof-compute_setup.sh /tmp/rocm_rocprof-compute_setup.sh
 

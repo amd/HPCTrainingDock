@@ -31,7 +31,7 @@ usage()
    echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default is $AMDGPU_GFXMODEL"
    echo "--build-pytorch [ BUILD_PYTORCH ] set to 1 to build jax default is 0"
    echo "--pytorch-version [ PYTORCH_VERSION ] version of PyTorch, default is $PYTORCH_VERSION"
-   echo "--python-version [ PYTHON_VERSION ] minor version of Python3, default is $PYTHON_VERSION"
+   echo "--python-version [ PYTHON_VERSION ] version of Python, default is $PYTHON_VERSION"
    echo "--install-path [ INSTALL_PATH ] directory where PyTorch, Torchaudio and Torchvision will be installed, default is $INSTALL_PATH"
    echo "--help: this usage information"
    echo "--module-path [ MODULE_PATH ] default $MODULE_PATH"
@@ -118,7 +118,6 @@ ZSTD_PATH=$INSTALL_PATH/zstd
 TRANSFORMERS_PATH=$INSTALL_PATH/transformers
 AOTRITON_PATH=$INSTALL_PATH/aotriton
 PYTORCH_PATH=$INSTALL_PATH/pytorch
-PYTHON_VERSION="3.${PYTHON_VERSION}"
 TORCHVISION_PATH=$INSTALL_PATH/vision
 TORCHAUDIO_PATH=$INSTALL_PATH/audio
 
@@ -270,7 +269,7 @@ else
       # GPU aware MPI
       #module load openmpi
 
-      export PYTHONPATH=${PYTORCH_PATH}/lib/${PYTHON_VERSION}/site-packages:$PYTHONPATH
+      export PYTHONPATH=${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages:$PYTHONPATH
       export _GLIBCXX_USE_CXX11_ABI=1
       export ROCM_HOME=${ROCM_PATH}
       export ROCM_SOURCE_DIR=${ROCM_PATH}
@@ -340,12 +339,12 @@ else
       rm -rf pytorch
       cd /tmp
 
-      export PYTHONPATH=${PYTORCH_PATH}/lib/${PYTHON_VERSION}/site-packages
-      export PYTHONPATH=${TORCHVISION_PATH}/lib/${PYTHON_VERSION}/site-packages/torchvision-${TORCHVISION_VERSION}a0+${TORCHVISION_HASH}-py3.10-linux-x86_64.egg:$PYTHONPATH
-      export PYTHONPATH=${TORCHVISION_PATH}/lib/${PYTHON_VERSION}/site-packages/pillow-${PILLOW_VERSION}-py3.10-linux-x86_64.egg:$PYTHONPATH
-      export PYTHONPATH=${TORCHAUDIO_PATH}/lib/${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.10-linux-x86_64.egg:$PYTHONPATH
-      export PYTHONPATH=${TORCHVISION_PATH}/lib/${PYTHON_VERSION}/site-packages:$PYTHONPATH
-      export PYTHONPATH=${TORCHAUDIO_PATH}/lib/${PYTHON_VERSION}/site-packages:$PYTHONPATH
+      export PYTHONPATH=${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages
+      export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchvision-${TORCHVISION_VERSION}a0+${TORCHVISION_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
+      export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/pillow-${PILLOW_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
+      export PYTHONPATH=${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
+      export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages:$PYTHONPATH
+      export PYTHONPATH=${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages:$PYTHONPATH
 
       git clone --recursive --depth 1 --branch v${TORCHVISION_VERSION} https://github.com/pytorch/vision
       cd vision
@@ -388,11 +387,11 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 
         load("rocm/${ROCM_VERSION}")
         conflict("miniconda3")
-	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/${PYTHON_VERSION}/site-packages/torchvision-${TORCHVISION_VERSION}+${TORCHVISION_HASH}-py3.10-linux-x86_64.egg")
-	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/${PYTHON_VERSION}/site-packages/pillow-${PILLOW_VERSION}-py3.10-linux-x86_64.egg")
-	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}/lib/${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.10-linux-x86_64.egg")
+	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchvision-${TORCHVISION_VERSION}+${TORCHVISION_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
+	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/pillow-${PILLOW_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
+	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
         prepend_path("PYTHONPATH","${TRANSFORMERS_PATH}")
-        prepend_path("PYTHONPATH","${PYTORCH_PATH}/lib/${PYTHON_VERSION}/site-packages")
+        prepend_path("PYTHONPATH","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages")
 EOF
 
 #pip download --only-binary :all: --dest /opt/wheel_files_6.0/pytorch-rocm --no-cache --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/rocm6.0
