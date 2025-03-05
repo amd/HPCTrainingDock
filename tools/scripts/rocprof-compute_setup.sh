@@ -131,7 +131,7 @@ cd rocprofiler-compute
 
 ${SUDO} mkdir -p ${INSTALL_PATH}
 if [[ "${USER}" != "root" ]]; then
-   ${SUDO} chmod a+w ${INSTALL_PATH}
+   ${SUDO} chmod -R a+w ${INSTALL_PATH}
 fi
 
 python3.${PYTHON_VERSION} -m pip install -t ${INSTALL_PATH}/python-libs -r requirements.txt --upgrade
@@ -141,21 +141,9 @@ cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_PATH}/ \
       -DCMAKE_BUILD_TYPE=Release \
       -DPYTHON_DEPS=${INSTALL_PATH}/python-libs \
       -DMOD_INSTALL_PATH=${INSTALL_PATH}/modulefiles ..
-${SUDO} make install
+      make install
 cd ../..
 rm -rf rocprofiler-compute
-
-# install roofline binary
-export ROOFLINE_BIN=$INSTALL_PATH/roofline
-${SUDO} mkdir -p $ROOFLINE_BIN
-git clone https://github.com/ROCm/rocm-amdgpu-bench.git
-cd rocm-amdgpu-bench
-mkdir build && cd build
-cmake -DCMAKE_INSTALL_PREFIX=$ROOFLINE_BIN ..
-make
-${SUDO} make install
-cd ../..
-rm -rf rocm-amdgpu-bench
 
 if [[ "${USER}" != "root" ]]; then
    ${SUDO} chmod go-w ${INSTALL_PATH}
@@ -190,12 +178,12 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GITHUB_BRANCH}.lua
 	local binDir="${INSTALL_PATH}/bin"
 	local shareDir="${INSTALL_PATH}/share"
 	local pythonDeps="${INSTALL_PATH}/python-libs"
-	local roofline="${ROOFLINE_BIN}"
+	-- no need to set: local roofline="${ROOFLINE_BIN}"
 
 	setenv("${TOOL_CONFIG}_DIR",topDir)
 	setenv("${TOOL_CONFIG}_BIN",binDir)
 	setenv("${TOOL_CONFIG}_SHARE",shareDir)
-	setenv("ROOFLINE_BIN",roofline)
+	-- no need to set: setenv("ROOFLINE_BIN",roofline)
 
 	-- Update relevant PATH variables
 	prepend_path("PATH",binDir)
@@ -210,4 +198,5 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GITHUB_BRANCH}.lua
 	--  prereq("mongodb-tools")
 	local home = os.getenv("HOME")
 	setenv("MPLCONFIGDIR",pathJoin(home,".matplotlib"))
+        set_shell_function("omniperf",'${INSTALL_PATH}/bin/rocprof-compute "$@"',"${INSTALL_PATH}/bin/rocprof-compute $*")
 EOF

@@ -246,6 +246,9 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GITHUB_BRANCH}.lua
 	prepend_path("INCLUDE", pathJoin(base, "include"))
 	setenv("${TOOL_CONFIG}_PATH", base)
 	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
+        set_shell_function("omnitrace-avail",'${INSTALL_PATH}/bin/rocprof-sys-avail "$@"',"${INSTALL_PATH}/bin/rocprof-sys-avail $*")
+        set_shell_function("omnitrace-instrument",'${INSTALL_PATH}/bin/rocprof-sys-instrument "$@"',"${INSTALL_PATH}/bin/rocprof-sys-instrument $*")
+        set_shell_function("omnitrace-run",'${INSTALL_PATH}/bin/rocprof-sys-run "$@"',"${INSTALL_PATH}/bin/rocprof-sys-run $*")
 EOF
 
 

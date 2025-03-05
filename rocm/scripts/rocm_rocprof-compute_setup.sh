@@ -136,12 +136,12 @@ if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
 	local binDir="/opt/rocm-${ROCM_VERSION}/bin"
 	local shareDir="/opt/rocm-${ROCM_VERSION}/share/${TOOL_NAME}"
 	local pythonDeps="/opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/python-libs"
-	--- no need to set: local roofline="${ROOFLINE_BIN}"
+	-- no need to set: local roofline="${ROOFLINE_BIN}"
 
 	setenv("${TOOL_NAME_UC}_DIR",topDir)
 	setenv("${TOOL_NAME_UC}_BIN",binDir)
 	setenv("${TOOL_NAME_UC}_SHARE",shareDir)
-	--- no need to set: setenv("ROOFLINE_BIN",roofline)
+	-- no need to set: setenv("ROOFLINE_BIN",roofline)
 
 	-- Update relevant PATH variables
 	prepend_path("PATH",binDir)
