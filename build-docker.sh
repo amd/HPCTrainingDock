@@ -28,6 +28,7 @@
 : ${BUILD_NETCDF:="0"}
 : ${BUILD_X11VNC:="0"}
 : ${BUILD_FLANGNEW:="0"}
+: ${BUILD_OLLAMA:="1"}
 : ${BUILD_HIPFORT:="0"}
 : ${BUILD_ALL_LATEST:="0"}
 : ${HIPIFLY_MODULE:="1"}
@@ -606,6 +607,7 @@ do
        --build-arg BUILD_X11VNC=${BUILD_X11VNC} \
        --build-arg BUILD_FFTW=${BUILD_FFTW} \
        --build-arg BUILD_FLANGNEW=${BUILD_FLANGNEW} \
+       --build-arg BUILD_OLLAMA=${BUILD_OLLAMA} \
        --build-arg HIPIFLY_MODULE=${HIPIFLY_MODULE} \
        --build-arg BUILD_HIPFORT=${BUILD_HIPFORT} \
        --build-arg BUILD_DATE=$(date +'%Y-%m-%dT%H:%M:%SZ') \

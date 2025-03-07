@@ -37,6 +37,7 @@ ARG BUILD_HIPFORT
 ARG BUILD_FFTW
 ARG HIPIFLY_MODULE
 ARG BUILD_FLANGNEW
+ARG BUILD_OLLAMA=1
 ARG USE_CACHED_APPS
 ARG AMDGPU_GFXMODEL=gfx90a
 ARG PYTHON_VERSION
@@ -200,6 +201,15 @@ RUN /tmp/pytorch_setup.sh --build-pytorch ${BUILD_PYTORCH} --rocm-version ${ROCM
 
 RUN echo "At end of pytorch install" && cd /app && ls -l && cd /tmp && ls -l && cd && ls -l
 WORKDIR /app
+
+#
+# Install ollama
+#
+COPY extras/scripts/ollama_setup.sh /tmp/ollama_setup.sh
+
+RUN /tmp/ollama_setup.sh --build-ollama ${BUILD_OLLAMA} && rm /tmp/ollama_setup.sh
+
+WORKDIR /app 
 
 #
 # Install VNC
