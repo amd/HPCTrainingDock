@@ -159,7 +159,7 @@ fi
 
 ${SUDO} mkdir -p ${MODULE_PATH}
 
-cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/rocprofiler-sdk-${ROCM_VERSION}.lua
         whatis("Name: Rocprofiler-sdk")
         whatis("ROCm Version: ${ROCM_VERSION}")
         whatis("Category: AMD")
