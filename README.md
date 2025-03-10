@@ -72,7 +72,7 @@ of AMD GPUs in LLVM docs may help identify compiler support.
 
 # 2. Model Installation Setup Instructions
 
-We currently provide two options for the setup of the software: a container (based on Docker), and a bare system install. The latter can be tested with a container before deployment.  
+We currently provide two options for the setup of the software: a container (based on Docker), and a bare system install. The latter can be tested with a container before deployment.
 
 ## 2.1 Training Docker Container Build Steps
 
@@ -80,10 +80,10 @@ These instructions will setup a container on `localhost` and assume that:
 1. Docker or Podman are installed.
 2. For Docker, your userid is part of the Docker group.
 3. For Docker, you can issue Docker commands without `sudo`.
- 
-### 2.1.1 Building the Four Images of the Container 
+
+### 2.1.1 Building the Four Images of the Container
 The container is set up to pull an OS Docker image depending on the values of the `--distro` and `--distro-versions` input flags.
-On top of this OS image, it will build four different images called `rocm`, `comm`,  `tools` and `extras`. 
+On top of this OS image, it will build four different images called `rocm`, `comm`,  `tools` and `extras`.
 Here is a flowchart of the container installation process:
 <p>
 <img src="figures/container_flowchart.png" \>
@@ -97,7 +97,7 @@ This documentation considers version 6.2.1 of ROCm as an example. The ROCm versi
 
 2. The latest versions from AMD Research that would be used for ROCm releases < 6.2. These can be used by loading: `module load omnitrace/1.11.3`, `module load omniperf/2.0.0`.
 
-Several compilers and other dependencies will be built as part of the images setup (more on this later). First, clone this repo and go into the folder where the Docker build script lives: 
+Several compilers and other dependencies will be built as part of the images setup (more on this later). First, clone this repo and go into the folder where the Docker build script lives:
 
 ```bash
 git clone --recursive git@github.com:amd/HPCTrainingDock.git
@@ -112,12 +112,12 @@ To build the four images, run the following command (note that `<admin>` is set 
 
 To visualize all the input flags that can be provided to the script, run: `./build-docker.sh --help`.
 
-**NOTE**: In some OS cases, when launching the installation scripts it may be necessary to explictly include the  `--distro` option to avoid "7 arguments instead of 1" type of errors. The distribution is auto-detected and is the same as the one from which the script is launched. Hence, if a different one is needed, it is necessary to explicitly specify it with the appropriate input flag: `--distro <distro_name>`.
+**NOTE**: In some OS cases, when launching the installation scripts it may be necessary to explicitly include the  `--distro` option to avoid "7 arguments instead of 1" type of errors. The distribution is auto-detected and is the same as the one from which the script is launched. Hence, if a different one is needed, it is necessary to explicitly specify it with the appropriate input flag: `--distro <distro_name>`.
 
 To show more docker build output, add this option to the build command above:
 
 ```bash
---output-verbosity 
+--output-verbosity
 ```
 
 **NOTE**: The docker build script will try and detect the GPU on the system you are building on, but you can also have it build for a different GPU model than your local GPU, by specifying the target architecture with the `--amdgpu-gfxmodel` option. For instance, to build for the MI200 series data center GPU we would provide this:
@@ -126,7 +126,7 @@ To show more docker build output, add this option to the build command above:
 --amdgpu-gfxmodel=gfx90a
 ```
 
-For the MI200 series, the value to specify is `gfx90a`, for the MI300 series, the value is `gfx942`. Note that you can also build the images on a machine that does not have any GPU hardware (such as your laptop) provided you specify a target hardware with the flag above. 
+For the MI200 series, the value to specify is `gfx90a`, for the MI300 series, the value is `gfx942`. Note that you can also build the images on a machine that does not have any GPU hardware (such as your laptop) provided you specify a target hardware with the flag above.
 
 Omnitrace will by default download a pre-built version. You can also build from source,
 which is useful if the right version of omnitrace is not available as pre-built. To build omnitrace from source, append the following to the build command above:
@@ -138,8 +138,8 @@ which is useful if the right version of omnitrace is not available as pre-built.
 Building extra compilers takes a long time, but a cached option can be used  to shorten subsequent build times, just append these options to the build command above:
 
 ```bash
---build-gcc-option 
---build-aomp-option 
+--build-gcc-option
+--build-aomp-option
 ```
 
 The first one builds the latest version of `gcc` for offloading, the second builds the latest version of `LLVM` for offloading. Once a version of these compilers is built, they can be tarred up and placed in the following directory structure:
@@ -154,16 +154,16 @@ CacheFiles/:
 Then, the cached versions can be installed specifying:
 
 ```bash
---use-cached-apps 
+--use-cached-apps
 ```
 The above flag will allow you to use pre-built `gcc` and `aomp` located in `CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}`.
 
 ### 2.1.2 Previewing the Images
- 
+
 Assuming that the build of the images has been successful, you can see details on the images that have been built by doing:
 
 ```bash
- docker images 
+ docker images
 ```
 which will have an output similar to this one:
 
@@ -188,7 +188,7 @@ To start the container, run:
 docker run -it --device=/dev/kfd --device=/dev/dri --group-add video -p 2222:22 --detach --name Training --rm -v $HOME/Class/training/hostdir:/hostdir --security-opt seccomp=unconfined docker.io/library/training
 ```
 
-**NOTE**: If you are testing the container on a machine that does not have a GPU (such as your laptop), you need to remove the `--device=/dev/kfd` option from the above command. 
+**NOTE**: If you are testing the container on a machine that does not have a GPU (such as your laptop), you need to remove the `--device=/dev/kfd` option from the above command.
 
 You can check what containers are running by running `docker ps`.
 
@@ -207,7 +207,7 @@ kex_exchange_identification: read: Connection reset by peer
 Connection reset by 127.0.0.1 port 2222
 ```
 
-Once you are in, you can startup slurm with the manage script `manage.sh` located in the `bin` directory. To transfer files from your local system to the container, run: 
+Once you are in, you can startup slurm with the manage script `manage.sh` located in the `bin` directory. To transfer files from your local system to the container, run:
 
 ```bash
 rsync -avz -e "ssh -p 2222" <file> <admin>@localhost:<path/to/destination>
@@ -258,7 +258,7 @@ In the figure, it is assumed that your local system is either a *Linux Laptop* o
 ---------------------------------------------------------------------------------------------------------------
 #### Method 1
 4. Access the node that is launching the container using ssh and copy-paste the content of the ssh public key in your local system to `.ssh/authorized_keys` in the node launching the container.
-5. From the container, run `/usr/local/bin/startvnc.sh` which will produce some output, the relevant part will look something like: 
+5. From the container, run `/usr/local/bin/startvnc.sh` which will produce some output, the relevant part will look something like:
 ```bash
 or connect your VNC viewer to localhost:<port_number> with password <password>
 ```
@@ -289,9 +289,9 @@ where `<username>` is the username you use to ssh into the `Container`, and `<po
 
 ---------------------------------------------------------------------------------------------------------------
 
-7. Install `remmina` from terminal: 
+7. Install `remmina` from terminal:
 ```bash
-sudo apt-get update 
+sudo apt-get update
 sudo apt-get install remmina
 ```
 8. Launch the `remmina` GUI from terminal:
@@ -301,13 +301,13 @@ remmina &
 9. From the remmina GUI, click on the icon on the top left corner (the one including the plus sign) and make the following selection:
 ```bash
 Protocol: Remmina VNC Plugin
-Server: localhost:5950 
+Server: localhost:5950
 Username: <username>
 ```
 Then click on the *Advanced* tab, and check the box for *Forget passwords after use*.
 Click on *Save and Connect*, then type the `<password>` noted from Step 5. This will open the Remmina VNC window.
 
-10. In the bottom left of the VNC window, click on the terminal icon to access the terminal from the container. 
+10. In the bottom left of the VNC window, click on the terminal icon to access the terminal from the container.
 Note that desktop directories will be added to your container home.
 
 #### Troubleshooting
@@ -350,7 +350,7 @@ docker system prune -a
 
 ## 2.2 Training Enviroment Install on Bare System
 
-In this section, we provide instrucitons on how to install AMD GPU software on a bare system. This is achieved with the same set of scripts used for the setup of the container, except that instead of being called from within a Dockerfile, they are called from a top level script that does not require the use of Docker. There is however a script called `test_install.sh` that will run a Docker container to test the bare system install. 
+In this section, we provide instructions on how to install AMD GPU software on a bare system. This is achieved with the same set of scripts used for the setup of the container, except that instead of being called from within a Dockerfile, they are called from a top level script that does not require the use of Docker. There is however a script called `test_install.sh` that will run a Docker container to test the bare system install.
 
 To test the bare system install, do:
 
@@ -392,47 +392,47 @@ The `main_install.sh` script calls a series of other scripts to install the soft
 rocm/scripts/baseospackages_setup.sh
 
 // install lmod and create the modulepath
-rocm/scripts/lmod_setup.sh 
+rocm/scripts/lmod_setup.sh
 
 // install ROCm and create ROCm module
-rocm/scripts/rocm_setup.sh 
+rocm/scripts/rocm_setup.sh
 
 // install ROCm Omniperf (if ROCm > 6.1.2) and create module
-rocm/scripts/rocm_omniperf_setup.sh 
+rocm/scripts/rocm_omniperf_setup.sh
 
 // install ROCm Omnitrace (if ROCm > 6.1.2) and create module
-rocm/scripts/rocm_omnitrace_setup.sh 
+rocm/scripts/rocm_omnitrace_setup.sh
 
 // install OpenMPI and create OpenMPI module
-comm/scripts/openmpi_setup.sh 
+comm/scripts/openmpi_setup.sh
 
 // install MVAPICH and create MVAPICH module
-comm/scripts/mvapich_setup.sh 
+comm/scripts/mvapich_setup.sh
 
 // install MPI4PY and create MPI4PY module
-comm/scripts/mpi4py_setup.sh 
+comm/scripts/mpi4py_setup.sh
 
 // install AMD Research Omnitrace and create module
-tools/scripts/omnitrace_setup.sh 
+tools/scripts/omnitrace_setup.sh
 
 // install Grafana (needed for Omniperf)
 tools/scripts/grafana_setup.sh
 
 // install AMD Research Omniperf and create module
-tools/scripts/omniperf_setup.sh 
+tools/scripts/omniperf_setup.sh
 
 // install HPCToolkit and create HPCToolkit module
-tools/scripts/hpctoolkit_setup.sh 
+tools/scripts/hpctoolkit_setup.sh
 
 // install TAU and create TAU module
-tools/scripts/tau_setup.sh 
+tools/scripts/tau_setup.sh
 
 // install Score-P and create Score-P module
-tools/scripts/scorep_setup.sh 
+tools/scripts/scorep_setup.sh
 
 // install Miniconda3 and create Miniconda3 module
 extras/scripts/miniconda3_setup.sh
- 
+
 // install Miniforge3 and create Miniforge3 module
 extras/scripts/miniforge3_setup.sh
 
@@ -443,13 +443,13 @@ extras/scripts/compiler_setup.sh
 extras/scripts/apps_setup_basic.sh
 
 // install CuPy and create CuPy module
-extras/scripts/cupy_setup.sh 
+extras/scripts/cupy_setup.sh
 
 // install JAX and create JAX module
-extras/scripts/jax_setup.sh 
+extras/scripts/jax_setup.sh
 
 // install PyTorch and create PyTorch module
-extras/scripts/pytorch_setup.sh 
+extras/scripts/pytorch_setup.sh
 
 // install additional libs and apps such as valgrind, boost, parmetis, openssl, etc.
 extras/scripts/apps_setup.sh
@@ -489,11 +489,11 @@ Host Makefile
    ProxyJump Remoteserver
    Hostname localhost
    Port 2222
-   User sysadmin 
+   User sysadmin
    ForwardX11 yes
    StrictHostKeyChecking no
    IdentityFile ~/.ssh/id_ed25519 # ssh key file on local system
-``` 
+```
 
 Then, proceed with these steps:
 
@@ -528,29 +528,27 @@ Click on *Save and Connect*, then type the `<password>` noted from Step 8. This 
 
 # 3. Inspecting the Model Installation Environment
 
-The training environment comes with a variety of modules installed, with their necessary dependencies. To inspect the modules available, run `module avail`, which will show you this output (assuming the installation has been performed with ROCm 6.1.2):
+The training environment comes with a variety of modules installed, with their necessary dependencies. To inspect the modules available, run `module avail`, which will show you this output (assuming the installation has been performed with ROCm 6.3.3):
 
 ```bash
------------------------------------------------------------------------ /etc/lmod/modules/Linux ------------------------------------------------------------------------
+------------------------------------------------------------------ /etc/lmod/modules/Linux -------------------------------------------------------------------
    clang/base    clang/14 (D)    clang/15    gcc/base    gcc/11 (D)    gcc/12    gcc/13    miniconda3/24.9.2    miniforge3/24.9.0
 
------------------------------------------------------------------------- /etc/lmod/modules/ROCm ------------------------------------------------------------------------
-   amdclang/-6.3.2    hipfort/6.3.2    omniperf/6.3.2 (D)    omnitrace/6.3.2 (D)    opencl/6.3.2    rocm/6.3.2
+------------------------------------------------------------------- /etc/lmod/modules/ROCm -------------------------------------------------------------------
+   amdclang/18.0.0-6.3.3    hipfort/6.3.3 (D)    opencl/6.3.3    rocm/6.3.3    rocprofiler-compute/6.3.3    rocprofiler-systems/6.3.3
 
--------------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-MPI --------------------------------------------------------------------
-   mpi4py/4.0.1    mvapich/3.0    openmpi/5.0.6-ucc1.3.0-ucx1.17.0-xpmem2.7.3    
+--------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-MPI ---------------------------------------------------------------
+   mpi4py/4.0.1    openmpi/5.0.7-ucc1.3.0-ucx1.18.0
 
-------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-AMDResearchTools --------------------------------------------------------------
-   omniperf/2.0.0    omnitrace/1.11.3
+--------------------------------------------------------- /etc/lmod/modules/ROCmPlus-LatestCompilers ---------------------------------------------------------
+   amdflang-new-beta-drop/rocm-afar-7110-drop-5.3.0    aomp/amdclang-19.0    hipfort/6.3.3
 
--------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-LatestCompilers --------------------------------------------------------------
-   amd-gcc/13.2.0    amdflang-new-beta-drop/rocm-afar-6711-drop-5.1.0    aomp/amdclang-19.0
+--------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-AI ----------------------------------------------------------------
+   cupy/14.0.0a1    jax/0.4.35    pytorch/2.6.0
 
--------------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-AI ---------------------------------------------------------------------
-   cupy/14.0.0a1    jax/0.4.35    pytorch/2.6
-
------------------------------------------------------------------------- /etc/lmod/modules/misc ------------------------------------------------------------------------
-   hpctoolkit/2024.09.26dev    kokkos/4.5.01    scorep/9.0-dev    tau/dev
+------------------------------------------------------------------- /etc/lmod/modules/misc -------------------------------------------------------------------
+   fftw/3.3.10    hipifly/dev                 kokkos/4.5.01         netcdf-fortran/4.6.2-rc1    tau/dev
+   hdf5/1.14.5    hpctoolkit/2024.11.27dev    netcdf-c/4.9.3-rc1    scorep/9.0-dev
 
   Where:
    D:  Default Module
@@ -559,7 +557,7 @@ The training environment comes with a variety of modules installed, with their n
 The modules are searched in the `MODULEPATH` environment variable, which is set during the images creation. To see what environment variables the module is setting, run:
 ```bash
 module show <module>
-``` 
+```
 where `<module>` is the module you want to inspect. For example, `module show cupy` will show (in case ROCm 6.2.1 has been selected at build time):
 
 ```bash
@@ -597,7 +595,7 @@ Once you selected the version you want (let's assume it's 1.10), you can install
 juliaup add 1.10
 ```
 
-The package will be installed in `$HOME/.julia/juliaup/julia-1.10.3+0.x64.linux.gnu` (or later minor version, please check). 
+The package will be installed in `$HOME/.julia/juliaup/julia-1.10.3+0.x64.linux.gnu` (or later minor version, please check).
 
 Next, `cd` into `/etc/lmod/modules` and create a folder for `Julia`:
 
@@ -645,9 +643,9 @@ cd HPCTrainingExamples/tests
 If no `--<key_word>` is specified, all tests will be run. Depending on the installed software, one may want to run only a subset of the tests, e.g., to run only OpenMPI tests do:
 
 ```bash
-./runTests.sh --openmpi 
+./runTests.sh --openmpi
 ```
-Run 
+Run
 ```bash
 ./runTests.sh --help
 ```
@@ -658,8 +656,8 @@ to see what are the possible options.
 To test the installation using the Makefile run:
 
 ```bash
-git clone https://github.com/AMD/HPCTrainingDock 
-cd HPCTrainingDock 
+git clone https://github.com/AMD/HPCTrainingDock
+cd HPCTrainingDock
 ./bare_system/test_install.sh --use-makefile 1
 ```
 **NOTE**: If `--distro` and `--distro-versions` are left out, the test install script will detect the current distro and distro version on the system where the script is being run and use that. If `--rocm-version` is left out, the script also tries to detect the current ROCm version on your system and use that as default. As explained, the above script will automatically get you into a container as `sysdamin`. Once in the container do:
