@@ -129,7 +129,7 @@ if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
 	whatis("Version: ${ROCM_VERSION}")
 	whatis("Keywords: Profiling, Performance, GPU")
 	whatis("Description: tool for GPU performance profiling")
-	whatis("URL: https://github.com/AMDResearch/omniperf")
+	whatis("URL: https://github.com/ROCm/${TOOL_NAME}")
 
 	-- Export environmental variables
 	local topDir="/opt/rocm-${ROCM_VERSION}"
