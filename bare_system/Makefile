@@ -89,7 +89,7 @@ rocprof-compute_rocm.timestamp: rocm.timestamp
 	touch rocprof-compute_rocm.timestamp
 
 rocprofiler-sdk.timestamp: rocm.timestamp
-	rocm/scripts/rocprofiler-sdk_setup.sh \
+	tools/scripts/rocprofiler-sdk_setup.sh \
 	   --rocm-version ${ROCM_VERSION}
 	touch rocprofiler-sdk.timestamp
 
