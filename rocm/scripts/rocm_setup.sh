@@ -403,7 +403,6 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("INCLUDE", pathJoin(base, "include"))
 	setenv("ROCM_PATH", base)
-	setenv("HSA_XNACK", "1")
 	family("GPUSDK")
 EOF
 
