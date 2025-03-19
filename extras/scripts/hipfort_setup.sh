@@ -1,7 +1,7 @@
 #/bin/bash
 
 # Variables controlling setup process
-MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/hipfort
+MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/hipfort_from_source
 BUILD_HIPFORT=0
 ROCM_VERSION=6.0.0
 HIPFORT_PATH="/opt/rocmplus-${ROCM_VERSION}/hipfort"
