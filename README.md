@@ -681,10 +681,16 @@ make rocm_package
 ```
 This make command tars up the `rocm-6.2.1` directory and then the next build it will restore from the tar file.
 
-# 7. Additional Resources
+# 7. Installing HIP Software on Nvidia Machine
+
+HIP portability layer works across different GPU vendors, and one often wants to test their HIP codes on machines without AMD GPUs. In such scenarios, installing the whole ROCm software stack might be too heavyweight solution.
+
+Therefore, we provide multiple example scripts `extras/scripts/build_hip-6.1.0` and `extras/scripts/build_hip-6.3.0`  for installing specific HIP packages from source. Note that these scripts worked for users on a cluster with Intel Xeon Platinum 8360Y CPUs + Nvidia A100 GPUs with SLES 15.6 OS. These scripts have not been thoroughly tested on different systems, but can probably serve as a good starting point for any similar installations.
+
+# 8. Additional Resources
 
 Please see: https://github.com/amd/InfinityHub-CI for a list of instructions on how to run a variety of scientific application codes on AMD GPUs. The repository mostly deals with Docker containers, but some Bare Metal installs are also available.
 
-# 8. Feedback and Contributions
+# 9. Feedback and Contributions
 
 We very much welcome user experience and feedback, please feel free to reach out to us by creating pull requests or opening issues if you consider it necessary. We will get back to you as soon as possible. For information on licenses, please see the `LICENSE.md` file.
