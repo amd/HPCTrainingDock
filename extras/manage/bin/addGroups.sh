@@ -26,18 +26,22 @@ do
       if [ "${DRYRUN}" != 1 ]; then
          sudo groupadd $group_name
       fi
-      if [[ ! -d /shared/$group_name ]]; then
+      if [[ ! -d /Shared/$group_name ]]; then
          echo "Group shared directory at /Shared/$group_name does not exist -- creating it"
          if (( "${VERBOSE}" > 0 )); then
             echo "  sudo mkdir /Shared/$group_name"
-            echo "  sudo chgrp $group_name /Shared/$group_name"
-            echo "  sudo chmod g+rwx /Shared/$group_name"
          fi
          if [ "${DRYRUN}" != 1 ]; then
             sudo mkdir /Shared/$group_name
-            sudo chgrp $group_name /Shared/$group_name
-            sudo chmod g+rwx /Shared/$group_name
          fi
+      fi
+      if (( "${VERBOSE}" > 0 )); then
+         echo "  sudo chgrp $group_name /Shared/$group_name"
+         echo "  sudo chmod g+rwx /Shared/$group_name"
+      fi
+      if [ "${DRYRUN}" != 1 ]; then
+         sudo chgrp $group_name /Shared/$group_name
+         sudo chmod g+rwx /Shared/$group_name
       fi
    else
       echo "Group $group_name already exists in /etc/group"
