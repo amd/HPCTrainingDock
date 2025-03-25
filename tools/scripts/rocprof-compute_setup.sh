@@ -156,7 +156,7 @@ fi
 
 ${SUDO} mkdir -p ${MODULE_PATH}
 
-cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${TOOL_NAME}-${GITHUB_BRANCH}.lua
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GITHUB_BRANCH}.lua
 	local help_message = [[
 
 	${TOOL_NAME} is an open-source performance analysis tool for profiling
