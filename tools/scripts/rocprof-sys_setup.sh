@@ -229,7 +229,7 @@ fi
 ${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${TOOL_NAME}-${GITHUB_BRANCH}.lua
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GITHUB_BRANCH}.lua
 	whatis("Name: ${TOOL_NAME}")
 	whatis("Installed from Github branch: ${GITHUB_BRANCH}")
 	whatis("Category: AMD")
