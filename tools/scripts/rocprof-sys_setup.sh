@@ -140,6 +140,7 @@ if [ -w ${INSTALL_PATH} ]; then
    cd texinfo-7.0.2
    ./configure --prefix=$TEXINFO_PATH && make && make install
    export PATH=$TEXINFO_PATH/bin:$PATH
+   cd ../
    rm -rf texinfo-7.0.2*
 else
    if [ ! -x /usr/bin/gettext ]; then
