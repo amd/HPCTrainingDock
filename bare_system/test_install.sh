@@ -116,6 +116,11 @@ docker build --no-cache ${ADD_OPTIONS} \
              -t ${IMAGE_NAME} \
 	     -f bare_system/Dockerfile .
 
+if [ $? -ne 0 ]; then
+    echo "ERROR: Failed to build Docker image, you might need to manually specify the '--distro' and '--distro-versions'."
+    exit 1
+fi
+
 RHEL_COMPATIBLE=0
 if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
    RHEL_COMPATIBLE=1
