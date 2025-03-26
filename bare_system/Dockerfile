@@ -48,6 +48,12 @@ COPY bare_system/adduser_os.sh /tmp/adduser_os.sh
 RUN /tmp/adduser_os.sh && rm /tmp/adduser_os.sh
 
 USER sysadmin
+
+RUN sudo usermod -aG sudo sysadmin
+
+RUN echo 'sysadmin ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/sysadmin
+RUN sudo chmod 0440 /etc/sudoers.d/sysadmin
+
 ENV HOME=/home/sysadmin
 ENV USER=sysadmin
 WORKDIR /home/sysadmin
