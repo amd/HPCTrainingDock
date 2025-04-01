@@ -1,4 +1,4 @@
-Last review of this README: **October 25, 2024**
+Last review of this README: **April 2, 2025**
 
 # 1. Synopsis
 
@@ -572,7 +572,6 @@ As a simple example, below we show how to install `Julia` as a module within the
 First, install the Julia installation manager Juliaup:
 
 ```bash
-sudo -s
 curl -fsSL https://install.julialang.org | sh
 exit
 ```
@@ -597,10 +596,10 @@ juliaup add 1.10
 
 The package will be installed in `$HOME/.julia/juliaup/julia-1.10.3+0.x64.linux.gnu` (or later minor version, please check).
 
-Next, `cd` into `/etc/lmod/modules` and create a folder for `Julia`:
+Next, `cd` into a directory where you have write access, let's call it `MODULE_PATH` and create a folder for `Julia`:
 
 ```bash
-sudo mkdir Julia
+mkdir $MODULE_PATH/Julia
 ```
 
 Go in the folder just created and create a modulefile (here called `julia.1.10.lua`) with this content (replace `<admin>` with your admin username):
@@ -613,13 +612,13 @@ append_path("PATH", "/home/<admin>/.julia/juliaup/julia-1.10.3+0.x64.linux.gnu/b
 Finally, add the new modulefile location to `MODULEPATH` (needs to be repeated every time you exit the container):
 
 ```bash
-module use --append /etc/lmod/modules/Julia
+module use --append $MODULE_PATH/Julia
 ```
 
 Now, `module avail` will show this additional module:
 
 ```bash
--------------------------------------------------------------------------------- /etc/lmod/modules/Julia --------------------------------------------------------------------------------
+-------------------------------------------------------------------------------- $MODULE_PATH/Julia --------------------------------------------------------------------------------
    julia.1.10
 ```
 
@@ -681,11 +680,11 @@ make rocm_package
 ```
 This make command tars up the `rocm-6.2.1` directory and then the next build it will restore from the tar file.
 
-# 7. Installing HIP Software on Nvidia Machine
+# 7. Installing HIP Software on an Nvidia Machine
 
-HIP portability layer works across different GPU vendors, and one often wants to test their HIP codes on machines without AMD GPUs. In such scenarios, installing the whole ROCm software stack might be too heavyweight solution.
+The HIP portability layer works across different GPU vendors, and one often wants to test their HIP codes on machines without AMD GPUs. In such scenarios, installing the whole ROCm software stack might be too heavyweight a solution.
 
-Therefore, we provide example scripts `extras/scripts/build_hip-6.1.0` and `extras/scripts/build_hip-6.3.0` for installing specific HIP packages from source. Note that these scripts worked for users on a cluster with Intel Xeon Platinum 8360Y CPUs + Nvidia A100 GPUs with SLES 15.6 OS. These scripts have not been thoroughly tested on different systems, but can serve as a good starting point for any similar installations.
+Therefore, we provide example scripts [`extras/scripts/build_hip-6.1.0`](https://github.com/amd/HPCTrainingDock/blob/main/extras/scripts/build_hip-6.1.0.sh) and [`extras/scripts/build_hip-6.3.0`](https://github.com/amd/HPCTrainingDock/blob/main/extras/scripts/build_hip-6.3.0.sh) for installing specific HIP packages from source. Note that these scripts worked for users on a cluster with Intel Xeon Platinum 8360Y CPUs + Nvidia A100 GPUs with SLES 15.6 OS. These scripts have not been thoroughly tested on different systems, but can serve as a good starting point for any similar installations.
 
 # 8. Additional Resources
 
