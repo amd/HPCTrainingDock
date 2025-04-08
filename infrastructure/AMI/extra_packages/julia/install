@@ -1,0 +1,23 @@
+#!/bin/bash -x
+
+export INSTDIR=/opt
+
+export JVER=1
+export JREL=11
+export JSUB=4
+
+export MAJOR=$JVER.$JREL
+export FULL=$MAJOR.$JSUB
+
+export JTAR=julia-$FULL-linux-x86_64.tar.gz
+
+wget https://julialang-s3.julialang.org/bin/linux/x64/$MAJOR/$JTAR
+
+#tar -zxf $JTAR --strip-components=1  -C $INSTDIR
+tar -zxf $JTAR   -C $INSTDIR
+
+cat<<EOF>/etc/profile.d/julia.sh
+export ABLE=$INSTDIR/julia-$FULL
+export PATH=\$ABLE/bin:\$PATH
+export LD_LIBRARY_PATH=\$ABLE/lib:\$LD_LIBRARY_PATH
+EOF
