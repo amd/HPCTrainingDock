@@ -8,6 +8,7 @@ ROCM_VERSION=6.0
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 MPI_MODULE="openmpi"
+SCOREP_VERSION=9.0
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
@@ -22,10 +23,11 @@ usage()
 {
    echo "Usage:"
    echo "  --build-scorep: set to 1 to build Score-P, default is 0"
-   echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/misc/scorep"
-   echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
-   echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
+   echo "  --scorep-version [SCOREP_VERSION] default is $SCOREP_VERSION "
+   echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
+   echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE "
+   echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
+   echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default $AMDGPU_GFXMODEL"
    echo "  --help: this usage information"
    exit 1
 }
@@ -54,6 +56,11 @@ do
       "--build-scorep")
           shift
           BUILD_SCOREP=${1}
+          reset-last
+          ;;
+      "--scorep-version")
+          shift
+          SCOREP_VERSION=${1}
           reset-last
           ;;
       "--help")
@@ -100,7 +107,7 @@ if [ "${BUILD_SCOREP}" = "0" ]; then
 
    echo "SCORE-P will not be built, according to the specified value of BUILD_SCOREP"
    echo "BUILD_SCOREP: $BUILD_SCOREP"
-   exit 
+   exit
 
 else
    if [ -f ${CACHE_FILES}/scorep.tgz ]; then
@@ -129,6 +136,12 @@ else
 
       source /etc/profile.d/lmod.sh
       module load rocm/${ROCM_VERSION}
+      module load amdflang-new-beta-drop
+      if [[ `which amdflang-new | wc -l` -eq 0 ]]; then
+         # if amdflang-new is not found in the path
+         # build with compilers from ROCm
+         module load amdclang
+      fi
 
       SCOREP_PATH=/opt/rocmplus-${ROCM_VERSION}/scorep
       PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
@@ -148,7 +161,7 @@ else
 
       # open permissions to use spack to install PDT
       if [[ "${USER}" != "root" ]]; then
-	 ${SUDO} chmod -R a+rwX ${PDT_PATH} 
+	 ${SUDO} chmod -R a+rwX ${PDT_PATH}
 	 ${SUDO} chmod -R a+rwX ${SCOREP_PATH}
       fi
 
@@ -163,27 +176,23 @@ else
       module load ${MPI_MODULE}
       if [[ `which mpicc | wc -l` -eq 0 ]]; then
          ${SUDO} apt-get update
-         ${SUDO} ${DEB_FRONTEND} apt-get install -q -y libopenmpi-dev  
+         ${SUDO} ${DEB_FRONTEND} apt-get install -q -y libopenmpi-dev
       fi
 
-      wget https://go.fzj.de/scorep-ompt-device-tracing
-      mv scorep-ompt-device-tracing scorep-ompt-device-tracing.tar.gz
-      tar -xvf scorep-ompt-device-tracing.tar.gz
-      cd sources.*
+      wget https://perftools.pages.jsc.fz-juelich.de/cicd/scorep/tags/scorep-${SCOREP_VERSION}/scorep-${SCOREP_VERSION}.tar.gz
+      tar -xvf scorep-${SCOREP_VERSION}.tar.gz
+      cd scorep-${SCOREP_VERSION}
       mkdir build
       cd build
-      export OMPI_CC=$ROCM_PATH/llvm/bin/clang
-      export OMPI_CXX=$ROCM_PATH/llvm/bin/clang++
-      export OMPI_FC=$ROCM_PATH/llvm/bin/flang
       ../configure --with-rocm=$ROCM_PATH  --with-mpi=openmpi  --prefix=$SCOREP_PATH  --with-librocm_smi64-include=$ROCM_PATH/include/rocm_smi \
                    --with-librocm_smi64-lib=$ROCM_PATH/lib --with-libunwind=download --enable-shared --with-libbfd=download --without-shmem  \
-		     CC=$ROCM_PATH/llvm/bin/clang CXX=$ROCM_PATH/llvm/bin/clang++ FC=$ROCM_PATH/llvm/bin/flang CFLAGS=-fPIE
+		   CC=$CC CXX=$CXX FC=$FC CFLAGS=-fPIE
 
       make
       ${SUDO} make install
 
       cd ${CUR_DIR}
-      rm -rf scorep-ompt* sources.*
+      rm -rf scorep-${SCOREP_VERSION}
       rm -rf spack
 
       if [[ "${USER}" != "root" ]]; then
@@ -194,9 +203,11 @@ else
       fi
 
       module unload rocm/${ROCM_VERSION}
+      module unload amdclang
+      module unload amdflang-new-beta-drop
       module unload ${MPI_MODULE}
 
-   fi   
+   fi
 
    # Create a module file for SCORE-P
    ${SUDO} mkdir -p ${MODULE_PATH}

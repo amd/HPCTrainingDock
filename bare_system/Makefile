@@ -139,7 +139,7 @@ tau.timestamp: rocm.timestamp
 	   --build-tau 1
 	touch tau.timestamp
 
-scorep.timestamp: rocm.timestamp
+scorep.timestamp: rocm.timestamp flang-new.timestamp
 	tools/scripts/scorep_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-scorep 1

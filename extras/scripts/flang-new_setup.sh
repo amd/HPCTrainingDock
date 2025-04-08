@@ -6,9 +6,10 @@ MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/amdflang-new-beta-drop
 BUILD_FLANGNEW=0
 ROCM_VERSION=6.0
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_SHORT=$DISTRO
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-ARCHIVE_NAME="rocm-afar-7110-drop-5.3.0"
-ARCHIVE_DIR="rocm-afar-7110-drop-5.3.0"
+ARCHIVE_NAME="rocm-afar-7450-drop-6.0.0"
+ARCHIVE_DIR="rocm-afar-7450-drop-6.0.0"
 
 SUDO="sudo"
 
@@ -99,30 +100,36 @@ echo ""
 if [ "${BUILD_FLANGNEW}" = "0" ]; then
       echo "flang-new will not be build, according to the specified value of BUILD_FLANGNEW"
       echo "BUILD_FLANGNEW: $BUILD_FLANGNEW"
-      exit 
-else  
+      exit
+else
       echo ""
       echo "================================================"
       echo " Archive $ARCHIVE_NAME-${DISTRO} found in $CACHE_FILES"
       echo "         Installing Cached flang-new            "
       echo "================================================"
       echo ""
-	
+
       #install the cached version
-      if [ ! -d "/opt/rocmplus-${ROCM_VERSION}" ]; then
+      if [[ ! -d "/opt/rocmplus-${ROCM_VERSION}" ]]; then
          ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}
       fi
       cd /opt/rocmplus-${ROCM_VERSION}
       ${SUDO} chmod a+w /opt/rocmplus-${ROCM_VERSION}
 
-      wget https://repo.radeon.com/rocm/misc/flang/${ARCHIVE_NAME}-${DISTRO}.tar.bz2
-      tar -xvjf ${ARCHIVE_NAME}-${DISTRO}.tar.bz2
- 
+      if [[ ${DISTRO} == "ubuntu" ]]; then
+         if [[ ${ARCHIVE_NAME} == "rocm-afar-7450-drop-6.0.0" ]]; then
+            DISTRO_SHORT="ubu"
+         fi
+      fi
+
+      wget https://repo.radeon.com/rocm/misc/flang/${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
+      tar -xvjf ${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
+
       ${SUDO} chown -R root:root /opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_DIR}
       ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}
 
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm ${CACHE_FILES}/${ARCHIVE_NAME}-${DISTRO}.tar.bz2
+         ${SUDO} rm ${CACHE_FILES}/${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
       fi
 
       # Create a module file for flang-new
