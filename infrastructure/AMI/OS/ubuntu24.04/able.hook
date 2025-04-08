@@ -1,0 +1,27 @@
+#!/bin/sh -x
+
+# initramfs hook for sios (ramboot)
+
+set -e
+
+# initramfs-tools header
+
+PREREQ=""
+
+prereqs()
+{
+	echo "${PREREQ}"
+}
+
+case "${1}" in
+	prereqs)
+		prereqs
+		exit 0
+		;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+cp -vp  /able_snap.tar.* $DESTDIR
+
+exit 0

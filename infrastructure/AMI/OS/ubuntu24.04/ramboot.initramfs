@@ -1,0 +1,75 @@
+#!/bin/sh -x
+PREREQ=""
+prereqs() {
+  echo "$PREREQ"
+}
+
+AS=__ABLE_SNAP__
+CB=__COMP_BIN__
+
+case $1 in
+prereqs)
+  prereqs
+  exit 0
+  ;;
+esac
+
+if (grep -q break=preunpack /proc/cmdline); then
+  echo "honoring break=preunpack kernel arg"
+  /bin/sh
+fi
+
+if (grep -q debug /proc/cmdline); then
+  env
+fi
+
+if (grep -q rootfstype=ramdisk /proc/cmdline); then
+
+  echo "Creating and mounting ramdisk"
+  mkdir -p ${rootmnt}
+
+  if (grep -q ramdisksize= /proc/cmdline); then
+    RAMDISKSIZE=${ramdisksize}
+  else
+    RAMDISKSIZE=16
+  fi
+  echo "ramdisk size set to " ${RAMDISKSIZE}
+
+  if (grep -q ramdisktype=zram /proc/cmdline); then
+    modprobe -v zram num_devices=1
+    echo ${RAMDISKSIZE}G >/sys/block/zram0/disksize
+    echo ${RAMDISKSIZE}G >/sys/block/zram0/mem_limit
+    mkfs.ext4 -q -m 0 -b 4096 -O sparse_super,dir_index,extent -L root /dev/zram0
+    mount -o relatime -t ext4 /dev/zram0 ${rootmnt}
+  else
+    mount -t tmpfs -o size=${RAMDISKSIZE}G,mode=0755 tmpfs ${rootmnt}
+  fi
+  echo
+
+  echo "Unpacking file system into ramdisk"
+  cd ${rootmnt}
+  /bin/tar -I ${CB} -xSf /${AS} -C ${rootmnt}
+  echo
+
+  if (grep -q image=keep /proc/cmdline); then
+    echo "keeping image"
+    mv -fv /${AS} ${rootmnt}
+  else
+    echo "Removing image"
+    rm -f /${AS}
+    echo
+  fi
+
+  echo "Make sys proc dev"
+  mkdir -p ${rootmnt}/proc
+  mkdir -p ${rootmnt}/sys
+  mkdir -p ${rootmnt}/dev
+  echo
+fi
+
+if (grep -q break=postunpack /proc/cmdline); then
+  echo "honoring break=postunpack kernel arg"
+  /bin/sh
+fi
+
+#exit 0

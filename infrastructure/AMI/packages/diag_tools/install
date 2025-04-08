@@ -1,0 +1,14 @@
+#!/bin/bash
+
+# install errorscraper (https://github.com/AMD-HPC/Scraper) into 
+# image
+
+cp /root/x/{scraper,gendot,gentopo,netgraph} /usr/local/bin/
+
+
+
+
+
+
+
+chmod +x /usr/local/bin/scraper

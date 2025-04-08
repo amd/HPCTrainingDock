@@ -1,0 +1,26 @@
+    1  lsnet 
+    2  ping 1.1.1.1
+    3  lsnet 
+    4  df -h
+    5  ls
+    6  cd scripts/
+    7  ls
+    8  chmod +x local_disk_install.bash 
+    9  less local_disk_install.bash
+   10  parted /dev/sda p
+   11  parted /dev/vda p
+   12  parted /dev/vda mklabel msdos
+   13  parted /dev/vda mkpart xfs primary 1GB 64GB
+   14  parted /dev/vda mkpart primary xfs 1GB 64GB
+   15  mkfs.xfs /dev/vda1
+   16  mkdir /mnt/root
+   17  tar -I /usr/bin/zstd -xf /nyble_snap.tar.zst -C /mnt/root
+   18  rm -rf /mnt/root
+   19  mkdir /mnt/root
+   20  mount /dev/vda1 /mnt/root
+   21  tar -I /usr/bin/zstd -xf /nyble_snap.tar.zst -C /mnt/root
+   22  ls
+   23  ./mount_sys.sh /mnt/root
+   24  chroot /mnt/root
+   25  history
+   26  history > setup.txt

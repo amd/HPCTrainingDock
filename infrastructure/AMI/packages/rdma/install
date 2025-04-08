@@ -1,0 +1,42 @@
+#!/bin/bash -x
+
+set -e
+
+# use distro OFED stack
+
+if [[ -e /etc/debian_version  ]]; then
+	apt-get install -y 	\
+		ibutils 	\
+		ibverbs-utils	\
+		infiniband-diags \
+		rdmacm-utils	\
+		rdma-core	\
+		libibumad-dev	\
+		libibverbs-dev	\
+		libibmad-dev	\
+		librdmacm-dev	\
+		perftest
+				
+fi
+
+
+pushd .
+cd /root/x
+
+if [[ -e /etc/redhat-release ]]; then
+ echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+ yum -y install  pciutils numactl-libs gtk2 atk gcc-gfortran  \
+	tcsh openssl-libs expat lsof ethtool libstdc++ python \
+	make pkgconfig cairo libnl3 glib2 libmnl tcl tk       \
+	fuse-libs systemd-libs pciutils-libs python make      \
+	pkgconfig libnl3 glib2 libmnl libusbx perl-Getopt-Long
+fi
+
+
+popd
+
+
+
+
+
+

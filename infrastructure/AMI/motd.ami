@@ -1,0 +1,9 @@
++----------------------------------------------------------------------------+
+|    #    #     # ###     AMD DC-GPU Machine Image                           |
+|   # #   ##   ##  #      Linux environment                                  |
+|  #   #  # # # #  #         * amdgpu-dkms driver                            |
+| #     # #  #  #  #         * utilities for testing                         |
+| ####### #     #  #         * ROCm installation and development stack       |
+| #     # #     #  #         * node monitoring via web and cli tools         |
+| #     # #     # ###                                                        |
++----------------------------------------------------------------------------+

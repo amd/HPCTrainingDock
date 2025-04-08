@@ -1,0 +1,48 @@
+#!/bin/sh
+
+# initramfs hook for tools (ramboot)
+
+set -e
+
+# initramfs-tools header
+
+PREREQ=""
+
+prereqs()
+{
+	echo "${PREREQ}"
+}
+
+case "${1}" in
+	prereqs)
+		prereqs
+		exit 0
+		;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+# tools hook
+mkdir -p /usr/lib/initramfs-tools/bin
+mkdir -p /usr/lib/initramfs-tools/etc/dhcp
+copy_exec /sbin/mke2fs /sbin
+copy_exec /sbin/mkfs.ext4 /sbin
+copy_exec /sbin/dhclient /sbin
+copy_exec /sbin/ethtool /sbin
+copy_exec /bin/grep /bin
+copy_exec /bin/cat /bin
+copy_exec /bin/tar /bin
+copy_exec /bin/bash /bin
+copy_exec /etc/dhcp/dhclient.conf /etc
+copy_exec /sbin/mount.nfs /sbin
+copy_exec /usr/sbin/showmount /usr/sbin
+copy_exec /lib/x86_64-linux-gnu/libpcre2* /lib/x86_64-linux-gnu/
+copy_exec /usr/lib/x86_64-linux-gnu/libgomp.so.1 /lib/x86_64-linux-gnu/
+copy_exec /usr/bin/pbzip2 /bin
+copy_exec /usr/bin/pigz /bin
+copy_exec /usr/bin/xz /bin
+copy_exec /usr/bin/ldd /bin
+copy_exec /usr/bin/lbzip2 /bin
+copy_exec /usr/bin/zstd /bin
+copy_exec /bin/rsync /bin
+exit 0

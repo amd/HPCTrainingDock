@@ -1,0 +1,72 @@
+#!/bin/bash -x
+#exit 0
+
+r=`id amd`
+if [[ $? != 0 ]]; then
+useradd -m amd
+fi
+sudo usermod -a -G render,video amd
+
+set -e
+
+# baseline install, can use runfile as well
+
+if [[ -e /etc/debian_version  ]]; then
+wget https://repo.radeon.com/amdgpu-install/6.3.3/ubuntu/jammy/amdgpu-install_6.3.60303-1_all.deb
+sudo apt install -y ./amdgpu-install_6.3.60303-1_all.deb
+sudo apt update
+
+sudo apt install -y amdgpu-dkms rocm rocm-validation-suite rocm-bandwidth-test
+
+# get installed version
+export ROCMVER=`cat /opt/rocm/.info/version | cut -d"-" -f1`
+export ROCM_PATH=/opt/rocm-$ROCMVER
+export ROCM_BIN=$ROCM_PATH/bin
+export ROCM_LIB=$ROCM_PATH/lib
+
+
+# fix the alternatives broken-ness
+rm -f /opt/rocm
+ln -s $ROCM_PATH /opt/rocm
+cat<<EOF>/etc/profile.d/amdgpu.sh
+# adjust as needed to point to a different directory
+export ROC_TOP=$ROCM_PATH
+export ROCM_LIB=\$ROCM_PATH/lib
+export ROCM_BIN=\$ROCM_PATH/bin
+export PATH=\$ROCM_TOP:\$PATH
+export LD_LIBRARY_PATH=\$ROCM_LIB:\$LD_LIBRARY_PATH
+export ROCM_PATH=\$ROCM_PATH
+export HIP_PATH=\$ROCM_PATH
+export MANPATH=\$MANPATH:${ROCM_PATH}/share/man:${ROCM_PATH}/lib/llvm/share/
+EOF
+cat /etc/profile.d/amdgpu.sh >> /root/.profile
+
+fi
+
+
+pushd .
+cd /root/x
+
+if ( -e /etc/redhat-release ); then
+echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+wget https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+sudo rpm -ivh -y epel-release-latest-9.noarch.rpm
+sudo crb enable
+sudo yum install kernel-headers kernel-devel
+# See prerequisites. Adding current user to Video and Render groups
+sudo yum install -y https://repo.radeon.com/amdgpu-install/6.3.1/rhel/9.3/amdgpu-install-6.3.6.3.1-1.el9.noarch.rpm
+sudo yum clean all
+sudo yum install -y amdgpu-dkms
+sudo yum install -y rocm
+
+
+fi
+
+
+popd
+
+
+
+
+
+
