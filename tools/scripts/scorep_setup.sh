@@ -186,7 +186,7 @@ else
       cd build
       ../configure --with-rocm=$ROCM_PATH  --with-mpi=openmpi  --prefix=$SCOREP_PATH  --with-librocm_smi64-include=$ROCM_PATH/include/rocm_smi \
                    --with-librocm_smi64-lib=$ROCM_PATH/lib --with-libunwind=download --enable-shared --with-libbfd=download --without-shmem  \
-		   CC=$CC CXX=$CXX FC=$FC CFLAGS=-fPIE
+		   --with-libgotcha=download CC=$CC CXX=$CXX FC=$FC CFLAGS=-fPIE
 
       make
       ${SUDO} make install
