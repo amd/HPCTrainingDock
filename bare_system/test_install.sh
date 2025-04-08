@@ -63,12 +63,14 @@ do
       "--distro")
           shift
           DISTRO=${1}
-          last() { DISTRO="${DISTRO} ${1}"; }
+          reset-last
+          #last() { DISTRO="${DISTRO} ${1}"; }
           ;;
       "--distro-versions")
           shift
           DISTRO_VERSION=${1}
-          last() { DISTRO_VERSION="${DISTRO_VERSION} ${1}"; }
+          reset-last
+          #last() { DISTRO_VERSION="${DISTRO_VERSION} ${1}"; }
           ;;
       "--image-name")
           shift
