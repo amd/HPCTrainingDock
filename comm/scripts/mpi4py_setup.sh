@@ -173,7 +173,7 @@ else
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/4.0.1.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/4.0.3.lua
 	whatis(" MPI4PY - provides Python bindings for MPI")
 
         prepend_path("PYTHONPATH", "${MPI4PY_PATH}")
