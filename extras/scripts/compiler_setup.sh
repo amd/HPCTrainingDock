@@ -35,7 +35,7 @@ val=80
 for GCC_VERSION in ${GCC_VERSION_LIST}
 do
    result=`echo $GCC_VERSION | awk '$1<$GCC_BASE_VERSION'` && echo $result
-   if [ "$GCC_VERSION" -lt "$GCC_BASE_VERSION" ]; then
+   if [[ "$GCC_VERSION" -lt "$GCC_BASE_VERSION" ]]; then
       continue
    fi
    echo "Adding GCC_VERSION $GCC_VERSION"
