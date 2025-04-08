@@ -66,31 +66,31 @@ else
    exit
 fi
 
-if [[ "${DISTRO}" == "ubuntu" ]]; then
-   # Instructions from https://apt.kitware.com/
-   # Remove standard version installed with ubuntu packages
-   ${SUDO} apt-get purge --auto-remove -y cmake
-
-   # Step 1
-   ${SUDO} apt-get -y update
-   ${SUDO} ${DEB_FRONTEND} apt-get install -y ca-certificates gpg wget
-   # Step 2
-   test -f /usr/share/doc/kitware-archive-keyring/copyright || \
-      wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
-      gpg --dearmor - | ${SUDO} tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
-   # Step 3
-   echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ ${DISTRO_CODENAME} main" | \
-      ${SUDO} tee /etc/apt/sources.list.d/kitware.list >/dev/null
-   # Step 4
-   ${SUDO} apt-get -y update
-   test -f /usr/share/doc/kitware-archive-keyring/copyright || \
-      ${SUDO} rm /usr/share/keyrings/kitware-archive-keyring.gpg
-   # Step 5
-   ${SUDO} ${DEB_FRONTEND} apt-get install -y kitware-archive-keyring
-
-   ${SUDO} ${DEB_FRONTEND} apt-get install -y cmake
-   CMAKE_VERSION=`cmake --version`
-   echo "Installed latest version of cmake ($CMAKE_VERSION)"
-else
+#if [[ "${DISTRO}" == "ubuntu" ]]; then
+#   # Instructions from https://apt.kitware.com/
+#   # Remove standard version installed with ubuntu packages
+#   ${SUDO} apt-get purge --auto-remove -y cmake
+#
+#   # Step 1
+#   ${SUDO} apt-get -y update
+#   ${SUDO} ${DEB_FRONTEND} apt-get install -y ca-certificates gpg wget
+#   # Step 2
+#   test -f /usr/share/doc/kitware-archive-keyring/copyright || \
+#      wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
+#      gpg --dearmor - | ${SUDO} tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
+#   # Step 3
+#   echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ ${DISTRO_CODENAME} main" | \
+#      ${SUDO} tee /etc/apt/sources.list.d/kitware.list >/dev/null
+#   # Step 4
+#   ${SUDO} apt-get -y update
+#   test -f /usr/share/doc/kitware-archive-keyring/copyright || \
+#      ${SUDO} rm /usr/share/keyrings/kitware-archive-keyring.gpg
+#   # Step 5
+#   ${SUDO} ${DEB_FRONTEND} apt-get install -y kitware-archive-keyring
+#
+#   ${SUDO} ${DEB_FRONTEND} apt-get install -y cmake=3.31.6-0kitware1ubuntu22.04.1
+#   CMAKE_VERSION=`cmake --version`
+#   echo "Installed latest version of cmake ($CMAKE_VERSION)"
+#else
    ${SUDO} python3 -m pip install 'cmake==3.28.3'
-fi
+#fi
