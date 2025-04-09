@@ -124,6 +124,7 @@ else
 
       wget https://repo.radeon.com/rocm/misc/flang/${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
       tar -xvjf ${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
+      rm -f ${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
 
       ${SUDO} chown -R root:root /opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_DIR}
       ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}

@@ -316,7 +316,7 @@ do
             reset-last
             ;;
         "--build-all-latest")
-            BUILD_AOMP_LATEST="1"
+            #BUILD_AOMP_LATEST="1"
             #BUILD_LLVM_LATEST="1"
             #BUILD_GCC_LATEST="1"
             #BUILD_OG_LATEST="1"
@@ -337,6 +337,8 @@ do
 	    BUILD_X11VNC="1"
 	    BUILD_FLANGNEW="1"
 	    BUILD_HIPFORT="1"
+	    INSTALL_ROCPROF_SYS_FROM_SOURCE="1"
+            INSTALL_ROCPROF_COMPUTE_FROM_SOURCE="1"
             reset-last
             ;;
         "--use-cached-apps")
@@ -468,7 +470,7 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
 	 # All latest recommended
          "all-latest")
 	    echo "Setting all latest build"
-            BUILD_AOMP_LATEST="1"
+            #BUILD_AOMP_LATEST="1"
             #BUILD_LLVM_LATEST="1"
             #BUILD_GCC_LATEST="1"
             #BUILD_OG_LATEST="1"
@@ -490,6 +492,8 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             BUILD_FLANGNEW="1"
             BUILD_HIPFORT="1"
             BUILD_X11VNC=1
+	    INSTALL_ROCPROF_SYS_FROM_SOURCE="1"
+            INSTALL_ROCPROF_COMPUTE_FROM_SOURCE="1"
 	    ;;
          *)
             echo "Unsupported build option request \"$i\""
