@@ -21,11 +21,11 @@ ${SUDO} add-apt-repository -y ppa:ubuntu-toolchain-r/test
 
 # autodetecting default version for distro and getting available gcc version list
 GCC_BASE_VERSION=`ls /usr/bin/gcc-* | cut -f2 -d'-' | grep '^[[:digit:]]'`
-GCC_VERSION_LIST=`apt list |grep '^gcc-[[:digit:]]*\/' |cut -f2 -d'-' | cut -f1 -d'/' | sort -n | tr '\n' ' '`
+#GCC_VERSION_LIST=`apt list |grep '^gcc-[[:digit:]]*\/' |cut -f2 -d'-' | cut -f1 -d'/' | sort -n | tr '\n' ' '`
+GCC_VERSION_LIST=""
 echo "GCC_BASE_VERSION is ${GCC_BASE_VERSION}, GCC_VERSION_LIST is ${GCC_VERSION_LIST}"
 
 ${SUDO} ${DEB_FRONTEND} apt-get -qy install gcc-$GCC_BASE_VERSION-offload-amdgcn
-exit
 
 MODULE_PATH=/etc/lmod/modules/Linux/gcc
 ${SUDO} mkdir -p ${MODULE_PATH}
@@ -84,7 +84,8 @@ EOF
 # Install the default clang version before getting the base version for the distro
 ${SUDO} ${DEB_FRONTEND} apt-get -q install -y clang
 CLANG_BASE_VERSION=`ls /usr/bin/clang-* | cut -f2 -d'-' | grep '^[[:digit:]]'`
-CLANG_VERSION_LIST=`apt list |grep '^clang-[[:digit:]]*\/' |cut -f2 -d'-' | cut -f1 -d'/' | sort -n | tr '\n' ' '`
+#CLANG_VERSION_LIST=`apt list |grep '^clang-[[:digit:]]*\/' |cut -f2 -d'-' | cut -f1 -d'/' | sort -n | tr '\n' ' '`
+CLANG_VERSION_LIST=""
 echo "CLANG_BASE_VERSION is ${CLANG_BASE_VERSION}, CLANG_VERSION_LIST is ${CLANG_VERSION_LIST}"
 
 MODULE_PATH=/etc/lmod/modules/Linux/clang
