@@ -1,0 +1,17 @@
+[Unit]
+Description=Start AMDGPU Base Linux Environment (ABLE) services for rambooted image
+DefaultDependencies=no
+Requires=systemd-udev-settle.service
+After=systemd-udev-settle.service
+After=network.target
+After=multi-user.target
+Before=remote-fs-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/etc/init.d/able start
+
+[Install]
+WantedBy=getty.target
+WantedBy=graphical.target
