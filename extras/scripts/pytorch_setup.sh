@@ -369,7 +369,7 @@ else
       # cleanup
       cd ..
       rm -rf vision audio
-      rm intel-onemkl-2025.0.0.940.sh
+      rm -f intel-onemkl-2025.0.0.940.sh
       ${SUDO} rm -rf /tmp/amd_triton_kernel* /tmp/can*
 
    fi
