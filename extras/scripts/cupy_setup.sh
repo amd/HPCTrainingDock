@@ -155,8 +155,9 @@ else
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod a+w /opt/rocmplus-${ROCM_VERSION}/cupy
       fi
-      pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/cupy pytest mock
+      pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/cupy pytest mock xarray dask
       pip3 install -v --upgrade --target=/opt/rocmplus-${ROCM_VERSION}/cupy dist/*.whl
+      pip3 install -v --target=/opt/rocmplus-${ROCM_VERSION}/cupy cupy-xarray --no-deps
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/cupy -type f -execdir chown root:root "{}" +
          ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/cupy -type d -execdir chown root:root "{}" +
