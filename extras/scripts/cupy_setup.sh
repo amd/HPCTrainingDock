@@ -135,6 +135,8 @@ else
       # Load the ROCm version for this CuPy build -- use hip compiler, path to ROCm and the GPU model
       export CUPY_INSTALL_USE_HIP=1
       export ROCM_HOME=${ROCM_PATH}
+      export HIPCC=${ROCM_HOME}/bin/hipcc
+      export CFLAGS+=-D__HIP__
       export HCC_AMDGPU_ARCH=${AMDGPU_GFXMODEL}
       
       # Get source from the ROCm repository of CuPy.
