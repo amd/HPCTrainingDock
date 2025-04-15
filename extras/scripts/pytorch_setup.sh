@@ -183,10 +183,40 @@ else
 
    elif [ "${USE_WHEEL}" == "1" ]; then
 
-      # TODO	    
-      # install of pre-built pytorch for reference
-      #${SUDO} pip3 install --target=/opt/rocmplus-${ROCM_VERSION}/pytorch torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.0
-      echo " Build with wheel coming soon, for now please build from source by setting --use-wheel 0"
+      # don't use sudo if user has write access to install path
+      if [ -w ${INSTALL_PATH} ]; then
+         SUDO=""
+      fi
+
+      ${SUDO} mkdir -p ${INSTALL_PATH}
+      ${SUDO} mkdir -p ${TRANSFORMERS_PATH}
+      ${SUDO} mkdir -p ${PYTORCH_PATH}
+      ${SUDO} mkdir -p ${TORCHAUDIO_PATH}
+      ${SUDO} mkdir -p ${TORCHVISION_PATH}
+      if [[ "${USER}" != "root" ]]; then
+         ${SUDO} chmod -R a+w ${INSTALL_PATH}
+      fi
+
+      # install of pre-built pytorch using a wheel
+      echo "Installing PyTorch, Torchaudio and Torchvision with wheel"
+      ROCM_VERSION_WHEEL=${ROCM_VERSION}
+      echo ${ROCM_VERSION_WHEEL}
+      if [[ `echo ${ROCM_VERSION} | cut -f3-3 -d'.'` == 0 ]]; then
+         ROCM_VERSION_WHEEL=`echo ${ROCM_VERSION} | cut -f1-2 -d'.'`
+      fi
+      pip3 install torch==${PYTORCH_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${PYTORCH_PATH}
+      pip3 install torchaudio==${TORCHAUDIO_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHAUDIO_PATH}
+      pip3 install torchvision==${TORCHVISION_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHVISION_PATH}
+      pip3 install --target=${TRANSFORMERS_PATH} transformers
+
+      if [[ "${USER}" != "root" ]]; then
+         ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${INSTALL_PATH} -type d -execdir chown root:root "{}" +
+      fi
+
+      if [[ "${USER}" != "root" ]]; then
+         ${SUDO} chmod go-w ${INSTALL_PATH}
+      fi
 
    else
 
@@ -392,6 +422,9 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
         prepend_path("PYTHONPATH","${TRANSFORMERS_PATH}")
         prepend_path("PYTHONPATH","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages")
+	prepend_path("PYTHONPATH","${PYTORCH_PATH}")
+	prepend_path("PYTHONPATH","${TORCHVISION_PATH}")
+	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}")
 EOF
 
 #pip download --only-binary :all: --dest /opt/wheel_files_6.0/pytorch-rocm --no-cache --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/rocm6.0
