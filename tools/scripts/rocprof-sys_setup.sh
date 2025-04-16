@@ -10,6 +10,7 @@ PYTHON_VERSION=10
 TOOL_REPO="https://github.com/ROCm/omnitrace"
 TOOL_NAME="omnitrace"
 TOOL_CONFIG="OMNITRACE"
+TOOL_NAME_UC=$TOOL_CONFIG
 MPI_MODULE="openmpi"
 MODULE_PATH="/etc/lmod/modules/ROCmPlus-AMDResearchTools/${TOOL_NAME}"
 MODULE_PATH_INPUT=""
@@ -115,6 +116,7 @@ if [[ "${result}" ]]; then
    TOOL_NAME="rocprofiler-systems"
    TOOL_REPO="https://github.com/ROCm/rocprofiler-systems.git"
    TOOL_CONFIG="ROCPROFSYS"
+   TOOL_NAME_UC="ROCPROFILER_SYSTEMS"
 fi
 
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
@@ -235,17 +237,23 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GITHUB_BRANCH}.lua
 	whatis("Category: AMD")
 	whatis("${TOOL_NAME}")
 
-	local base = "${INSTALL_PATH}"
+	local topDir = "${INSTALL_PATH}"
+	local binDir = "${INSTALL_PATH}/bin"
+	local shareDir = "${INSTALL_PATH}/share/${TOOL_NAME}"
+
+        setenv("${TOOL_NAME_UC}_DIR",topDir)
+        setenv("${TOOL_NAME_UC}_BIN",binDir)
+        setenv("${TOOL_NAME_UC}_SHARE",shareDir)
+        prepend_path("PATH", pathJoin(shareDir, "bin"))
 
 	load("rocm/${ROCM_VERSION}")
-	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
-	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-	prepend_path("CPATH", pathJoin(base, "include"))
-	prepend_path("PATH", pathJoin(base, "bin"))
-        prepend_path("PYTHONPATH",pathJoin(base,"lib/python3.${PYTHON_VERSION}/site-packages"))
-	prepend_path("INCLUDE", pathJoin(base, "include"))
-	setenv("${TOOL_CONFIG}_PATH", base)
+	prepend_path("LD_LIBRARY_PATH", pathJoin(topDir, "lib"))
+	prepend_path("C_INCLUDE_PATH", pathJoin(topDir, "include"))
+	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(topDir, "include"))
+	prepend_path("CPATH", pathJoin(topDir, "include"))
+	prepend_path("PATH", pathJoin(topDir, "bin"))
+        prepend_path("PYTHONPATH",pathJoin(topDir,"lib/python3.${PYTHON_VERSION}/site-packages"))
+	prepend_path("INCLUDE", pathJoin(topDir, "include"))
 	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
         set_shell_function("omnitrace-avail",'${INSTALL_PATH}/bin/rocprof-sys-avail "$@"',"${INSTALL_PATH}/bin/rocprof-sys-avail $*")
         set_shell_function("omnitrace-instrument",'${INSTALL_PATH}/bin/rocprof-sys-instrument "$@"',"${INSTALL_PATH}/bin/rocprof-sys-instrument $*")

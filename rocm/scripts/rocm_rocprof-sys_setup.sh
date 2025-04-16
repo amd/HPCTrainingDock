@@ -112,6 +112,7 @@ if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
         setenv("${TOOL_NAME_UC}_DIR",topDir)
         setenv("${TOOL_NAME_UC}_BIN",binDir)
         setenv("${TOOL_NAME_UC}_SHARE",shareDir)
+        prepend_path("PATH", pathJoin(shareDir, "bin"))
 
 	load("rocm/${ROCM_VERSION}")
 	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
