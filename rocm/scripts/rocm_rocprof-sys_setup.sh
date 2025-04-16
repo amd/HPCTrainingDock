@@ -104,9 +104,15 @@ if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
 	whatis("Category: AMD")
 	whatis("${TOOL_NAME}")
 
-	local base = "/opt/rocm-${ROCM_VERSION}"
+        -- Export environmental variables
+        local topDir="/opt/rocm-${ROCM_VERSION}"
+        local binDir="/opt/rocm-${ROCM_VERSION}/bin"
+        local shareDir="/opt/rocm-${ROCM_VERSION}/share/${TOOL_NAME}"
 
-	setenv("${TOOL_NAME_UC}_PATH", base)
+        setenv("${TOOL_NAME_UC}_DIR",topDir)
+        setenv("${TOOL_NAME_UC}_BIN",binDir)
+        setenv("${TOOL_NAME_UC}_SHARE",shareDir)
+
 	load("rocm/${ROCM_VERSION}")
 	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
         set_shell_function("omnitrace-avail",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-avail "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-avail $*")
