@@ -55,15 +55,13 @@ do
    shift
 done
 
-# if ROCM_VERSION is less 6.3.0, the awk command will give the ROCM_VERSION number
-# if ROCM_VERSION is greater than or equal to 6.1.2, the awk command result will be blank
-result=`echo $ROCM_VERSION | awk '$1<6.3.0'` && echo $result
-if [[ "${result}" == "" ]]; then # ROCM_VERSION < 6.3
-   TOOL_NAME=omnitrace
-   TOOL_EXEC_NAME=omnitrace
-   TOOL_NAME_MC=Omnitrace
-   TOOL_NAME_UC=OMNITRACE
-else
+TOOL_NAME=omnitrace
+TOOL_EXEC_NAME=omnitrace
+TOOL_NAME_MC=Omnitrace
+TOOL_NAME_UC=OMNITRACE
+# if ROCM_VERSION is greater than 6.2.9, the awk command will give the ROCM_VERSION number
+result=`echo ${ROCM_VERSION} | awk '$1>6.2.9'` && echo $result
+if [[ "${result}" ]]; then
    TOOL_NAME=rocprofiler-systems
    TOOL_EXEC_NAME=rocprof-sys-avail
    TOOL_NAME_MC=Rocprofiler-systems
@@ -82,7 +80,7 @@ echo "=================================="
 echo ""
 
 # if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
-# if ROCM_VERSION is less than or equalt to 6.1.2, the awk command result will be blank
+# if ROCM_VERSION is less than or equal to 6.1.2, the awk command result will be blank
 result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
 if [[ "${result}" == "" ]]; then
    echo "ROCm built-in ${TOOL_NAME_MC} version cannot be installed on ROCm versions before 6.2.0"
@@ -96,7 +94,7 @@ else
    fi
 fi
 
-if [[ -f /opt/rocm-${ROCM_VERSION}/bin//${TOOL_EXEC_NAME} ]] ; then
+if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
    export MODULE_PATH=/etc/lmod/modules/ROCm/${TOOL_NAME}
    ${SUDO} mkdir -p ${MODULE_PATH}
    # The - option suppresses tabs

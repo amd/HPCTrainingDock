@@ -61,15 +61,13 @@ do
    shift
 done
 
-# if ROCM_VERSION is less 6.3.0, the awk command will give the ROCM_VERSION number
-# if ROCM_VERSION is greater than or equal to 6.1.2, the awk command result will be blank
-result=`echo $ROCM_VERSION | awk '$1<6.3.0'` && echo $result
-if [[ "${result}" == "" ]]; then # ROCM_VERSION < 6.3
-   TOOL_NAME=omniperf
-   TOOL_EXEC_NAME=omniperf
-   TOOL_NAME_MC=Omniperf
-   TOOL_NAME_UC=OMNIPERF
-else
+TOOL_NAME=omniperf
+TOOL_EXEC_NAME=omniperf
+TOOL_NAME_MC=Omniperf
+TOOL_NAME_UC=OMNIPERF
+# if ROCM_VERSION is greater than 6.2.9, the awk command will give the ROCM_VERSION number
+result=`echo ${ROCM_VERSION} | awk '$1>6.2.9'` && echo $result
+if [[ "${result}" ]]; then
    TOOL_NAME=rocprofiler-compute
    TOOL_EXEC_NAME=rocprof-compute
    TOOL_NAME_MC=Rocprofiler-compute
