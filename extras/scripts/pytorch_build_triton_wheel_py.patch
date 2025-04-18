@@ -2,8 +2,8 @@
 +++ sources-fixed/build_triton_wheel.py	2024-08-23 15:55:32.011615930 -0500
 @@ -44,6 +44,25 @@
          f.write(orig)
- 
- 
+
+
 +# TODO: remove patch_setup_py() once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
 +def patch_setup_py(path: Path) -> None:
 +    with open(path) as f:
@@ -29,7 +29,7 @@
 @@ -82,6 +101,9 @@
          else:
              check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
- 
+
 +        # TODO: remove this and patch_setup_py() once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
 +        patch_setup_py(triton_pythondir / "setup.py")
 +

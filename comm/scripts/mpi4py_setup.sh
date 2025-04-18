@@ -1,11 +1,15 @@
 #/bin/bash
 
 # Variables controlling setup process
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+ROCM_VERSION=6.0
+AMDGPU_GFXMODEL_INPUT=""
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/mpi4py
 BUILD_MPI4PY=0
-ROCM_VERSION=6.0
+MPIPY_VERSION=4.0.3
+MPI4PY_PATH=/opt/rocmplus-${ROCM_VERSION}/mpi4py
+MPI4PY_PATH_INPUT=""
 MPI_PATH="/usr"
+MPI_MODULE="openmpi"
 SUDO="sudo"
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -15,14 +19,14 @@ if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
 fi
 
-LOAD_MODULE="openmpi"
-
 usage()
 {
    echo "Usage:"
    echo "  --build-mpi4py: default is 0"
-   echo "  --load-module [ LOAD_MODULE ] default is ""openmpi"" module"
-   echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/mpi4py"
+   echo "  --mpi-module [ MPI_MODULE ] default is $MPI_MODULE "
+   echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
+   echo "  --install-path [ MPI4PY_PATH_INPUT ] default $MPI4PY_PATH "
+   echo "  --mpi4py-version [ MPI4PY_VERSION ] default is $MPI4PY_VERSION "
    echo "  --mpi-path [MPI_PATH] default is from MPI module"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --help: this usage information"
@@ -57,14 +61,24 @@ do
       "--help")
           usage
           ;;
-      "--load-module")
+      "--mpi-module")
           shift
-          LOAD_MODULE=${1}
+          MPI_MODULE=${1}
+          reset-last
+          ;;
+      "--mpi4py-version")
+          shift
+          MPI4PY_VERSION=${1}
           reset-last
           ;;
       "--module-path")
           shift
           MODULE_PATH=${1}
+          reset-last
+          ;;
+      "--install-path")
+          shift
+          MPI4PY_PATH_INPUT=${1}
           reset-last
           ;;
       "--rocm-version")
@@ -88,11 +102,22 @@ do
    shift
 done
 
+if [ "${MPI4PY_PATH_INPUT}" != "" ]; then
+   MPI4PY_PATH=${MPI4PY_PATH_INPUT}
+else
+   # override path in case ROCM_VERSION has been supplied as input
+   MPI4PY_PATH=/opt/rocmplus-${ROCM_VERSION}/mpi4py
+fi
+
 echo ""
 echo "==================================="
 echo "Starting MPI4PY Install with"
 echo "ROCM_VERSION: $ROCM_VERSION"
 echo "BUILD_MPI4PY: $BUILD_MPI4PY"
+echo "MPI4PY_VERSION: $MPI4PY_VERSION"
+echo "MPI4PY_PATH: $MPI4PY_PATH"
+echo "MODULE_PATH: $MODULE_PATH"
+echo "Loading MPI module: $MPI_MODULE"
 echo "==================================="
 echo ""
 
@@ -100,7 +125,7 @@ if [ "${BUILD_MPI4PY}" = "0" ]; then
 
    echo "MPI4PY will not be built, according to the specified value of BUILD_MPI4PY"
    echo "BUILD_MPI4PY: $BUILD_MPI4PY"
-   exit 
+   exit
 
 else
    MPI4PY_PATH=/opt/rocmplus-${ROCM_VERSION}/mpi4py
@@ -131,15 +156,20 @@ else
 
       source /etc/profile.d/lmod.sh
       source /etc/profile.d/z01_lmod.sh
-      module load ${LOAD_MODULE}
+      module load ${MPI_MODULE}
       module load rocm/${ROCM_VERSION}
+
+      # don't use sudo if user has write access to install path
+      if [ -w ${MPI4PY_PATH} ]; then
+         SUDO=""
+      fi
 
       ${SUDO} mkdir -p ${MPI4PY_PATH}
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod a+w ${MPI4PY_PATH}
       fi
 
-      git clone --branch 4.0.3 https://github.com/mpi4py/mpi4py.git
+      git clone --branch $MPI4PY_VERSION https://github.com/mpi4py/mpi4py.git
       cd mpi4py
 
       echo "[model]              = ${MPI_PATH}" >> mpi.cfg
@@ -165,19 +195,23 @@ else
       cd ..
       ${SUDO} rm -rf mpi4py
       module unload rocm/${ROCM_VERSION}
+      module unload ${MPI_MODULE}
 
-   fi   
+   fi
 
 
    # Create a module file for mpi4py
+   if [ ! -w ${MODULE_PATH} ]; then
+      SUDO="sudo"
+   fi
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/4.0.3.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${MPI4PY_VERSION}.lua
 	whatis(" MPI4PY - provides Python bindings for MPI")
 
         prepend_path("PYTHONPATH", "${MPI4PY_PATH}")
-	load("${LOAD_MODULE}")
+	load("${MPI_MODULE}")
 EOF
 
 fi

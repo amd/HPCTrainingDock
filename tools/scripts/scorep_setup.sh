@@ -9,6 +9,10 @@ SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 MPI_MODULE="openmpi"
 SCOREP_VERSION=9.0
+SCOREP_PATH=/opt/rocmplus-${ROCM_VERSION}/scorep
+PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
+SCOREP_PATH_INPUT=""
+PDT_PATH_INPUT=""
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
@@ -25,9 +29,11 @@ usage()
    echo "  --build-scorep: set to 1 to build Score-P, default is 0"
    echo "  --scorep-version [SCOREP_VERSION] default is $SCOREP_VERSION "
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
+   echo "  --scorep-install-path [ SCOREP_PATH_INPUT ] default $SCOREP_PATH "
+   echo "  --pdt-install-path [ PDT_PATH_INPUT ] default $PDT_PATH "
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
-   echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default $AMDGPU_GFXMODEL"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL_INPUT ] default autodetected "
    echo "  --help: this usage information"
    exit 1
 }
@@ -50,7 +56,7 @@ do
    case "${1}" in
       "--amdgpu-gfxmodel")
           shift
-          AMDGPU_GFXMODEL=${1}
+          AMDGPU_GFXMODEL_INPUT=${1}
           reset-last
           ;;
       "--build-scorep")
@@ -69,6 +75,16 @@ do
       "--module-path")
           shift
           MODULE_PATH=${1}
+          reset-last
+          ;;
+      "--scorep-install-path")
+          shift
+          SCOREP_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--pdt-install-path")
+          shift
+          PDT_PATH_INPUT=${1}
           reset-last
           ;;
      "--mpi-module")
@@ -92,11 +108,27 @@ do
    shift
 done
 
+if [ "${SCOREP_PATH_INPUT}" != "" ]; then
+   SCOREP_PATH=${SCOREP_PATH_INPUT}
+else
+   # override score-p path in case ROCM_VERSION has been supplied as input
+   SCOREP_PATH=/opt/rocmplus-${ROCM_VERSION}/scorep
+fi
+
+if [ "${PDT_PATH_INPUT}" != "" ]; then
+   PDT_PATH=${PDT_PATH_INPUT}
+else
+   # override pdt path in case ROCM_VERSION has been supplied as input
+   PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
+fi
+
 echo ""
 echo "==================================="
 echo "Starting SCORE-P Install with"
 echo "ROCM_VERSION: $ROCM_VERSION"
 echo "BUILD_SCOREP: $BUILD_SCOREP"
+echo "SCOREP_PATH: $SCOREP_PATH"
+echo "PDT_PATH: $PDT_PATH"
 echo "==================================="
 echo ""
 
@@ -143,8 +175,13 @@ else
          module load amdclang
       fi
 
-      SCOREP_PATH=/opt/rocmplus-${ROCM_VERSION}/scorep
-      PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
+      # don't use sudo if user has write access to install path
+      if [ -w ${SCOREP_PATH} ]; then
+         if [ -w ${PDT_PATH} ]; then
+           SUDO=""
+         fi
+      fi
+
       ${SUDO} mkdir -p ${SCOREP_PATH}
       ${SUDO} mkdir -p ${PDT_PATH}
 
@@ -196,10 +233,10 @@ else
       rm -rf spack
 
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/pdt -type f -execdir chown root:root "{}" +
-         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/scorep -type f -execdir chown root:root "{}" +
-         ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}/pdt
-         ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}/scorep
+         ${SUDO} find $PDT_PATH -type f -execdir chown root:root "{}" +
+         ${SUDO} find $SCOREP_PATH -type f -execdir chown root:root "{}" +
+         ${SUDO} chmod go-w $PDT_PATH
+         ${SUDO} chmod go-w $SCOREP_PATH
       fi
 
       module unload rocm/${ROCM_VERSION}

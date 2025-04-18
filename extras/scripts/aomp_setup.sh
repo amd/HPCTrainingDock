@@ -64,7 +64,7 @@ do
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
-      *)  
+      *)
          last ${1}
          ;;
    esac
@@ -76,9 +76,9 @@ done
 echo ""
 echo "==================================="
 echo "Starting AOMP Latest Install with"
-echo "ROCM_VERSION: $ROCM_VERSION" 
-echo "BUILD_AOMP_LATEST: $BUILD_AOMP_LATEST" 
-echo "AOMP_VERSION_NUMBER: $AOMP_VERSION_NUMBER" 
+echo "ROCM_VERSION: $ROCM_VERSION"
+echo "BUILD_AOMP_LATEST: $BUILD_AOMP_LATEST"
+echo "AOMP_VERSION_NUMBER: $AOMP_VERSION_NUMBER"
 echo "==================================="
 echo ""
 
@@ -121,7 +121,7 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
       ${SUDO} ${DEB_FRONTEND} apt-get install -y gawk ninja-build generate-ninja ccache libssl-dev \
 	      libgmp-dev libmpfr-dev libbabeltrace-dev liblzma-dev libdrm-dev libelf-dev
       pip3 install CppHeaderParser
-      
+
       wget -q https://github.com/ROCm-Developer-Tools/aomp/releases/download/rel_${AOMP_VERSION_NUMBER}/aomp-${AOMP_VERSION_NUMBER}.tar.gz
       tar -xzf aomp-${AOMP_VERSION_NUMBER}.tar.gz
       cd aomp${AOMP_VERSION_SHORT}
@@ -147,7 +147,7 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/amdclang-${AOMP_VERSION_SHORT}.lua
 	whatis("AMD OpenMP Compiler version 19.0-3 based on LLVM")
-	
+
 	local base = "/opt/rocmplus-${ROCM_VERSION}/aomp_19.0-3"
 
 	prepend_path("PATH", pathJoin(base, "bin"))

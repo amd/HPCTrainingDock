@@ -1,7 +1,6 @@
 #/bin/bash
 
 # Variables controlling setup process
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 NETCDF_C_MODULE_PATH=/etc/lmod/modules/misc/netcdf-c
 NETCDF_FC_MODULE_PATH=/etc/lmod/modules/misc/netcdf-fortran
 BUILD_NETCDF=0
@@ -150,7 +149,7 @@ if [ "${BUILD_NETCDF}" = "0" ]; then
    echo "NETCDF will not be built, according to the specified value of BUILD_NETCDF"
    echo "BUILD_NETCDF: $BUILD_NETCDF"
    echo "Make sure to set '--build-netcdf 1' when running this install script"
-   exit 
+   exit
 
 else
 
@@ -218,7 +217,7 @@ else
          echo "hdf5 is a requirement for netcdf, please make sure hdf5"
          echo "is installed and present in PATH, then retry"
          exit
-      else 
+      else
          C_COMPILER=$HDF5_C_COMPILER
          CXX_COMPILER=$HDF5_CXX_COMPILER
          FC_COMPILER=$HDF5_FC_COMPILER
@@ -254,7 +253,7 @@ else
       echo ""
 
       git clone --branch v${NETCDF_C_VERSION} https://github.com/Unidata/netcdf-c.git
-      cd netcdf-c 
+      cd netcdf-c
       sed -i 's/if\ (H5FD_HTTP_g)/if\ (H5FD_HTTP_g\ \&\&\ (H5Iis_valid(H5FD_HTTP_g)\ >\ 0))/g' libhdf5/H5FDhttp.c
       mkdir build && cd build
 
@@ -294,7 +293,7 @@ else
       make install
 
       cd ../..
-      rm -rf netcdf-c 
+      rm -rf netcdf-c
       rm -rf netcdf-fortran
       ${SUDO} rm -rf PnetCDF
 

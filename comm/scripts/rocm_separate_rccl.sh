@@ -50,7 +50,7 @@ git clone https://github.com/ROCm/rccl.git
 cd rccl
 mkdir build && cd build
 cmake -DCMAKE_INSTALL_PREFIX=/opt/rocmplus-${ROCM_VERSION}/rccl
-make -j 16 
+make -j 16
 make install
 cd ../..
 rm -rf rccl

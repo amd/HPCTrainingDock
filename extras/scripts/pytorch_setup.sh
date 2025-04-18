@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ROCM_VERSION=6.0
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+AMDGPU_GFXMODEL_INPUT=""
 BUILD_PYTORCH=0
 ZSTD_VERSION=1.5.6
 PYTORCH_VERSION=2.6.0
@@ -28,7 +28,7 @@ fi
 
 usage()
 {
-   echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default is $AMDGPU_GFXMODEL"
+   echo "--amdgpu-gfxmodel [ AMDGPU_GFXMODEL_INPUT ] default is autodetected"
    echo "--build-pytorch [ BUILD_PYTORCH ] set to 1 to build jax default is 0"
    echo "--pytorch-version [ PYTORCH_VERSION ] version of PyTorch, default is $PYTORCH_VERSION"
    echo "--python-version [ PYTHON_VERSION ] version of Python, default is $PYTHON_VERSION"
@@ -63,7 +63,7 @@ do
           ;;
       "--amdgpu-gfxmodel")
           shift
-          AMDGPU_GFXMODEL=${1}
+          AMDGPU_GFXMODEL_INPUT=${1}
 	  reset-last
           ;;
       "--build-pytorch")
@@ -99,7 +99,7 @@ do
           USE_WHEEL=${1}
 	  reset-last
           ;;
-      *)  
+      *)
          last ${1}
          ;;
    esac
@@ -112,6 +112,12 @@ if [ "${INSTALL_PATH_INPUT}" != "" ]; then
 else
    # override path in case ROCM_VERSION has been supplied as input
    INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch
+fi
+
+if [[ "$AMDGPU_GFXMODEL_INPUT" != "" ]]; then
+   AMDGPU_GFXMODEL=$AMDGPU_GFXMODEL_INPUT
+else
+   AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 fi
 
 ZSTD_PATH=$INSTALL_PATH/zstd
@@ -352,7 +358,7 @@ else
 
       pip3 install -r requirements.txt
       python3 tools/amd_build/build_amd.py >& /dev/null
-      
+
       echo ""
       echo "===================="
       echo "Starting setup.py install"

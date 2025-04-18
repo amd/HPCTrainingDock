@@ -1,12 +1,17 @@
 #/bin/bash
 
 # Variables controlling setup process
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+AMDGPU_GFXMODEL_INPUT=""
 MODULE_PATH=/etc/lmod/modules/misc/hpctoolkit
 BUILD_HPCTOOLKIT=0
 ROCM_VERSION=6.0
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
+HPCTOOLKIT_PATH=/opt/rocmplus-${ROCM_VERSION}/hpctoolkit
+HPCVIEWER_PATH=/opt/rocmplus-${ROCM_VERSION}/hpcviewer
+HPCTOOLKIT_PATH_INPUT=""
+HPCVIEWER_PATH_INPUT=""
+
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
@@ -20,7 +25,9 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 usage()
 {
    echo "Usage:"
-   echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/misc/hpctoolkit"
+   echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
+   echo "  --hpctoolkit-install-path [ HPCTOOLKIT_PATH_INPUT ] default $HPCTOOLKIT_PATH "
+   echo "  --hpcviewer-install-path [ HPCVIEWER_PATH_INPUT ] default $HPCVIEWER_PATH "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
    echo "  --build-hpctoolkit [ BUILD_HPCTOOLKIT ] default is 0"
@@ -54,6 +61,16 @@ do
           BUILD_HPCTOOLKIT=${1}
           reset-last
           ;;
+      "--hpctoolkit-install-path")
+          shift
+          HPCTOOLKIT_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--hpcviewer-install-path")
+          shift
+          HPCVIEWER_PATH_INPUT=${1}
+          reset-last
+          ;;
       "--help")
           usage
           ;;
@@ -78,6 +95,25 @@ do
    shift
 done
 
+if [ "${HPCTOOLKIT_PATH_INPUT}" != "" ]; then
+   HPCTOOLKIT_PATH=${HPCTOOLKIT_PATH_INPUT}
+else
+   # override path in case ROCM_VERSION has been supplied as input
+   HPCTOOLKIT_PATH=/opt/rocmplus-${ROCM_VERSION}/hpctoolkit
+fi
+if [ "${HPCVIEWER_PATH_INPUT}" != "" ]; then
+   HPCVIEWER_PATH=${HPCVIEWER_PATH_INPUT}
+else
+   # override path in case ROCM_VERSION has been supplied as input
+   HPCVIEWER_PATH=/opt/rocmplus-${ROCM_VERSION}/hpcviewer
+fi
+
+if [[ "$AMDGPU_GFXMODEL_INPUT" != "" ]]; then
+   AMDGPU_GFXMODEL=$AMDGPU_GFXMODEL_INPUT
+else
+   AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+fi
+
 echo ""
 echo "==================================="
 echo "Starting HPCToolkit Install with"
@@ -93,7 +129,7 @@ if [ "${BUILD_HPCTOOLKIT}" = "0" ]; then
 
    echo "HPCToolkit will not be built, according to the specified value of BUILD_HPCTOOLKIT"
    echo "BUILD_HPCTOOLKIT: $BUILD_HPCTOOLKIT"
-   exit 
+   exit
 
 else
    if [ -f ${CACHE_FILES}/hpctoolkit.tgz ]; then
@@ -126,13 +162,17 @@ else
 
       cd /tmp
 
-      export HPCTOOLKIT_PATH=/opt/rocmplus-${ROCM_VERSION}/hpctoolkit
-      export HPCVIEWER_PATH=/opt/rocmplus-${ROCM_VERSION}/hpcviewer
+      # don't use sudo if user has write access to install path
+      if [ -w ${HPCTOOLKIT_PATH} ]; then
+         if [ -w ${HPCVIEWER_PATH} ]; then
+            SUDO=""
+         fi
+      fi
       ${SUDO} mkdir -p ${HPCTOOLKIT_PATH}
       ${SUDO} mkdir -p ${HPCVIEWER_PATH}
 
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} chmod a+w ${HPCTOOLKIT_PATH} 
+         ${SUDO} chmod a+w ${HPCTOOLKIT_PATH}
          ${SUDO} chmod a+w ${HPCVIEWER_PATH}
       fi
 
@@ -189,6 +229,7 @@ else
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${HPCVIEWER_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${HPCVIEWER_PATH} -type d -execdir chown root:root "{}" +
       fi
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod go-w ${HPCVIEWER_PATH}
@@ -199,10 +240,13 @@ else
    fi
 
    # Create a module file for hpctoolkit
+   if [ ! -w ${MODULE_PATH} ]; then
+      SUDO="sudo"
+   fi
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/2024.11.27dev.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/2024.01.99-next.lua
 	whatis("HPCToolkit - integrated suite of tools for measurement and analysis of program performance")
 
 	local base = "${HPCTOOLKIT_PATH}"

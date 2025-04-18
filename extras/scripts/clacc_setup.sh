@@ -25,7 +25,7 @@ do
           shift
           BUILD_CLACC_LATEST=${1}
           ;;
-      *)  
+      *)
          last ${1}
          ;;
    esac
@@ -33,7 +33,7 @@ do
    shift
 done
 
-if [ "$(printf '%s\n' "6.1.0" "${ROCM_VERSION}" | sort --version-sort | head -n1)" = "6.1.0" ]; then 
+if [ "$(printf '%s\n' "6.1.0" "${ROCM_VERSION}" | sort --version-sort | head -n1)" = "6.1.0" ]; then
    # C++ Standard Parallel is included in the released compiler
    exit;
 fi
@@ -41,9 +41,9 @@ fi
 echo ""
 echo "==================================="
 echo "Starting CLACC Install with"
-echo "BUILD_CLACC_LATEST: $BUILD_CLACC_LATEST" 
-echo "ROCM_VERSION: $ROCM_VERSION" 
-echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL" 
+echo "BUILD_CLACC_LATEST: $BUILD_CLACC_LATEST"
+echo "ROCM_VERSION: $ROCM_VERSION"
+echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL"
 echo "==================================="
 echo ""
 

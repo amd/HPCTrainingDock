@@ -66,17 +66,17 @@ fi
 
 # fix the nodejs install if broken
 pushd /etc/apt/sources.list.d
-ls -lsa 
+ls -lsa
 rm -f  nodesource.list
 ${SUDO} apt-get --fix-broken install
 ${SUDO} apt-get update
 ${SUDO} apt-get remove nodejs
-${SUDO} apt-get remove nodejs-doc 
+${SUDO} apt-get remove nodejs-doc
 popd
 
-${SUDO} apt-get update 
+${SUDO} apt-get update
 ${SUDO} apt-get install -y apt-transport-https software-properties-common  adduser libfontconfig1 wget curl
-wget -q https://dl.grafana.com/enterprise/release/grafana-enterprise_8.3.4_amd64.deb 
+wget -q https://dl.grafana.com/enterprise/release/grafana-enterprise_8.3.4_amd64.deb
 ${SUDO} dpkg -i grafana-enterprise_8.3.4_amd64.deb
 echo "deb https://packages.grafana.com/enterprise/deb stable main" | tee -a /etc/apt/sources.list.d/grafana.list
 echo "deb [signed-by=/usr/share/keyrings/yarnkey.gpg] https://dl.yarnpkg.com/debian stable main" | tee /etc/apt/sources.list.d/yarn.list

@@ -1,10 +1,15 @@
 #/bin/bash
 
 # Variables controlling setup process
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+AMDGPU_GFXMODEL_INPUT=""
 MODULE_PATH=/etc/lmod/modules/misc/tau
 BUILD_TAU=0
 ROCM_VERSION=6.0
+TAU_PATH=/opt/rocmplus-${ROCM_VERSION}/tau
+PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
+TAU_PATH_INPUT=""
+PDT_PATH_INPUT=""
+GIT_COMMIT="23a56e2a1a728e99ff03341c30f9d24892c5952b"
 SUDO="sudo"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -20,8 +25,11 @@ usage()
    echo "Usage:"
    echo "  --build-tau: default is 0"
    echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/misc/tau"
+   echo "  --tau-install-path [ TAU_PATH_INPUT ] default $TAU_PATH"
+   echo "  --pdt-install-path [ PDT_PATH_INPUT ] default $PDT_PATH"
+   echo "  --git-commit [ GIT_COMMIT ] specify what commit hash you want to build from, default is $GIT_COMMIT"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
+   echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL_INPUT ] default autodetected"
    echo "  --help: this usage information"
    exit 1
 }
@@ -44,12 +52,17 @@ do
    case "${1}" in
       "--amdgpu-gfxmodel")
           shift
-          AMDGPU_GFXMODEL=${1}
+          AMDGPU_GFXMODEL_INPUT=${1}
           reset-last
           ;;
       "--build-tau")
           shift
           BUILD_TAU=${1}
+          reset-last
+          ;;
+      "--git-commit")
+          shift
+          GIT_COMMIT=${1}
           reset-last
           ;;
       "--help")
@@ -58,6 +71,16 @@ do
       "--module-path")
           shift
           MODULE_PATH=${1}
+          reset-last
+          ;;
+      "--tau-install-path")
+          shift
+          TAU_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--pdt-install-path")
+          shift
+          PDT_PATH_INPUT=${1}
           reset-last
           ;;
       "--rocm-version")
@@ -76,11 +99,34 @@ do
    shift
 done
 
+if [ "${TAU_PATH_INPUT}" != "" ]; then
+   TAU_PATH=${TAU_PATH_INPUT}
+else
+   # override tau path in case ROCM_VERSION has been supplied as input
+   TAU_PATH=/opt/rocmplus-${ROCM_VERSION}/tau
+fi
+
+if [ "${PDT_PATH_INPUT}" != "" ]; then
+   PDT_PATH=${PDT_PATH_INPUT}
+else
+   # override pdt path in case ROCM_VERSION has been supplied as input
+   PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
+fi
+
+if [[ "$AMDGPU_GFXMODEL_INPUT" != "" ]]; then
+   AMDGPU_GFXMODEL=$AMDGPU_GFXMODEL_INPUT
+else
+   AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+fi
+
 echo ""
 echo "==================================="
 echo "Starting TAU Install with"
 echo "ROCM_VERSION: $ROCM_VERSION"
 echo "BUILD_TAU: $BUILD_TAU"
+echo "TAU_PATH: $TAU_PATH"
+echo "PDT_PATH: $PDT_PATH"
+echo "Building TAU off of this commit: $GIT_COMMIT"
 echo "==================================="
 echo ""
 
@@ -89,7 +135,7 @@ if [ "${BUILD_TAU}" = "0" ]; then
 
    echo "TAU will not be build, according to the specified value of BUILD_TAU"
    echo "BUILD_TAU: $BUILD_TAU"
-   exit 
+   exit
 
 else
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
@@ -120,8 +166,13 @@ else
       source /etc/profile.d/lmod.sh
       module load rocm/${ROCM_VERSION}
 
-      TAU_PATH=/opt/rocmplus-${ROCM_VERSION}/tau
-      PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
+      # don't use sudo if user has write access to install path
+      if [ -w ${SCOREP_PATH} ]; then
+         if [ -w ${PDT_PATH} ]; then
+           SUDO=""
+         fi
+      fi
+
       export TAU_LIB_DIR=${TAU_PATH}/x86_64/lib
       ${SUDO} mkdir -p ${TAU_PATH}
       ${SUDO} mkdir -p ${PDT_PATH}
@@ -139,8 +190,8 @@ else
 
       # open permissions to use spack to install PDT
       if [[ "${USER}" != "root" ]]; then
-	 ${SUDO} chmod -R a+rwX /opt/rocmplus-${ROCM_VERSION}/pdt
-	 ${SUDO} chmod -R a+rwX /opt/rocmplus-${ROCM_VERSION}/tau
+	 ${SUDO} chmod -R a+rwX $PDT_PATH
+	 ${SUDO} chmod -R a+rwX $TAU_PATH
       fi
 
       # install PDT with spack
@@ -152,7 +203,7 @@ else
       # cloning the latest version of TAU
       git clone https://github.com/UO-OACISS/tau2.git
       cd tau2
-      git checkout 23a56e2a1a728e99ff03341c30f9d24892c5952b
+      git checkout $GIT_COMMIT
 
       # install third pary dependencies
       wget http://tau.uoregon.edu/ext.tgz
@@ -226,26 +277,29 @@ else
       rm -rf spack
 
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/pdt -type f -execdir chown root:root "{}" +
-         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/pdt -type d -execdir chown root:root "{}" +
-         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/tau -type f -execdir chown root:root "{}" +
-         ${SUDO} find /opt/rocmplus-${ROCM_VERSION}/tau -type d -execdir chown root:root "{}" +
+         ${SUDO} find $PDT_PATH -type f -execdir chown root:root "{}" +
+         ${SUDO} find $PDT_PATH -type d -execdir chown root:root "{}" +
+         ${SUDO} find $TAU_PATH -type f -execdir chown root:root "{}" +
+         ${SUDO} find $TAU_PATH -type d -execdir chown root:root "{}" +
       fi
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}/pdt
-         ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}/tau
+         ${SUDO} chmod go-w $PDT_PATH
+         ${SUDO} chmod go-w $TAU_PATH
       fi
 
       module unload rocm/${ROCM_VERSION}
 
-   fi   
+   fi
 
    # Create a module file for TAU
+   if [ ! -w ${MODULE_PATH} ]; then
+      SUDO="sudo"
+   fi
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/dev.lua
-	whatis(" TAU - portable profiling and tracing toolkit ") 
+	whatis(" TAU - portable profiling and tracing toolkit ")
 
         load("rocm/${ROCM_VERSION}")
 	prepend_path("PATH","${TAU_PATH}/x86_64/bin")

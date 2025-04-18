@@ -56,17 +56,17 @@ do
           shift
           INSTALL_PATH_INPUT=${1}
           reset-last
-          ;;	  
+          ;;
       "--github-branch")
           shift
           GITHUB_BRANCH=${1}
           reset-last
-          ;;	  
+          ;;
       "--module-path")
           shift
           MODULE_PATH=${1}
           reset-last
-          ;;	  
+          ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
@@ -79,12 +79,12 @@ do
 done
 
 result=`echo $ROCM_VERSION | awk '$1>6.2.0'` && echo $result
-if [[ "${result}" == "" ]]; then # ROCM_VERSION < 6.2.0 
+if [[ "${result}" == "" ]]; then # ROCM_VERSION < 6.2.0
    echo "The rocprofiler-sdk library can be installed only for ROCm versions greater than or equal to 6.2.0"
    echo "You selected this as ROCm version: $ROCM_VERSION"
    echo "Select appropriate ROCm version by specifying --rocm-version $ROCM_VERSION, with $ROCM_VERSION >= 6.2.0"
    exit 1
-fi   
+fi
 
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}

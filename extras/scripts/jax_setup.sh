@@ -88,7 +88,7 @@ do
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
-      *)  
+      *)
          last ${1}
          ;;
    esac
@@ -145,7 +145,7 @@ if [ "${BUILD_JAX}" = "0" ]; then
    echo "BUILD_JAX: $BUILD_JAX"
    exit
 
-else 
+else
    cd /tmp
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
@@ -199,7 +199,7 @@ else
       cd ..
       git clone --depth 1 --branch rocm-jaxlib-v0.${JAX_VERSION} https://github.com/ROCm/jax.git
       cd jax
-      
+
       # install necessary packages in installation directory
       ${SUDO} mkdir -p ${JAXLIB_PATH}
       ${SUDO} mkdir -p ${JAX_PATH}
@@ -240,11 +240,14 @@ else
 
       module unload rocm/${ROCM_VERSION}
    fi
-      
+
    # Create a module file for jax
-   
+   if [ ! -w ${MODULE_PATH} ]; then
+      SUDO="sudo"
+   fi
+
    ${SUDO} mkdir -p ${MODULE_PATH}
-   
+
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/0.${JAX_VERSION}.lua
 	whatis("JAX version ${JAX_VERSION} with ROCm support")

@@ -24,7 +24,7 @@ do
           shift
           BUILD_GCC_LATEST=${1}
           ;;
-      *)  
+      *)
          last ${1}
          ;;
    esac
@@ -38,9 +38,9 @@ export GCC_VERSION=gcc-${GCC_VERSION_NUMBER}
 echo ""
 echo "==================================="
 echo "Starting AMD GCC Latest Install with"
-echo "BUILD_GCC_LATEST: $BUILD_GCC_LATEST" 
-echo "ROCM_VERSION: $ROCM_VERSION" 
-echo "GCC_VERSION: $GCC_VERSION" 
+echo "BUILD_GCC_LATEST: $BUILD_GCC_LATEST"
+echo "ROCM_VERSION: $ROCM_VERSION"
+echo "GCC_VERSION: $GCC_VERSION"
 echo "==================================="
 echo ""
 
@@ -99,8 +99,8 @@ if [ "${BUILD_GCC_LATEST}" = "1" ] ; then
       rm -rf ${LLVM_DIR} ${LLVM_DIR_SHORT}
 
       git clone https://sourceware.org/git/newlib-cygwin.git newlib
-      git clone https://gcc.gnu.org/git/gcc.git gcc 
-      cd gcc 
+      git clone https://gcc.gnu.org/git/gcc.git gcc
+      cd gcc
       git checkout releases/${GCC_VERSION}
       ./contrib/download_prerequisites
 

@@ -26,7 +26,7 @@ do
           shift
           BUILD_LLVM_LATEST=${1}
           ;;
-      *)  
+      *)
          last ${1}
          ;;
    esac
@@ -37,9 +37,9 @@ done
 echo ""
 echo "==================================="
 echo "Starting LLVM Latest Install with"
-echo "BUILD_LLVM_LATEST: $BUILD_LLVM_LATEST" 
-echo "ROCM_VERSION: $ROCM_VERSION" 
-echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL" 
+echo "BUILD_LLVM_LATEST: $BUILD_LLVM_LATEST"
+echo "ROCM_VERSION: $ROCM_VERSION"
+echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL"
 echo "==================================="
 echo ""
 

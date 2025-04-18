@@ -1,7 +1,6 @@
 #/bin/bash
 
 # Variables controlling setup process
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 MODULE_PATH=/etc/lmod/modules/misc/hdf5
 BUILD_HDF5=0
 ROCM_VERSION=6.0
@@ -127,13 +126,12 @@ else
    HDF5_PATH=/opt/rocmplus-${ROCM_VERSION}/hdf5
 fi
 
-
 if [ "${BUILD_HDF5}" = "0" ]; then
 
    echo "HDF5 will not be built, according to the specified value of BUILD_HDF5"
    echo "BUILD_HDF5: $BUILD_HDF5"
    echo "Make sure to set '--build-hdf5 1' when running this install script"
-   exit 
+   exit
 
 else
 

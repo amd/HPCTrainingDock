@@ -1,7 +1,6 @@
 #/bin/bash
 
 # Variables controlling setup process
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 MODULE_PATH=/etc/lmod/modules/misc/fftw
 BUILD_FFTW=0
 ROCM_VERSION=6.0
@@ -133,7 +132,7 @@ if [ "${BUILD_FFTW}" = "0" ]; then
    echo "FFTW will not be built, according to the specified value of BUILD_FFTW"
    echo "BUILD_FFTW: $BUILD_FFTW"
    echo "Make sure to set '--build-fftw 1' when running this install script"
-   exit 
+   exit
 
 else
 

@@ -7,6 +7,10 @@ PYTHON_VERSION="10"
 ROCM_VERSION=6.0
 BUILD_MINICONDA3=0
 MINICONDA3_VERSION="24.9.2"
+MODULE_PATH=/etc/lmod/modules/Linux/miniconda3/
+MINICONDA3_PATH=/opt/rocmplus-${ROCM_VERSION}/miniconda3
+MINICONDA3_PATH_INPUT=""
+
 
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -19,6 +23,8 @@ usage()
    echo "  --rocm-version [ ROCM_VERSION ], default $ROCM_VERSION"
    echo "  --python-version [ PYTHON_VERSION ], python3 minor release, default $PYTHON_VERSION"
    echo "  --build-miniconda3 [BUILD_MINICONDA3], installs Miniconda3, default $BUILD_MINICONDA3"
+   echo "  --install-path [ MINICONDA3_PATH ], default is $MINICONDA3_PATH "
+   echo "  --module-path [ MODULE_PATH ], default is $MODULE_PATH "
    echo "  --help: this usage information"
    exit 1
 }
@@ -52,6 +58,16 @@ do
       "--help")
           usage
           ;;
+       "--install-path")
+          shift
+          MINICONDA3_PATH_INPUT=${1}
+          reset-last
+          ;;
+       "--module-path")
+          shift
+          MODULE_PATH=${1}
+          reset-last
+          ;;
       "--python-version")
           shift
           PYTHON_VERSION=${1}
@@ -68,6 +84,12 @@ do
    shift
 done
 
+if [ "${MINICONDA3_PATH_INPUT}" != "" ]; then
+   MINICONDA3_PATH=${MINICONDA3_PATH_INPUT}
+else
+   # override path in case ROCM_VERSION has been supplied as input
+   MINICONDA3_PATH=/opt/rocmplus-${ROCM_VERSION}/miniconda3
+fi
 
 echo ""
 echo "============================"
@@ -92,6 +114,11 @@ else
    echo "============================"
    echo ""
 
+   # don't use sudo if user has write access to install path
+   if [ -w ${MINICONDA3_PATH} ]; then
+      SUDO=""
+   fi
+
    if [ "${DISTRO}" = "ubuntu" ] ; then
       wget -q https://repo.anaconda.com/miniconda/Miniconda3-py3${PYTHON_VERSION}_${MINICONDA3_VERSION}-0-Linux-x86_64.sh -O /tmp/miniconda-installer.sh
       chmod +x /tmp/miniconda-installer.sh
@@ -110,9 +137,10 @@ else
       rm -f /tmp/miniconda-installer.sh
    fi
 
-
-   ## Create a module file for miniconda3
-   export MODULE_PATH=/etc/lmod/modules/Linux/miniconda3/
+   # Create a module file for miniforge3
+   if [ ! -w ${MODULE_PATH} ]; then
+      SUDO="sudo"
+   fi
 
    ${SUDO} mkdir -p ${MODULE_PATH}
 

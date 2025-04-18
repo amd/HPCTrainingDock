@@ -4,7 +4,7 @@ BUILD_OLLAMA=0
 
 usage()
 {
-   echo "  --build-netcdf [ BUILD_NETCDF ], set to 1 to build netcdf-c and netcdf-fortran, default is 0"
+   echo "  --build-ollama [ BUILD_OLLAMA ], set to 1 to build ollama, default is $BUILD_OLLAMA "
 }
 
 send-error()
@@ -40,5 +40,9 @@ if [ ${BUILD_OLLAMA} = "1" ]; then
    wget https://ollama.com/install.sh
    chmod +x install.sh
    ./install.sh
+else
+   echo " OLLAMA will not be built, according to the value of BUILD_OLLAMA: $BUILD_OLLAMA "
+   echo " Use --build-ollama 1 to build Ollama "
+   exit 1
 fi
 

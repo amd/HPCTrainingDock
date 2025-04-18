@@ -6,6 +6,9 @@ SUDO="sudo"
 PYTHON_VERSION="10"
 ROCM_VERSION=6.0
 BUILD_MINIFORGE3=0
+MODULE_PATH=/etc/lmod/modules/Linux/miniforge3/
+MINIFORGE3_PATH=/opt/rocmplus-${ROCM_VERSION}/miniforge3
+MINIFORGE3_PATH_INPUT=""
 
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -17,7 +20,9 @@ usage()
    echo "Usage:"
    echo "  --rocm-version [ ROCM_VERSION ], default $ROCM_VERSION"
    echo "  --python-version [ PYTHON_VERSION ], python3 minor release, default $PYTHON_VERSION"
-   echo "  --build-miniforge3 [BUILD_MINIFORGE3], installs Miniforge3, default $BUILD_MINIFORGE3"
+   echo "  --build-miniforge3 [ BUILD_MINIFORGE3 ], installs Miniforge3, default $BUILD_MINIFORGE3"
+   echo "  --install-path [ MINIFORGE3_PATH ], default is $MINIFORGE3_PATH "
+   echo "  --module-path [ MODULE_PATH ], default is $MODULE_PATH "
    echo "  --help: this usage information"
    exit 1
 }
@@ -48,6 +53,16 @@ do
           BUILD_MINIFORGE3=${1}
           reset-last
           ;;
+       "--install-path")
+          shift
+          MINIFORGE3_PATH_INPUT=${1}
+          reset-last
+          ;;
+       "--module-path")
+          shift
+          MODULE_PATH=${1}
+          reset-last
+          ;;
       "--help")
           usage
           ;;
@@ -67,6 +82,12 @@ do
    shift
 done
 
+if [ "${MINIFORGE3_PATH_INPUT}" != "" ]; then
+   MINIFORGE3_PATH=${MINIFORGE3_PATH_INPUT}
+else
+   # override path in case ROCM_VERSION has been supplied as input
+   MINIFORGE3_PATH=/opt/rocmplus-${ROCM_VERSION}/miniforge3
+fi
 
 echo ""
 echo "============================"
@@ -91,6 +112,11 @@ else
    echo "============================"
    echo ""
 
+   # don't use sudo if user has write access to install path
+   if [ -w ${MINIFORGE3_PATH} ]; then
+      SUDO=""
+   fi
+
    if [ "${DISTRO}" = "ubuntu" ] ; then
       # getting Miniforge3 version 24.9.0
       wget -q "https://github.com/conda-forge/miniforge/releases/download/24.9.0-0/Miniforge3-$(uname)-$(uname -m).sh" -O /tmp/Miniforge3-$(uname)-$(uname -m).sh
@@ -100,10 +126,11 @@ else
       ${SUDO} /tmp/Miniforge3-*.sh -b -u -p ${MINIFORGE3_PATH}
       rm -f /tmp/Miniforge3-*.sh
    fi
-   
 
-   ## Create a module file for miniforge3
-   export MODULE_PATH=/etc/lmod/modules/Linux/miniforge3/
+   # Create a module file for miniforge3
+   if [ ! -w ${MODULE_PATH} ]; then
+      SUDO="sudo"
+   fi
 
    ${SUDO} mkdir -p ${MODULE_PATH}
 
@@ -111,9 +138,9 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/24.9.0.lua
            conflict("miniconda3")
            local root = "${MINIFORGE3_PATH}"
-           setenv("MINIFORGE3_ROOT", root) 
-           setenv("CONDA_ENVS_PATH", pathJoin(root, "envs")) 
-           setenv("MAMBA_ROOT_PREFIX", root) 
+           setenv("MINIFORGE3_ROOT", root)
+           setenv("CONDA_ENVS_PATH", pathJoin(root, "envs"))
+           setenv("MAMBA_ROOT_PREFIX", root)
            prepend_path("PATH",pathJoin(root,"bin"))
            prepend_path("PATH",pathJoin(root,"condabin"))
 
