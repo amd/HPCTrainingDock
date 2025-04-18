@@ -79,6 +79,7 @@ do
           shift
           INSTALL_PATH_INPUT=${1}
           reset-last
+          ;;
       "--use-spack")
           shift
           USE_SPACK=${1}
