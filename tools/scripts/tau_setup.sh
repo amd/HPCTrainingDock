@@ -186,7 +186,7 @@ else
       spack external find
 
       # change spack install dir for PDT
-      sed -i 's|$spack/opt/spack|/opt/rocmplus-'"${ROCM_VERSION}"'/pdt|g' spack/etc/spack/defaults/config.yaml
+      sed -i 's|$spack/opt/spack|'"${PDT_PATH}"'|g' spack/etc/spack/defaults/config.yaml
 
       # open permissions to use spack to install PDT
       if [[ "${USER}" != "root" ]]; then
@@ -198,6 +198,7 @@ else
       spack install pdt
 
       # get PDT install dir created by spack
+      PDT_PATH_ORIGINAL=$PDT_PATH
       PDT_PATH=`spack find -p pdt | awk '{print $2}' | grep opt`
 
       # cloning the latest version of TAU
@@ -277,13 +278,13 @@ else
       rm -rf spack
 
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} find $PDT_PATH -type f -execdir chown root:root "{}" +
-         ${SUDO} find $PDT_PATH -type d -execdir chown root:root "{}" +
+         ${SUDO} find $PDT_PATH_ORIGINAL -type f -execdir chown root:root "{}" +
+         ${SUDO} find $PDT_PATH_ORIGINAL -type d -execdir chown root:root "{}" +
          ${SUDO} find $TAU_PATH -type f -execdir chown root:root "{}" +
          ${SUDO} find $TAU_PATH -type d -execdir chown root:root "{}" +
       fi
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} chmod go-w $PDT_PATH
+         ${SUDO} chmod go-w $PDT_PATH_ORIGINAL
          ${SUDO} chmod go-w $TAU_PATH
       fi
 

@@ -194,7 +194,7 @@ else
       spack external find
 
       # change spack install dir for PDT
-      ${SUDO} sed -i 's|$spack/opt/spack|/opt/rocmplus-'"${ROCM_VERSION}"'/pdt|g' spack/etc/spack/defaults/config.yaml
+      ${SUDO} sed -i 's|$spack/opt/spack|'"${PDT_PATH}"'|g' spack/etc/spack/defaults/config.yaml
 
       # open permissions to use spack to install PDT
       if [[ "${USER}" != "root" ]]; then
@@ -206,6 +206,7 @@ else
       spack install pdt
 
       # get PDT install dir created by spack
+      PDT_PATH_ORIGINAL=$PDT_PATH
       PDT_PATH=`spack find -p pdt | awk '{print $2}' | grep opt`
       export PATH=$PDT_PATH/bin:$PATH
 
@@ -233,9 +234,9 @@ else
       rm -rf spack
 
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} find $PDT_PATH -type f -execdir chown root:root "{}" +
+         ${SUDO} find $PDT_PATH_ORIGINAL -type f -execdir chown root:root "{}" +
          ${SUDO} find $SCOREP_PATH -type f -execdir chown root:root "{}" +
-         ${SUDO} chmod go-w $PDT_PATH
+         ${SUDO} chmod go-w $PDT_PATH_ORIGINAL
          ${SUDO} chmod go-w $SCOREP_PATH
       fi
 

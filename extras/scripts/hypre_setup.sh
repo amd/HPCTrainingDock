@@ -10,6 +10,7 @@ DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 AMDGPU_GFXMODEL_INPUT=""
 USE_SPACK=1
 HYPRE_VERSION="2.32.0"
+MPI_MODULE="openmpi"
 HYPRE_PATH=/opt/rocmplus-${ROCM_VERSION}/hypre
 HYPRE_PATH_INPUT=""
 
@@ -28,6 +29,7 @@ usage()
    echo "  --module-path [ MODULE_PATH ] default is $MODULE_PATH "
    echo "  --install-path [ HYPRE_PATH_INPUT ] default is $HYPRE_PATH "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
+   echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE "
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL_INPUT ] default autodetected "
    echo "  --hypre-version [ HYPRE_VERSION ] default is $HYPRE_VERSION "
    echo "  --use-spack [ USE_SPACK ] default is $USE_SPACK "
@@ -60,6 +62,11 @@ do
       "--build-hypre")
           shift
           BUILD_HYPRE=${1}
+          reset-last
+          ;;
+      "--mpi-module")
+          shift
+          MPI_MODULE=${1}
           reset-last
           ;;
       "--hypre-version")
@@ -160,7 +167,7 @@ else
       source /etc/profile.d/lmod.sh
       source /etc/profile.d/z01_lmod.sh
       module load rocm/${ROCM_VERSION}
-      module load openmpi
+      module load ${MPI_MODULE}
 
       cd /tmp
 
@@ -200,6 +207,7 @@ else
          spack install hypre@$HYPRE_VERSION+rocm@$ROCM_VERSION+rocblas@$ROCM_VERSION+unified-memory+gpu-aware-mpi amdgpu_target=$AMDGPU_GFXMODEL
 
          # get hypre install dir created by spack
+         HYPRE_PATH_ORIGINAL=$HYPRE_PATH
          HYPRE_PATH=`spack find -p hypre | awk '{print $2}' | grep opt`
 
          ${SUDO} rm -rf spack
@@ -213,14 +221,14 @@ else
       fi
 
       if [[ "${USER}" != "root" ]]; then
-            ${SUDO} find ${HYPRE_PATH} -type f -execdir chown root:root "{}" +
+            ${SUDO} find ${HYPRE_PATH_ORIGINAL} -type f -execdir chown root:root "{}" +
       fi
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} chmod go-w ${HYPRE_PATH}
+         ${SUDO} chmod go-w ${HYPRE_PATH_ORIGINAL}
       fi
 
       module unload rocm/${ROCM_VERSION}
-      module unload openmpi
+      module unload ${MPI_MODULE}
 
    fi
 
@@ -237,7 +245,7 @@ else
 	local base = "${HYPRE_PATH}"
 
 	load("rocm/${ROCM_VERSION}")
-	load("openmpi")
+	load("${MPI_MODULE}")
 	setenv("HYPRE_PATH", base)
 	prepend_path("PATH",pathJoin(base, "bin"))
 	prepend_path("PATH","${HYPRE_PATH}/bin")
