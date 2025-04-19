@@ -81,6 +81,13 @@ do
    shift
 done
 
+if [ "${HIPIFLY_PATH_INPUT}" != "" ]; then
+   HIPIFLY_PATH=${HIPIFLY_PATH_INPUT}
+else
+   # override path in case ROCM_VERSION has been supplied as input
+   HIPIFLY_PATH=/opt/rocmplus-${ROCM_VERSION}/hipifly
+fi
+
 echo ""
 echo "==========================================="
 echo "Setting Up the HIPIFLY Module"
@@ -98,13 +105,6 @@ if [ "${HIPIFLY_MODULE}" = "0" ]; then
    exit
 
 else
-
-      if [ "${HIPIFLY_PATH_INPUT}" != "" ]; then
-         HIPIFLY_PATH=${HIPIFLY_PATH_INPUT}
-      else
-         # override path in case ROCM_VERSION has been supplied as input
-         HIPIFLY_PATH=/opt/rocmplus-${ROCM_VERSION}/hipifly
-      fi
 
       # don't use sudo if user has write access to install path
       if [ -w ${HIPIFLY_PATH} ]; then
