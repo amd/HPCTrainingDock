@@ -167,7 +167,7 @@ else
       module load rocm/${ROCM_VERSION}
 
       # don't use sudo if user has write access to install path
-      if [ -w ${SCOREP_PATH} ]; then
+      if [ -w ${TAU_PATH} ]; then
          if [ -w ${PDT_PATH} ]; then
            SUDO=""
          fi
