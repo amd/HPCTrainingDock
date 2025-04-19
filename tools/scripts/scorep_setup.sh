@@ -230,7 +230,7 @@ else
       ${SUDO} make install
 
       cd ${CUR_DIR}
-      rm -rf scorep-${SCOREP_VERSION}
+      rm -rf scorep-${SCOREP_VERSION}*
       rm -rf spack
 
       if [[ "${USER}" != "root" ]]; then
