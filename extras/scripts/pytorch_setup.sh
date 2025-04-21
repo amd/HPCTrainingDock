@@ -230,16 +230,26 @@ else
       source /etc/profile.d/z01_lmod.sh
       module load rocm
 
-      ${SUDO} apt-get update
-      ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
-      ${SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
-      wget https://registrationcenter-download.intel.com/akdlm/IRC_NAS/79153e0f-74d7-45af-b8c2-258941adf58a/intel-onemkl-2025.0.0.940.sh
-      ${SUDO} sh ./intel-onemkl-2025.0.0.940.sh -a -s --eula accept
-      export PATH=/opt/intel/oneapi:$PATH
-
       # don't use sudo if user has write access to install path
       if [ -w ${INSTALL_PATH} ]; then
+         echo "...not using sudo since user has write access for install path..."
          SUDO=""
+      fi
+
+      if [[ ${SUDO} != "" ]]; then
+         ${SUDO} apt-get update
+         ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
+         ${SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
+         wget https://registrationcenter-download.intel.com/akdlm/IRC_NAS/79153e0f-74d7-45af-b8c2-258941adf58a/intel-onemkl-2025.0.0.940.sh
+         ${SUDO} sh ./intel-onemkl-2025.0.0.940.sh -a -s --eula accept
+         export PATH=/opt/intel/oneapi:$PATH
+      else
+         ln -s $(which python3) ~/bin/python
+         export PATH="$HOME/bin:$PATH"
+         source $HOME/.bashrc
+         mkdir -p ${INSTALL_PATH}/mkl
+         pip3 install mkl --target=${INSTALL_PATH}/mkl
+         export PYTHONPATH=$PYTHONPATH:${INSTALL_PATH}/mkl
       fi
 
       ${SUDO} mkdir -p ${INSTALL_PATH}

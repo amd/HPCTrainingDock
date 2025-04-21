@@ -178,6 +178,7 @@ else
       # don't use sudo if user has write access to install path
       if [ -w ${SCOREP_PATH} ]; then
          if [ -w ${PDT_PATH} ]; then
+           echo "not using sudo since user has write access to score-p install path and pdt install path..."
            SUDO=""
          fi
       fi
@@ -194,7 +195,7 @@ else
       spack external find
 
       # change spack install dir for PDT
-      ${SUDO} sed -i 's|$spack/opt/spack|'"${PDT_PATH}"'|g' spack/etc/spack/defaults/config.yaml
+      sed -i 's|$spack/opt/spack|'"${PDT_PATH}"'|g' spack/etc/spack/defaults/config.yaml
 
       # open permissions to use spack to install PDT
       if [[ "${USER}" != "root" ]]; then

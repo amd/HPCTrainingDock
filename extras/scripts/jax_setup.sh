@@ -110,15 +110,6 @@ else
    JAXLIB_PATH=/opt/rocmplus-${ROCM_VERSION}/jaxlib
 fi
 
-
-# don't use sudo if user has write access to install path
-if [ -w ${JAX_PATH} ]; then
-   if [ -w ${JAXLIB_PATH} ]; then
-   SUDO=""
-   fi
-fi
-
-
 # Load the ROCm version for this JAX build
 source /etc/profile.d/lmod.sh
 source /etc/profile.d/z01_lmod.sh
@@ -176,13 +167,27 @@ else
       echo "======================================="
       echo ""
 
+      # don't use sudo if user has write access to install path
+      if [ -w ${JAX_PATH} ]; then
+         if [ -w ${JAXLIB_PATH} ]; then
+            echo "...not using sudo since user has write access for install paths for jax and jaxlib..."
+            SUDO=""
+         fi
+      fi
+
       if [[ `which python | wc -l` -eq 0 ]]; then
-         echo "============================"
-	 echo "WARNING: python needs to be linked to python3 for the build to work"
-	 echo ".....Installing python-is-python3......"
-         echo "============================"
-	 ${SUDO} apt-get update
-         ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
+         if [[ ${SUDO} != "" ]]; then
+            echo "============================"
+   	    echo "WARNING: python needs to be linked to python3 for the build to work"
+	    echo ".....Installing python-is-python3 with sudo......"
+            echo "============================"
+    	    ${SUDO} apt-get update
+            ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
+         else
+            ln -s $(which python3) ~/bin/python
+            export PATH="$HOME/bin:$PATH"
+            source $HOME/.bashrc
+         fi
       fi
 
       source /etc/profile.d/lmod.sh

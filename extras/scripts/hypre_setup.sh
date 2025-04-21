@@ -195,12 +195,7 @@ else
          spack external find
 
          # change spack install dir for Hypre
-         ${SUDO} sed -i 's|$spack/opt/spack|'"${HYPRE_PATH}"'|g' spack/etc/spack/defaults/config.yaml
-
-         # open permissions to use spack to install hypre
-         if [[ "${USER}" != "root" ]]; then
-            ${SUDO} chmod -R a+rwX ${HYPRE_PATH}
-         fi
+         sed -i 's|$spack/opt/spack|'"${HYPRE_PATH}"'|g' spack/etc/spack/defaults/config.yaml
 
          # install hypre with spack
          #spack install hypre+rocm+rocblas+unified-memory

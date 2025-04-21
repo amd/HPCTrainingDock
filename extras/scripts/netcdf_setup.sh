@@ -188,20 +188,23 @@ else
       source /etc/profile.d/lmod.sh
       source /etc/profile.d/z01_lmod.sh
 
+      # don't use sudo if user has write access to install path
+      if [ -w ${NETCDF_PATH} ]; then
+         SUDO=""
+      fi
+
       # install libcurl
       if [ "${DISTRO}" = "ubuntu" ]; then
+         echo "...installing libcurl using sudo..."
          ${SUDO} apt-get update
          ${SUDO} apt-get install libcurl4-gnutls-dev
       elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
+         echo "...installing libcurl using sudo..."
          ${SUDO} yum install libcurl-devel
       elif [ "${DISTRO}" = "opensuse" ]; then
 	 echo "Not tested yet"
       fi
 
-      # don't use sudo if user has write access to install path
-      if [ -w ${NETCDF_PATH} ]; then
-         SUDO=""
-      fi
       ${SUDO} mkdir -p ${NETCDF_PATH}
       ${SUDO} mkdir -p ${NETCDF_PATH}/netcdf-c
       ${SUDO} mkdir -p ${NETCDF_PATH}/netcdf-fortran

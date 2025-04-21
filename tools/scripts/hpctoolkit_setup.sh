@@ -157,17 +157,19 @@ else
       source /etc/profile.d/z01_lmod.sh
       module load rocm/${ROCM_VERSION}
 
+      # don't use sudo if user has write access to install path
+      if [ -w ${HPCTOOLKIT_PATH} ]; then
+         if [ -w ${HPCVIEWER_PATH} ]; then
+            echo "...not using sudo since user has write access to hpctoolkit install path and hpcviewer install path..."
+            SUDO=""
+         fi
+      fi
+
       # openmpi library being installed as dependency of libboost-all-dev
       ${SUDO} ${DEB_FRONTEND} apt-get install -q -y pipx libboost-all-dev liblzma-dev libgtk-3-dev
 
       cd /tmp
 
-      # don't use sudo if user has write access to install path
-      if [ -w ${HPCTOOLKIT_PATH} ]; then
-         if [ -w ${HPCVIEWER_PATH} ]; then
-            SUDO=""
-         fi
-      fi
       ${SUDO} mkdir -p ${HPCTOOLKIT_PATH}
       ${SUDO} mkdir -p ${HPCVIEWER_PATH}
 

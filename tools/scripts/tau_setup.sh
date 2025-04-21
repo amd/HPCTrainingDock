@@ -169,6 +169,7 @@ else
       # don't use sudo if user has write access to install path
       if [ -w ${TAU_PATH} ]; then
          if [ -w ${PDT_PATH} ]; then
+           echo "...not using sudo since user has write access to tau install path and pdt install path..."
            SUDO=""
          fi
       fi
