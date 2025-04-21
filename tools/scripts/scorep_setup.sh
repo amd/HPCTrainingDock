@@ -34,7 +34,7 @@ usage()
    echo "  --pdt-install-path [ PDT_PATH_INPUT ] default $PDT_PATH "
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
-   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL_INPUT ] default autodetected "
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected "
    echo "  --help: print this usage information"
    exit 1
 }
@@ -57,7 +57,7 @@ do
    case "${1}" in
       "--amdgpu-gfxmodel")
           shift
-          AMDGPU_GFXMODEL_INPUT=${1}
+          AMDGPU_GFXMODEL=${1}
           reset-last
           ;;
       "--build-scorep")

@@ -189,9 +189,11 @@ else
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf ${CacheFiles}/netcdf.tgz
+      tar -xzf ${CACHE_FILES}/netcdf.tgz
       chown -R root:root ${NETCDF_PATH}
-      ${SUDO} rm ${CacheFiles}/netcdf.tgz
+      if [ "${USER}" != "sysadmin" ]; then
+         ${SUDO} rm -f ${CACHE_FILES}/netcdf.tgz
+      fi
 
    else
       echo ""

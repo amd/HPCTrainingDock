@@ -4,7 +4,7 @@
 ROCM_VERSION=6.0
 BUILD_CUPY=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/cupy
-AMDGPU_GFXMODEL_INPUT=""
+AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 CUPY_PATH=/opt/rocmplus-${ROCM_VERSION}/cupy
 CUPY_PATH_INPUT=""
 GIT_COMMIT="9cdff1737eaa44aba657cb17f7e0cc421d7cca34"
@@ -52,7 +52,7 @@ do
    case "${1}" in
       "--amdgpu-gfxmodel")
           shift
-          AMDGPU_GFXMODEL_INPUT=${1}
+          AMDGPU_GFXMODEL=${1}
 	  reset-last
           ;;
       "--build-cupy")
@@ -105,11 +105,6 @@ fi
 source /etc/profile.d/lmod.sh
 source /etc/profile.d/z01_lmod.sh
 module load rocm/${ROCM_VERSION}
-if [[ "$AMDGPU_GFXMODEL_INPUT" != "" ]]; then
-   AMDGPU_GFXMODEL=$AMDGPU_GFXMODEL_INPUT
-else
-   AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-fi
 
 echo ""
 echo "==================================="
