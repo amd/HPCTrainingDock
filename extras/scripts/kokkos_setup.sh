@@ -213,6 +213,7 @@ else
 
 	load("rocm/${ROCM_VERSION}")
 	prepend_path("PATH","${KOKKOS_PATH}")
+	setenv("Kokkos_DIR","${KOKKOS_PATH}")
 EOF
 
 fi

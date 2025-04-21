@@ -1,5 +1,6 @@
 #!/bin/bash
 
+AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 ROCM_VERSION=6.0
 GITHUB_BRANCH="develop"
 REPLACE=0
@@ -18,11 +19,15 @@ if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
 fi
 
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
 usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --help: print this usage information"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default is $AMDGPU_GFXMODEL "
    echo "  --install-path: default is: $INSTALL_PATH"
    echo "  --python-version: minor version of Python3, default is: $PYTHON_VERSION"
    echo "  --module-path: default is: $MODULE_PATH"
@@ -56,6 +61,11 @@ do
       "--install-rocprof-compute-from-source")
           shift
           INSTALL_ROCPROF_COMPUTE_FROM_SOURCE=${1}
+          reset-last
+          ;;
+      "--amdgpu-gfxmodel")
+          shift
+          AMDGPU_GFXMODEL=${1}
           reset-last
           ;;
       "--rocm-version")
@@ -127,39 +137,59 @@ if [[ "$INSTALL_ROCPROF_COMPUTE_FROM_SOURCE" == "0" ]];then
    exit
 fi
 
-git clone -b ${GITHUB_BRANCH} https://github.com/ROCm/rocprofiler-compute
-cd rocprofiler-compute
+AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
+CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
-if [ -d "$INSTALL_PATH" ]; then
-   # don't use sudo if user has write access to install path
-   if [ -w ${INSTALL_PATH} ]; then
-      SUDO=""
-   else
-      echo "WARNING: using an install path that requires sudo"
-   fi
+if [ -f ${CACHE_FILES}/${TOOL_NAME}-${GITHUB_BRANCH}.tgz ]; then
+      echo ""
+      echo "============================"
+      echo " Installing Cached ${TOOL_NAME}-${GITHUB_BRANCH}"
+      echo "============================"
+      echo ""
+
+      #install the cached version
+      cd /opt/rocmplus-${ROCM_VERSION}
+      tar -xzf ${CACHE_FILES}/${TOOL_NAME}-${GITHUB_BRANCH}.tgz
+      chown -R root:root ${TOOL_NAME}-${GITHUB_BRANCH}
+      if [ "${USER}" != "sysadmin" ]; then
+         ${SUDO} rm ${CACHE_FILES}/${TOOL_NAME}-${GITHUB_BRANCH}.tgz
+      fi
 else
-   # if install path does not exist yet, the check on write access will fail
-   echo "WARNING: using sudo, make sure you have sudo privileges"
-fi
 
-${SUDO} mkdir -p ${INSTALL_PATH}
-if [[ "${USER}" != "root" ]]; then
-   ${SUDO} chmod -R a+w ${INSTALL_PATH}
-fi
-
-python3.${PYTHON_VERSION} -m pip install -t ${INSTALL_PATH}/python-libs -r requirements.txt --upgrade
-python3.${PYTHON_VERSION} -m pip install -t ${INSTALL_PATH}/python-libs pytest --upgrade
-mkdir build && cd build
-cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_PATH}/ \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DPYTHON_DEPS=${INSTALL_PATH}/python-libs \
-      -DMOD_INSTALL_PATH=${INSTALL_PATH}/modulefiles ..
-      make install
-cd ../..
-rm -rf rocprofiler-compute
-
-if [[ "${USER}" != "root" ]]; then
-   ${SUDO} chmod go-w ${INSTALL_PATH}
+   git clone -b ${GITHUB_BRANCH} https://github.com/ROCm/rocprofiler-compute
+   cd rocprofiler-compute
+   
+   if [ -d "$INSTALL_PATH" ]; then
+      # don't use sudo if user has write access to install path
+      if [ -w ${INSTALL_PATH} ]; then
+         SUDO=""
+      else
+         echo "WARNING: using an install path that requires sudo"
+      fi
+   else
+      # if install path does not exist yet, the check on write access will fail
+      echo "WARNING: using sudo, make sure you have sudo privileges"
+   fi
+   
+   ${SUDO} mkdir -p ${INSTALL_PATH}
+   if [[ "${USER}" != "root" ]]; then
+      ${SUDO} chmod -R a+w ${INSTALL_PATH}
+   fi
+   
+   python3.${PYTHON_VERSION} -m pip install -t ${INSTALL_PATH}/python-libs -r requirements.txt --upgrade
+   python3.${PYTHON_VERSION} -m pip install -t ${INSTALL_PATH}/python-libs pytest --upgrade
+   mkdir build && cd build
+   cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_PATH}/ \
+         -DCMAKE_BUILD_TYPE=Release \
+         -DPYTHON_DEPS=${INSTALL_PATH}/python-libs \
+         -DMOD_INSTALL_PATH=${INSTALL_PATH}/modulefiles ..
+         make install
+   cd ../..
+   rm -rf rocprofiler-compute
+   
+   if [[ "${USER}" != "root" ]]; then
+      ${SUDO} chmod go-w ${INSTALL_PATH}
+   fi
 fi
 
 # Create a module file for ${TOOL_NAME}

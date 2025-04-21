@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ROCM_VERSION=6.0
-AMDGPU_GFXMODEL_INPUT=""
+AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 BUILD_PYTORCH=0
 ZSTD_VERSION=1.5.6
 PYTORCH_VERSION=2.6.0
@@ -30,7 +30,7 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
-   echo "--amdgpu-gfxmodel [ AMDGPU_GFXMODEL_INPUT ] default is autodetected"
+   echo "--amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default is autodetected"
    echo "--build-pytorch [ BUILD_PYTORCH ] set to 1 to build jax default is 0"
    echo "--pytorch-version [ PYTORCH_VERSION ] version of PyTorch, default is $PYTORCH_VERSION"
    echo "--python-version [ PYTHON_VERSION ] version of Python, default is $PYTHON_VERSION"
@@ -66,7 +66,7 @@ do
           ;;
       "--amdgpu-gfxmodel")
           shift
-          AMDGPU_GFXMODEL_INPUT=${1}
+          AMDGPU_GFXMODEL=${1}
 	  reset-last
           ;;
       "--build-pytorch")
@@ -115,12 +115,6 @@ if [ "${INSTALL_PATH_INPUT}" != "" ]; then
 else
    # override path in case ROCM_VERSION has been supplied as input
    INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch
-fi
-
-if [[ "$AMDGPU_GFXMODEL_INPUT" != "" ]]; then
-   AMDGPU_GFXMODEL=$AMDGPU_GFXMODEL_INPUT
-else
-   AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 fi
 
 ZSTD_PATH=$INSTALL_PATH/zstd
@@ -462,15 +456,15 @@ ${SUDO} mkdir -p ${MODULE_PATH}
 
 # the - option suppresses tabs
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
-        whatis("PyTorch version ${PYTORCH_VERSION} with ROCm Support")
+	whatis("PyTorch version ${PYTORCH_VERSION} with ROCm Support")
 
-        load("rocm/${ROCM_VERSION}")
-        conflict("miniconda3")
+	load("rocm/${ROCM_VERSION}")
+	conflict("miniconda3")
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchvision-${TORCHVISION_VERSION}+${TORCHVISION_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/pillow-${PILLOW_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
-        prepend_path("PYTHONPATH","${TRANSFORMERS_PATH}")
-        prepend_path("PYTHONPATH","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages")
+	prepend_path("PYTHONPATH","${TRANSFORMERS_PATH}")
+	prepend_path("PYTHONPATH","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages")
 	prepend_path("PYTHONPATH","${PYTORCH_PATH}")
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}")
 	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}")

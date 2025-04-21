@@ -71,6 +71,7 @@ COPY tools/scripts/rocprof-compute_setup.sh /tmp/rocprof-compute_setup.sh
 RUN  /tmp/rocprof-compute_setup.sh \
         --rocm-version ${ROCM_VERSION} \
         --python-version ${PYTHON_VERSION} \
+        --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
         --install-rocprof-compute-from-source ${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE} && \
      rm /tmp/rocprof-compute_setup.sh
 
