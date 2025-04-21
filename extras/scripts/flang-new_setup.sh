@@ -6,6 +6,7 @@ MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/amdflang-new-beta-drop
 BUILD_FLANGNEW=0
 ROCM_VERSION=6.0
 UNTAR_DIR=/opt/rocmplus-${ROCM_VERSION}
+UNTAR_DIR_INPUT=""
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_SHORT=$DISTRO
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -24,7 +25,7 @@ usage()
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected "
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
-   echo "  --install-path [ UNTAR_DIR ] default $UNTAR_DIR "
+   echo "  --install-path [ UNTAR_DIR_INPUT ] default $UNTAR_DIR "
    echo "  --archive-name [ ARCHIVE NAME ] default $ARCHIVE_NAME "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
    echo "  --build-flang-new [ BUILD_FLANGNEW ] default $BUILD_FLANGNEW "
@@ -60,7 +61,7 @@ do
           ;;
       "--install-path")
           shift
-          UNTAR_DIR=${1}
+          UNTAR_DIR_INPUT=${1}
           reset-last
           ;;
       "--help")
@@ -91,6 +92,13 @@ do
    n=$((${n} + 1))
    shift
 done
+
+if [ "${UNTAR_DIR_INPUT}" != "" ]; then
+   UNTAR_DIR=${UNTAR_DIR_INPUT}
+else
+   # override path in case ROCM_VERSION has been supplied as input
+   UNTAR_DIR=/opt/rocmplus-${ROCM_VERSION}
+fi
 
 AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
 CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
