@@ -28,6 +28,7 @@ fi
 usage()
 {
    echo "Usage:"
+   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --module-path [ MODULE_PATH ] default is $MODULE_PATH "
    echo "  --github-branch [ GITHUB_BRANCH] default is $GITHUB_BRANCH "
    echo "  --mpi-module [ MPI_MODULE ] default is $MPI_MODULE "
@@ -36,7 +37,7 @@ usage()
    echo "  --install-rocprof-sys-from-source [ INSTALL_ROCPROF_SYS_FROM_SOURCE ] default is $INSTALL_ROCPROF_SYS_FROM_SOURCE "
    echo "  --rocm-version [ ROCM_VERSION ] default is $ROCM_VERSION "
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default is $AMDGPU_GFXMODEL "
-   echo "  --help: this usage information"
+   echo "  --help: print this usage information"
    exit 1
 }
 
@@ -134,21 +135,27 @@ else
 fi
 
 # don't use sudo if user has write access to install path
-if [ -w ${INSTALL_PATH} ]; then
-   SUDO=""
-   export TEXINFO_PATH=${INSTALL_PATH}/texinfo
-   wget https://ftp.gnu.org/gnu/texinfo/texinfo-7.0.2.tar.gz
-   tar -xzvf texinfo-7.0.2.tar.gz
-   cd texinfo-7.0.2
-   ./configure --prefix=$TEXINFO_PATH && make && make install
-   export PATH=$TEXINFO_PATH/bin:$PATH
-   cd ../
-   rm -rf texinfo-7.0.2*
-else
-   if [ ! -x /usr/bin/gettext ]; then
-      ${SUDO} apt-get update
-      ${SUDO} apt-get install -y gettext autopoint
+if [ -d "$INSTALL_PATH" ]; then
+   if [ -w ${INSTALL_PATH} ]; then
+      SUDO=""
+      export TEXINFO_PATH=${INSTALL_PATH}/texinfo
+      wget https://ftp.gnu.org/gnu/texinfo/texinfo-7.0.2.tar.gz
+      tar -xzvf texinfo-7.0.2.tar.gz
+      cd texinfo-7.0.2
+      ./configure --prefix=$TEXINFO_PATH && make && make install
+      export PATH=$TEXINFO_PATH/bin:$PATH
+      cd ../
+      rm -rf texinfo-7.0.2*
+   else
+      echo "WARNING: using an install path that requires sudo"
+      if [ ! -x /usr/bin/gettext ]; then
+         ${SUDO} apt-get update
+         ${SUDO} apt-get install -y gettext autopoint
+      fi
    fi
+else
+   # if install path does not exist yet, the check on write access will fail
+   echo "WARNING: using sudo, make sure you have sudo privileges"
 fi
 
 # omnitrace (omnitrace-avail) will throw this message using default values, so change default to 2
@@ -224,9 +231,19 @@ if [ "${INSTALL_ROCPROF_SYS_FROM_SOURCE}" = "1" ] ; then
 fi
 
 # Create a module file for ${TOOL_NAME}
-if [ ! -w ${MODULE_PATH} ]; then
+if [ -d "$MODULE_PATH" ]; then
+   # use sudo if user does not have write access to module path
+   if [ ! -w ${MODULE_PATH} ]; then
+      SUDO="sudo"
+   else
+      echo "WARNING: not using sudo since user has write access to module path"
+   fi
+else
+   # if module path dir does not exist yet, the check on write access will fail
    SUDO="sudo"
+   echo "WARNING: using sudo, make sure you have sudo privileges"
 fi
+
 
 ${SUDO} mkdir -p ${MODULE_PATH}
 

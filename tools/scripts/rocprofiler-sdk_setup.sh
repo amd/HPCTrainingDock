@@ -20,11 +20,12 @@ fi
 usage()
 {
    echo "Usage:"
+   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --install-path [INSTALL_PATH ] default $INSTALL_PATH"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --github-branch [ GITHUB_BRANCH ] default $GITHUB_BRANCH"
-   echo "  --help: this usage information"
+   echo "  --help: print this usage information"
    exit 1
 }
 
@@ -95,33 +96,40 @@ fi
 
 LIBDW_FLAGS=""
 # don't use sudo if user has write access to install path
-if [ -w ${INSTALL_PATH} ]; then
-   SUDO=""
-   if [ "${DISTRO}" == "ubuntu" ]; then
-      export LIBDW_PATH=$INSTALL_PATH/libdw
-      mkdir libdw_install
-      cd libdw_install
-      apt-get source libdw-dev
-      cd elfutils-*
-      ./configure --prefix=$LIBDW_PATH --disable-libdebuginfod --disable-debuginfod
-      make -j
-      make install
-      export PATH=$PATH:$LIBDW_PATH:$LIBDW_PATH/bin
-      cd ../../
-      rm -rf libdw_install
-      LIBDW_FLAGS="-I$LIBDW_PATH/include -L$LIBDW_PATH/lib -ldw"
+if [ -d "$INSTALL_PATH" ]; then
+   # don't use sudo if user has write access to install path
+   if [ -w ${INSTALL_PATH} ]; then
+      SUDO=""
+      if [ "${DISTRO}" == "ubuntu" ]; then
+         export LIBDW_PATH=$INSTALL_PATH/libdw
+         mkdir libdw_install
+         cd libdw_install
+         apt-get source libdw-dev
+         cd elfutils-*
+         ./configure --prefix=$LIBDW_PATH --disable-libdebuginfod --disable-debuginfod
+         make -j
+         make install
+         export PATH=$PATH:$LIBDW_PATH:$LIBDW_PATH/bin
+         cd ../../
+         rm -rf libdw_install
+         LIBDW_FLAGS="-I$LIBDW_PATH/include -L$LIBDW_PATH/lib -ldw"
+      else
+         echo " ------ WARNING: your distribution is not ubuntu ------ "
+         echo " ------ WARNING: install will fail if libdw is not found ------ "
+      fi
    else
-      echo " ------ WARNING: your distribution is not ubuntu ------ "
-      echo " ------ WARNING: install will fail if libdw is not found ------ "
+      echo " ------ WARNING: using an install path that requires sudo ------ "
+      if [ "${DISTRO}" == "ubuntu" ]; then
+         sudo apt-get update
+         sudo apt-get install -y libdw-dev
+      else
+         echo " ------ WARNING: your distribution is not ubuntu ------"
+         echo " ------ WARNING: install will fail if libdw is not found ------ "
+      fi
    fi
 else
-   if [ "${DISTRO}" == "ubuntu" ]; then
-      sudo apt-get update
-      sudo apt-get install -y libdw-dev
-   else
-      echo " ------ WARNING: your distribution is not ubuntu ------"
-      echo " ------ WARNING: install will fail if libdw is not found ------ "
-   fi
+   # if install path does not exist yet, the check on write access will fail
+   echo "WARNING: using sudo, make sure you have sudo privileges"
 fi
 
 echo ""
@@ -152,10 +160,20 @@ cd ../..
 
 rm -rf rocprofiler-sdk
 
-# Create a module file for ${TOOL_NAME}
-if [ ! -w ${MODULE_PATH} ]; then
-   SUDO="sudo"
+# Create a module file for rocprofiler-sdk
+if [ -d "$MODULE_PATH" ]; then
+   # use sudo if user does not have write access to module path
+   if [ ! -w ${MODULE_PATH} ]; then
+      SUDO="sudo"
+    else
+       echo "WARNING: not using sudo since user has write access to module path"
+    fi
+else
+    # if module path dir does not exist yet, the check on write access will fail
+    SUDO="sudo"
+    echo "WARNING: using sudo, make sure you have sudo privileges"
 fi
+
 
 ${SUDO} mkdir -p ${MODULE_PATH}
 

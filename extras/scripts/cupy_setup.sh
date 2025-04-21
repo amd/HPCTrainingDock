@@ -23,13 +23,15 @@ fi
 usage()
 {
    echo "Usage:"
+   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --build-cupy"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --install-path [ CUPY_PATH ] default $CUPY_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --git-commit [ GIT_COMMIT ] specify what commit hash you want to build from, default is $GIT_COMMIT"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
-   echo "  --help: this usage information"
+   echo "  --help: print this usage information"
+   exit 1
 }
 
 send-error()
@@ -165,9 +167,16 @@ else
       export CFLAGS+=-D__HIP__
       export HCC_AMDGPU_ARCH=${AMDGPU_GFXMODEL}
 
-      # don't use sudo if user has write access to install path
-      if [ -w ${CUPY_PATH} ]; then
-         SUDO=""
+      if [ -d "$CUPY_PATH" ]; then
+         # don't use sudo if user has write access to install path
+         if [ -w ${CUPY_PATH} ]; then
+            SUDO=""
+         else
+            echo "WARNING: using an install path that requires sudo"
+         fi
+      else
+         # if install path does not exist yet, the check on write access will fail
+         echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
       # Get source from the ROCm repository of CuPy.
@@ -205,9 +214,19 @@ else
    fi
 
    # Create a module file for cupy
-   if [ ! -w ${MODULE_PATH} ]; then
+   if [ -d "$MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to module path"
+      fi
+   else
+      # if module path dir does not exist yet, the check on write access will fail
       SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
+
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    CUPY_VERSION=`cat "$CUPY_PATH/cupy/_version.py"  | cut -f3 -d' ' |  tr -d "'"`

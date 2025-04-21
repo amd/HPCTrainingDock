@@ -5,6 +5,7 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/amdflang-new-beta-drop
 BUILD_FLANGNEW=0
 ROCM_VERSION=6.0
+UNTAR_DIR=/opt/rocmplus-${ROCM_VERSION}
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_SHORT=$DISTRO
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -20,12 +21,14 @@ fi
 usage()
 {
    echo "Usage:"
+   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected "
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
+   echo "  --install-path [ UNTAR_DIR ] default $UNTAR_DIR "
    echo "  --archive-name [ ARCHIVE NAME ] default $ARCHIVE_NAME "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
    echo "  --build-flang-new [ BUILD_FLANGNEW ] default $BUILD_FLANGNEW "
-   echo "  --help: this usage information"
+   echo "  --help: print this usage information"
    exit 1
 }
 
@@ -53,6 +56,11 @@ do
       "--build-flang-new")
           shift
           BUILD_FLANGNEW=${1}
+          reset-last
+          ;;
+      "--install-path")
+          shift
+          UNTAR_DIR=${1}
           reset-last
           ;;
       "--help")
@@ -109,12 +117,24 @@ else
       echo "================================================"
       echo ""
 
-      #install the cached version
-      if [[ ! -d "/opt/rocmplus-${ROCM_VERSION}" ]]; then
-         ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}
+      if [ -d "$UNTAR_DIR" ]; then
+         # don't use sudo if user has write access to install path
+         if [ -w ${UNTAR_DIR} ]; then
+            SUDO=""
+         else
+            echo "WARNING: using an install path that requires sudo"
+         fi
+      else
+         # if install path does not exist yet, the check on write access will fail
+         echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
-      cd /opt/rocmplus-${ROCM_VERSION}
-      ${SUDO} chmod a+w /opt/rocmplus-${ROCM_VERSION}
+
+      #install the cached version
+      if [[ ! -d "${UNTAR_DIR}" ]]; then
+         ${SUDO} mkdir -p ${UNTAR_DIR}
+      fi
+      cd ${UNTAR_DIR}
+      ${SUDO} chmod a+w ${UNTAR_DIR}}
 
       if [[ ${DISTRO} == "ubuntu" ]]; then
          if [[ ${ARCHIVE_NAME} == "rocm-afar-7450-drop-6.0.0" ]]; then
@@ -126,14 +146,27 @@ else
       tar -xvjf ${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
       rm -f ${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
 
-      ${SUDO} chown -R root:root /opt/rocmplus-${ROCM_VERSION}/${ARCHIVE_DIR}
-      ${SUDO} chmod go-w /opt/rocmplus-${ROCM_VERSION}
+      ${SUDO} chown -R root:root ${UNTAR_DIR}/${ARCHIVE_DIR}
+      ${SUDO} chmod go-w ${UNTAR_DIR}
 
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm ${CACHE_FILES}/${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
       fi
 
       # Create a module file for flang-new
+      if [ -d "$MODULE_PATH" ]; then
+         # use sudo if user does not have write access to module path
+         if [ ! -w ${MODULE_PATH} ]; then
+            SUDO="sudo"
+         else
+            echo "WARNING: not using sudo since user has write access to module path"
+         fi
+      else
+         # if module path dir does not exist yet, the check on write access will fail
+         SUDO="sudo"
+         echo "WARNING: using sudo, make sure you have sudo privileges"
+      fi
+
       ${SUDO} mkdir -p ${MODULE_PATH}
 
       # - on next line suppresses tab in the following lines

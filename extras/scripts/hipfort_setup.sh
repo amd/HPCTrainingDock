@@ -17,6 +17,7 @@ fi
 usage()
 {
    echo "Usage:"
+   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --build-hipfort [ BUILD_HIPFORT ], set to 1 to build hipfort, default is $BUILD_HIPFORT"
@@ -137,6 +138,18 @@ else
          source /etc/profile.d/z01_lmod.sh
          module load rocm/${ROCM_VERSION}
 
+         if [ -d "$HIPFORT_PATH" ]; then
+            # don't use sudo if user has write access to install path
+            if [ -w ${HIPFORT_PATH} ]; then
+               SUDO=""
+            else
+               echo "WARNING: using an install path that requires sudo"
+            fi
+         else
+            # if install path does not exist yet, the check on write access will fail
+            echo "WARNING: using sudo, make sure you have sudo privileges"
+         fi
+
          ${SUDO} mkdir -p ${HIPFORT_PATH}
 
          git clone --branch rocm-${ROCM_VERSION} https://github.com/ROCm/hipfort.git
@@ -166,10 +179,20 @@ else
 
    fi
 
-   if [ ! -w ${MODULE_PATH} ]; then
-      SUDO="sudo"
-   fi
    # Create a module file for hipfort
+   if [ -d "$MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to module path"
+      fi
+   else
+      # if module path dir does not exist yet, the check on write access will fail
+      SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
+   fi
+
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs

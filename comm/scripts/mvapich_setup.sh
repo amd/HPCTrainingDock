@@ -26,13 +26,14 @@ fi
 usage()
 {
    echo "Usage:"
+   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --dry-run default off"
    echo "  --install-path [ INSTALL_PATH ] default /opt/rocmplus-<ROCM_VERSION>/mvapich"
    echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/mvapich"
    echo "  --replace default off"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --rocm-path [ ROCM_PATH ] default /opt/rocm-$ROCM_VERSION"
-   echo "  --help: this usage information"
+   echo "  --help: print this usage information"
    exit 1
 }
 

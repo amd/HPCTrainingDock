@@ -21,7 +21,8 @@ fi
 usage()
 {
    echo "Usage:"
-   echo "  --help: display this usage information"
+   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  --help: print this usage information"
    echo "  --install-path: default is: $INSTALL_PATH"
    echo "  --python-version: minor version of Python3, default is: $PYTHON_VERSION"
    echo "  --module-path: default is: $MODULE_PATH"
@@ -129,6 +130,18 @@ fi
 git clone -b ${GITHUB_BRANCH} https://github.com/ROCm/rocprofiler-compute
 cd rocprofiler-compute
 
+if [ -d "$INSTALL_PATH" ]; then
+   # don't use sudo if user has write access to install path
+   if [ -w ${INSTALL_PATH} ]; then
+      SUDO=""
+   else
+      echo "WARNING: using an install path that requires sudo"
+   fi
+else
+   # if install path does not exist yet, the check on write access will fail
+   echo "WARNING: using sudo, make sure you have sudo privileges"
+fi
+
 ${SUDO} mkdir -p ${INSTALL_PATH}
 if [[ "${USER}" != "root" ]]; then
    ${SUDO} chmod -R a+w ${INSTALL_PATH}
@@ -150,8 +163,17 @@ if [[ "${USER}" != "root" ]]; then
 fi
 
 # Create a module file for ${TOOL_NAME}
-if [ ! -w ${MODULE_PATH} ]; then
+if [ -d "$MODULE_PATH" ]; then
+   # use sudo if user does not have write access to module path
+   if [ ! -w ${MODULE_PATH} ]; then
+      SUDO="sudo"
+   else
+      echo "WARNING: not using sudo since user has write access to module path"
+   fi
+else
+   # if module path dir does not exist yet, the check on write access will fail
    SUDO="sudo"
+   echo "WARNING: using sudo, make sure you have sudo privileges"
 fi
 
 ${SUDO} mkdir -p ${MODULE_PATH}

@@ -51,29 +51,30 @@ fi
 usage()
 {
     echo "Usage:"
+    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
     echo "  --build-xpmem [ BUILD_XPMEM ] default 1-yes"
     echo "  --c-compiler [ CC ] default $C_COMPILER"
     echo "  --cxx-compiler [ CXX ] default $CXX_COMPILER"
     echo "  --dry-run default off"
     echo "  --fc-compiler [ FC ] default $FC_COMPILER"
-    echo "  --install-path [ INSTALL_PATH ] default /opt/rocmplus-<ROCM_VERSION>/openmpi (ucx, and ucc)"
-    echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/openmpi"
+    echo "  --install-path [ INSTALL_PATH ] default /opt/rocmplus-$ROCM_VERSION/openmpi (ucx, and ucc)"
+    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
     echo "  --openmpi-path [OPENMPI_PATH] default $INSTALL_PATH/openmpi-$OPENMPI_VERSION-ucc-$UCC_VERSION-ucx-$UCX_VERSION-xpmem-$XPMEM_VERSION"
     echo "  --openmpi-version [VERSION] default $OPENMPI_VERSION"
     echo "  --openmpi-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
     echo "  --replace default off"
     echo "  --rocm-version [ ROCM_VERSION ] default none"
     echo "  --rocm-path [ ROCM_PATH ] default none"
-    echo "  --ucc-path default <INSTALL_PATH>/ucc"
+    echo "  --ucc-path default $INSTALL_PATH/ucc-$UCC_VERSION-ucx-$UCX_VERSION-xpmem-$XPMEM_VERSION"
     echo "  --ucc-version [VERSION] default $UCC_VERSION"
     echo "  --ucc-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
-    echo "  --ucx-path default <INSTALL_PATH>/ucx"
+    echo "  --ucx-path default $INSTALL_PATH/ucx-$UCX_VERSION-xpmem-$XPMEM_VERSION"
     echo "  --ucx-version [VERSION] default $UCX_VERSION"
     echo "  --ucx-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
-    echo "  --xpmem-path default <INSTALL_PATH>/ucx"
+    echo "  --xpmem-path default ${INSTALL_PATH}/xpmem-${XPMEM_VERSION}"
     echo "  --xpmem-version [VERSION] default $UCX_VERSION"
     echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
-    echo "  --help: this usage information"
+    echo "  --help: print this usage information"
     exit 1
 }
 
@@ -246,35 +247,6 @@ echo "   ROCM_PATH: ${ROCM_PATH}"
 echo "============================"
 echo ""
 
-if [ "${DISTRO}" = "ubuntu" ]; then
-   echo "Install of libpmix-dev libhwloc-dev libevent-dev libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen packages"
-   if [[ "${DRY_RUN}" == "0" ]]; then
-      # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
-      ${SUDO} apt-get update
-      ${SUDO} ${DEB_FRONTEND} apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
-         libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen
-      IS_DOCKER=0
-      if [ -f "/run/systemd/container" ]; then
-        IS_DOCKER=`grep -E '^docker$' /run/systemd/container |wc -l`
-      fi
-      if [ "${IS_DOCKER}" == "1" ]; then
-	 BUILD_XPMEM=0
-      else
-         ${SUDO} ${DEB_FRONTEND} apt-get install -y linux-headers-$(uname -r)
-      fi
-   fi
-elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
-   echo "Install of pmix and hwloc packages"
-   if [[ "${DRY_RUN}" == "0" ]]; then
-      # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
-      ${SUDO} yum update
-      ${SUDO} yum install -y pmix hwloc
-   fi
-else
-   echo "DISTRO version ${DISTRO} not recognized or supported"
-   exit
-fi
-
 if [ "${BUILD_XPMEM}" == "1" ]; then
    XPMEM_STRING=-xpmem-${XPMEM_VERSION}
 fi
@@ -309,6 +281,48 @@ else
    OPENMPI_PATH="${INSTALL_PATH}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}
 fi
 
+
+if [ -d "$INSTALL_PATH" ]; then
+   # don't use sudo if user has write access to install path
+   if [ -w ${INSTALL_PATH} ]; then
+      SUDO=""
+      echo "WARNING: not using sudo since user has write privileges to install path, some dependencies may fail to get installed"
+   else
+      echo "WARNING: using an install path that requires sudo"
+   fi
+else
+   # if install path does not exist yet, the check on write access will fail
+   echo "WARNING: using sudo, make sure you have sudo privileges"
+fi
+
+if [ "${DISTRO}" = "ubuntu" ]; then
+   echo "Install of libpmix-dev libhwloc-dev libevent-dev libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen packages"
+   if [[ "${DRY_RUN}" == "0" ]]; then
+      # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
+      ${SUDO} apt-get update
+      ${SUDO} ${DEB_FRONTEND} apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
+         libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen
+      IS_DOCKER=0
+      if [ -f "/run/systemd/container" ]; then
+        IS_DOCKER=`grep -E '^docker$' /run/systemd/container |wc -l`
+      fi
+      if [ "${IS_DOCKER}" == "1" ]; then
+         BUILD_XPMEM=0
+      else
+         ${SUDO} ${DEB_FRONTEND} apt-get install -y linux-headers-$(uname -r)
+      fi
+   fi
+elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
+   echo "Install of pmix and hwloc packages"
+   if [[ "${DRY_RUN}" == "0" ]]; then
+      # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
+      ${SUDO} yum update
+      ${SUDO} yum install -y pmix hwloc
+   fi
+else
+   echo "DISTRO version ${DISTRO} not recognized or supported"
+   exit
+fi
 
 if [[ "${DRY_RUN}" == "0" ]] && [[ ! -d ${INSTALL_PATH} ]] ; then
    ${SUDO} mkdir -p "${INSTALL_PATH}"
@@ -768,6 +782,20 @@ module unload rocm/${ROCM_VERSION}
 # In either case of Cache or Build from source, create a module file for OpenMPI
 
 if [[ "${DRY_RUN}" == "0" ]]; then
+
+   if [ -d "$MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to module path"
+      fi
+   else
+      # if module path dir does not exist yet, the check on write access will fail
+      SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
+   fi
+
    ${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs

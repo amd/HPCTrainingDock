@@ -25,6 +25,7 @@ fi
 usage()
 {
    echo "Usage:"
+   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --hdf5-version [ HDF5_VERSION ] default $HDF5_VERSION"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
@@ -35,7 +36,7 @@ usage()
    echo "  --cxx-compiler [ CXX_COMPILER ] default ${CXX_COMPILER}"
    echo "  --fc-compiler [ FC_COMPILER ] default ${FC_COMPILER}"
    echo "  --build-hdf5 [ BUILD_HDF5 ], set to 1 to build HDF5, default is 0"
-   echo "  --help: this usage information"
+   echo "  --help: print this usage information"
    exit 1
 }
 
@@ -169,8 +170,16 @@ else
       source /etc/profile.d/z01_lmod.sh
 
       # don't use sudo if user has write access to install path
-      if [ -w ${HDF5_PATH} ]; then
-         SUDO=""
+      if [ -d "$HDF5_PATH" ]; then
+         # don't use sudo if user has write access to install path
+         if [ -w ${HDF5_PATH} ]; then
+            SUDO=""
+         else
+            echo "WARNING: using an install path that requires sudo"
+         fi
+      else
+         # if install path does not exist yet, the check on write access will fail
+         echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
       ${SUDO} mkdir -p ${HDF5_PATH}
@@ -258,9 +267,19 @@ else
    fi
 
    # Create a module file for hdf5
-   if [ ! -w ${MODULE_PATH} ]; then
+   if [ -d "$MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to module path"
+      fi
+   else
+      # if module path dir does not exist yet, the check on write access will fail
       SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
+
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs

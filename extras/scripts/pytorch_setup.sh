@@ -28,6 +28,8 @@ fi
 
 usage()
 {
+   echo "Usage:"
+   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "--amdgpu-gfxmodel [ AMDGPU_GFXMODEL_INPUT ] default is autodetected"
    echo "--build-pytorch [ BUILD_PYTORCH ] set to 1 to build jax default is 0"
    echo "--pytorch-version [ PYTORCH_VERSION ] version of PyTorch, default is $PYTORCH_VERSION"
@@ -37,6 +39,7 @@ usage()
    echo "--module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "--use-wheel [ USE_WHEEL ] build with a wheel instead of from source, default is $USE_WHEEL"
+   exit 1
 }
 
 send-error()
@@ -190,8 +193,16 @@ else
    elif [ "${USE_WHEEL}" == "1" ]; then
 
       # don't use sudo if user has write access to install path
-      if [ -w ${INSTALL_PATH} ]; then
-         SUDO=""
+      if [ -d "$INSTALL_PATH" ]; then
+         # don't use sudo if user has write access to install path
+         if [ -w ${INSTALL_PATH} ]; then
+            SUDO=""
+         else
+            echo "WARNING: using an install path that requires sudo"
+         fi
+      else
+         # if install path does not exist yet, the check on write access will fail
+         echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
       ${SUDO} mkdir -p ${INSTALL_PATH}
@@ -231,9 +242,16 @@ else
       module load rocm
 
       # don't use sudo if user has write access to install path
-      if [ -w ${INSTALL_PATH} ]; then
-         echo "...not using sudo since user has write access for install path..."
-         SUDO=""
+      if [ -d "$INSTALL_PATH" ]; then
+         # don't use sudo if user has write access to install path
+         if [ -w ${INSTALL_PATH} ]; then
+            SUDO=""
+         else
+            echo "WARNING: using an install path that requires sudo"
+         fi
+      else
+         # if install path does not exist yet, the check on write access will fail
+         echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
       if [[ ${SUDO} != "" ]]; then
@@ -422,9 +440,19 @@ else
 fi
 
 # create a module file for pytorch
-if [ ! -w ${MODULE_PATH} ]; then
+if [ -d "$MODULE_PATH" ]; then
+   # use sudo if user does not have write access to module path
+   if [ ! -w ${MODULE_PATH} ]; then
+      SUDO="sudo"
+   else
+      echo "WARNING: not using sudo since user has write access to module path"
+   fi
+else
+   # if module path dir does not exist yet, the check on write access will fail
    SUDO="sudo"
+   echo "WARNING: using sudo, make sure you have sudo privileges"
 fi
+
 ${SUDO} mkdir -p ${MODULE_PATH}
 
 # the - option suppresses tabs

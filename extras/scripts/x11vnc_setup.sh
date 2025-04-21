@@ -14,7 +14,7 @@ fi
 usage()
 {
     echo "Usage:"
-    echo "  --build-x11vnc [ BUILD_X11VNC ] default 0-no"
+    echo "  --build-x11vnc [ BUILD_X11VNC ] default ${BUILD_X11VNC}"
     echo "  --help: this usage information"
     exit 1
 }

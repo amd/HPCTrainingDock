@@ -17,12 +17,13 @@ fi
 usage()
 {
    echo "Usage:"
+   echo "  WARNING: when specifying --hipifly-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --hipifly-module [ HIPIFLY_MODULE ], set to 1 to create hipifly, default is $HIPIFLY_MODULE"
    echo "  --hipifly-path [ HIPIFLY_PATH ], default is $HIPIFLY_PATH"
    echo "  --hipifly-header-path [ HIPIFLY_HEADER_PATH ], location to copy the hipifly.h header from, default $HIPIFLY_HEADER_PATH"
-   echo "  --help: this usage information"
+   echo "  --help: print this usage information"
    exit 1
 }
 
@@ -106,17 +107,35 @@ if [ "${HIPIFLY_MODULE}" = "0" ]; then
 
 else
 
-      # don't use sudo if user has write access to install path
-      if [ -w ${HIPIFLY_PATH} ]; then
-         SUDO=""
+      # don't use sudo if user has write access to hipifly path
+      if [ -d "$HIPIFLY_PATH" ]; then
+         # don't use sudo if user has write access to hipifly path
+         if [ -w ${HIPIFLY_PATH} ]; then
+            SUDO=""
+         else
+            echo "WARNING: using a hipifly path that requires sudo"
+         fi
+      else
+         # if install path does not exist yet, the check on write access will fail
+         echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
       ${SUDO} mkdir -p ${HIPIFLY_PATH}
       ${SUDO} cp ${HIPIFLY_HEADER_PATH}/hipifly.h ${HIPIFLY_PATH}
 
-      if [ ! -w ${MODULE_PATH} ]; then
+      if [ -d "$MODULE_PATH" ]; then
+         # use sudo if user does not have write access to module path
+         if [ ! -w ${MODULE_PATH} ]; then
+            SUDO="sudo"
+         else
+            echo "WARNING: not using sudo since user has write access to module path"
+         fi
+      else
+         # if module path dir does not exist yet, the check on write access will fail
          SUDO="sudo"
+         echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
+
       ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs

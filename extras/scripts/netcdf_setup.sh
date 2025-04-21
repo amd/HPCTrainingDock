@@ -37,6 +37,7 @@ fi
 usage()
 {
    echo "Usage:"
+   echo "  WARNING: when specifying --install-path, --netcdf-c-module-path,  and --netcdf-fc-module-path the directories have to already exist because the script checks for write permissions"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --netcdf-c-version [ NETCDF_C_VERSION ] default $NETCDF_C_VERSION"
    echo "  --netcdf-fc-version [ NETCDF_FC_VERSION ] default $NETCDF_FC_VERSION"
@@ -48,7 +49,7 @@ usage()
    echo "  --cxx-compiler [ CXX_COMPILER ] default ${CXX_COMPILER}"
    echo "  --fc-compiler [ FC_COMPILER ] default ${FC_COMPILER}"
    echo "  --build-netcdf [ BUILD_NETCDF ], set to 1 to build netcdf-c and netcdf-fortran, default is 0"
-   echo "  --help: this usage information"
+   echo "  --help: print this usage information"
    exit 1
 }
 
@@ -310,11 +311,19 @@ else
    fi
 
    # Create a module file for netcdf-c
-   if [ ! -w ${NETCDF_C_MODULE_PATH} ]; then
-      SUDO="sudo"
+   if [ -d "$NETCDF_C_MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${NETCDF_C_MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to netcdf-c module path"
+      fi
    else
-     SUDO=""
+      # if module path dir does not exist yet, the check on write access will fail
+      SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
+
    ${SUDO} mkdir -p ${NETCDF_C_MODULE_PATH}
 
    # The - option suppresses tabs
@@ -336,11 +345,19 @@ else
 EOF
 
    # Create a module file for netcdf-fortran
-   if [ ! -w ${NETCDF_FC_MODULE_PATH} ]; then
-      SUDO="sudo"
+   if [ -d "$NETCDF_FC_MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${NETCDF_FC_MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to netcdf-fc module path"
+      fi
    else
-     SUDO=""
+      # if module path dir does not exist yet, the check on write access will fail
+      SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
+
    ${SUDO} mkdir -p ${NETCDF_FC_MODULE_PATH}
 
    # The - option suppresses tabs

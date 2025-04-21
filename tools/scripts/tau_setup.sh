@@ -23,14 +23,15 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 usage()
 {
    echo "Usage:"
-   echo "  --build-tau: default is 0"
-   echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/misc/tau"
+ echo "  WARNING: when specifying --tau-install-path, --pdt-install-path  and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  --build-tau: default $BUILD_TAU"
+   echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --tau-install-path [ TAU_PATH_INPUT ] default $TAU_PATH"
    echo "  --pdt-install-path [ PDT_PATH_INPUT ] default $PDT_PATH"
    echo "  --git-commit [ GIT_COMMIT ] specify what commit hash you want to build from, default is $GIT_COMMIT"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL_INPUT ] default autodetected"
-   echo "  --help: this usage information"
+   echo "  --help: print this usage information"
    exit 1
 }
 
@@ -166,12 +167,22 @@ else
       source /etc/profile.d/lmod.sh
       module load rocm/${ROCM_VERSION}
 
-      # don't use sudo if user has write access to install path
-      if [ -w ${TAU_PATH} ]; then
-         if [ -w ${PDT_PATH} ]; then
-           echo "...not using sudo since user has write access to tau install path and pdt install path..."
-           SUDO=""
+     # don't use sudo if user has write access to both install paths
+      if [ -d "$TAU_PATH" ]; then
+         if [ -d "$PDT_PATH" ]; then
+            # don't use sudo if user has write access to both install paths
+            if [ -w ${TAU_PATH} ]; then
+               if [ -w ${PDT_PATH} ]; then
+                  SUDO=""
+                  echo "WARNING: not using sudo since user has write access to install path, some dependencies may fail to get installed without sudo"
+               else
+                  echo "WARNING: using install paths that require sudo"
+               fi
+            fi
          fi
+      else
+         # if install paths do not both exist yet
+         echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
       export TAU_LIB_DIR=${TAU_PATH}/x86_64/lib
@@ -294,9 +305,19 @@ else
    fi
 
    # Create a module file for TAU
-   if [ ! -w ${MODULE_PATH} ]; then
+   if [ -d "$MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to module path"
+      fi
+   else
+      # if module path dir does not exist yet, the check on write access will fail
       SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
+
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs

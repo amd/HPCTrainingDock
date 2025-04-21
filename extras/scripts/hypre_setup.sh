@@ -26,6 +26,7 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 usage()
 {
    echo "Usage:"
+   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --module-path [ MODULE_PATH ] default is $MODULE_PATH "
    echo "  --install-path [ HYPRE_PATH_INPUT ] default is $HYPRE_PATH "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
@@ -34,7 +35,7 @@ usage()
    echo "  --hypre-version [ HYPRE_VERSION ] default is $HYPRE_VERSION "
    echo "  --use-spack [ USE_SPACK ] default is $USE_SPACK "
    echo "  --build-hypre [ BUILD_HYPRE ] default is 0 "
-   echo "  --help: this usage information "
+   echo "  --help: print this usage information "
    exit 1
 }
 
@@ -172,8 +173,16 @@ else
       cd /tmp
 
       # don't use sudo if user has write access to install path
-      if [ -w ${HYPRE_PATH} ]; then
-         SUDO=""
+      if [ -d "$HYPRE_PATH" ]; then
+         # don't use sudo if user has write access to install path
+         if [ -w ${HYPRE_PATH} ]; then
+            SUDO=""
+         else
+            echo "WARNING: using an install path that requires sudo"
+         fi
+      else
+         # if install path does not exist yet, the check on write access will fail
+         echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
       ${SUDO} mkdir -p ${HYPRE_PATH}
@@ -228,9 +237,19 @@ else
    fi
 
    # Create a module file for hypre
-   if [ ! -w ${MODULE_PATH} ]; then
+   if [ -d "$MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to module path"
+      fi
+   else
+      # if module path dir does not exist yet, the check on write access will fail
       SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
+
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs

@@ -18,12 +18,13 @@ fi
 usage()
 {
    echo "Usage:"
+   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --rocm-version [ ROCM_VERSION ], default $ROCM_VERSION"
    echo "  --python-version [ PYTHON_VERSION ], python3 minor release, default $PYTHON_VERSION"
    echo "  --build-miniforge3 [ BUILD_MINIFORGE3 ], installs Miniforge3, default $BUILD_MINIFORGE3"
    echo "  --install-path [ MINIFORGE3_PATH ], default is $MINIFORGE3_PATH "
    echo "  --module-path [ MODULE_PATH ], default is $MODULE_PATH "
-   echo "  --help: this usage information"
+   echo "  --help: print this usage information"
    exit 1
 }
 
@@ -128,8 +129,17 @@ else
    fi
 
    # Create a module file for miniforge3
-   if [ ! -w ${MODULE_PATH} ]; then
+   if [ -d "$MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to module path"
+      fi
+   else
+      # if module path dir does not exist yet, the check on write access will fail
       SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
 
    ${SUDO} mkdir -p ${MODULE_PATH}

@@ -22,14 +22,15 @@ fi
 usage()
 {
    echo "Usage:"
-   echo "  --build-mpi4py: default is 0"
+   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions
+   echo "  --build-mpi4py [ BUILD_MPI4PY ] default is $BUILD_MPI4PY"
    echo "  --mpi-module [ MPI_MODULE ] default is $MPI_MODULE "
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
    echo "  --install-path [ MPI4PY_PATH_INPUT ] default $MPI4PY_PATH "
    echo "  --mpi4py-version [ MPI4PY_VERSION ] default is $MPI4PY_VERSION "
    echo "  --mpi-path [MPI_PATH] default is from MPI module"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "  --help: this usage information"
+   echo "  --help: print this usage information"
    exit 1
 }
 
@@ -159,9 +160,16 @@ else
       module load ${MPI_MODULE}
       module load rocm/${ROCM_VERSION}
 
-      # don't use sudo if user has write access to install path
-      if [ -w ${MPI4PY_PATH} ]; then
-         SUDO=""
+      if [ -d "$MPI4PY_PATH" ]; then
+         # don't use sudo if user has write access to install path
+         if [ -w ${MPI4PY_PATH} ]; then
+            SUDO=""
+         else
+            echo "WARNING: using an install path that requires sudo"
+         fi
+      else
+         # if install path does not exist yet, the check on write access will fail
+         echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
       ${SUDO} mkdir -p ${MPI4PY_PATH}
@@ -201,9 +209,19 @@ else
 
 
    # Create a module file for mpi4py
-   if [ ! -w ${MODULE_PATH} ]; then
+   if [ -d "$MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to module path"
+      fi
+   else
+      # if module path dir does not exist yet, the check on write access will fail
       SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
+
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs

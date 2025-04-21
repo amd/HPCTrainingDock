@@ -21,6 +21,8 @@ fi
 
 usage()
 {
+   echo "Usage:"
+   echo "  WARNING: when specifying --jax-install-path, --jaxlib-install-path, and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected, specify as a comma separated list"
    echo "--build-jax [ BUILD_JAX ] set to 1 to build jax default is 0"
    echo "--jax-version [ JAX_VERSION ] version of JAX, XLA, and JAXLIB, default is $JAX_VERSION"
@@ -29,6 +31,7 @@ usage()
    echo "--help: this usage information"
    echo "--module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "--help: print this usage information"
 }
 
 send-error()
@@ -167,12 +170,21 @@ else
       echo "======================================="
       echo ""
 
-      # don't use sudo if user has write access to install path
-      if [ -w ${JAX_PATH} ]; then
-         if [ -w ${JAXLIB_PATH} ]; then
-            echo "...not using sudo since user has write access for install paths for jax and jaxlib..."
-            SUDO=""
+      # don't use sudo if user has write access to both install paths
+      if [ -d "$JAX_PATH" ]; then
+         if [ -d "$JAXLIB_PATH" ]; then
+            # don't use sudo if user has write access to both install paths
+            if [ -w ${JAX_PATH} ]; then
+               if [ -w ${JAXLIB_PATH} ]; then
+               SUDO=""
+               else
+                  echo "WARNING: using install paths that require sudo"
+               fi
+            fi
          fi
+      else
+         # if install paths do not both exist yet
+         echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
       if [[ `which python | wc -l` -eq 0 ]]; then
@@ -247,8 +259,17 @@ else
    fi
 
    # Create a module file for jax
-   if [ ! -w ${MODULE_PATH} ]; then
+   if [ -d "$MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to module path"
+      fi
+   else
+      # if module path dir does not exist yet, the check on write access will fail
       SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
 
    ${SUDO} mkdir -p ${MODULE_PATH}
