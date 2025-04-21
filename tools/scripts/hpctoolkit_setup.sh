@@ -1,7 +1,7 @@
 #/bin/bash
 
 # Variables controlling setup process
-AMDGPU_GFXMODEL_INPUT=""
+AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 MODULE_PATH=/etc/lmod/modules/misc/hpctoolkit
 BUILD_HPCTOOLKIT=0
 ROCM_VERSION=6.0
@@ -30,7 +30,7 @@ usage()
    echo "  --hpctoolkit-install-path [ HPCTOOLKIT_PATH_INPUT ] default $HPCTOOLKIT_PATH "
    echo "  --hpcviewer-install-path [ HPCVIEWER_PATH_INPUT ] default $HPCVIEWER_PATH "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --build-hpctoolkit [ BUILD_HPCTOOLKIT ] default is 0"
    echo "  --help: print this usage information"
    exit 1
@@ -109,12 +109,6 @@ else
    HPCVIEWER_PATH=/opt/rocmplus-${ROCM_VERSION}/hpcviewer
 fi
 
-if [[ "$AMDGPU_GFXMODEL_INPUT" != "" ]]; then
-   AMDGPU_GFXMODEL=$AMDGPU_GFXMODEL_INPUT
-else
-   AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-fi
-
 echo ""
 echo "==================================="
 echo "Starting HPCToolkit Install with"
@@ -144,7 +138,7 @@ else
       cd /opt/rocmplus-${ROCM_VERSION}
       tar -xpzf ${CACHE_FILES}/hpctoolkit.tgz
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm ${CACHE_FILES}/hpctoolkit.tgz
+         ${SUDO} rm -f ${CACHE_FILES}/hpctoolkit.tgz
       fi
 
    else

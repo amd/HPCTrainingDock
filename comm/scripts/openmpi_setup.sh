@@ -247,6 +247,14 @@ echo "   ROCM_PATH: ${ROCM_PATH}"
 echo "============================"
 echo ""
 
+IS_DOCKER=0
+if [ -f "/run/systemd/container" ]; then
+  IS_DOCKER=`grep -E '^docker$' /run/systemd/container |wc -l`
+fi
+if [ "${IS_DOCKER}" == "1" ]; then
+   BUILD_XPMEM=0
+fi
+
 if [ "${BUILD_XPMEM}" == "1" ]; then
    XPMEM_STRING=-xpmem-${XPMEM_VERSION}
 fi
@@ -302,13 +310,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
       ${SUDO} apt-get update
       ${SUDO} ${DEB_FRONTEND} apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
          libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen
-      IS_DOCKER=0
-      if [ -f "/run/systemd/container" ]; then
-        IS_DOCKER=`grep -E '^docker$' /run/systemd/container |wc -l`
-      fi
-      if [ "${IS_DOCKER}" == "1" ]; then
-         BUILD_XPMEM=0
-      else
+      if [ "${IS_DOCKER}" != "1" ]; then
          ${SUDO} ${DEB_FRONTEND} apt-get install -y linux-headers-$(uname -r)
       fi
    fi
