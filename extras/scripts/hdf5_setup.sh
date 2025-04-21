@@ -22,10 +22,14 @@ if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
 fi
 
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
 usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --hdf5-version [ HDF5_VERSION ] default $HDF5_VERSION"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
@@ -59,6 +63,11 @@ do
       "--build-hdf5")
           shift
           BUILD_HDF5=${1}
+          reset-last
+          ;;
+      "--amdgpu-gfxmodel")
+          shift
+          AMDGPU_GFXMODEL=${1}
           reset-last
           ;;
       "--help")
@@ -146,7 +155,9 @@ else
    echo "==============================="
    echo ""
 
-   if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/hdf5.tgz ]; then
+   AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
+   if [ -f ${CACHE_FILES}/hdf5.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached HDF5"
@@ -155,9 +166,11 @@ else
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf CacheFiles/hdf5.tgz
+      tar -xzf  ${CACHE_FILES}/hdf5.tgz
       chown -R root:root /opt/rocmplus-${ROCM_VERSION}/hdf5
-      ${SUDO} rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/hdf5.tgz
+      if [ "${USER}" != "sysadmin" ]; then
+         ${SUDO} rm -f ${CACHE_FILES}/hdf5.tgz
+      fi
 
    else
       echo ""

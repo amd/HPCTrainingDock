@@ -2,7 +2,6 @@
 
 # Variables controlling setup process
 : ${ROCM_VERSION:="6.0"}
-USE_CACHE_BUILD=1
 REPLACE=0
 
 # Autodetect defaults
@@ -256,10 +255,12 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
 if [ "${DISTRO}" == "ubuntu" ]; then
    ${SUDO} apt-get update
    ${SUDO} ${DEB_FRONTEND} apt-get install -y libdrm-dev
+
    if [[ -d "${INSTALL_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
       ${SUDO} rm -rf ${INSTALL_PATH}
    fi
-   if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz ]]; then
+
+   if [[ -f ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz ]]; then
       echo ""
       echo "============================"
       echo " Installing Cached ROCm"

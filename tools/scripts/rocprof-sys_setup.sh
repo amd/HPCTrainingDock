@@ -182,52 +182,71 @@ if [[ "$INSTALL_ROCPROF_SYS_FROM_SOURCE" == "0" ]];then
 fi
 
 if [ "${INSTALL_ROCPROF_SYS_FROM_SOURCE}" = "1" ] ; then
-   # Load the ROCm version for this build
-   source /etc/profile.d/lmod.sh
-   source /etc/profile.d/z01_lmod.sh
-   module load rocm/${ROCM_VERSION}
-   module load ${MPI_MODULE}
+   AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
+   if [ -f ${CACHE_FILES}/${TOOL_NAME}.tgz ]; then
+      echo ""
+      echo "============================"
+      echo " Installing Cached ${TOOL_NAME}"
+      echo "============================"
+      echo ""
 
-   CPU_TYPE=zen3
-   if [ "${AMDGFX_GFXMODEL}" = "gfx1030" ]; then
-      CPU_TYPE=zen2
-   fi
-   if [ "${AMDGFX_GFXMODEL}" = "gfx90a" ]; then
+      #install the cached version
+      cd /opt/rocmplus-${ROCM_VERSION}
+      tar -xzf ${CACHE_FILES}/${TOOL_NAME}.tgz
+      chown -R root:root ${TOOL_NAME}
+      if [ "${USER}" != "sysadmin" ]; then
+         ${SUDO} rm ${CACHE_FILES}/${TOOL_NAME}.tgz
+      fi
+
+   else
+      # Load the ROCm version for this build
+      source /etc/profile.d/lmod.sh
+      source /etc/profile.d/z01_lmod.sh
+      module load rocm/${ROCM_VERSION}
+      module load ${MPI_MODULE}
+   
       CPU_TYPE=zen3
+      if [ "${AMDGFX_GFXMODEL}" = "gfx1030" ]; then
+         CPU_TYPE=zen2
+      fi
+      if [ "${AMDGFX_GFXMODEL}" = "gfx90a" ]; then
+         CPU_TYPE=zen3
+      fi
+      if [ "${AMDGFX_GFXMODEL}" = "gfx942" ]; then
+         CPU_TYPE=zen4
+      fi
+   
+      ${SUDO} mkdir -p ${INSTALL_PATH}
+   
+      git clone --depth 1 --branch ${GITHUB_BRANCH} ${TOOL_REPO} tool-source --recurse-submodules && \
+          cmake                                         \
+             -B tool-build                      \
+             -D CMAKE_INSTALL_PREFIX=${INSTALL_PATH}  \
+             -D ${TOOL_CONFIG}_USE_HIP=ON                 \
+             -D ${TOOL_CONFIG}_USE_ROCM_SMI=ON            \
+             -D ${TOOL_CONFIG}_USE_ROCTRACER=ON           \
+             -D ${TOOL_CONFIG}_USE_PYTHON=ON              \
+             -D ${TOOL_CONFIG}_USE_OMPT=ON                \
+             -D ${TOOL_CONFIG}_USE_MPI_HEADERS=ON         \
+             -D ${TOOL_CONFIG}_USE_MPI=ON                 \
+             -D ${TOOL_CONFIG}_BUILD_PAPI=ON              \
+             -D ${TOOL_CONFIG}_BUILD_LIBUNWIND=ON         \
+             -D ${TOOL_CONFIG}_BUILD_DYNINST=ON           \
+             -D DYNINST_BUILD_TBB=ON                 \
+             -D DYNINST_BUILD_BOOST=ON               \
+             -D DYNINST_BUILD_ELFUTILS=ON            \
+             -D DYNINST_BUILD_LIBIBERTY=ON           \
+             -D AMDGPU_TARGETS="${AMDGPU_GFXMODEL}"  \
+             -D CpuArch_TARGET=${CPU_TYPE} \
+             -D ${TOOL_CONFIG}_DEFAULT_ROCM_PATH=${ROCM_PATH} \
+             -D ${TOOL_CONFIG}_USE_COMPILE_TIMING=ON \
+             tool-source
+   
+      cmake --build tool-build --target all --parallel 16
+      ${SUDO} cmake --build tool-build --target install
+      rm -rf tool-source tool-build
    fi
-   if [ "${AMDGFX_GFXMODEL}" = "gfx942" ]; then
-      CPU_TYPE=zen4
-   fi
-
-   ${SUDO} mkdir -p ${INSTALL_PATH}
-
-   git clone --depth 1 --branch ${GITHUB_BRANCH} ${TOOL_REPO} tool-source --recurse-submodules && \
-       cmake                                         \
-          -B tool-build                      \
-          -D CMAKE_INSTALL_PREFIX=${INSTALL_PATH}  \
-          -D ${TOOL_CONFIG}_USE_HIP=ON                 \
-          -D ${TOOL_CONFIG}_USE_ROCM_SMI=ON            \
-          -D ${TOOL_CONFIG}_USE_ROCTRACER=ON           \
-          -D ${TOOL_CONFIG}_USE_PYTHON=ON              \
-          -D ${TOOL_CONFIG}_USE_OMPT=ON                \
-          -D ${TOOL_CONFIG}_USE_MPI_HEADERS=ON         \
-          -D ${TOOL_CONFIG}_USE_MPI=ON                 \
-          -D ${TOOL_CONFIG}_BUILD_PAPI=ON              \
-          -D ${TOOL_CONFIG}_BUILD_LIBUNWIND=ON         \
-          -D ${TOOL_CONFIG}_BUILD_DYNINST=ON           \
-          -D DYNINST_BUILD_TBB=ON                 \
-          -D DYNINST_BUILD_BOOST=ON               \
-          -D DYNINST_BUILD_ELFUTILS=ON            \
-          -D DYNINST_BUILD_LIBIBERTY=ON           \
-          -D AMDGPU_TARGETS="${AMDGPU_GFXMODEL}"  \
-          -D CpuArch_TARGET=${CPU_TYPE} \
-          -D ${TOOL_CONFIG}_DEFAULT_ROCM_PATH=${ROCM_PATH} \
-          -D ${TOOL_CONFIG}_USE_COMPILE_TIMING=ON \
-          tool-source
-
-   cmake --build tool-build --target all --parallel 16
-   ${SUDO} cmake --build tool-build --target install
-   rm -rf tool-source tool-build
 fi
 
 # Create a module file for ${TOOL_NAME}

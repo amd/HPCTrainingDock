@@ -22,10 +22,14 @@ if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
 fi
 
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
 usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --fftw-version [ FFTW_VERSION ] default $FFTW_VERSION"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
@@ -59,6 +63,11 @@ do
       "--build-fftw")
           shift
           BUILD_FFTW=${1}
+          reset-last
+          ;;
+      "--amdgpu-gfxmodel")
+          shift
+          AMDGPU_GFXMODEL=${1}
           reset-last
           ;;
       "--help")
@@ -147,7 +156,10 @@ else
    echo "==============================="
    echo ""
 
-   if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/fftw.tgz ]; then
+   AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
+
+   if [ -f ${CACHE_FILES}/fftw.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached FFTW"
@@ -156,9 +168,11 @@ else
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf CacheFiles/fftw.tgz
+      tar -xzf  ${CACHE_FILES}/fftw.tgz
       chown -R root:root /opt/rocmplus-${ROCM_VERSION}/fftw
-      ${SUDO} rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/fftw.tgz
+      if [ "${USER}" != "sysadmin" ]; then
+         ${SUDO} rm  ${CACHE_FILES}/fftw.tgz
+      fi
 
    else
       echo ""
@@ -200,7 +214,7 @@ else
          ENABLE_PARALLEL="--enable-mpi"
       fi
 
-      wget https://www.fftw.org/fftw-${FFTW_VERSION}.tar.gz
+      wget -q https://www.fftw.org/fftw-${FFTW_VERSION}.tar.gz
       tar zxf fftw-${FFTW_VERSION}.tar.gz
       cd fftw-${FFTW_VERSION}
 

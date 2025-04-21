@@ -109,22 +109,20 @@ RUN /tmp/compiler_setup.sh && \
 
 # Build the latest GCC for AMD compiler if requested
 COPY extras/scripts/amd_gcc_setup.sh /tmp/amd_gcc_setup.sh
-RUN /tmp/amd_gcc_setup.sh --build-gcc-latest ${BUILD_GCC_LATEST} --rocm-version ${ROCM_VERSION} && \
+RUN /tmp/amd_gcc_setup.sh --build-gcc-latest ${BUILD_GCC_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
     rm /tmp/amd_gcc_setup.sh
 
 # install aomp
 COPY extras/scripts/aomp_setup.sh /tmp/aomp_setup.sh
-RUN /tmp/aomp_setup.sh --build-aomp-latest ${BUILD_AOMP_LATEST} --rocm-version ${ROCM_VERSION}  |& tee /app/aomp_build.out && rm /tmp/aomp_setup.sh
+RUN /tmp/aomp_setup.sh --build-aomp-latest ${BUILD_AOMP_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}  |& tee /app/aomp_build.out && rm /tmp/aomp_setup.sh
  
-RUN echo "At end of aomp install" && cd /app && ls -l && cd /tmp && ls -l && cd && ls -l
-
 # install flang-new
 COPY extras/scripts/flang-new_setup.sh /tmp/flang-new_setup.sh
 RUN /tmp/flang-new_setup.sh --build-flang-new ${BUILD_FLANGNEW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/flang-new_setup.sh
  
 # install hipfort
 COPY extras/scripts/hipfort_setup.sh /tmp/hipfort_setup.sh
-RUN /tmp/hipfort_setup.sh --build-hipfort ${BUILD_HIPFORT} --rocm-version ${ROCM_VERSION} && rm /tmp/hipfort_setup.sh
+RUN /tmp/hipfort_setup.sh --build-hipfort ${BUILD_HIPFORT} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/hipfort_setup.sh
 
 # create hipifly module
 COPY extras/scripts/hipifly_setup.sh /tmp/hipifly_setup.sh
@@ -133,7 +131,7 @@ RUN /tmp/hipifly_setup.sh --hipifly-module ${HIPIFLY_MODULE} --rocm-version ${RO
  
 # install fftw
 COPY extras/scripts/fftw_setup.sh /tmp/fftw_setup.sh
-RUN /tmp/fftw_setup.sh --build-fftw ${BUILD_FFTW} --rocm-version ${ROCM_VERSION} && rm /tmp/fftw_setup.sh
+RUN /tmp/fftw_setup.sh --build-fftw ${BUILD_FFTW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/fftw_setup.sh
 
 # install latest llvm
 COPY extras/scripts/llvm-build.sh /tmp/llvm-build.sh
@@ -157,12 +155,12 @@ RUN /tmp/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-kokkos ${BUILD_K
 # Install hdf5
 #
 COPY extras/scripts/hdf5_setup.sh /tmp/hdf5_setup.sh
-RUN /tmp/hdf5_setup.sh --rocm-version ${ROCM_VERSION} --build-hdf5 ${BUILD_HDF5} && rm /tmp/hdf5_setup.sh
+RUN /tmp/hdf5_setup.sh --rocm-version ${ROCM_VERSION} --build-hdf5 ${BUILD_HDF5} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/hdf5_setup.sh
 
 # Install netcdf
 #
 COPY extras/scripts/netcdf_setup.sh /tmp/netcdf_setup.sh
-RUN /tmp/netcdf_setup.sh --rocm-version ${ROCM_VERSION} --build-netcdf ${BUILD_NETCDF} && rm /tmp/netcdf_setup.sh
+RUN /tmp/netcdf_setup.sh --rocm-version ${ROCM_VERSION} --build-netcdf ${BUILD_NETCDF} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/netcdf_setup.sh
 
 #
 # Moved into scripts that need these

@@ -14,6 +14,7 @@ if [  -f /.singularity.d/Singularity ]; then
 fi
 
 # Autodetect defaults
+AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
@@ -21,6 +22,7 @@ usage()
 {
    echo "Usage:"
    echo "  --build-aomp-latest"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-LatestCompilers/aomp"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --help: this usage information"
@@ -46,6 +48,11 @@ do
       "--build-aomp-latest")
           shift
           BUILD_AOMP_LATEST=${1}
+          reset-last
+          ;;
+      "--amdgpu-gfxmodel")
+          shift
+          AMDGPU_GFXMODEL=${1}
           reset-last
           ;;
       "--help")

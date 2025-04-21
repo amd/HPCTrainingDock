@@ -38,6 +38,7 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path, --netcdf-c-module-path,  and --netcdf-fc-module-path the directories have to already exist because the script checks for write permissions"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --netcdf-c-version [ NETCDF_C_VERSION ] default $NETCDF_C_VERSION"
    echo "  --netcdf-fc-version [ NETCDF_FC_VERSION ] default $NETCDF_FC_VERSION"
@@ -72,6 +73,11 @@ do
       "--build-netcdf")
           shift
           BUILD_NETCDF=${1}
+          reset-last
+          ;;
+      "--amdgpu-gfxmodel")
+          shift
+          AMDGPU_GFXMODEL=${1}
           reset-last
           ;;
       "--help")
@@ -166,7 +172,15 @@ else
    echo "==============================================="
    echo ""
 
-   if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/netcdf.tgz ]; then
+   if [ ! -f /usr/bin/mpicc ]; then
+      ${SUDO} apt-get update
+      ${SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
+   fi
+
+   AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
+
+   if [ -f ${CACHE_FILES}/netcdf.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached NETCDF"
@@ -175,9 +189,9 @@ else
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf CacheFiles/netcdf.tgz
+      tar -xzf ${CacheFiles}/netcdf.tgz
       chown -R root:root ${NETCDF_PATH}
-      ${SUDO} rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/netcdf.tgz
+      ${SUDO} rm ${CacheFiles}/netcdf.tgz
 
    else
       echo ""

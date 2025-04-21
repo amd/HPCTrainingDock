@@ -172,9 +172,13 @@ else
    echo "======================================"
    echo ""
 
+   ${SUDO} apt-get update
+   ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
+   ${SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
+
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   if [ -f ${CACHE_FILES}/pytorch.tgz ] && [ -f ${CACHE_FILES}/audio.tgz ] && [ -f ${CACHE_FILES}/vision.tgz ]; then
+   if [ -f ${CACHE_FILES}/pytorch.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached Pytorch"
@@ -184,10 +188,8 @@ else
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
       tar -xzf ${CACHE_FILES}/pytorch.tgz
-      tar -xzf ${CACHE_FILES}/audio.tgz
-      tar -xzf ${CACHE_FILES}/vision.tgz
       if [ "${USER}" != "sysadmin" ]; then
-         rm ${CACHE_FILES}/pytorch.tgz ${CACHE_FILES}/audio.tgz ${CACHE_FILES}/vision.tgz
+         rm ${CACHE_FILES}/pytorch.tgz
       fi
 
    elif [ "${USE_WHEEL}" == "1" ]; then
@@ -258,7 +260,7 @@ else
          ${SUDO} apt-get update
          ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
          ${SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
-         wget https://registrationcenter-download.intel.com/akdlm/IRC_NAS/79153e0f-74d7-45af-b8c2-258941adf58a/intel-onemkl-2025.0.0.940.sh
+         wget -q https://registrationcenter-download.intel.com/akdlm/IRC_NAS/79153e0f-74d7-45af-b8c2-258941adf58a/intel-onemkl-2025.0.0.940.sh
          ${SUDO} sh ./intel-onemkl-2025.0.0.940.sh -a -s --eula accept
          export PATH=/opt/intel/oneapi:$PATH
       else
@@ -286,6 +288,9 @@ else
       echo " Installing AOTriton from source "
       echo "=================================="
       echo ""
+
+      export GPU_TARGETS=${AMDGPU_GFXMODEL}
+      export AMDGPU_TARGETS=${AMDGPU_GFXMODEL}
 
       git clone --branch v${ZSTD_VERSION} https://github.com/facebook/zstd.git
       cd zstd/build/cmake

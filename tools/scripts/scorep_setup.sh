@@ -154,7 +154,7 @@ else
       cd /opt/rocmplus-${ROCM_VERSION}
       tar -xpzf ${CACHE_FILES}/scorep.tgz
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm /CacheFiles/scorep.tgz
+         ${SUDO} rm -f ${CacheFiles}/scorep.tgz
       fi
 
    else

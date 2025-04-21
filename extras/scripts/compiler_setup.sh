@@ -153,8 +153,8 @@ ${SUDO} chmod u+s /usr/bin/update-alternatives
 
 # To change GCC version
 # dad 3/23/23 add next line back in
-${SUDO} update-alternatives --config gcc
-${SUDO} update-alternatives --config clang
+#${SUDO} update-alternatives --config gcc
+#${SUDO} update-alternatives --config clang
 
 ${SUDO} apt-get autoremove
 ${SUDO} apt-get -qy clean && ${SUDO} rm -rf /var/lib/apt/lists/*

@@ -100,8 +100,6 @@ echo "========================================="
 echo "Starting flang-new Install with"
 echo "ROCM_VERSION: $ROCM_VERSION"
 echo "BUILD_FLANGNEW: $BUILD_FLANGNEW"
-echo "Searching for archive: $ARCHIVE_NAME.tgz"
-echo "In directory: $CACHE_FILES"
 echo "========================================="
 echo ""
 
@@ -112,8 +110,7 @@ if [ "${BUILD_FLANGNEW}" = "0" ]; then
 else
       echo ""
       echo "================================================"
-      echo " Archive $ARCHIVE_NAME-${DISTRO} found in $CACHE_FILES"
-      echo "         Installing Cached flang-new            "
+      echo "         Installing flang-new                   "
       echo "================================================"
       echo ""
 
@@ -129,12 +126,11 @@ else
          echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
-      #install the cached version
       if [[ ! -d "${UNTAR_DIR}" ]]; then
          ${SUDO} mkdir -p ${UNTAR_DIR}
       fi
       cd ${UNTAR_DIR}
-      ${SUDO} chmod a+w ${UNTAR_DIR}}
+      ${SUDO} chmod a+w ${UNTAR_DIR}
 
       if [[ ${DISTRO} == "ubuntu" ]]; then
          if [[ ${ARCHIVE_NAME} == "rocm-afar-7450-drop-6.0.0" ]]; then
@@ -142,8 +138,8 @@ else
          fi
       fi
 
-      wget https://repo.radeon.com/rocm/misc/flang/${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
-      tar -xvjf ${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
+      wget -q https://repo.radeon.com/rocm/misc/flang/${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
+      tar -xjf ${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
       rm -f ${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
 
       ${SUDO} chown -R root:root ${UNTAR_DIR}/${ARCHIVE_DIR}

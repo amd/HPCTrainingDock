@@ -26,6 +26,7 @@ usage()
    echo "  --build-mpi4py [ BUILD_MPI4PY ] default is $BUILD_MPI4PY"
    echo "  --mpi-module [ MPI_MODULE ] default is $MPI_MODULE "
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --install-path [ MPI4PY_PATH_INPUT ] default $MPI4PY_PATH "
    echo "  --mpi4py-version [ MPI4PY_VERSION ] default is $MPI4PY_VERSION "
    echo "  --mpi-path [MPI_PATH] default is from MPI module"

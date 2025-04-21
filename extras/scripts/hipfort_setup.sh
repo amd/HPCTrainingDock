@@ -2,6 +2,7 @@
 
 # Variables controlling setup process
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/hipfort_from_source
+AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 BUILD_HIPFORT=0
 ROCM_VERSION=6.0.0
 HIPFORT_PATH="/opt/rocmplus-${ROCM_VERSION}/hipfort"
@@ -14,10 +15,14 @@ if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
 fi
 
+DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
 usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default is $AMDGPU_GFXMODEL"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --build-hipfort [ BUILD_HIPFORT ], set to 1 to build hipfort, default is $BUILD_HIPFORT"
@@ -46,6 +51,11 @@ do
       "--build-hipfort")
           shift
           BUILD_HIPFORT=${1}
+          reset-last
+          ;;
+      "--amdgpu-gfxmodel")
+          shift
+          AMDGPU_GFXMODEL=${1}
           reset-last
           ;;
       "--help")
@@ -107,7 +117,10 @@ if [ "${BUILD_HIPFORT}" = "0" ]; then
    exit
 
 else
-   if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/hipfort.tgz ]; then
+   AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
+ 
+   if [ -f ${CACHE_FILES}/hipfort.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached Hipfort"
@@ -116,9 +129,11 @@ else
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xzf CacheFiles/hipfort.tgz
+      tar -xzf ${CACHE_FILES}/hipfort.tgz
       chown -R root:root /opt/rocmplus-${ROCM_VERSION}/hipfort
-      ${SUDO} rm /opt/rocmplus-${ROCM_VERSION}/CacheFiles/hipfort.tgz
+      if [ "${USER}" != "sysadmin" ]; then
+         ${SUDO} rm -f ${CACHE_FILES}/hipfort.tgz
+      fi
 
    else
       echo ""
