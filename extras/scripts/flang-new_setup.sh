@@ -100,6 +100,7 @@ echo "========================================="
 echo "Starting flang-new Install with"
 echo "ROCM_VERSION: $ROCM_VERSION"
 echo "BUILD_FLANGNEW: $BUILD_FLANGNEW"
+echo "Archive will be untarred in: $UNTAR_DIR"
 echo "========================================="
 echo ""
 
@@ -126,11 +127,11 @@ else
          echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
-      if [[ ! -d "${UNTAR_DIR}" ]]; then
-         ${SUDO} mkdir -p ${UNTAR_DIR}
-      fi
+       ${SUDO} mkdir -p ${UNTAR_DIR}
       cd ${UNTAR_DIR}
-      ${SUDO} chmod a+w ${UNTAR_DIR}
+      if [[ "${USER}" != "root" ]]; then
+         ${SUDO} chmod a+w ${UNTAR_DIR}
+      fi
 
       if [[ ${DISTRO} == "ubuntu" ]]; then
          if [[ ${ARCHIVE_NAME} == "rocm-afar-7450-drop-6.0.0" ]]; then
@@ -142,8 +143,10 @@ else
       tar -xjf ${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
       rm -f ${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
 
-      ${SUDO} chown -R root:root ${UNTAR_DIR}/${ARCHIVE_DIR}
-      ${SUDO} chmod go-w ${UNTAR_DIR}
+      if [[ "${USER}" != "root" ]]; then
+         ${SUDO} chown -R root:root ${UNTAR_DIR}/${ARCHIVE_DIR}
+         ${SUDO} chmod go-w ${UNTAR_DIR}
+      fi
 
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm ${CACHE_FILES}/${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
