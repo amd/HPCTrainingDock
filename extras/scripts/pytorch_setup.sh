@@ -397,7 +397,7 @@ else
       echo "Starting setup.py install"
       echo "===================="
       echo ""
-      python setup.py install --prefix=${PYTORCH_PATH}
+      python3 setup.py install --prefix=${PYTORCH_PATH}
       echo ""
       echo "===================="
       echo "Finished setup.py install"
