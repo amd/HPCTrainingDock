@@ -22,7 +22,7 @@ fi
 usage()
 {
    echo "Usage:"
-   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions
+   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --build-mpi4py [ BUILD_MPI4PY ] default is $BUILD_MPI4PY"
    echo "  --mpi-module [ MPI_MODULE ] default is $MPI_MODULE "
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
