@@ -244,9 +244,9 @@ else
       if [[ $MPI_CONFIG == "" ]]; then
          if [[ $MPI_MODULE == "openmpi" ]]; then
             MPI_CONFIG = openmpi
-         else if [[ $MPI_MODULE == "cray-mpich" ]]; then
+         elif [[ $MPI_MODULE == "cray-mpich" ]]; then
             MPI_CONFIG = "cray"
-         else if [[ $MPI_MODULE == "mpich" ]]; then
+         elif [[ $MPI_MODULE == "mpich" ]]; then
             MPI_CONFIG = "mpich"
          else
             echo " ERROR: --mpi-config not specified at input and not detected through $MPI_MODULE module"
