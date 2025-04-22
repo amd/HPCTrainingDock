@@ -24,7 +24,7 @@ usage()
    echo "  --rocm-version [ ROCM_VERSION ], default $ROCM_VERSION"
    echo "  --python-version [ PYTHON_VERSION ], python3 minor release, default $PYTHON_VERSION"
    echo "  --build-miniconda3 [BUILD_MINICONDA3], installs Miniconda3, default $BUILD_MINICONDA3"
-   echo "  --install-path [ MINICONDA3_PATH ], default is $MINICONDA3_PATH "
+   echo "  --install-path [ MINICONDA3_PATH_INPUT ], default is $MINICONDA3_PATH "
    echo "  --module-path [ MODULE_PATH ], default is $MODULE_PATH "
    echo "  --help: print this usage information"
    exit 1
@@ -98,6 +98,8 @@ echo " Installing Miniconda3 with:"
 echo "ROCM_VERSION is $ROCM_VERSION"
 echo "PYTHON_VERSION (python 3 minor release) is $PYTHON_VERSION"
 echo "BUILD_MINICONDA3 is $BUILD_MINICONDA3"
+echo "Installing in: $MINICONDA3_PATH"
+echo "Creating module file in: $MODULE_PATH"
 echo "============================"
 echo ""
 
@@ -115,15 +117,23 @@ else
    echo "============================"
    echo ""
 
+
    # don't use sudo if user has write access to install path
-   if [ -w ${MINICONDA3_PATH} ]; then
-      SUDO=""
+   if [ -d "$MINICONDA3_PATH" ]; then
+      # don't use sudo if user has write access to install path
+      if [ -w ${MINICONDA3_PATH} ]; then
+         SUDO=""
+      else
+         echo "WARNING: using an install path that requires sudo"
+      fi
+   else
+      # if install path does not exist yet, the check on write access will fail
+      echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
 
    if [ "${DISTRO}" = "ubuntu" ] ; then
       wget -q https://repo.anaconda.com/miniconda/Miniconda3-py3${PYTHON_VERSION}_${MINICONDA3_VERSION}-0-Linux-x86_64.sh -O /tmp/miniconda-installer.sh
       chmod +x /tmp/miniconda-installer.sh
-      MINICONDA3_PATH=/opt/rocmplus-${ROCM_VERSION}/miniconda3
       ${SUDO} mkdir -p ${MINICONDA3_PATH}
       ${SUDO} /tmp/miniconda-installer.sh -b -u -p ${MINICONDA3_PATH}
       export PATH="${MINICONDA3_PATH}/bin:${PATH}"
