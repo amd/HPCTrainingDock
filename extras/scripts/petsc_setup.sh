@@ -5,8 +5,8 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 MODULE_PATH=/etc/lmod/modules/misc/petsc
 BUILD_PETSC=0
 ROCM_VERSION=6.0
-PETSC_PATH=/opt/rocmplus-${ROCM_VERSION}/petsc
-PETSC_PATH_INPUT=""
+INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/petsc
+INSTALL_PATH_INPUT=""
 PETSC_VERSION="3.23.0"
 SUDO="sudo"
 USE_SPACK=0
@@ -29,7 +29,7 @@ usage()
    echo "  WARNING: when selecting the module to supply to --mpi-module, make sure it sets the MPI_PATH environment variable"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH" 
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "  --install-path [ PETSC_PATH_INPUT ] default $PETSC_PATH"
+   echo "  --install-path [ INSTALL_PATH_INPUT ] default $INSTALL_PATH"
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
    echo "  --petsc-version [ PETSC_VERSION ] default $PETSC_VERSION"
    echo "  --use-spack [ USE_SPACK ] default $USE_SPACK"
@@ -80,7 +80,7 @@ do
           ;;
       "--install-path")
           shift
-          PETSC_PATH_INPUT=${1}
+          INSTALL_PATH_INPUT=${1}
           reset-last
           ;;
       "--petsc-version")
@@ -109,11 +109,11 @@ do
    shift
 done
 
-if [ "${PETSC_PATH_INPUT}" != "" ]; then
-   PETSC_PATH=${PETSC_PATH_INPUT}
+if [ "${INSTALL_PATH_INPUT}" != "" ]; then
+   INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
    # override path in case ROCM_VERSION has been supplied as input
-   PETSC_PATH=/opt/rocmplus-${ROCM_VERSION}/petsc
+   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/petsc
 fi
 
 echo ""
@@ -121,7 +121,7 @@ echo "==================================="
 echo "Starting PETSC Install with"
 echo "ROCM_VERSION: $ROCM_VERSION"
 echo "BUILD_PETSC: $BUILD_PETSC"
-echo "Installing PETSc in: $PETSC_PATH"
+echo "Installing PETSc in: $INSTALL_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
 echo "USE_SPACK: $USE_SPACK"
 echo "Loading this module for MPI: $MPI_MODULE"
@@ -171,9 +171,9 @@ else
       cd /tmp
 
       # don't use sudo if user has write access to install path
-      if [ -d "$PETSC_PATH" ]; then
+      if [ -d "$INSTALL_PATH" ]; then
          # don't use sudo if user has write access to install path
-         if [ -w ${PETSC_PATH} ]; then
+         if [ -w ${INSTALL_PATH} ]; then
             SUDO=""
          else
             echo "WARNING: using an install path that requires sudo"
@@ -183,10 +183,16 @@ else
          echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
+      PETSC_PATH=${INSTALL_PATH}/petsc
+      SLEPC_PATH=${INSTALL_PATH}/slepc
+      EIGEN_PATH=${INSTALL_PATH}/eigen
+      ${SUDO} mkdir -p ${INSTALL_PATH}
       ${SUDO} mkdir -p ${PETSC_PATH}
+      ${SUDO} mkdir -p ${SLEPC_PATH}
+      ${SUDO} mkdir -p ${EIGEN_PATH}
 
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} chmod a+w ${PETSC_PATH}
+         ${SUDO} chmod -R a+w ${INSTALL_PATH}
       fi
 
       if [[ $USE_SPACK == 1 ]]; then
@@ -244,9 +250,6 @@ else
 
          export PETSC_DIR=$PETSC_PATH
 
-         SLEPC_PATH=$PETSC_PATH/slepc
-         ${SUDO} mkdir -p $SLEPC_PATH
-
          ./configure --prefix=$SLEPC_PATH
 
          ${SUDO} make SLEPC_DIR=$SLEPC_REPO PETSC_DIR=$PETSC_PATH
@@ -258,8 +261,6 @@ else
          cd eigen
          mkdir build && cd build
 
-         export EIGEN_PATH=$PETSC_PATH/eigen
-
          cmake -DCMAKE_INSTALL_PREFIX=$EIGEN_PATH -DCHOLMOD_LIBRARIES=$PETSC_PATH/lib -DCHOLMOD_INCLUDES=$PETSC_PATH/include \
                -DKLU_LIBRARIES=$PETSC_PATH/lib -DKLU_INCLUDES=$PETSC_PATH/include -DEIGEN_TEST_HIP=ON ..
          ${SUDO} make install
@@ -267,10 +268,16 @@ else
       fi
 
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} find ${PETSC_PATH_ORIGINAL} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${PETSC_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${SLEPC_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${EIGEN_PATH} -type f -execdir chown root:root "{}" +
       fi
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} chmod go-w ${PETSC_PATH_ORIGINAL}
+         ${SUDO} chmod go-w ${INSTALL_PATH}
+         ${SUDO} chmod go-w ${PETSC_PATH}
+         ${SUDO} chmod go-w ${SLEPC_PATH}
+         ${SUDO} chmod go-w ${EIGEN_PATH}
       fi
 
       module unload rocm/${ROCM_VERSION}
