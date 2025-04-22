@@ -175,7 +175,7 @@ else
          if [ "${FC_COMPILER}" = "gfortran" ]; then
             cmake -DHIPFORT_INSTALL_DIR=${HIPFORT_PATH} ..
          elif [ "${FC_COMPILER}" = "amdflang-new" ]; then
-            module load amdflang-new-beta-drop
+            module load amdflang-new
             cmake -DHIPFORT_INSTALL_DIR=${HIPFORT_PATH} -DHIPFORT_COMPILER=$FC -DHIPFORT_COMPILER_FLAGS="-ffree-form -cpp" ..
          elif [ "${FC_COMPILER}" = "cray-ftn" ]; then
             cmake -DHIPFORT_INSTALL_DIR=$HIPFORT_PATH -DHIPFORT_BUILD_TYPE=RELEASE -DHIPFORT_COMPILER=$(which ftn) -DHIPFORT_COMPILER_FLAGS="-ffree -eT" -DHIPFORT_AR=$(which ar) -DHIPFORT_RANLIB=$(which ranlib) ..
@@ -220,7 +220,7 @@ else
         setenv("HIPFORT_PATH","${HIPFORT_PATH}")
         local fc_compiler = "${FC_COMPILER}"
         if fc_compiler == "amdflang-new" then
-		load("amdflang-new-beta-drop")
+		load("amdflang-new")
         end
 	prepend_path("PATH","${HIPFORT_PATH}/bin")
 EOF

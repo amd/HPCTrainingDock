@@ -541,7 +541,7 @@ The training environment comes with a variety of modules installed, with their n
    mpi4py/4.0.1    openmpi/5.0.7-ucc1.3.0-ucx1.18.0
 
 --------------------------------------------------------- /etc/lmod/modules/ROCmPlus-LatestCompilers ---------------------------------------------------------
-   amdflang-new-beta-drop/rocm-afar-7110-drop-5.3.0    aomp/amdclang-19.0    hipfort/6.3.3
+   amdflang-new/rocm-afar-7110-drop-5.3.0    aomp/amdclang-19.0    hipfort/6.3.3
 
 --------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-AI ----------------------------------------------------------------
    cupy/14.0.0a1    jax/0.4.35    pytorch/2.6.0

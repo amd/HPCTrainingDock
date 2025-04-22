@@ -176,7 +176,7 @@ else
 
       source /etc/profile.d/lmod.sh
       module load rocm/${ROCM_VERSION}
-      module load amdflang-new-beta-drop
+      module load amdflang-new
       if [[ `which amdflang-new | wc -l` -eq 0 ]]; then
          # if amdflang-new is not found in the path
          # build with compilers from ROCm
@@ -279,7 +279,7 @@ else
 
       module unload rocm/${ROCM_VERSION}
       module unload amdclang
-      module unload amdflang-new-beta-drop
+      module unload amdflang-new
       module unload ${MPI_MODULE}
 
    fi
