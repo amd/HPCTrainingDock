@@ -2,7 +2,7 @@
 
 # Variables controlling setup process
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/amdflang-new-beta-drop
+MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/amdflang-new
 BUILD_FLANGNEW=0
 ROCM_VERSION=6.0
 UNTAR_DIR=/opt/rocmplus-${ROCM_VERSION}
@@ -11,7 +11,7 @@ DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | t
 DISTRO_SHORT=$DISTRO
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 ARCHIVE_NAME="rocm-afar-7450-drop-6.0.0"
-ARCHIVE_DIR="rocm-afar-7450-drop-6.0.0"
+ARCHIVE_DIR="rocm-afar-6.0.0"
 
 SUDO="sudo"
 

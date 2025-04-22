@@ -36,7 +36,6 @@ ARG BUILD_X11VNC
 ARG BUILD_HIPFORT
 ARG BUILD_FFTW
 ARG HIPIFLY_MODULE
-ARG BUILD_FLANGNEW
 ARG BUILD_OLLAMA=1
 ARG USE_CACHED_APPS
 ARG AMDGPU_GFXMODEL=gfx90a
@@ -115,10 +114,6 @@ RUN /tmp/amd_gcc_setup.sh --build-gcc-latest ${BUILD_GCC_LATEST} --rocm-version 
 # install aomp
 COPY extras/scripts/aomp_setup.sh /tmp/aomp_setup.sh
 RUN /tmp/aomp_setup.sh --build-aomp-latest ${BUILD_AOMP_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}  |& tee /app/aomp_build.out && rm /tmp/aomp_setup.sh
- 
-# install flang-new
-COPY extras/scripts/flang-new_setup.sh /tmp/flang-new_setup.sh
-RUN /tmp/flang-new_setup.sh --build-flang-new ${BUILD_FLANGNEW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/flang-new_setup.sh
  
 # install hipfort
 COPY extras/scripts/hipfort_setup.sh /tmp/hipfort_setup.sh

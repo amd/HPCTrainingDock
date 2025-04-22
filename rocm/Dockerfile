@@ -26,6 +26,7 @@ ARG PYTHON_VERSION
 ARG AMDGPU_GFXMODEL=gfx90a
 ARG AMDGPU_GFXMODEL_FIRST=gfx90a
 ARG AMDGPU_GFXMODEL_STRING=gfx90a
+ARG BUILD_FLANGNEW=1
 ENV PATH ${HOME}/.local/bin:${PATH}
 
 COPY rocm/scripts/baseospackages_setup.sh /tmp/baseospackages_setup.sh
@@ -59,6 +60,10 @@ COPY rocm/scripts/rocm_rocprof-compute_setup.sh /tmp/rocm_rocprof-compute_setup.
 
 RUN  /tmp/rocm_rocprof-compute_setup.sh --rocm-version ${ROCM_VERSION} --python-version ${PYTHON_VERSION} && \
      rm /tmp/rocm_rocprof-compute_setup.sh
+
+# install flang-new
+COPY extras/scripts/flang-new_setup.sh /tmp/flang-new_setup.sh
+RUN /tmp/flang-new_setup.sh --build-flang-new ${BUILD_FLANGNEW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/flang-new_setup.sh
 
 USER root
 

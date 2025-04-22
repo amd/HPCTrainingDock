@@ -568,6 +568,7 @@ do
     verbose-build docker build ${GENERAL_DOCKER_OPTS} ${PULL} \
        --build-arg AMDGPU_GFXMODEL=\"${AMDGPU_GFXMODEL}\" \
        --build-arg AMDGPU_GFXMODEL_STRING=\"${AMDGPU_GFXMODEL_STRING}\" \
+       --build-arg BUILD_FLANGNEW=${BUILD_FLANGNEW} \
        --build-arg PYTHON_VERSION=\"${PYTHON_VERSION}\" \
        --tag ${DOCKER_USER}/rocm:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        -f rocm/Dockerfile .
@@ -611,7 +612,6 @@ do
        --build-arg BUILD_NETCDF=${BUILD_NETCDF} \
        --build-arg BUILD_X11VNC=${BUILD_X11VNC} \
        --build-arg BUILD_FFTW=${BUILD_FFTW} \
-       --build-arg BUILD_FLANGNEW=${BUILD_FLANGNEW} \
        --build-arg BUILD_OLLAMA=${BUILD_OLLAMA} \
        --build-arg HIPIFLY_MODULE=${HIPIFLY_MODULE} \
        --build-arg BUILD_HIPFORT=${BUILD_HIPFORT} \
