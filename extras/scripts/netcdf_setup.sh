@@ -206,20 +206,36 @@ else
       source /etc/profile.d/z01_lmod.sh
 
       # don't use sudo if user has write access to install path
-      if [ -w ${NETCDF_PATH} ]; then
-         SUDO=""
+      if [ -d "$NETCDF_PATH" ]; then
+         # don't use sudo if user has write access to install path
+         if [ -w ${NETCDF_PATH} ]; then
+            SUDO=""
+         else
+            echo "WARNING: using an install path that requires sudo"
+         fi
+      else
+         # if install path does not exist yet, the check on write access will fail
+         echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
       # install libcurl
       if [ "${DISTRO}" = "ubuntu" ]; then
-         echo "...installing libcurl using sudo..."
-         ${SUDO} apt-get update
-         ${SUDO} apt-get install libcurl4-gnutls-dev
+         if [[ ${SUDO} == "" ]]; then
+            echo " WARNING: not installing libcurl since we are not using sudo"
+         else
+            echo "...installing libcurl using sudo..."
+            ${SUDO} apt-get update
+            ${SUDO} apt-get install libcurl4-gnutls-dev
+         fi
       elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
-         echo "...installing libcurl using sudo..."
-         ${SUDO} yum install libcurl-devel
+         if [[ ${SUDO} == "" ]]; then
+            echo " WARNING: not installing libcurl since we are not using sudo"
+         else
+            echo "...installing libcurl using sudo..."
+            ${SUDO} yum install libcurl-devel
+         fi
       elif [ "${DISTRO}" = "opensuse" ]; then
-	 echo "Not tested yet"
+	 echo "opensuse is not tested yet, not installing libcurl"
       fi
 
       ${SUDO} mkdir -p ${NETCDF_PATH}
