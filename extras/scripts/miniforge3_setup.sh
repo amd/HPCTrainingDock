@@ -96,6 +96,8 @@ echo " Installing Miniforge3 with:"
 echo "ROCM_VERSION is $ROCM_VERSION"
 echo "PYTHON_VERSION (python3 minor release) is $PYTHON_VERSION"
 echo "BUILD_MINIFORGE3 is $BUILD_MINIFORGE3"
+echo "Installing in: $MINIFORGE3_PATH"
+echo "Creating module file in: $MODULE_PATH"
 echo "============================"
 echo ""
 
