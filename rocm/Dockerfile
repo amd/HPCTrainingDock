@@ -62,7 +62,7 @@ RUN  /tmp/rocm_rocprof-compute_setup.sh --rocm-version ${ROCM_VERSION} --python-
      rm /tmp/rocm_rocprof-compute_setup.sh
 
 # install flang-new
-COPY extras/scripts/flang-new_setup.sh /tmp/flang-new_setup.sh
+COPY rocm/scripts/flang-new_setup.sh /tmp/flang-new_setup.sh
 RUN /tmp/flang-new_setup.sh --build-flang-new ${BUILD_FLANGNEW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/flang-new_setup.sh
 
 USER root
