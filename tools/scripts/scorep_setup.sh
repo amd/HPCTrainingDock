@@ -8,6 +8,7 @@ ROCM_VERSION=6.0
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 MPI_MODULE="openmpi"
+MPI_CONFIG=""
 SCOREP_VERSION=9.0
 SCOREP_PATH=/opt/rocmplus-${ROCM_VERSION}/scorep
 PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
@@ -33,6 +34,7 @@ usage()
    echo "  --scorep-install-path [ SCOREP_PATH_INPUT ] default $SCOREP_PATH "
    echo "  --pdt-install-path [ PDT_PATH_INPUT ] default $PDT_PATH "
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE "
+   echo "  --mpi-config [ MPI_CONFIG ] what to pass to --with-mpi= when configuring score-p, default is $MPI_MODULE "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected "
    echo "  --help: print this usage information"
@@ -91,6 +93,11 @@ do
      "--mpi-module")
           shift
           MPI_MODULE=${1}
+          reset-last
+          ;;
+     "--mpi-config")
+          shift
+          MPI_CONFIG=${1}
           reset-last
           ;;
       "--rocm-version")
@@ -184,7 +191,7 @@ else
             if [ -w ${SCOREP_PATH} ]; then
                if [ -w ${PDT_PATH} ]; then
                   SUDO=""
-                  echo "WARNING: not using sudo since user has write access to install path, some dependencies may fail to get installed without sudo"
+                  echo "WARNING: not using sudo since user has write access to install path, if no $MPI_MODULE module is found MPI will not be installed"
                else
                   echo "WARNING: using install paths that require sudo"
                fi
@@ -226,8 +233,25 @@ else
       # install OpenMPI if not in the system already
       module load ${MPI_MODULE}
       if [[ `which mpicc | wc -l` -eq 0 ]]; then
-         ${SUDO} apt-get update
-         ${SUDO} ${DEB_FRONTEND} apt-get install -q -y libopenmpi-dev
+         if [[ ${SUDO} != "" ]]; then
+            ${SUDO} apt-get update
+            ${SUDO} ${DEB_FRONTEND} apt-get install -q -y libopenmpi-dev
+         else
+            echo "WARNING: module for ${MPI_MODULE} not found, and did not install libopenmpi-dev due to not having sudo"
+         fi
+      fi
+
+      if [[ $MPI_CONFIG == "" ]]; then
+         if [[ $MPI_MODULE == "openmpi" ]]; then
+            MPI_CONFIG = openmpi
+         else if [[ $MPI_MODULE == "cray-mpich" ]]; then
+            MPI_CONFIG = "cray"
+         else if [[ $MPI_MODULE == "mpich" ]]; then
+            MPI_CONFIG = "mpich"
+         else
+            echo " ERROR: --mpi-config not specified at input and not detected through $MPI_MODULE module"
+            exit 1
+         fi
       fi
 
       wget https://perftools.pages.jsc.fz-juelich.de/cicd/scorep/tags/scorep-${SCOREP_VERSION}/scorep-${SCOREP_VERSION}.tar.gz
@@ -235,7 +259,7 @@ else
       cd scorep-${SCOREP_VERSION}
       mkdir build
       cd build
-      ../configure --with-rocm=$ROCM_PATH  --with-mpi=openmpi  --prefix=$SCOREP_PATH  --with-librocm_smi64-include=$ROCM_PATH/include/rocm_smi \
+      ../configure --with-rocm=$ROCM_PATH  --with-mpi=$MPI_CONFIG  --prefix=$SCOREP_PATH  --with-librocm_smi64-include=$ROCM_PATH/include/rocm_smi \
                    --with-librocm_smi64-lib=$ROCM_PATH/lib --with-libunwind=download --enable-shared --with-libbfd=download --without-shmem  \
 		   --with-libgotcha=download CC=$CC CXX=$CXX FC=$FC CFLAGS=-fPIE
 
