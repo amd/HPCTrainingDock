@@ -243,7 +243,7 @@ else
 
       if [[ $MPI_CONFIG == "" ]]; then
          if [[ $MPI_MODULE == "openmpi" ]]; then
-            MPI_CONFIG = openmpi
+            MPI_CONFIG = "openmpi"
          elif [[ $MPI_MODULE == "cray-mpich" ]]; then
             MPI_CONFIG = "cray"
          elif [[ $MPI_MODULE == "mpich" ]]; then
