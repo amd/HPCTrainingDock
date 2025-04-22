@@ -5,7 +5,12 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 MODULE_PATH=/etc/lmod/modules/misc/petsc
 BUILD_PETSC=0
 ROCM_VERSION=6.0
+PETSC_PATH=/opt/rocmplus-${ROCM_VERSION}/petsc
+PETSC_PATH_INPUT=""
+PETSC_VERSION="3.23.0"
 SUDO="sudo"
+USE_SPACK=0
+MPI_MODULE="openmpi"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -20,8 +25,13 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 usage()
 {
    echo "Usage:"
-   echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/misc/petsc"
+   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH" 
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --install-path [ PETSC_PATH_INPUT ] default $PETSC_PATH"
+   echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
+   echo "  --petsc-version [ PETSC_VERSION ] default $PETSC_VERSION"
+   echo "  --use-spack [ USE_SPACK ] default $USE_SPACK"
    echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
    echo "  --build-petsc [ BUILD_PETSC ] default is 0"
    echo "  --help: this usage information"
@@ -62,6 +72,25 @@ do
           MODULE_PATH=${1}
           reset-last
           ;;
+      "--mpi-module")
+          shift
+          MPI_MODULE=${1}
+          reset-last
+          ;;
+      "--install-path")
+          shift
+          PETSC_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--petsc-version")
+          shift
+          PETSC_VERSION=${1}
+          reset-last
+          ;;
+      "--use-spack")
+          shift
+          USE_SPACK=${1}
+          reset-last
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
@@ -78,11 +107,22 @@ do
    shift
 done
 
+if [ "${PETSC_PATH_INPUT}" != "" ]; then
+   PETSC_PATH=${PETSC_PATH_INPUT}
+else
+   # override path in case ROCM_VERSION has been supplied as input
+   PETSC_PATH=/opt/rocmplus-${ROCM_VERSION}/petsc
+fi
+
 echo ""
 echo "==================================="
 echo "Starting PETSC Install with"
 echo "ROCM_VERSION: $ROCM_VERSION"
 echo "BUILD_PETSC: $BUILD_PETSC"
+echo "Installing PETSc in: $PETSC_PATH"
+echo "MODULE_PATH: $MODULE_PATH"
+echo "USE_SPACK: $USE_SPACK"
+echo "Loading this module for MPI: $MPI_MODULE"
 echo "==================================="
 echo ""
 
@@ -120,70 +160,146 @@ else
       source /etc/profile.d/lmod.sh
       source /etc/profile.d/z01_lmod.sh
       module load rocm/${ROCM_VERSION}
-      module load openmpi
+      module load $MPI_MODULE
 
       cd /tmp
 
-      export PETSC_PATH=/opt/rocmplus-${ROCM_VERSION}/petsc
+      # don't use sudo if user has write access to install path
+      if [ -d "$PETSC_PATH" ]; then
+         # don't use sudo if user has write access to install path
+         if [ -w ${PETSC_PATH} ]; then
+            SUDO=""
+         else
+            echo "WARNING: using an install path that requires sudo"
+         fi
+      else
+         # if install path does not exist yet, the check on write access will fail
+         echo "WARNING: using sudo, make sure you have sudo privileges"
+      fi
+
       ${SUDO} mkdir -p ${PETSC_PATH}
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod a+w ${PETSC_PATH}
       fi
 
-      # ------------ Installing PETSC
+      if [[ $USE_SPACK == 1 ]]; then
 
-      git clone https://github.com/spack/spack.git
+         # ------------ Installing PETSC
 
-      # load spack environment
-      source spack/share/spack/setup-env.sh
+         git clone https://github.com/spack/spack.git
 
-      # find already installed libs for spack
-      spack external find
+         # load spack environment
+         source spack/share/spack/setup-env.sh
 
-      # change spack install dir for Hypre
-      ${SUDO} sed -i 's|$spack/opt/spack|'"${PETSC_PATH}"'|g' spack/etc/spack/defaults/config.yaml
+         # find already installed libs for spack
+         spack external find
 
-      # open permissions to use spack to install petsc
-      if [[ "${USER}" != "root" ]]; then
-         ${SUDO} chmod -R a+rwX ${PETSC_PATH}
+         # change spack install dir for Hypre
+         sed -i 's|$spack/opt/spack|'"${PETSC_PATH}"'|g' spack/etc/spack/defaults/config.yaml
+
+         # install petsc with spack
+         #spack install petsc+rocm+rocblas+unified-memory
+         spack install petsc+rocm+rocblas+unified-memory+gpu-aware-mpi amdgpu_target=gfx942
+
+
+         # get petsc install dir created by spack
+         PETSC_PATH_ORIGINAL=$PETSC_PATH
+         PETSC_PATH=`spack find -p petsc | awk '{print $2}' | grep opt`
+
+         rm -rf spack
+
+      else
+
+         # petsc install
+         git clone --branch v$PETSC_VERSION https://gitlab.com/petsc/petsc.git
+         cd petsc
+         PETSC_REPO=$PWD
+         DOWNLOAD_HDF5=1
+         module load hdf5
+         if [[ "HDF5_PATH" != "" ]]; then
+            DOWNLOAD_HDF5=0
+         fi
+
+         ./configure --with-debugging=0 --with-x=0 COPTFLAGS="-O3 -march=native -mtune=native" \
+                     CXXOPTFLAGS="-O3 -march=native -mtune=native" FOPTFLAGS="-O3 -march=native -mtune=native" \
+                     HIPOPTFLAGS="-O3 -march=native -mtune=native" --download-fblaslapack=1 --download-hdf5=$DOWNLOAD_HDF5 --download-metis=1 \
+                     --download-parmetis=1 --with-shared-libraries=1 --download-blacs=1 --download-scalapack=1 --download-mumps=1 \
+                     --download-suitesparse=1 --with-hip-arch=$AMDGPU_GFXMODEL --with-mpi=1 --with-mpi-dir=$OPENMPI_PATH \
+                     --prefix=$PETSC_PATH --with-hip=1 --with-hip-dir=$ROCM_PATH 
+
+         ${SUDO} make PETSC_DIR=$PETSC_REPO PETSC_ARCH=arch-linux-c-opt all
+         ${UIDO} make PETSC_DIR=$PETSC_REPO PETSC_ARCH=arch-linux-c-opt install
+
+         # slepc install
+         git clone --branch v$PETSC_VERSION https://gitlab.com/slepc/slepc.git
+         cd slepc
+         SLEPC_REPO=$PWD
+
+         export PETSC_DIR=$PETSC_PATH
+
+         SLEPC_PATH=$PETSC_PATH/slepc
+         ${SUDO} mkdir -p $SLEPC_PATH
+
+         ./configure --prefix=$SLEPC_PATH
+
+         ${SUDO} make SLEPC_DIR=$SLEPC_REPO PETSC_DIR=$PETSC_PATH
+         ${SUDO} make SLEPC_DIR=$SLEPC_REPO PETSC_DIR=$PETSC_PATH install
+
+         # eigen install
+
+         git clone --branch nightly https://gitlab.com/libeigen/eigen.git
+         cd eigen
+         mkdir build && cd build
+
+         export EIGEN_PATH=$PETSC_PATH/eigen
+
+         cmake -DCMAKE_INSTALL_PREFIX=$EIGEN_PATH -DCHOLMOD_LIBRARIES=$PETSC_PATH/lib -DCHOLMOD_INCLUDES=$PETSC_PATH/include \
+               -DKLU_LIBRARIES=$PETSC_PATH/lib -DKLU_INCLUDES=$PETSC_PATH/include -DEIGEN_TEST_HIP=ON ..
+         ${SUDO} make install
+
       fi
 
-      # install petsc with spack
-      #spack install petsc+rocm+rocblas+unified-memory
-      spack install petsc+rocm+rocblas+unified-memory+gpu-aware-mpi amdgpu_target=gfx942
-
-
-      # get petsc install dir created by spack
-      PETSC_PATH=`spack find -p petsc | awk '{print $2}' | grep opt`
-
-      ${SUDO} rm -rf spack
-
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} find ${PETSC_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${PETSC_PATH_ORIGINAL} -type f -execdir chown root:root "{}" +
       fi
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} chmod go-w ${PETSC_PATH}
+         ${SUDO} chmod go-w ${PETSC_PATH_ORIGINAL}
       fi
 
       module unload rocm/${ROCM_VERSION}
+      module unload $MPI_MODULE
 
    fi
 
    # Create a module file for petsc
+   if [ -d "$MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to module path"
+      fi
+   else
+      # if module path dir does not exist yet, the check on write access will fail
+      SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
+   fi
+
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/2.32.0.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/$PETSC_VERSION.lua
 	whatis("PETSC - solver package")
 
 	local base = "${PETSC_PATH}"
 
 	load("rocm/${ROCM_VERSION}")
-	load("openmpi")
+	load("$MPI_MODULE")
 	setenv("PETSC_PATH", base)
 	prepend_path("PATH",pathJoin(base, "bin"))
 	prepend_path("PATH","${PETSC_PATH}/bin")
+	prepend_path("PATH","${SLEPC_PATH}/bin")
 	prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
 	prepend_path("LD_LIBRARY_PATH","/usr/lib")
 EOF

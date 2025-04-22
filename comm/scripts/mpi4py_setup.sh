@@ -130,7 +130,6 @@ if [ "${BUILD_MPI4PY}" = "0" ]; then
    exit
 
 else
-   MPI4PY_PATH=/opt/rocmplus-${ROCM_VERSION}/mpi4py
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
    if [ -f ${CACHE_FILES}/mpi4py.tgz ]; then

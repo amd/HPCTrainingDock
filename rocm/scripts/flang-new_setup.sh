@@ -151,6 +151,8 @@ else
       tar -xjf ${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
       rm -f ${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
 
+      ${SUDO} mv ${ARCHIVE_NAME} ${ARCHIVE_DIR}
+
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chown -R root:root ${UNTAR_DIR}/${ARCHIVE_DIR}
          ${SUDO} chmod go-w ${UNTAR_DIR}
