@@ -235,7 +235,7 @@ else
                      --prefix=$PETSC_PATH --with-hip=1 --with-hip-dir=$ROCM_PATH 
 
          ${SUDO} make PETSC_DIR=$PETSC_REPO PETSC_ARCH=arch-linux-c-opt all
-         ${UIDO} make PETSC_DIR=$PETSC_REPO PETSC_ARCH=arch-linux-c-opt install
+         ${SUDO} make PETSC_DIR=$PETSC_REPO PETSC_ARCH=arch-linux-c-opt install
 
          # slepc install
          git clone --branch v$PETSC_VERSION https://gitlab.com/slepc/slepc.git
