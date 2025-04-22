@@ -26,6 +26,7 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  WARNING: when selecting the module to supply to --mpi-module, make sure it sets the MPI_PATH environment variable"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH" 
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --install-path [ PETSC_PATH_INPUT ] default $PETSC_PATH"
@@ -91,6 +92,7 @@ do
           shift
           USE_SPACK=${1}
           reset-last
+          ;;
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
@@ -161,6 +163,10 @@ else
       source /etc/profile.d/z01_lmod.sh
       module load rocm/${ROCM_VERSION}
       module load $MPI_MODULE
+      if [[ $MPI_PATH == "" ]]; then
+         echo "MPI module $MPI_MODULE is not setting the MPI_PATH env variable, aborting..."
+         exit 1
+      fi
 
       cd /tmp
 
@@ -225,7 +231,7 @@ else
                      CXXOPTFLAGS="-O3 -march=native -mtune=native" FOPTFLAGS="-O3 -march=native -mtune=native" \
                      HIPOPTFLAGS="-O3 -march=native -mtune=native" --download-fblaslapack=1 --download-hdf5=$DOWNLOAD_HDF5 --download-metis=1 \
                      --download-parmetis=1 --with-shared-libraries=1 --download-blacs=1 --download-scalapack=1 --download-mumps=1 \
-                     --download-suitesparse=1 --with-hip-arch=$AMDGPU_GFXMODEL --with-mpi=1 --with-mpi-dir=$OPENMPI_PATH \
+                     --download-suitesparse=1 --with-hip-arch=$AMDGPU_GFXMODEL --with-mpi=1 --with-mpi-dir=$MPI_PATH \
                      --prefix=$PETSC_PATH --with-hip=1 --with-hip-dir=$ROCM_PATH 
 
          ${SUDO} make PETSC_DIR=$PETSC_REPO PETSC_ARCH=arch-linux-c-opt all
