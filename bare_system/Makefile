@@ -342,7 +342,7 @@ cupy_tests.timestamp: cupy.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Cupy
 	touch cupy_tests.timestamp
 
-kokkos_tests.timestamp: kokkos.timestamp HPCTrainingExamples
+kokkos_tests.timestamp: kokkos.timestamp compiler.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Kokkos
 	touch kokkos_tests.timestamp
 
