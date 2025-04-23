@@ -131,12 +131,14 @@ grafana.timestamp:
 rocprof-compute_source.timestamp: rocm.timestamp
 	tools/scripts/rocprof-compute_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
 	   --install-rocprof-compute-from-source 1
 	touch rocprof-compute_source.timestamp
 
 tau.timestamp: rocm.timestamp
 	tools/scripts/tau_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
 	   --build-tau 1
 	touch tau.timestamp
 
@@ -149,6 +151,7 @@ scorep.timestamp: rocm.timestamp flang-new.timestamp
 hpctoolkit.timestamp: rocm.timestamp
 	tools/scripts/hpctoolkit_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
 	   --build-hpctoolkit 1
 	touch hpctoolkit.timestamp
 
@@ -193,18 +196,21 @@ miniforge3.timestamp:
 hdf5.timestamp:
 	extras/scripts/hdf5_setup.sh \
            --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
            --build-hdf5 1
 	touch hdf5.timestamp
 
 netcdf.timestamp: hdf5.timestamp
 	extras/scripts/netcdf_setup.sh \
            --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
            --build-netcdf 1
 	touch netcdf.timestamp
 
 hipfort.timestamp: rocm.timestamp
 	extras/scripts/hipfort_setup.sh \
            --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
            --build-hipfort 1
 	touch hipfort.timestamp
 
@@ -245,6 +251,7 @@ jax.timestamp: rocm.timestamp
 fftw.timestamp:
 	extras/scripts/fftw_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
            --build-fftw 1
 	touch fftw.timestamp
 
