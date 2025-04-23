@@ -197,7 +197,7 @@ else
 
          if [[ ${SUDO} != "" ]]; then
             ${SUDO} apt-get update
-            ${SUDO} apt-get install -y libssl-dev
+            ${SUDO} apt-get install -y libssl-dev unzip
          else
             echo " WARNING: not using sudo, the spack build might fail if libevent does not find openssl "
          fi
@@ -215,7 +215,7 @@ else
 
          # install hypre with spack
          #spack install hypre+rocm+rocblas+unified-memory
-         spack install hypre@$HYPRE_VERSION+rocm@$ROCM_VERSION+rocblas@$ROCM_VERSION+unified-memory+gpu-aware-mpi amdgpu_target=$AMDGPU_GFXMODEL
+         spack install hypre@$HYPRE_VERSION+rocm+unified-memory+gpu-aware-mpi amdgpu_target=$AMDGPU_GFXMODEL
 
          # get hypre install dir created by spack
          HYPRE_PATH_ORIGINAL=$HYPRE_PATH
