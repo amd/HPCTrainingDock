@@ -224,6 +224,7 @@ hipifly.timestamp: rocm.timestamp
 kokkos.timestamp: rocm.timestamp
 	extras/scripts/kokkos_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
 	   --build-kokkos 1
 	touch kokkos.timestamp
 
