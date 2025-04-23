@@ -16,6 +16,13 @@ if [[ "${DISTRO}" == "ubuntu" ]]; then
    fi
 fi
 
+send-error()
+{
+    usage
+    echo -e "\nError: ${@}"
+    exit 1
+}
+
 reset-last()
 {
    last() { send-error "Unsupported argument :: ${1}"; }
@@ -30,6 +37,8 @@ usage()
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: autodetected using rocminfo"
    echo "  --distro [DISTRO: ubuntu|rockylinux|opensuse/leap]: autodetected by looking into /etc/os-release"
    echo "  --distro-versions [DISTRO_VERSION]: autodetected by looking into /etc/os-release"
+   echo "  Including alternate version --distro-version to avoid errors"
+   echo "  --distro-version [DISTRO_VERSION]: autodetected by looking into /etc/os-release"
    echo "  --image-name [IMAGE_NAME]: Docker image name, default is $IMAGE_NAME"
    echo "  --use-makefile [0 or 1]: default 0 "
    echo "  --help: prints this message"
@@ -64,13 +73,17 @@ do
           shift
           DISTRO=${1}
           reset-last
-          #last() { DISTRO="${DISTRO} ${1}"; }
           ;;
       "--distro-versions")
           shift
           DISTRO_VERSION=${1}
           reset-last
-          #last() { DISTRO_VERSION="${DISTRO_VERSION} ${1}"; }
+          ;;
+      # alternate version
+      "--distro-version")
+          shift
+          DISTRO_VERSION=${1}
+          reset-last
           ;;
       "--image-name")
           shift
