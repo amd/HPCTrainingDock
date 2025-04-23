@@ -199,6 +199,8 @@ else
 
          # ------------ Installing PETSC
 
+         echo " WARNING: installing petsc with spack: the build is a work in progress, fails can happen..."
+
          if [[ ${SUDO} != "" ]]; then
             ${SUDO} apt-get update
             ${SUDO} apt-get install -y libssl-dev

@@ -9,7 +9,7 @@ SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 AMDGPU_GFXMODEL_INPUT=""
 USE_SPACK=1
-HYPRE_VERSION="2.32.0"
+HYPRE_VERSION="2.33.0"
 MPI_MODULE="openmpi"
 HYPRE_PATH=/opt/rocmplus-${ROCM_VERSION}/hypre
 HYPRE_PATH_INPUT=""
@@ -195,6 +195,8 @@ else
 
       if [[ $USE_SPACK == 1 ]]; then
 
+         echo " WARNING: installing hypre with spack: the build is a work in progress, fails can happen..."
+
          if [[ ${SUDO} != "" ]]; then
             ${SUDO} apt-get update
             ${SUDO} apt-get install -y libssl-dev unzip
@@ -225,9 +227,15 @@ else
 
       else
 
-         echo " HYPRE build only enabled with Spack at the moment "
-         echo " Set --use-spack 1 "
-         exit 1
+         git clone --branch v$HYPRE_VERSION https://github.com/hypre-space/hypre.git
+         cd hypre/src
+
+         ./configure --enable-unified-memory   --enable-shared   --prefix=$HYPRE_PATH --enable-mixedint \
+                     --enable-gpu-aware-mpi  --enable-rocsparse    --enable-gpu-profiling   --enable-rocblas \
+                     --enable-rocsolver --enable-rocrand   --with-MPI   --with-hip  --with-gpu-arch=$AMDGPU_GFXMODEL
+
+         ${SUDO} make install
+
 
       fi
 
