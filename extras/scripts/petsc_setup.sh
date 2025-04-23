@@ -210,10 +210,8 @@ else
          # change spack install dir for Hypre
          sed -i 's|$spack/opt/spack|'"${PETSC_PATH}"'|g' spack/etc/spack/defaults/config.yaml
 
-         # install petsc with spack
-         #spack install petsc+rocm+rocblas+unified-memory
-         spack install petsc+rocm+rocblas+unified-memory+gpu-aware-mpi amdgpu_target=gfx942
-
+         # install petsc with spack, some variants are not specified because true by default
+         spack install petsc@$PETSC_VERSION+rocm+fortran+mumps+suite-sparse amdgpu_target=$AMDGPU_GFXMODEL
 
          # get petsc install dir created by spack
          PETSC_PATH_ORIGINAL=$PETSC_PATH
