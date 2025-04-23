@@ -16,7 +16,7 @@ INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch
 INSTALL_PATH_INPUT=""
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
-USE_WHEEL=0
+USE_WHEEL=1
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
