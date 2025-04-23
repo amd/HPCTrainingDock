@@ -1,7 +1,7 @@
 #/bin/bash
 
 # Variables controlling setup process
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+AMDGPU_GFXMODEL_INPUT=""
 MODULE_PATH=/etc/lmod/modules/misc/kokkos
 BUILD_KOKKOS=0
 ROCM_VERSION=6.0
@@ -9,6 +9,8 @@ KOKKOS_ARCH_AMD_GFX942="OFF"
 KOKKOS_ARCH_AMD_GFX90A="OFF"
 KOKKOS_ARCH_VEGA90A="OFF"
 KOKKOS_VERSION="4.5.01"
+KOKKOS_PATH=/opt/rocmplus-${ROCM_VERSION}/kokkos
+KOKKOS_PATH_INPUT=""
 
 SUDO="sudo"
 
@@ -19,11 +21,13 @@ fi
 usage()
 {
    echo "Usage:"
+   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
+   echo "  --install-path [ KOKKOS_PATH ] default $KOKKOS_PATH"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL_INPUT ] default is autodetected "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --build-kokkos [ BUILD_KOKKOS ], set to 1 to build Kokkos, default is 0"
-   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
-   echo "  --help: this usage information"
+   echo "  --help: print this usage information"
    exit 1
 }
 
@@ -43,11 +47,6 @@ n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
-      "--amdgpu-gfxmodel")
-          shift
-          AMDGPU_GFXMODEL=${1}
-          reset-last
-          ;;
       "--build-kokkos")
           shift
           BUILD_KOKKOS=${1}
@@ -59,6 +58,16 @@ do
       "--module-path")
           shift
           MODULE_PATH=${1}
+          reset-last
+          ;;
+      "--install-path")
+          shift
+          KOKKOS_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--amdgpu-gfxmodel")
+          shift
+          AMDGPU_GFXMODEL_INPUT=${1}
           reset-last
           ;;
       "--rocm-version")
@@ -77,11 +86,27 @@ do
    shift
 done
 
+if [ "${KOKKOS_PATH_INPUT}" != "" ]; then
+   KOKKOS_PATH=${KOKKOS_PATH_INPUT}
+else
+   # override path in case ROCM_VERSION has been supplied as input
+   KOKKOS_PATH=/opt/rocmplus-${ROCM_VERSION}/kokkos
+fi
+
+if [[ "$AMDGPU_GFXMODEL_INPUT" != "" ]]; then
+   AMDGPU_GFXMODEL=$AMDGPU_GFXMODEL_INPUT
+else
+   AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+fi
+
 echo ""
 echo "==================================="
 echo "Starting Kokkos Install with"
 echo "ROCM_VERSION: $ROCM_VERSION"
 echo "BUILD_KOKKOS: $BUILD_KOKKOS"
+echo "KOKKOS_PATH:  $KOKKOS_PATH"
+echo "MODULE_PATH:  $MODULE_PATH"
+echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL"
 echo "==================================="
 echo ""
 
@@ -89,7 +114,7 @@ if [ "${BUILD_KOKKOS}" = "0" ]; then
 
    echo "Kokkos will not be built, according to the specified value of BUILD_KOKKOS"
    echo "BUILD_KOKKOS: $BUILD_KOKKOS"
-   exit 
+   exit
 
 else
    if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/kokkos.tgz ]; then
@@ -112,6 +137,21 @@ else
       echo "============================"
       echo ""
 
+      # don't use sudo if user has write access to install path
+      if [ -d "$KOKKOS_PATH" ]; then
+         # don't use sudo if user has write access to install path
+         if [ -w ${KOKKS_PATH} ]; then
+            SUDO=""
+         else
+            echo "WARNING: using an install path that requires sudo"
+         fi
+      else
+         # if install path does not exist yet, the check on write access will fail
+         echo "WARNING: using sudo, make sure you have sudo privileges"
+      fi
+
+      ${SUDO} mkdir -p ${KOKKOS_PATH}
+
       if [ "${AMDGPU_GFXMODEL}" = "gfx90a" ]; then
          KOKKOS_ARCH_AMD_GFX90A="ON"
       elif [ "${AMDGPU_GFXMODEL}" = "gfx942" ]; then
@@ -123,9 +163,6 @@ else
       source /etc/profile.d/lmod.sh
       source /etc/profile.d/z01_lmod.sh
       module load rocm/${ROCM_VERSION}
-
-      KOKKOS_PATH=/opt/rocmplus-${ROCM_VERSION}/kokkos
-      ${SUDO} mkdir -p ${KOKKOS_PATH}
 
       git clone --branch ${KOKKOS_VERSION} https://github.com/kokkos/kokkos
       cd kokkos
@@ -155,6 +192,19 @@ else
    fi
 
    # Create a module file for kokkos
+   if [ -d "$MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to module path"
+      fi
+   else
+      # if module path dir does not exist yet, the check on write access will fail
+      SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
+   fi
+
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
@@ -163,6 +213,7 @@ else
 
 	load("rocm/${ROCM_VERSION}")
 	prepend_path("PATH","${KOKKOS_PATH}")
+	setenv("Kokkos_DIR","${KOKKOS_PATH}")
 EOF
 
 fi
