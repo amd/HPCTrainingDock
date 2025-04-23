@@ -154,7 +154,7 @@ hpctoolkit.timestamp: rocm.timestamp
 
 # From Training layer
 
-compiler_setup.sh:
+compiler_setup.timestamp:
 	extras/scripts/compiler_setup.sh
 	touch compiler_setup.timestamp
 
