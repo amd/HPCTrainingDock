@@ -148,11 +148,11 @@ tools/scripts/grafana_setup.sh
 
 tools/scripts/rocprof-compute_setup.sh --rocm-version ${ROCM_VERSION} --install-rocprof-compute-from-source ${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE} --python-version ${PYTHON_VERSION}
 
-tools/scripts/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_HPCTOOLKIT}
+tools/scripts/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-hpctoolkit ${BUILD_HPCTOOLKIT}
 
 tools/scripts/scorep_setup.sh --rocm-version ${ROCM_VERSION} --build-scorep ${BUILD_SCOREP}
 
-tools/scripts/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-tau ${BUILD_TAU}
+tools/scripts/tau_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-tau ${BUILD_TAU}
 
 extras/scripts/compiler_setup.sh
 
@@ -166,7 +166,7 @@ extras/scripts/pytorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel
 
 extras/scripts/apps_setup.sh
 
-extras/scripts/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-kokkos ${BUILD_KOKKOS}
+extras/scripts/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-kokkos ${BUILD_KOKKOS}
 
 extras/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniconda3 ${BUILD_MINICONDA3} --python-version ${PYTHON_VERSION}
 
@@ -176,9 +176,9 @@ extras/scripts/hipfort_setup.sh --rocm-version ${ROCM_VERSION} --build-hipfort $
 
 extras/scripts/hipifly_setup.sh --rocm-version ${ROCM_VERSION} --hipifly-module ${HIPIFLY_MODULE} --hipifly-header-path extras/sources/hipifly/
 
-extras/scripts/hdf5_setup.sh --rocm-version ${ROCM_VERSION} --build-hdf5 ${BUILD_HDF5}
+extras/scripts/hdf5_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-hdf5 ${BUILD_HDF5}
 
-extras/scripts/netcdf_setup.sh --rocm-version ${ROCM_VERSION} --build-netcdf ${BUILD_NETCDF}
+extras/scripts/netcdf_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-netcdf ${BUILD_NETCDF}
 
 extras/scripts/fftw_setup.sh --rocm-version ${ROCM_VERSION} --build-fftw ${BUILD_FFTW}
 
