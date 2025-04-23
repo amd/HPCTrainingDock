@@ -27,7 +27,7 @@ usage()
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  WARNING: when selecting the module to supply to --mpi-module, make sure it sets the MPI_PATH environment variable"
-   echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH" 
+   echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --install-path [ INSTALL_PATH_INPUT ] default $INSTALL_PATH"
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
@@ -199,6 +199,13 @@ else
 
          # ------------ Installing PETSC
 
+         if [[ ${SUDO} != "" ]]; then
+            ${SUDO} apt-get update
+            ${SUDO} apt-get install -y libssl-dev
+         else
+            echo " WARNING: not using sudo, the spack build might fail if libevent does not find openssl "
+         fi
+
          git clone https://github.com/spack/spack.git
 
          # load spack environment
@@ -236,7 +243,7 @@ else
                      HIPOPTFLAGS="-O3 -march=native -mtune=native" --download-fblaslapack=1 --download-hdf5=$DOWNLOAD_HDF5 --download-metis=1 \
                      --download-parmetis=1 --with-shared-libraries=1 --download-blacs=1 --download-scalapack=1 --download-mumps=1 \
                      --download-suitesparse=1 --with-hip-arch=$AMDGPU_GFXMODEL --with-mpi=1 --with-mpi-dir=$MPI_PATH \
-                     --prefix=$PETSC_PATH --with-hip=1 --with-hip-dir=$ROCM_PATH 
+                     --prefix=$PETSC_PATH --with-hip=1 --with-hip-dir=$ROCM_PATH
 
          ${SUDO} make PETSC_DIR=$PETSC_REPO PETSC_ARCH=arch-linux-c-opt all
          ${SUDO} make PETSC_DIR=$PETSC_REPO PETSC_ARCH=arch-linux-c-opt install

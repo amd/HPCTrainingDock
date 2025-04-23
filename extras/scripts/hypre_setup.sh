@@ -195,6 +195,13 @@ else
 
       if [[ $USE_SPACK == 1 ]]; then
 
+         if [[ ${SUDO} != "" ]]; then
+            ${SUDO} apt-get update
+            ${SUDO} apt-get install -y libssl-dev
+         else
+            echo " WARNING: not using sudo, the spack build might fail if libevent does not find openssl "
+         fi
+
          git clone https://github.com/spack/spack.git
 
          # load spack environment
