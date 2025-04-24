@@ -170,8 +170,6 @@ else
       module load rocm/${ROCM_VERSION}
       module load ${MPI_MODULE}
 
-      cd /tmp
-
       # don't use sudo if user has write access to install path
       if [ -d "$HYPRE_PATH" ]; then
          # don't use sudo if user has write access to install path
@@ -191,6 +189,7 @@ else
          ${SUDO} chmod a+w ${HYPRE_PATH}
       fi
 
+      HYPRE_PATH_ORIGINAL=$HYPRE_PATH
       # ------------ Installing HYPRE
 
       if [[ $USE_SPACK == 1 ]]; then
@@ -220,7 +219,6 @@ else
          spack install hypre@$HYPRE_VERSION+rocm+unified-memory+gpu-aware-mpi amdgpu_target=$AMDGPU_GFXMODEL
 
          # get hypre install dir created by spack
-         HYPRE_PATH_ORIGINAL=$HYPRE_PATH
          HYPRE_PATH=`spack find -p hypre | awk '{print $2}' | grep opt`
 
          ${SUDO} rm -rf spack
@@ -235,7 +233,7 @@ else
                -DHYPRE_ENABLE_OPENMP=ON -DHYPRE_BUILD_TESTS=ON -DHYPRE_ENABLE_HIP=ON -DCMAKE_HIP_ARCHITECTURES=$AMDGPU_GFXMODEL \
                 -DHYPRE_ENABLE_GPU_PROFILING=ON -DHYPRE_ENABLE_GPU_AWARE_MPI=ON ..
 
-         ${SUDO} make -j
+         make -j
          ${SUDO} make install
          cd ../../..
          rm -rf hypre
