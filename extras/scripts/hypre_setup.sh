@@ -229,13 +229,16 @@ else
 
          git clone --branch v$HYPRE_VERSION https://github.com/hypre-space/hypre.git
          cd hypre/src
+         mkdir build && cd build
 
-         ./configure --enable-unified-memory   --enable-shared   --prefix=$HYPRE_PATH --enable-mixedint \
-                     --enable-gpu-aware-mpi  --enable-rocsparse    --enable-gpu-profiling   --enable-rocblas \
-                     --enable-rocsolver --enable-rocrand   --with-MPI   --with-hip  --with-gpu-arch=$AMDGPU_GFXMODEL
+         cmake -DCMAKE_INSTALL_PREFIX=$HYPRE_PATH -DHYPRE_ENABLE_MIXEDINT=ON -DHYPRE_ENABLE_MPI=ON \
+               -DHYPRE_ENABLE_OPENMP=ON -DHYPRE_BUILD_TESTS=ON -DHYPRE_ENABLE_HIP=ON -DCMAKE_HIP_ARCHITECTURES=$AMDGPU_GFXMODEL \
+                -DHYPRE_ENABLE_GPU_PROFILING=ON -DHYPRE_ENABLE_GPU_AWARE_MPI=ON ..
 
+         ${SUDO} make -j
          ${SUDO} make install
-
+         cd ../../..
+         rm -rf hypre
 
       fi
 
