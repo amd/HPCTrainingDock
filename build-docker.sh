@@ -25,6 +25,8 @@
 : ${BUILD_MINIFORGE3:="0"}
 : ${BUILD_HPCTOOLKIT:="0"}
 : ${BUILD_HDF5:="0"}
+: ${BUILD_PETSC:="0"}
+: ${BUILD_HYPRE:="0"}
 : ${BUILD_NETCDF:="0"}
 : ${BUILD_X11VNC:="0"}
 : ${BUILD_FLANGNEW:="0"}
@@ -128,6 +130,8 @@ usage()
     print_default_option build-tau "[BUILD_TAU: 0 or 1]"  "build the development version of TAU" "${BUILD_TAU} (false)"
     print_default_option build-scorep "[BUILD_SCOREP: 0 or 1]" "build version 9.0-dev of Score-P" "${BUILD_SCOREP} (false)"
     print_default_option build-x11vnc "[BUILD_X11VNC: 0 or 1]" "enable x11 screen forwarding in the container" "${BUILD_X11VNC} (false)"
+    print_default_option build-petsc "[BUILD_PETSC: 0 or 1]" "build version 3.23.0 of petsc" "${BUILD_PETSC} (false)"
+    print_default_option build-hypre "[BUILD_HYPRE: 0 or 1]" "build version 2.33 of hypre" "${BUILD_HYPRE} (false)"
     print_default_option build-mpi4py "[BUILD_MPI4PY: 0 or 1]" "build version 4.0.1 of mpi4py" "${BUILD_MPI4PY} (false)"
     print_default_option build-hipfort "[BUILD_HIPFORT: 0 or 1]" "build version 6.3.2 of hipfort" "${BUILD_HIPFORT} (false)"
     print_default_option build-fftw "[BUILD_FFTW: 0 or 1]" "build version 3.3.10 of fftw" "${BUILD_FFTW} (false)"
@@ -251,6 +255,14 @@ do
             BUILD_PYTORCH="1"
             reset-last
             ;;
+        "--build-petsc")
+            BUILD_PETSC="1"
+            reset-last
+            ;;
+        "--build-hypre")
+            BUILD_HYPRE="1"
+            reset-last
+            ;;
         "--build-cupy")
             BUILD_CUPY="1"
             reset-last
@@ -323,6 +335,8 @@ do
             #BUILD_CLACC_LATEST="1"
             BUILD_PYTORCH="1"
             BUILD_CUPY="1"
+            BUILD_PETSC="1"
+            BUILD_HYPRE="1"
             BUILD_JAX="1"
             BUILD_HDF5="1"
             BUILD_NETCDF="1"
@@ -396,6 +410,14 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
          "netcdf")
 	    echo "Setting netcdf build"
             BUILD_NETCDF=1
+	    ;;
+         "petsc")
+	    echo "Setting petsc build"
+            BUILD_PETSC=1
+	    ;;
+         "hypre")
+	    echo "Setting hypre build"
+            BUILD_HYPRE=1
 	    ;;
          "scorep")
 	    echo "Setting scorep build"
@@ -477,6 +499,8 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             #BUILD_CLACC_LATEST="1"
             BUILD_PYTORCH="1"
             BUILD_CUPY="1"
+            BUILD_PETSC="1"
+            BUILD_HYPRE="1"
             BUILD_JAX="1"
             BUILD_KOKKOS="1"
             BUILD_MINICONDA3="1"
@@ -506,6 +530,8 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             echo "   rocprof-sys"
             echo "   rocprof-compute"
             echo "   scorep"
+            echo "   petsc"
+            echo "   hypre"
             echo "   tau"
 	    echo " # optional compiler packages"
             echo "   aomp_latest"
@@ -605,6 +631,8 @@ do
        --build-arg BUILD_PYTORCH=${BUILD_PYTORCH} \
        --build-arg BUILD_CUPY=${BUILD_CUPY} \
        --build-arg BUILD_JAX=${BUILD_JAX} \
+       --build-arg BUILD_PETSC=${BUILD_PETSC} \
+       --build-arg BUILD_HYPRE=${BUILD_HYPRE} \
        --build-arg BUILD_KOKKOS=${BUILD_KOKKOS} \
        --build-arg BUILD_MINICONDA3=${BUILD_MINICONDA3} \
        --build-arg BUILD_MINIFORGE3=${BUILD_MINIFORGE3} \

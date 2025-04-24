@@ -63,6 +63,8 @@ mpi4py_tests: mpi4py_tests.timestamp
 hpctoolkit_tests: hpctoolkit_tests.timestamp
 cupy_tests: cupy_tests.timestamp
 pytorch_tests: pytorch_tests.timestamp
+petsc_tests: petsc_tests.timestamp
+hypre_tests: hypre_tests.timestamp
 jax_tests: jax_tests.timestamp
 
 rocm_package: rocm_package.timestamp
@@ -404,6 +406,14 @@ hipifly_tests.timestamp: hipifly.timestamp HPCTrainingExamples
 pytorch_tests.timestamp: pytorch.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Pytorch
 	touch pytorch_tests.timestamp
+
+petsc_tests.timestamp: petsc.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R PETSc
+	touch petsc_tests.timestamp
+
+hypre_tests.timestamp: hypre.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R HYPRE
+	touch hypre_tests.timestamp
 
 jax_tests.timestamp: jax.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R JAX

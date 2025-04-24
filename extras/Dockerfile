@@ -26,6 +26,8 @@ ARG BUILD_OG_LATEST
 ARG BUILD_CLACC_LATEST
 ARG BUILD_PYTORCH
 ARG BUILD_CUPY
+ARG BUILD_PETSC
+ARG BUILD_HYPRE
 ARG BUILD_KOKKOS
 ARG BUILD_MINIFORGE3
 ARG BUILD_MINICONDA3
@@ -183,6 +185,25 @@ COPY extras/scripts/jax_setup.sh /tmp/jax_setup.sh
 RUN /tmp/jax_setup.sh --build-jax ${BUILD_JAX} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/jax_setup.sh
 
 WORKDIR /app 
+
+#
+# Install petsc
+#
+COPY extras/scripts/petsc_setup.sh /tmp/petsc_setup.sh
+
+RUN /tmp/petsc_setup.sh --build-petsc ${BUILD_PETSC} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/petsc_setup.sh
+
+WORKDIR /app
+ 
+#
+# Install hypre
+#
+COPY extras/scripts/hypre_setup.sh /tmp/hypre_setup.sh
+
+RUN /tmp/hypre_setup.sh --build-hypre ${BUILD_HYPRE} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/hypre_setup.sh
+
+WORKDIR /app 
+
 #
 # Install pytorch
 #

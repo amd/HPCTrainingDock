@@ -317,10 +317,13 @@ else
 	load("rocm/${ROCM_VERSION}")
 	load("$MPI_MODULE")
 	setenv("PETSC_PATH", base)
-	prepend_path("PATH","${PETSC_PATH}/bin")
-	prepend_path("PATH","${SLEPC_PATH}/bin")
+	setenv("PETSC_DIR", base)
+	setenv("SLEPC_PATH", "$SLEPC_PATH")
+	setenv("SLEPC_DIR", "$SLEPC_PATH")
+	prepend_path("PATH", "${PETSC_PATH}/bin")
+	prepend_path("PATH", "${SLEPC_PATH}/bin")
 	prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
-	prepend_path("LD_LIBRARY_PATH",pathJoin(${SLEPC_PATH}, "lib"))
+	prepend_path("LD_LIBRARY_PATH",pathJoin("${SLEPC_PATH}", "lib"))
 	prepend_path("LD_LIBRARY_PATH","/usr/lib")
 EOF
 

@@ -5,6 +5,8 @@
 : ${BUILD_PYTORCH:="1"}
 : ${BUILD_CUPY:="1"}
 : ${BUILD_JAX:="1"}
+: ${BUILD_PETSC:="1"}
+: ${BUILD_HYPRE:="1"}
 : ${BUILD_SCOREP:="1"}
 : ${BUILD_KOKKOS:="1"}
 : ${BUILD_HIPFORT:="1"}
@@ -183,6 +185,10 @@ extras/scripts/netcdf_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel 
 extras/scripts/fftw_setup.sh --rocm-version ${ROCM_VERSION} --build-fftw ${BUILD_FFTW}
 
 extras/scripts/x11vnc_setup.sh --build-x11vnc ${BUILD_X11VNC}
+
+extras/scripts/petsc_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-petsc ${BUILD_PETSC}
+ 
+extras/scripts/hypre_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-hypre ${BUILD_HYPRE} 
 
 #If ROCm should be installed in a different location
 if [ "${ROCM_INSTALLPATH}" != "/opt/" ]; then
