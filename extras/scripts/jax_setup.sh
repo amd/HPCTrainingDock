@@ -228,17 +228,29 @@ else
          ${SUDO} chmod a+w ${JAXLIB_PATH}
       fi
 
-      # build the wheel for jaxlib
-      python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
-	                     --bazel_options=--override_repository=xla=$XLA_PATH \
-			     --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
-			     --bazel_options=--action_env=CC=/usr/bin/gcc --nouse_clang \
-			     --build_gpu_plugin --gpu_plugin_rocm_version=60 --build_gpu_kernel_plugin=rocm \
-			     --bazel_options=--jobs=128 \
-			     --bazel_startup_options=--host_jvm_args=-Xmx512m
+      if [[ $ROCM_VERSION == "6.4.0" ]]; then
+         sed -i '$a build:rocm --copt=-Wno-error=c23-extensions' .bazelrc
+         module amdclang
+         # build the wheel for jaxlib using clang (which is the default)
+         python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
+                                --bazel_options=--override_repository=xla=$XLA_PATH \
+                                --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
+                                --build_gpu_plugin --gpu_plugin_rocm_version=60 --build_gpu_kernel_plugin=rocm \
+                                --bazel_options=--jobs=128 \
+                                --bazel_startup_options=--host_jvm_args=-Xmx512m
+      else
+         # build the wheel for jaxlib using gcc
+         python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
+                                --bazel_options=--override_repository=xla=$XLA_PATH \
+                                --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
+                                --bazel_options=--action_env=CC=/usr/bin/gcc --nouse_clang \
+                                --build_gpu_plugin --gpu_plugin_rocm_version=60 --build_gpu_kernel_plugin=rocm \
+                                --bazel_options=--jobs=128 \
+                                --bazel_startup_options=--host_jvm_args=-Xmx512m
+      fi
 
       # install the wheel for jaxlib
-      pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl
+      pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
 
       # next we need to install the jax python module
       pip3 install --target=${JAX_PATH} .
