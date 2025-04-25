@@ -178,7 +178,7 @@ aomp.timestamp: rocm.timestamp
 	touch aomp.timestamp
 
 flang-new.timestamp: rocm.timestamp
-	extras/scripts/flang-new_setup.sh \
+	rocm/scripts/flang-new_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-flang-new 1
 	touch flang-new.timestamp
