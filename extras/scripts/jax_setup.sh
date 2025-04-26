@@ -230,7 +230,7 @@ else
 
       if [[ $ROCM_VERSION == "6.4.0" ]]; then
          sed -i '$a build:rocm --copt=-Wno-error=c23-extensions' .bazelrc
-         module amdclang
+         module load amdclang
          # build the wheel for jaxlib using clang (which is the default)
          python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
                                 --bazel_options=--override_repository=xla=$XLA_PATH \
