@@ -4,7 +4,7 @@ ROCM_VERSION=6.0
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 BUILD_PYTORCH=0
 ZSTD_VERSION=1.5.6
-PYTORCH_VERSION=2.6.0
+PYTORCH_VERSION=2.7.0
 PYTHON_VERSION=10
 TORCHVISION_VERSION=0.21.0
 TORCHVISION_HASH="7af6987"
@@ -133,7 +133,10 @@ if [ "${BUILD_PYTORCH}" = "0" ]; then
 else
 
    PYTORCH_SHORT_VERSION=`echo ${PYTORCH_VERSION} | cut -f1-2 -d'.'`
-   if [ "${PYTORCH_SHORT_VERSION}" == "2.6" ]; then
+   if [ "${PYTORCH_SHORT_VERSION}" == "2.7" ]; then
+      AOTRITON_VERSION="0.9.2b"
+      ${SUDO} ${DEB_FRONTEND} apt-get install -y liblzma-dev
+   elif [ "${PYTORCH_SHORT_VERSION}" == "2.6" ]; then
       AOTRITON_VERSION="0.8b"
       ${SUDO} ${DEB_FRONTEND} apt-get install -y liblzma-dev
    elif [ "${PYTORCH_SHORT_VERSION}" == "2.5" ]; then
