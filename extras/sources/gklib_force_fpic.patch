@@ -1,0 +1,12 @@
+diff --git a/GKlibSystem.cmake b/GKlibSystem.cmake
+index 31a1cf1..571b9bd 100644
+--- a/GKlibSystem.cmake
++++ b/GKlibSystem.cmake
+@@ -145,6 +145,7 @@ if(MSVC)
+ endif()
+ 
+ # Finally set the official C flags.
++set(GKlib_COPTIONS "${GKlib_COPTIONS} -fPIC")
+ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${GKlib_COPTIONS} ${GKlib_COPTS}")
+ 
+ # Find GKlib sources.
