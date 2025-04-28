@@ -168,8 +168,6 @@ else
          exit 1
       fi
 
-      cd /tmp
-
       # don't use sudo if user has write access to install path
       if [ -d "$INSTALL_PATH" ]; then
          # don't use sudo if user has write access to install path
