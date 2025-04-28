@@ -229,8 +229,8 @@ else
       else
 
          # petsc install
-         git clone --branch v$PETSC_VERSION https://gitlab.com/petsc/petsc.git
-         cd petsc
+         git clone --branch v$PETSC_VERSION https://gitlab.com/petsc/petsc.git petsc_to_install
+         cd petsc_to_install
          PETSC_REPO=$PWD
          DOWNLOAD_HDF5=1
          module load hdf5
@@ -248,9 +248,11 @@ else
          ${SUDO} make PETSC_DIR=$PETSC_REPO PETSC_ARCH=arch-linux-c-opt all
          ${SUDO} make PETSC_DIR=$PETSC_REPO PETSC_ARCH=arch-linux-c-opt install
 
+         cd ../
+
          # slepc install
-         git clone --branch v$PETSC_VERSION https://gitlab.com/slepc/slepc.git
-         cd slepc
+         git clone --branch v$PETSC_VERSION https://gitlab.com/slepc/slepc.git slepc_to_install
+         cd slepc_to_install
          SLEPC_REPO=$PWD
 
          export PETSC_DIR=$PETSC_PATH
@@ -260,15 +262,20 @@ else
          ${SUDO} make SLEPC_DIR=$SLEPC_REPO PETSC_DIR=$PETSC_PATH
          ${SUDO} make SLEPC_DIR=$SLEPC_REPO PETSC_DIR=$PETSC_PATH install
 
+         cd ../
+
          # eigen install
 
-         git clone --branch nightly https://gitlab.com/libeigen/eigen.git
-         cd eigen
+         git clone --branch nightly https://gitlab.com/libeigen/eigen.git eigen_to_install
+         cd eigen_to_install
          mkdir build && cd build
 
          cmake -DCMAKE_INSTALL_PREFIX=$EIGEN_PATH -DCHOLMOD_LIBRARIES=$PETSC_PATH/lib -DCHOLMOD_INCLUDES=$PETSC_PATH/include \
                -DKLU_LIBRARIES=$PETSC_PATH/lib -DKLU_INCLUDES=$PETSC_PATH/include -DEIGEN_TEST_HIP=ON ..
          ${SUDO} make install
+
+         cd ../
+         ${SUDO} rm -rf petsc_to_install slepc_to_install eigen_to_install
 
       fi
 
