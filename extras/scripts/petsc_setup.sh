@@ -245,7 +245,7 @@ else
                      --download-suitesparse=1 --with-hip-arch=$AMDGPU_GFXMODEL --with-mpi=1 --with-mpi-dir=$MPI_PATH \
                      --prefix=$PETSC_PATH --with-hip=1 --with-hip-dir=$ROCM_PATH
 
-         ${SUDO} make PETSC_DIR=$PETSC_REPO PETSC_ARCH=arch-linux-c-opt all
+         make PETSC_DIR=$PETSC_REPO PETSC_ARCH=arch-linux-c-opt all
          ${SUDO} make PETSC_DIR=$PETSC_REPO PETSC_ARCH=arch-linux-c-opt install
 
          cd ../
@@ -259,7 +259,7 @@ else
 
          ./configure --prefix=$SLEPC_PATH
 
-         ${SUDO} make SLEPC_DIR=$SLEPC_REPO PETSC_DIR=$PETSC_PATH
+         make SLEPC_DIR=$SLEPC_REPO PETSC_DIR=$PETSC_PATH
          ${SUDO} make SLEPC_DIR=$SLEPC_REPO PETSC_DIR=$PETSC_PATH install
 
          cd ../
