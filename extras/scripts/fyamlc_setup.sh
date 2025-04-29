@@ -2,12 +2,12 @@
 
 # Variables controlling setup process
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-MODULE_PATH=/etc/lmod/modules/misc/rcm
-BUILD_RCM=1
+MODULE_PATH=/etc/lmod/modules/misc/fyamlc
+BUILD_FYAMLC=1
 ROCM_VERSION=6.4.0
-INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/rcm-v3.14
+INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/fyamlc-v0.2.6
 INSTALL_PATH_INPUT=""
-RCM_VERSION="3.14"
+FYAMLC_VERSION="0.2.6"
 SUDO="sudo"
 MPI_MODULE="openmpi"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
@@ -30,9 +30,9 @@ usage()
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --install-path [ INSTALL_PATH_INPUT ] default $INSTALL_PATH"
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
-   echo "  --rcm-version [ RCM_VERSION ] default $RCM_VERSION"
+   echo "  --fyamlc-version [ FYAMLC_VERSION ] default $FYAMLC_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
-   echo "  --build-rcm [ BUILD_RCM ] default is 0"
+   echo "  --build-fyamlc [ BUILD_FYAMLC ] default is 0"
    echo "  --help: this usage information"
    exit 1
 }
@@ -58,9 +58,9 @@ do
           AMDGPU_GFXMODEL=${1}
           reset-last
           ;;
-      "--build-rcm")
+      "--build-fyamlc")
           shift
-          BUILD_RCM=${1}
+          BUILD_FYAMLC=${1}
           reset-last
           ;;
       "--help")
@@ -81,9 +81,9 @@ do
           INSTALL_PATH_INPUT=${1}
           reset-last
           ;;
-      "--rcm-version")
+      "--fyamlc-version")
           shift
-          RCM_VERSION=${1}
+          FYAMLC_VERSION=${1}
           reset-last
           ;;
       "--rocm-version")
@@ -106,15 +106,15 @@ if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
    # override path in case ROCM_VERSION has been supplied as input
-   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/rcm
+   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/fyamlc-v${FYAMLC_VERSION}
 fi
 
 echo ""
 echo "==================================="
-echo "Starting RCM Install with"
+echo "Starting FYAMLC Install with"
 echo "ROCM_VERSION: $ROCM_VERSION"
-echo "BUILD_RCM: $BUILD_RCM"
-echo "Installing RCM in: $INSTALL_PATH"
+echo "BUILD_FYAMLC: $BUILD_FYAMLC"
+echo "Installing FYAMLC in: $INSTALL_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
 echo "Loading this module for MPI: $MPI_MODULE"
 echo "==================================="
@@ -123,31 +123,31 @@ echo ""
 AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
 CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
-if [ "${BUILD_RCM}" = "0" ]; then
+if [ "${BUILD_FYAMLC}" = "0" ]; then
 
-   echo "RCM will not be built, according to the specified value of BUILD_RCM"
-   echo "BUILD_RCM: $BUILD_RCM"
+   echo "FYAMLC will not be built, according to the specified value of BUILD_FYAMLC"
+   echo "BUILD_FYAMLC: $BUILD_FYAMLC"
    exit
 
 else
-   if [ -f ${CACHE_FILES}/rcm.tgz ]; then
+   if [ -f ${CACHE_FILES}/fyamlc-v${FYAMLC_VERSION}.tgz ]; then
       echo ""
       echo "============================"
-      echo " Installing Cached RCM"
+      echo " Installing Cached FYAMLC"
       echo "============================"
       echo ""
 
       #install the cached version
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xpzf ${CACHE_FILES}/rcm.tgz
+      tar -xpzf ${CACHE_FILES}/fyamlc-v${FYAMLC_VERSION}.tgz
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm ${CACHE_FILES}/rcm.tgz
+         ${SUDO} rm ${CACHE_FILES}/fyamlc-v${FYAMLC_VERSION}.tgz
       fi
 
    else
       echo ""
       echo "============================"
-      echo " Building RCM"
+      echo " Building FYAMLC"
       echo "============================"
       echo ""
 
@@ -157,25 +157,23 @@ else
          ${SUDO} chmod -R a+w ${INSTALL_PATH}
       fi
 
-      source /etc/profile.d/lmod.sh
-      source /etc/profile.d/z01_lmod.sh
-      module load amdclang
+      wget https://github.com/Nicholaswogan/fortran-yaml-c/archive/refs/tags/v${FYAMLC_VERSION}.tar.gz -O fyamlc-v${FYAMLC_VERSION}.tar.gz
+      tar -xzf fyamlc-v${FYAMLC_VERSION}.tar.gz
+      cd fortran-yaml-c-${FYAMLC_VERSION}
+      mkdir build && cd build
+      cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_PATH} -DBUILD_SHARED_LIBS=Yes ..
+      cmake --build .
 
-      rm -rf rcm
-      ${SUDO} rm -rf $INSTALL_PATH
-      # path does not resolve
-      git clone --depth 1 https://github.com/asimovpp/RCM-f90.git rcm-f90
-      cd rcm-f90
-      make
+      echo "Installing FYAMLC in: $INSTALL_PATH"
 
-      echo "Installing RCM in: $INSTALL_PATH"
+      ${SUDO} mkdir -p ${INSTALL_PATH}/{include,lib}
+      ${SUDO} cp -r modules ${INSTALL_PATH}
+      ${SUDO} cp src/*so ${INSTALL_PATH}/lib/
+      ${SUDO} cp _deps/libyaml-build/libyaml.so ${INSTALL_PATH}/lib
 
-      ${SUDO} mkdir -p ${INSTALL_PATH}
-      ${SUDO} cp -r lib ${INSTALL_PATH}/
-      ${SUDO} cp -r include ${INSTALL_PATH}/
-
-      cd ..
-      rm -rf rcm-f90
+      cd ../..
+      rm -rf fyaml-v${FYAMLC_VERSION}.tar.gz
+      rm -rf fortran-yaml-c-${FYAMLC_VERSION}
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
@@ -187,17 +185,17 @@ else
 
    ${SUDO} mkdir -p ${MODULE_PATH}
 
-   RCM_PATH=${INSTALL_PATH}
+   FYAMLC_PATH=${INSTALL_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/$RCM_VERSION.lua
-        whatis("RCM package")
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/$FYAMLC_VERSION.lua
+        whatis("FYAMLC package")
 
-        local base = "${RCM_PATH}"
+        local base = "${FYAMLC_PATH}"
 
-        setenv("RCM_PATH", base)
-        setenv("RCM_DIR", base)
-        prepend_path("PATH", "${RCM_PATH}/bin")
+        setenv("FYAMLC", base)
+        setenv("FYAMLC_PATH", base)
+        setenv("FYAMLC_DIR", base)
         prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
 EOF
 

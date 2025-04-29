@@ -106,12 +106,11 @@ else
         load("fyaml")
         load("hdf5")
         load("makedepf90")
-        load("makedepf90")
         load("parhip")
         load("parmetis")
         load("petsc")
         load("pyyaml_lit")
-        load("rcm")
+        load("rcmf90")
 EOF
 
 fi

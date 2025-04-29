@@ -195,9 +195,9 @@ else
 
         local base = "${PARHIP_PATH}"
 
+        setenv("PARHIP", base)
         setenv("PARHIP_PATH", base)
         setenv("PARHIP_DIR", base)
-        prepend_path("PATH", "${PARHIP_PATH}/bin")
         prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
 EOF
 

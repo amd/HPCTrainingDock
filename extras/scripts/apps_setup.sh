@@ -17,7 +17,8 @@ ${SUDO} apt-get install -y valgrind \
                         libxml2 \
                         libmpfrc++-dev libmpfr6 \
                         openssl \
-			swig
+			swig \
+			libparmetis-dev
 
 
 #                       libeigen3-dev \
@@ -25,7 +26,6 @@ ${SUDO} apt-get install -y valgrind \
 #		libhdf5-openmpi-103-1 libhdf5-dev \
 #                       libmagma-dev \
 #                       python3-matplotlib \
-#                       libparmetis4.0 \
 #                       python3-mpi4py \
 #                       python3-numpy \
 #                       python3-scipy  python3-h5sparse \

@@ -192,6 +192,7 @@ else
 
         local base = "${MAKEDEPF90_PATH}"
 
+        setenv("MAKEDEPF90", base)
         setenv("MAKEDEPF90_PATH", base)
         setenv("MAKEDEPF90_DIR", base)
         prepend_path("PATH", "${MAKEDEPF90_PATH}/bin")

@@ -322,6 +322,7 @@ else
 	load("rocm/${ROCM_VERSION}")
 	load("$MPI_MODULE")
 	setenv("PETSC_PATH", base)
+	setenv("PETSC", base)
 	setenv("PETSC_DIR", base)
 	setenv("SLEPC_PATH", "$SLEPC_PATH")
 	setenv("SLEPC_DIR", "$SLEPC_PATH")

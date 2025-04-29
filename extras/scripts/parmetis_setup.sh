@@ -182,7 +182,6 @@ else
       make config shared=1 cc=${CC} prefix=$INSTALL_PATH gklib_path=$INSTALL_PATH metis_path=$INSTALL_PATH
       ${SUDO} make install -j16
       cd ..
-      exit
 
       cd ..
       rm -rf parmetis
@@ -206,9 +205,9 @@ else
 
         local base = "${PARMETIS_PATH}"
 
+        setenv("PARMETIS", base)
         setenv("PARMETIS_PATH", base)
         setenv("PARMETIS_DIR", base)
-        prepend_path("PATH", "${PARMETIS_PATH}/bin")
         prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
 EOF
 

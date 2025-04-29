@@ -170,6 +170,8 @@ else
 
         local base = "${PYYAML_LIT_PATH}"
 
+        setenv("PYTHONUSERBASE", "${PYYAML_LIT_PATH}")
+        append_path("PATH", "${PYYAML_LIT_PATH}/bin")
         prepend_path("PYTHONPATH", "${PYYAML_LIT_PATH}")
 EOF
 

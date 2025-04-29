@@ -304,6 +304,7 @@ else
         prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
         prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
         setenv("HDF5_PATH", base)
+        setenv("HDF5_ROOT", base)
         setenv("HDF5_C_COMPILER", "${C_COMPILER}")
         setenv("HDF5_FC_COMPILER", "${FC_COMPILER}")
         setenv("HDF5_CXX_COMPILER", "${CXX_COMPILER}")

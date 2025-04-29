@@ -153,7 +153,8 @@ else
 
       source /etc/profile.d/lmod.sh
       source /etc/profile.d/z01_lmod.sh
-      module load amdflang-new
+      #module load amdflang-new
+      module load gcc
       module load $MPI_MODULE
       module load hdf5
       if [[ $MPI_PATH == "" ]]; then
@@ -199,7 +200,7 @@ else
          ${SUDO} chmod go-w ${INSTALL_PATH}
       fi
 
-      module unload amdflang-new
+      module unload gcc
       module unload $MPI_MODULE
       module unload hdf5
    fi
@@ -208,15 +209,15 @@ else
 
    ADIOS2_PATH=${INSTALL_PATH}
 
+        #load("$MPI_MODULE")
+        #load("hdf5")
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/$ADIOS2_VERSION.lua
         whatis("ADIOS2 package")
 
         local base = "${ADIOS2_PATH}"
 
-        load("$MPI_MODULE")
-        load("hdf5")
-        load("amdflang-new")
+        setenv("ADIOS2", base)
         setenv("ADIOS2_PATH", base)
         setenv("ADIOS2_DIR", base)
         prepend_path("PATH", "${ADIOS2_PATH}/bin")
