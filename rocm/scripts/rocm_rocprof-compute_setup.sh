@@ -90,7 +90,7 @@ if [[ "${result}" == "" ]]; then
    echo "ROCm built-in ${TOOL_NAME_MC} version cannot be installed on ROCm versions before 6.2.0"
    exit
 fi
-if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_NAME} ]] ; then
+if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
    echo "ROCm built-in ${TOOL_NAME_MC} already installed"
 else
    if [ "${DISTRO}" == "ubuntu" ]; then
