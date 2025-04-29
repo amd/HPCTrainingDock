@@ -274,7 +274,7 @@ else
                -DKLU_LIBRARIES=$PETSC_PATH/lib -DKLU_INCLUDES=$PETSC_PATH/include -DEIGEN_TEST_HIP=ON ..
          ${SUDO} make install
 
-         cd ../
+         cd ../..
          ${SUDO} rm -rf petsc_to_install slepc_to_install eigen_to_install
 
       fi
