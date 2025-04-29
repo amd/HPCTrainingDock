@@ -33,6 +33,7 @@ ARG BUILD_MINIFORGE3
 ARG BUILD_MINICONDA3
 ARG BUILD_HDF5
 ARG BUILD_NETCDF
+ARG BUILD_ADIOS2
 ARG BUILD_JAX
 ARG BUILD_X11VNC
 ARG BUILD_HIPFORT
@@ -158,6 +159,11 @@ RUN /tmp/hdf5_setup.sh --rocm-version ${ROCM_VERSION} --build-hdf5 ${BUILD_HDF5}
 #
 COPY extras/scripts/netcdf_setup.sh /tmp/netcdf_setup.sh
 RUN /tmp/netcdf_setup.sh --rocm-version ${ROCM_VERSION} --build-netcdf ${BUILD_NETCDF} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/netcdf_setup.sh
+
+# Install adios2
+#
+COPY extras/scripts/adios2_setup.sh /tmp/adios2_setup.sh
+RUN /tmp/adios2_setup.sh --rocm-version ${ROCM_VERSION} --build-adios2 ${BUILD_ADIOS2} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/adios2_setup.sh
 
 #
 # Moved into scripts that need these

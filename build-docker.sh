@@ -28,6 +28,7 @@
 : ${BUILD_PETSC:="0"}
 : ${BUILD_HYPRE:="0"}
 : ${BUILD_NETCDF:="0"}
+: ${BUILD_ADIOS2:="0"}
 : ${BUILD_X11VNC:="0"}
 : ${BUILD_FLANGNEW:="0"}
 : ${BUILD_OLLAMA:="1"}
@@ -122,6 +123,7 @@ usage()
     print_default_option build-miniforge3 "[BUILD_MINIFORGE3: 0 or 1]" "build version 24.9.0 of Miniforge3" "${BUILD_MINIFORGE3} (false)"
     print_default_option build-hdf5 "[BUILD_HDF5: 0 or 1]" "build version 1.14.5 of HDF5" "${BUILD_HDF5} (false)"
     print_default_option build-netcdf "[BUILD_NETCDF: 0 or 1]" "build version 4.9.3-rc1 of netcdf-c and 4.6.2-rc1 of netcdf-fortran" "${BUILD_NETCDF} (false)"
+    print_default_option build-adios2 "[BUILD_ADIOS2: 0 or 1]" "build version 2.10.1" "${BUILD_ADIOS2} (false)"
     print_default_option build-hipfort "[BUILD_HIPFORT: 0 or 1]" "build version 6.3.2 of Hipfort" "${BUILD_HIPFORT} (false)"
     print_default_option build-cupy "[BUILD_CUPY: 0 or 1]" "build version 14.0.0a1 of CuPy" "${BUILD_CUPY} (false)"
     print_default_option build-jax "[BUILD_JAX: 0 or 1]" "build version 0.5.0 of JAX" "${BUILD_JAX} (false)"
@@ -291,6 +293,10 @@ do
             BUILD_NETCDF="1"
             reset-last
             ;;
+        "--build-adios2")
+            BUILD_ADIOS2="1"
+            reset-last
+            ;;
         "--build-tau")
             BUILD_TAU="1"
             reset-last
@@ -340,6 +346,7 @@ do
             BUILD_JAX="1"
             BUILD_HDF5="1"
             BUILD_NETCDF="1"
+            BUILD_ADIOS2="1"
 	    BUILD_KOKKOS="1"
 	    BUILD_MINICONDA3="1"
 	    BUILD_MINIFORGE3="1"
@@ -410,6 +417,10 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
          "netcdf")
 	    echo "Setting netcdf build"
             BUILD_NETCDF=1
+	    ;;
+         "adios2")
+	    echo "Setting adios2 build"
+            BUILD_ADIOS2=1
 	    ;;
          "petsc")
 	    echo "Setting petsc build"
@@ -511,6 +522,7 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             BUILD_MPI4PY="1"
             BUILD_HDF5="1"
             BUILD_NETCDF="1"
+            BUILD_ADIOS2="1"
             BUILD_HPCTOOLKIT="1"
             BUILD_X11VNC="1"
             BUILD_FLANGNEW="1"
@@ -638,6 +650,7 @@ do
        --build-arg BUILD_MINIFORGE3=${BUILD_MINIFORGE3} \
        --build-arg BUILD_HDF5=${BUILD_HDF5} \
        --build-arg BUILD_NETCDF=${BUILD_NETCDF} \
+       --build-arg BUILD_ADIOS2=${BUILD_ADIOS2} \
        --build-arg BUILD_X11VNC=${BUILD_X11VNC} \
        --build-arg BUILD_FFTW=${BUILD_FFTW} \
        --build-arg BUILD_OLLAMA=${BUILD_OLLAMA} \
