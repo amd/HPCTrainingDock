@@ -471,6 +471,10 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	prepend_path("PYTHONPATH","${PYTORCH_PATH}")
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}")
 	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}")
+        cmd1="mkdir -p $HOME/miopen_tmpdir; export TMPDIR=$HOME/miopen_tmpdir"
+        cmd2="rm -rf $HOME/miopen_tmpdir; unset TMPDIR"
+        execute{cmd=cmd1, modeA={"load"}}
+        execute{cmd=cmd2, modeA={"unload"}}
 EOF
 
 #pip download --only-binary :all: --dest /opt/wheel_files_6.0/pytorch-rocm --no-cache --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/rocm6.0
