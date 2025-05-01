@@ -5,7 +5,7 @@ ROCM_VERSION=6.0
 BUILD_JAX=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/jax
 AMDGPU_GFXMODEL_INPUT=""
-JAX_VERSION=4.35
+JAX_VERSION=5.0
 JAX_PATH=/opt/rocmplus-${ROCM_VERSION}/jax
 JAX_PATH_INPUT=""
 JAXLIB_PATH=/opt/rocmplus-${ROCM_VERSION}/jaxlib
@@ -229,15 +229,36 @@ else
       fi
 
       if [[ $ROCM_VERSION == "6.4.0" ]]; then
-         sed -i '$a build:rocm --copt=-Wno-error=c23-extensions' .bazelrc
-         module load amdclang
-         # build the wheel for jaxlib using clang (which is the default)
-         python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
-                                --bazel_options=--override_repository=xla=$XLA_PATH \
-                                --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
-                                --build_gpu_plugin --gpu_plugin_rocm_version=60 --build_gpu_kernel_plugin=rocm \
-                                --bazel_options=--jobs=128 \
-                                --bazel_startup_options=--host_jvm_args=-Xmx512m
+         if [[ $JAX_VERSION == "4.35" ]]; then
+            sed -i '$a build:rocm --copt=-Wno-error=c23-extensions' .bazelrc
+            module load amdclang
+            # build the wheel for jaxlib using clang (which is the default)
+            python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
+                                   --bazel_options=--override_repository=xla=$XLA_PATH \
+                                   --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
+                                   --build_gpu_plugin --gpu_plugin_rocm_version=60 --build_gpu_kernel_plugin=rocm \
+                                   --bazel_options=--jobs=128 \
+                                   --bazel_startup_options=--host_jvm_args=-Xmx512m
+         elif [[ $JAX_VERSION == "5.0" ]]; then
+            if [[ ${SUDO} == "" ]]; then
+               echo "WARNING: need sudo to install patchelf, unless patchelf is installed already the build will likely fail"
+            fi
+            ${SUDO} apt-get update
+            ${SUDO} apt-get install patchelf
+            module load amdclang
+            python3 build/build.py build --rocm_path=$ROCM_PATH \
+                                         --bazel_options=--override_repository=xla=$XLA_PATH \
+                                         --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
+                                         --clang_path=$ROCM_PATH/llvm/bin/clang \
+                                         --rocm_version=60 \
+                                         --use_clang=true \
+                                         --bazel_options=--jobs=128 \
+                                         --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
+                                         --bazel_startup_options=--host_jvm_args=-Xmx512m
+         else
+            echo "JAX version $JAX_VERSION not compatible with ROCm 6.4.0"
+            exit 1
+         fi
       else
          # build the wheel for jaxlib using gcc
          python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
