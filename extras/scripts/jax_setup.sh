@@ -276,14 +276,32 @@ else
             compat_info
          fi
       else
-         # build the wheel for jaxlib using gcc
-         python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
-                                --bazel_options=--override_repository=xla=$XLA_PATH \
-                                --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
-                                --bazel_options=--action_env=CC=/usr/bin/gcc --nouse_clang \
-                                --build_gpu_plugin --gpu_plugin_rocm_version=60 --build_gpu_kernel_plugin=rocm \
-                                --bazel_options=--jobs=128 \
-                                --bazel_startup_options=--host_jvm_args=-Xmx512m
+         if [[ $JAX_VERSION == "5.0" ]]; then
+           if [[ ${SUDO} == "" ]]; then
+              echo "WARNING: need sudo to install patchelf, unless patchelf is installed already the build will likely fail"
+           fi
+           ${SUDO} apt-get update
+           ${SUDO} apt-get install patchelf
+           module load amdclang
+           python3 build/build.py build --rocm_path=$ROCM_PATH \
+                                        --bazel_options=--override_repository=xla=$XLA_PATH \
+                                        --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
+                                        --clang_path=$ROCM_PATH/llvm/bin/clang \
+                                        --rocm_version=60 \
+                                        --use_clang=true \
+                                        --bazel_options=--jobs=128 \
+                                        --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
+                                        --bazel_startup_options=--host_jvm_args=-Xmx512m
+         else
+            # build the wheel for jaxlib using gcc
+            python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
+                                   --bazel_options=--override_repository=xla=$XLA_PATH \
+                                   --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
+                                   --bazel_options=--action_env=CC=/usr/bin/gcc --nouse_clang \
+                                   --build_gpu_plugin --gpu_plugin_rocm_version=60 --build_gpu_kernel_plugin=rocm \
+                                   --bazel_options=--jobs=128 \
+                                   --bazel_startup_options=--host_jvm_args=-Xmx512m
+         fi
       fi
 
       # install the wheel for jaxlib
