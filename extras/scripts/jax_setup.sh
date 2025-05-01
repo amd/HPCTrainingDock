@@ -37,6 +37,20 @@ usage()
    echo "--help: print this usage information"
 }
 
+compat_info()
+{
+   echo " List of compatible versions according to https://github.com/ROCm/jax/releases: "
+   echo " JAX version 5.0 --> ROCm versions 6.0.3, 6.2.4 and 6.3.1 "
+   echo " JAX version 4.35 --> ROCm versions 6.0.3, 6.1.3 and 6.2.4 "
+   echo " JAX version 4.34 --> ROCm versions 6.0.3, 6.1.3 and 6.2.3 "
+   echo " JAX version 4.33 --> ROCm versions 6.0.3, 6.1.3 and 6.2.3 "
+   echo " JAX version 4.31 --> ROCm versions 6.0.3, 6.1.3 and 6.2.3 "
+   echo " JAX version 4.30 --> ROCm versions 6.1.1, 6.0.2 "
+   echo " ... see https://github.com/ROCm/jax/releases for full list ... "
+   echo " NOTE: ROCm versions not listed in the compatibility matrix might still work! "
+   echo " For instance, ROCm 6.4.0 can be selected in this script with JAX version 5.0 and 4.35 "
+}
+
 send-error()
 {
     usage
@@ -80,6 +94,7 @@ do
           ;;
       "--help")
           usage
+          compat_info
           ;;
       "--module-path")
           shift
@@ -256,7 +271,8 @@ else
                                          --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
                                          --bazel_startup_options=--host_jvm_args=-Xmx512m
          else
-            echo "JAX version $JAX_VERSION not compatible with ROCm 6.4.0"
+            echo " JAX version $JAX_VERSION not compatible with ROCm 6.4.0 "
+            compat_info
             exit 1
          fi
       else
