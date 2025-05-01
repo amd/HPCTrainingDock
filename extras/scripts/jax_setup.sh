@@ -49,6 +49,7 @@ compat_info()
    echo " ... see https://github.com/ROCm/jax/releases for full list ... "
    echo " NOTE: ROCm versions not listed in the compatibility matrix might still work! "
    echo " For instance, ROCm 6.4.0 can be selected in this script with JAX version 5.0 and 4.35 "
+   exit 1
 }
 
 send-error()
@@ -273,7 +274,6 @@ else
          else
             echo " JAX version $JAX_VERSION not compatible with ROCm 6.4.0 "
             compat_info
-            exit 1
          fi
       else
          # build the wheel for jaxlib using gcc
