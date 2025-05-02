@@ -1,7 +1,7 @@
 # -----------------------------------------------------------------------
 # NOTE:
 # Dependencies are not included as part of Omniperf.
-# It's the user's responsibility to accept any licensing implications 
+# It's the user's responsibility to accept any licensing implications
 # before building the project
 # -----------------------------------------------------------------------
 
@@ -26,6 +26,7 @@ ARG BUILD_OG_LATEST
 ARG BUILD_CLACC_LATEST
 ARG BUILD_PYTORCH
 ARG BUILD_CUPY
+ARG BUILD_TENSORFLOW
 ARG BUILD_PETSC
 ARG BUILD_HYPRE
 ARG BUILD_KOKKOS
@@ -54,12 +55,12 @@ LABEL org.label-schema.version=$BUILD_VERSION
 # LABEL org.label-schema.docker.cmd="docker run -v ... "
 
 ARG OG_BUILD_DATE
- 
+
 ENV DEBIAN_FRONTEND noninteractive
 ENV TZ "US/Chicago"
 
 #
-# install a few extra things for the extras classes 
+# install a few extra things for the extras classes
 # for og13 -- libgmp-dev libmpfr-dev
 #
 RUN apt-get update && \
@@ -69,7 +70,7 @@ RUN apt-get update && \
     apt-get install -qy libgmp-dev libmpfr-dev liblzma-dev libbabeltrace-dev
 
 #
-# some  networking tools, including the OpenSSH server 
+# some  networking tools, including the OpenSSH server
 #
 COPY extras/scripts/sshd_setup.sh /tmp/sshd_setup.sh
 RUN  /tmp/sshd_setup.sh && rm /tmp/sshd_setup.sh
@@ -117,7 +118,7 @@ RUN /tmp/amd_gcc_setup.sh --build-gcc-latest ${BUILD_GCC_LATEST} --rocm-version 
 # install aomp
 COPY extras/scripts/aomp_setup.sh /tmp/aomp_setup.sh
 RUN /tmp/aomp_setup.sh --build-aomp-latest ${BUILD_AOMP_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}  |& tee /app/aomp_build.out && rm /tmp/aomp_setup.sh
- 
+
 # install hipfort
 COPY extras/scripts/hipfort_setup.sh /tmp/hipfort_setup.sh
 RUN /tmp/hipfort_setup.sh --build-hipfort ${BUILD_HIPFORT} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/hipfort_setup.sh
@@ -126,7 +127,7 @@ RUN /tmp/hipfort_setup.sh --build-hipfort ${BUILD_HIPFORT} --rocm-version ${ROCM
 COPY extras/scripts/hipifly_setup.sh /tmp/hipifly_setup.sh
 COPY extras/sources/hipifly/hipifly.h /tmp/hipifly.h
 RUN /tmp/hipifly_setup.sh --hipifly-module ${HIPIFLY_MODULE} --rocm-version ${ROCM_VERSION} --hipifly-header-path /tmp/ && rm /tmp/hipifly*
- 
+
 # install fftw
 COPY extras/scripts/fftw_setup.sh /tmp/fftw_setup.sh
 RUN /tmp/fftw_setup.sh --build-fftw ${BUILD_FFTW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/fftw_setup.sh
@@ -134,14 +135,14 @@ RUN /tmp/fftw_setup.sh --build-fftw ${BUILD_FFTW} --rocm-version ${ROCM_VERSION}
 # install latest llvm
 COPY extras/scripts/llvm-build.sh /tmp/llvm-build.sh
 RUN /tmp/llvm-build.sh --build-llvm-latest ${BUILD_LLVM_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/llvm-build.sh
- 
+
 # Grab any cache files of compiler builds
 
 # Build the clacc_clang compiler
 COPY extras/scripts/clacc_setup.sh /tmp/clacc_setup.sh
 RUN /tmp/clacc_setup.sh --build-clacc-latest ${BUILD_CLACC_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/clacc_setup.sh
 
-WORKDIR /tmp 
+WORKDIR /tmp
 
 #
 # Install kokkos
@@ -167,7 +168,7 @@ RUN /tmp/adios2_setup.sh --rocm-version ${ROCM_VERSION} --build-adios2 ${BUILD_A
 
 #
 # Moved into scripts that need these
-# Install any additional apps or libs that are needed 
+# Install any additional apps or libs that are needed
 #
 #COPY extras/scripts/apps_setup_basic.sh /tmp/apps_setup_basic.sh
 #
@@ -175,22 +176,30 @@ RUN /tmp/adios2_setup.sh --rocm-version ${ROCM_VERSION} --build-adios2 ${BUILD_A
 #     /tmp/apps_setup_basic.sh; rm /tmp/apps_setup_basic.sh
 
 #
-# Install cupy 
+# Install cupy
 #
 COPY extras/scripts/cupy_setup.sh /tmp/cupy_setup.sh
 
 RUN /tmp/cupy_setup.sh --build-cupy ${BUILD_CUPY} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/cupy_setup.sh
 
-WORKDIR /app 
+WORKDIR /app
+
+# Install tensorflow
+#
+COPY extras/scripts/tensorflow_setup.sh /tmp/tensorflow_setup.sh
+
+RUN /tmp/tensorflow_setup.sh --build-tensorflow ${BUILD_TENSORFLOW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/tensorflow_setup.sh
+
+WORKDIR /app
 
 #
-# Install jax 
+# Install jax
 #
 COPY extras/scripts/jax_setup.sh /tmp/jax_setup.sh
 
 RUN /tmp/jax_setup.sh --build-jax ${BUILD_JAX} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/jax_setup.sh
 
-WORKDIR /app 
+WORKDIR /app
 
 #
 # Install petsc
@@ -200,7 +209,7 @@ COPY extras/scripts/petsc_setup.sh /tmp/petsc_setup.sh
 RUN /tmp/petsc_setup.sh --build-petsc ${BUILD_PETSC} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/petsc_setup.sh
 
 WORKDIR /app
- 
+
 #
 # Install hypre
 #
@@ -208,7 +217,7 @@ COPY extras/scripts/hypre_setup.sh /tmp/hypre_setup.sh
 
 RUN /tmp/hypre_setup.sh --build-hypre ${BUILD_HYPRE} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/hypre_setup.sh
 
-WORKDIR /app 
+WORKDIR /app
 
 #
 # Install pytorch
@@ -229,7 +238,7 @@ COPY extras/scripts/ollama_setup.sh /tmp/ollama_setup.sh
 
 RUN /tmp/ollama_setup.sh --build-ollama ${BUILD_OLLAMA} && rm /tmp/ollama_setup.sh
 
-WORKDIR /app 
+WORKDIR /app
 
 #
 # Install VNC
@@ -245,7 +254,7 @@ RUN  chmod u+x /tmp/x11vnc_setup.sh && \
      /tmp/x11vnc_setup.sh --build-x11vnc ${BUILD_X11VNC} ; rm /tmp/x11vnc_setup.sh
 
 #
-# Install any additional apps or libs that are needed 
+# Install any additional apps or libs that are needed
 #
 COPY extras/scripts/apps_setup.sh /tmp/apps_setup.sh
 
@@ -263,13 +272,13 @@ COPY extras/sources/skel/setTmpDir.sh  /users/default/setTmpDir.sh
 RUN  chmod a+x /users/default/.bashrc && chmod a+x /users/default/setTmpDir.sh
 
 # TODO:
-# For Plexus, we need to put a home directory for the user on 
+# For Plexus, we need to put a home directory for the user on
 # /datasets/teams/hackathon-testing
 #
 # and then fix up .bashrc to cd to the new home directory
 
 #
-# add some default userids 
+# add some default userids
 #
 # add a user with sudo auth
 RUN useradd --create-home --skel /users/default --shell /bin/bash --home /users/${ADMIN_USERNAME} --password ${ADMIN_PASSWORD} --uid 11000 ${ADMIN_USERNAME}
@@ -279,13 +288,13 @@ RUN usermod -a -G audio,video,render,renderalt ${ADMIN_USERNAME} \
     && usermod -a -G sudo  ${ADMIN_USERNAME}
 
 
-# add some users 
+# add some users
 #COPY ./scripts/add_users.sh /tmp/add_users.sh
 #RUN  chmod u+x /tmp/add_users.sh  \
 #     && /tmp/add_users.sh  \
-#     && rm -f /tmp/add_users.sh 
+#     && rm -f /tmp/add_users.sh
 
-# add the management script (use by the ${ADMIN_USERNAME}) 
+# add the management script (use by the ${ADMIN_USERNAME})
 COPY extras/manage /users/${ADMIN_USERNAME}/
 #RUN ls -lsa /users/${ADMIN_USERNAME}/
 RUN chown -R ${ADMIN_USERNAME} /users/${ADMIN_USERNAME}/bin && chmod -R a-rwx /users/${ADMIN_USERNAME}/bin && \

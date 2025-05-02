@@ -15,6 +15,7 @@
 : ${BUILD_CLACC_LATEST:="0"}
 : ${BUILD_PYTORCH:="0"}
 : ${BUILD_CUPY:="0"}
+: ${BUILD_TENSORFLOW:="0"}
 : ${BUILD_JAX:="0"}
 : ${BUILD_KOKKOS:="0"}
 : ${BUILD_TAU:="0"}
@@ -126,6 +127,7 @@ usage()
     print_default_option build-adios2 "[BUILD_ADIOS2: 0 or 1]" "build version 2.10.1" "${BUILD_ADIOS2} (false)"
     print_default_option build-hipfort "[BUILD_HIPFORT: 0 or 1]" "build version 6.3.2 of Hipfort" "${BUILD_HIPFORT} (false)"
     print_default_option build-cupy "[BUILD_CUPY: 0 or 1]" "build version 14.0.0a1 of CuPy" "${BUILD_CUPY} (false)"
+    print_default_option build-tensorflow "[BUILD_TENSORFLOW: 0 or 1]" "build branch merge-250318 of TensorFlow" "${BUILD_TENSORFLOW} (false)"
     print_default_option build-jax "[BUILD_JAX: 0 or 1]" "build version 0.5.0 of JAX" "${BUILD_JAX} (false)"
     print_default_option build-kokkos "[BUILD_KOKKOS: 0 or 1]"  "build version 4.5.01 of Kokkos" "${BUILD_KOKKOS} (false)"
     print_default_option build-hpctoolkit "[BUILD_HPCTOOLKIT: 0 or 1]"  "build the 2024.11.27dev version of HPCToolkit" "${BUILD_HPCTOOLKIT} (false)"
@@ -269,6 +271,10 @@ do
             BUILD_CUPY="1"
             reset-last
             ;;
+        "--build-tensorflow")
+            BUILD_TENSORFLOW="1"
+            reset-last
+            ;;
         "--build-jax")
             BUILD_JAX="1"
             reset-last
@@ -341,6 +347,7 @@ do
             #BUILD_CLACC_LATEST="1"
             BUILD_PYTORCH="1"
             BUILD_CUPY="1"
+            BUILD_TENSORFLOW="1"
             BUILD_PETSC="1"
             BUILD_HYPRE="1"
             BUILD_JAX="1"
@@ -468,6 +475,10 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
 	    echo "Setting CUPY build"
             BUILD_CUPY=1
 	    ;;
+         "tensorflow")
+	    echo "Setting TENSORFLOW build"
+            BUILD_TENSORFLOW=1
+	    ;;
          "jax")
 	    echo "Setting JAX build"
             BUILD_JAX=1
@@ -510,6 +521,7 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             #BUILD_CLACC_LATEST="1"
             BUILD_PYTORCH="1"
             BUILD_CUPY="1"
+            BUILD_TENSORFLOW="1"
             BUILD_PETSC="1"
             BUILD_HYPRE="1"
             BUILD_JAX="1"
@@ -642,6 +654,7 @@ do
        --build-arg BUILD_CLACC_LATEST=${BUILD_CLACC_LATEST} \
        --build-arg BUILD_PYTORCH=${BUILD_PYTORCH} \
        --build-arg BUILD_CUPY=${BUILD_CUPY} \
+       --build-arg BUILD_TENSORFLOW=${BUILD_TENSORFLOW} \
        --build-arg BUILD_JAX=${BUILD_JAX} \
        --build-arg BUILD_PETSC=${BUILD_PETSC} \
        --build-arg BUILD_HYPRE=${BUILD_HYPRE} \

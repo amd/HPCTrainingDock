@@ -244,7 +244,9 @@ else
          ${SUDO} chmod a+w ${JAXLIB_PATH}
       fi
 
-      if [[ $ROCM_VERSION == "6.4.0" ]]; then
+      result=`echo ${ROCM_VERSION} | awk '$1>6.3.9'` && echo $result
+      # check if ROCm version is greater than or equal to 6.4.0
+      if [[ "${result}" ]]; then
          if [[ $JAX_VERSION == "4.35" ]]; then
             sed -i '$a build:rocm --copt=-Wno-error=c23-extensions' .bazelrc
             module load amdclang

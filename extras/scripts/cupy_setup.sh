@@ -24,7 +24,7 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
-   echo "  --build-cupy"
+   echo "  --build-cupy [ BUILD_CUPY ] default $BUILD_CUPY "
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --install-path [ CUPY_PATH ] default $CUPY_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
@@ -108,11 +108,10 @@ module load rocm/${ROCM_VERSION}
 
 echo ""
 echo "==================================="
-echo "Starting Cupy Install with"
+echo "Starting CuPy Install with"
 echo "ROCM_VERSION: $ROCM_VERSION"
 echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL"
 echo "BUILD_CUPY: $BUILD_CUPY"
-echo "CUPY_VERSION: $CUPY_VERSION"
 echo "CUPY_PATH: $CUPY_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
 echo "Building from source off of this commit: $GIT_COMMIT"
