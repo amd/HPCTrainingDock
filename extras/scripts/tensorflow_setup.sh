@@ -206,8 +206,8 @@ else
       export WHEEL_PATH_DIR=$PWD
       cd ..
 
-      CLANG_COMPILER=`which clang`
-      sed -i 's/\/usr\/lib\/llvm-18\/bin\/clang/"'$CLANG_COMPILER'"/' .bazelrc
+      export CLANG_COMPILER=`which clang`
+      sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
 
       result=`echo ${ROCM_VERSION} | awk '$1>6.3.9'` && echo $result
       if [[ "${result}" ]]; then
