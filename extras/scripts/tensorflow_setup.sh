@@ -203,7 +203,7 @@ else
 
       ${SUDO} mkdir wheel_path_dir
       cd wheel_path_dir
-      export WHEEL_PATH_DIR=$PWD
+      export WHEEL_DIR_PATH=$PWD
       cd ..
 
       export CLANG_COMPILER=`which clang`
