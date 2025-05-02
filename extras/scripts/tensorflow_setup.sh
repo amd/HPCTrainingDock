@@ -201,7 +201,7 @@ else
 
       cd tensorflow-upstream
 
-      mkdir wheel_path_dir
+      ${SUDO} mkdir wheel_path_dir
       cd wheel_path_dir
       export WHEEL_PATH_DIR=$PWD
       cd ..
@@ -221,8 +221,7 @@ else
       # build and install tensorflow
       bazel build --config=opt --config=rocm --repo_env=WHEEL_NAME=tensorflow_rocm \
 	          --action_env=project_name=tensorflow_rocm/ //tensorflow/tools/pip_package:wheel \
-		  --verbose_failures --repo_env=CC=$CLANG_COMPILER --repo_env=BAZEL_COMPILER=$CLANG_COMPILER \
-		  --repo_env=OUTPUT_PATH=$WHEEL_DIR_PATH --repo_env=CLANG_COMPILER_PATH=$CLANG_COMPILER
+		  --verbose_failures --repo_env=OUTPUT_PATH=$WHEEL_DIR_PATH
 
       pip3 install -v --target=$TF_PATH --upgrade $WHEEL_DIR_PATH/tensorflow*.whl
 
