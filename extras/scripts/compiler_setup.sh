@@ -44,8 +44,7 @@ do
          --install /usr/bin/gcc      gcc      /usr/bin/gcc-$GCC_VERSION      $val \
          --slave   /usr/bin/g++      g++      /usr/bin/g++-$GCC_VERSION           \
          --slave   /usr/bin/gfortran gfortran /usr/bin/gfortran-$GCC_VERSION      \
-         --slave   /usr/bin/gcov     gcov     /usr/bin/gcov-$GCC_VERSION          \
-         --slave   /usr/lib/libstdc++.so libstdc++.so /usr/lib/gcc/x86_64-linux-gnu/$GCC_VERSION/libstdc++.so
+         --slave   /usr/bin/gcov     gcov     /usr/bin/gcov-$GCC_VERSION
    ${SUDO} ${DEB_FRONTEND} apt-get -qy install gcc-$GCC_VERSION-offload-amdgcn
    val=$((val - 5))
 # The - option suppresses tabs
@@ -146,8 +145,6 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/.version
 	#%Module
 	set ModulesVersion "${CLANG_BASE_VERSION}"
 EOF
-
-# Need to install libstdc++ for aomp install and some occasional software
 
 ${SUDO} chmod u+s /usr/bin/update-alternatives
 

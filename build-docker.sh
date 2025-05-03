@@ -539,7 +539,6 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             BUILD_X11VNC="1"
             BUILD_FLANGNEW="1"
             BUILD_HIPFORT="1"
-            BUILD_X11VNC=1
 	    INSTALL_ROCPROF_SYS_FROM_SOURCE="1"
             INSTALL_ROCPROF_COMPUTE_FROM_SOURCE="1"
 	    ;;

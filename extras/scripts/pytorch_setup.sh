@@ -387,6 +387,8 @@ else
       fi
 
       pip3 install -r requirements.txt
+      #pip3 install -r requirements.txt --target=$INSTALL_PATH
+      #PYTHONPATH="PYTHONPATH:$INSTALL_PATH"
       python3 tools/amd_build/build_amd.py >& /dev/null
 
       echo ""
@@ -471,11 +473,11 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	prepend_path("PYTHONPATH","${PYTORCH_PATH}")
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}")
 	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}")
-        cmd1="mkdir -p $HOME/miopen_tmpdir; export TMPDIR=$HOME/miopen_tmpdir"
-        cmd2="rm -rf $HOME/miopen_tmpdir; unset TMPDIR"
-        execute{cmd=cmd1, modeA={"load"}}
-        execute{cmd=cmd2, modeA={"unload"}}
 EOF
+#        cmd1="mkdir -p $$HOME/miopen_tmpdir; export TMPDIR=$$HOME/miopen_tmpdir"
+#        cmd2="rm -rf $$HOME/miopen_tmpdir; unset TMPDIR"
+#        execute{cmd=cmd1, modeA={"load"}}
+#        execute{cmd=cmd2, modeA={"unload"}}
 
 #pip download --only-binary :all: --dest /opt/wheel_files_6.0/pytorch-rocm --no-cache --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/rocm6.0
 #cat > /opt/wheel_files_6.0/README_pytorch <<-EOF

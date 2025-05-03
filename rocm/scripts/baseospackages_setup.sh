@@ -92,5 +92,17 @@ fi
 #   CMAKE_VERSION=`cmake --version`
 #   echo "Installed latest version of cmake ($CMAKE_VERSION)"
 #else
-   ${SUDO} python3 -m pip install 'cmake==3.28.3'
+#   CMAKE_VERSION=`cmake --version | head -1`
+#   echo "CMAKE_VERSION ${CMAKE_VERSION}"
+#   CMAKE_VERSION_OK=`echo $CMAKE_VERSION | awk '$1>3.28.3'` && echo $CMAKE_VERSION_OK
+#   echo "CMAKE_VERSION_OK: ${CMAKE_VERSION_OK}"
+#   if [[ "${CMAKE_VERSION_OK}" = "" ]]; then
+#   else
+    if [ "${DISTRO}" = "ubuntu" ]; then
+       result=`echo $DISTRO_VERSION | awk '$1<24.00'` && echo $result
+       if [[ "${result}" ]]; then
+          echo "Installing cmake 3.28.3"
+          ${SUDO} python3 -m pip install 'cmake==3.28.3'
+       fi
+    fi
 #fi

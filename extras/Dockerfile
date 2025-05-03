@@ -60,16 +60,6 @@ ENV DEBIAN_FRONTEND noninteractive
 ENV TZ "US/Chicago"
 
 #
-# install a few extra things for the extras classes
-# for og13 -- libgmp-dev libmpfr-dev
-#
-RUN apt-get update && \
-    apt-get install -y  hwloc numactl libnuma-dev  libpci-dev \
-    lshw emacs htop pandoc ffmpeg cgdb && \
-    apt-get install -y --no-install-recommends gedit dos2unix && \
-    apt-get install -qy libgmp-dev libmpfr-dev liblzma-dev libbabeltrace-dev
-
-#
 # some  networking tools, including the OpenSSH server
 #
 COPY extras/scripts/sshd_setup.sh /tmp/sshd_setup.sh
@@ -167,6 +157,7 @@ COPY extras/scripts/adios2_setup.sh /tmp/adios2_setup.sh
 RUN /tmp/adios2_setup.sh --rocm-version ${ROCM_VERSION} --build-adios2 ${BUILD_ADIOS2} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/adios2_setup.sh
 
 #
+<<<<<<< HEAD
 # Moved into scripts that need these
 # Install any additional apps or libs that are needed
 #
@@ -177,6 +168,9 @@ RUN /tmp/adios2_setup.sh --rocm-version ${ROCM_VERSION} --build-adios2 ${BUILD_A
 
 #
 # Install cupy
+=======
+# Install cupy 
+>>>>>>> 416b20b (Partial changes for Ubuntu 24.04)
 #
 COPY extras/scripts/cupy_setup.sh /tmp/cupy_setup.sh
 
