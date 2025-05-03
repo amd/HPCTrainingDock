@@ -3,13 +3,12 @@
 # Variables controlling setup process
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 MODULE_PATH=/etc/lmod/modules/misc/rcmf90
-BUILD_RCM=1
+BUILD_RCMF90=1
 ROCM_VERSION=6.4.0
-INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/rcmf90-v3.14
+RCMF90_VERSION="3.14"
+INSTALL_PATH=/opt/rcmf90-v${RCMF90_VERSION}
 INSTALL_PATH_INPUT=""
-RCM_VERSION="3.14"
 SUDO="sudo"
-MPI_MODULE="openmpi"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -25,14 +24,12 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
-   echo "  WARNING: when selecting the module to supply to --mpi-module, make sure it sets the MPI_PATH environment variable"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --install-path [ INSTALL_PATH_INPUT ] default $INSTALL_PATH"
-   echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
-   echo "  --rcm-version [ RCM_VERSION ] default $RCM_VERSION"
+   echo "  --rcmf90-version [ RCMF90_VERSION ] default $RCMF90_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
-   echo "  --build-rcm [ BUILD_RCM ] default is 0"
+   echo "  --build-rcmf90 [ BUILD_RCMF90 ] default is 0"
    echo "  --help: this usage information"
    exit 1
 }
@@ -58,9 +55,9 @@ do
           AMDGPU_GFXMODEL=${1}
           reset-last
           ;;
-      "--build-rcm")
+      "--build-rcmf90")
           shift
-          BUILD_RCM=${1}
+          BUILD_RCMF90=${1}
           reset-last
           ;;
       "--help")
@@ -71,19 +68,14 @@ do
           MODULE_PATH=${1}
           reset-last
           ;;
-      "--mpi-module")
-          shift
-          MPI_MODULE=${1}
-          reset-last
-          ;;
       "--install-path")
           shift
           INSTALL_PATH_INPUT=${1}
           reset-last
           ;;
-      "--rcm-version")
+      "--rcmf90-version")
           shift
-          RCM_VERSION=${1}
+          RCMF90_VERSION=${1}
           reset-last
           ;;
       "--rocm-version")
@@ -105,49 +97,49 @@ done
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
-   # override path in case ROCM_VERSION has been supplied as input
-   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/rcmf90-v3.14
+   # override path in case RCMF90_VERSION has been supplied as input
+   INSTALL_PATH=/opt/rcmf90-v${RCMF90_VERSION}
 fi
 
 echo ""
 echo "==================================="
-echo "Starting RCM Install with"
+echo "Starting RCMF90 Install with"
 echo "ROCM_VERSION: $ROCM_VERSION"
-echo "BUILD_RCM: $BUILD_RCM"
-echo "Installing RCM in: $INSTALL_PATH"
+echo "BUILD_RCMF90: $BUILD_RCMF90"
+echo "RCMF90_VERSION: $RCMF90_VERSION"
+echo "Installing RCMF90 in: $INSTALL_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
-echo "Loading this module for MPI: $MPI_MODULE"
 echo "==================================="
 echo ""
 
 AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
 CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
-if [ "${BUILD_RCM}" = "0" ]; then
+if [ "${BUILD_RCMF90}" = "0" ]; then
 
-   echo "RCM will not be built, according to the specified value of BUILD_RCM"
-   echo "BUILD_RCM: $BUILD_RCM"
+   echo "RCMF90 will not be built, according to the specified value of BUILD_RCMF90"
+   echo "BUILD_RCMF90: $BUILD_RCMF90"
    exit
 
 else
    if [ -f ${CACHE_FILES}/rcm.tgz ]; then
       echo ""
       echo "============================"
-      echo " Installing Cached RCM"
+      echo " Installing Cached RCMF90"
       echo "============================"
       echo ""
 
       #install the cached version
-      cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xpzf ${CACHE_FILES}/rcm.tgz
+      cd /opt
+      tar -xpzf ${CACHE_FILES}/rcmf90.tgz
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm ${CACHE_FILES}/rcm.tgz
+         ${SUDO} rm ${CACHE_FILES}/rcmf90.tgz
       fi
 
    else
       echo ""
       echo "============================"
-      echo " Building RCM"
+      echo " Building RCMF90"
       echo "============================"
       echo ""
 
@@ -168,7 +160,7 @@ else
       cd rcm-f90
       make
 
-      echo "Installing RCM in: $INSTALL_PATH"
+      echo "Installing RCMF90 in: $INSTALL_PATH"
 
       ${SUDO} mkdir -p ${INSTALL_PATH}
       ${SUDO} cp -r lib ${INSTALL_PATH}/
@@ -185,15 +177,27 @@ else
       fi
    fi
 
+   # Create a module file for fftw
+   if [ -d "$MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to module path"
+      fi
+   else
+      # if module path dir does not exist yet, the check on write access will fail
+      SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
+   fi
+
    ${SUDO} mkdir -p ${MODULE_PATH}
 
-   RCM_PATH=${INSTALL_PATH}
-
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/$RCM_VERSION.lua
-        whatis("RCM package")
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/$RCMF90_VERSION.lua
+        whatis("RCMF90 package")
 
-        local base = "${RCM_PATH}"
+        local base = "${INSTALL_PATH}"
 
         setenv("RCMF90", base)
         setenv("RCMF90_PATH", base)

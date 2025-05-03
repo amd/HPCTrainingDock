@@ -8,7 +8,7 @@ ROCM_VERSION=6.0
 BUILD_MINICONDA3=0
 MINICONDA3_VERSION="24.9.2"
 MODULE_PATH=/etc/lmod/modules/Linux/miniconda3/
-MINICONDA3_PATH=/opt/rocmplus-${ROCM_VERSION}/miniconda3
+MINICONDA3_PATH=/opt/miniconda3
 MINICONDA3_PATH_INPUT=""
 
 
@@ -87,9 +87,6 @@ done
 
 if [ "${MINICONDA3_PATH_INPUT}" != "" ]; then
    MINICONDA3_PATH=${MINICONDA3_PATH_INPUT}
-else
-   # override path in case ROCM_VERSION has been supplied as input
-   MINICONDA3_PATH=/opt/rocmplus-${ROCM_VERSION}/miniconda3
 fi
 
 echo ""

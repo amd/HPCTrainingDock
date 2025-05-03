@@ -7,7 +7,7 @@ PYTHON_VERSION="10"
 ROCM_VERSION=6.0
 BUILD_MINIFORGE3=0
 MODULE_PATH=/etc/lmod/modules/Linux/miniforge3/
-MINIFORGE3_PATH=/opt/rocmplus-${ROCM_VERSION}/miniforge3
+MINIFORGE3_PATH=/opt/miniforge3
 MINIFORGE3_PATH_INPUT=""
 
 
@@ -85,9 +85,6 @@ done
 
 if [ "${MINIFORGE3_PATH_INPUT}" != "" ]; then
    MINIFORGE3_PATH=${MINIFORGE3_PATH_INPUT}
-else
-   # override path in case ROCM_VERSION has been supplied as input
-   MINIFORGE3_PATH=/opt/rocmplus-${ROCM_VERSION}/miniforge3
 fi
 
 echo ""

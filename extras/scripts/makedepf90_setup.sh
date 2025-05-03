@@ -5,11 +5,10 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 MODULE_PATH=/etc/lmod/modules/misc/makedepf90
 BUILD_MAKEDEPF90=1
 ROCM_VERSION=6.4.0
-INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/makedepf90-v2.10.1
-INSTALL_PATH_INPUT=""
 MAKEDEPF90_VERSION="2.10.1"
+INSTALL_PATH=/opt/makedepf90-v${MAKEDEPF90_VERSION}
+INSTALL_PATH_INPUT=""
 SUDO="sudo"
-MPI_MODULE="openmpi"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -25,11 +24,9 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
-   echo "  WARNING: when selecting the module to supply to --mpi-module, make sure it sets the MPI_PATH environment variable"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --install-path [ INSTALL_PATH_INPUT ] default $INSTALL_PATH"
-   echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
    echo "  --makedepf90-version [ MAKEDEPF90_VERSION ] default $MAKEDEPF90_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
    echo "  --build-makedepf90 [ BUILD_MAKEDEPF90 ] default is 0"
@@ -71,11 +68,6 @@ do
           MODULE_PATH=${1}
           reset-last
           ;;
-      "--mpi-module")
-          shift
-          MPI_MODULE=${1}
-          reset-last
-          ;;
       "--install-path")
           shift
           INSTALL_PATH_INPUT=${1}
@@ -105,8 +97,8 @@ done
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
-   # override path in case ROCM_VERSION has been supplied as input
-   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/makedepf90
+   # override path in case MAKEDEPF90_VERSION has been supplied as input
+   INSTALL_PATH=/opt/makedepf90-v${MAKEDEPF90_VERSION}
 fi
 
 echo ""
@@ -116,7 +108,6 @@ echo "ROCM_VERSION: $ROCM_VERSION"
 echo "BUILD_MAKEDEPF90: $BUILD_MAKEDEPF90"
 echo "Installing MAKEDEPF90 in: $INSTALL_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
-echo "Loading this module for MPI: $MPI_MODULE"
 echo "==================================="
 echo ""
 
@@ -138,7 +129,7 @@ else
       echo ""
 
       #install the cached version
-      cd /opt/rocmplus-${ROCM_VERSION}
+      cd /opt
       tar -xpzf ${CACHE_FILES}/makedepf90.tgz
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm ${CACHE_FILES}/makedepf90.tgz
@@ -182,20 +173,32 @@ else
       fi
    fi
 
-   ${SUDO} mkdir -p ${MODULE_PATH}
+   # Create a module file for fftw
+   if [ -d "$MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to module path"
+      fi
+   else
+      # if module path dir does not exist yet, the check on write access will fail
+      SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
+   fi
 
-   MAKEDEPF90_PATH=${INSTALL_PATH}
+   ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/$MAKEDEPF90_VERSION.lua
         whatis("MAKEDEPF90 package")
 
-        local base = "${MAKEDEPF90_PATH}"
+        local base = "${INSTALL_PATH}"
 
         setenv("MAKEDEPF90", base)
         setenv("MAKEDEPF90_PATH", base)
         setenv("MAKEDEPF90_DIR", base)
-        prepend_path("PATH", "${MAKEDEPF90_PATH}/bin")
+        prepend_path("PATH", "${INSTALL_PATH}/bin")
         prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
 EOF
 

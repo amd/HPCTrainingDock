@@ -5,10 +5,10 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 MODULE_PATH=/etc/lmod/modules/misc/pyyaml_lit
 BUILD_PYYAML_LIT=1
 ROCM_VERSION=6.4.0
-INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pyyaml_lit-v3.14
+PYYAML_LIT_VERSION="3.14"
+INSTALL_PATH=/opt/pyyaml_lit-v${PYYAML_LIT_VERSION}
 INSTALL_PATH_INPUT=""
 SUDO="sudo"
-MPI_MODULE="openmpi"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -24,11 +24,10 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
-   echo "  WARNING: when selecting the module to supply to --mpi-module, make sure it sets the MPI_PATH environment variable"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --install-path [ INSTALL_PATH_INPUT ] default $INSTALL_PATH"
-   echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
+   echo "  --pyyaml-lit-version [ PYYAML_LIT_VERSION ] default $PYYAML_LIT_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
    echo "  --build-pyyaml_lit [ BUILD_PYYAML_LIT ] default is 0"
    echo "  --help: this usage information"
@@ -79,6 +78,11 @@ do
           INSTALL_PATH_INPUT=${1}
           reset-last
           ;;
+      "--pyyaml-lit-version")
+          shift
+          PYYAML_LIT_VERSION=${1}
+          reset-last
+          ;;
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
@@ -98,8 +102,8 @@ done
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
-   # override path in case ROCM_VERSION has been supplied as input
-   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pyyaml_lit
+   # override path in case PYYAML_LIT_VERSION has been supplied as input
+   INSTALL_PATH=/opt/pyyaml_lit-v${PYYAML_LIT_VERSION}
 fi
 
 echo ""
@@ -109,7 +113,7 @@ echo "ROCM_VERSION: $ROCM_VERSION"
 echo "BUILD_PYYAML_LIT: $BUILD_PYYAML_LIT"
 echo "Installing PYYAML_LIT in: $INSTALL_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
-echo "Loading this module for MPI: $MPI_MODULE"
+echo "PYYAML_LIT_VERSION: $PYYAML_LIT_VERSION"
 echo "==================================="
 echo ""
 
@@ -131,7 +135,7 @@ else
       echo ""
 
       #install the cached version
-      cd /opt/rocmplus-${ROCM_VERSION}
+      cd /opt
       tar -xpzf ${CACHE_FILES}/pyyaml_lit.tgz
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm ${CACHE_FILES}/pyyaml_lit.tgz
@@ -160,19 +164,29 @@ else
       fi
    fi
 
+   # Create a module file for fftw
+   if [ -d "$MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to module path"
+      fi
+   else
+      # if module path dir does not exist yet, the check on write access will fail
+      SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
+   fi
+
    ${SUDO} mkdir -p ${MODULE_PATH}
 
-   PYYAML_LIT_PATH=${INSTALL_PATH}
-
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/dev.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYYAML_LIT_VERSION}.lua
         whatis("PYYAML_LIT package")
 
-        local base = "${PYYAML_LIT_PATH}"
-
-        setenv("PYTHONUSERBASE", "${PYYAML_LIT_PATH}")
-        append_path("PATH", "${PYYAML_LIT_PATH}/bin")
-        prepend_path("PYTHONPATH", "${PYYAML_LIT_PATH}")
+        setenv("PYTHONUSERBASE", "${INSTALL_PATH}")
+        append_path("PATH", "${INSTALL_PATH}/bin")
+        prepend_path("PYTHONPATH", "${INSTALL_PATH}")
 EOF
 
 fi

@@ -14,7 +14,7 @@ FC_COMPILER_INPUT=""
 NETCDF_C_VERSION="4.9.3-rc1"
 NETCDF_FC_VERSION="4.6.2-rc1"
 HDF5_MODULE="hdf5"
-NETCDF_PATH=/opt/rocmplus-${ROCM_VERSION}/netcdf
+NETCDF_PATH=/opt/netcdf
 NETCDF_PATH_INPUT=""
 ENABLE_PNETCDF="OFF"
 
@@ -146,9 +146,6 @@ done
 
 if [ "${NETCDF_PATH_INPUT}" != "" ]; then
    NETCDF_PATH=${NETCDF_PATH_INPUT}
-else
-   # override path in case ROCM_VERSION has been supplied as input
-   NETCDF_PATH=/opt/rocmplus-${ROCM_VERSION}/netcdf
 fi
 
 if [ "${BUILD_NETCDF}" = "0" ]; then
@@ -188,9 +185,9 @@ else
       echo ""
 
       #install the cached version
-      cd /opt/rocmplus-${ROCM_VERSION}
+      cd /opt
       tar -xzf ${CACHE_FILES}/netcdf.tgz
-      chown -R root:root ${NETCDF_PATH}
+      chown -R root:root /opt/netcdf 
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm -f ${CACHE_FILES}/netcdf.tgz
       fi

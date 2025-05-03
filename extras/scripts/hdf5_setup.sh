@@ -13,7 +13,7 @@ FC_COMPILER_INPUT=""
 ENABLE_PARALLEL_INPUT=""
 HDF5_VERSION=1.14.5
 MPI_MODULE="openmpi"
-HDF5_PATH=/opt/rocmplus-${ROCM_VERSION}/hdf5
+HDF5_PATH=/opt/hdf5
 HDF5_PATH_INPUT=""
 
 SUDO="sudo"
@@ -131,9 +131,6 @@ done
 
 if [ "${HDF5_PATH_INPUT}" != "" ]; then
    HDF5_PATH=${HDF5_PATH_INPUT}
-else
-   # override path in case ROCM_VERSION has been supplied as input
-   HDF5_PATH=/opt/rocmplus-${ROCM_VERSION}/hdf5
 fi
 
 if [ "${BUILD_HDF5}" = "0" ]; then
@@ -165,9 +162,9 @@ else
       echo ""
 
       #install the cached version
-      cd /opt/rocmplus-${ROCM_VERSION}
+      cd /opt
       tar -xzf  ${CACHE_FILES}/hdf5.tgz
-      chown -R root:root /opt/rocmplus-${ROCM_VERSION}/hdf5
+      chown -R root:root /opt/hdf5
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm -f ${CACHE_FILES}/hdf5.tgz
       fi

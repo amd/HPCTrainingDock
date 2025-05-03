@@ -13,7 +13,7 @@ FC_COMPILER_INPUT=""
 ENABLE_MPI_INPUT=""
 FFTW_VERSION=3.3.10
 MPI_MODULE="openmpi"
-FFTW_PATH=/opt/rocmplus-${ROCM_VERSION}/fftw
+FFTW_PATH=/opt/fftw-v$FFTW_VERSION
 FFTW_PATH_INPUT=""
 
 SUDO="sudo"
@@ -132,8 +132,8 @@ done
 if [ "${FFTW_PATH_INPUT}" != "" ]; then
    FFTW_PATH=${FFTW_PATH_INPUT}
 else
-   # override path in case ROCM_VERSION has been supplied as input
-   FFTW_PATH=/opt/rocmplus-${ROCM_VERSION}/fftw
+   # override path in case FFTW_VERSION has been supplied as input
+   INSTALL_PATH=/opt/fftw-v${FFTW_VERSION}   
 fi
 
 
@@ -167,9 +167,9 @@ else
       echo ""
 
       #install the cached version
-      cd /opt/rocmplus-${ROCM_VERSION}
+      cd /opt
       tar -xzf  ${CACHE_FILES}/fftw.tgz
-      chown -R root:root /opt/rocmplus-${ROCM_VERSION}/fftw
+      chown -R root:root /opt/fftw
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm  ${CACHE_FILES}/fftw.tgz
       fi

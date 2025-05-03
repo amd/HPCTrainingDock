@@ -5,11 +5,10 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 MODULE_PATH=/etc/lmod/modules/misc/parhip
 BUILD_PARHIP=1
 ROCM_VERSION=6.4.0
-INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/parhip-v3.14
-INSTALL_PATH_INPUT=""
 PARHIP_VERSION="3.14"
+INSTALL_PATH=/opt/parhip-v${PARHIP_VERSION}
+INSTALL_PATH_INPUT=""
 SUDO="sudo"
-MPI_MODULE="openmpi"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -25,11 +24,9 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
-   echo "  WARNING: when selecting the module to supply to --mpi-module, make sure it sets the MPI_PATH environment variable"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --install-path [ INSTALL_PATH_INPUT ] default $INSTALL_PATH"
-   echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
    echo "  --parhip-version [ PARHIP_VERSION ] default $PARHIP_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
    echo "  --build-parhip [ BUILD_PARHIP ] default is 0"
@@ -71,11 +68,6 @@ do
           MODULE_PATH=${1}
           reset-last
           ;;
-      "--mpi-module")
-          shift
-          MPI_MODULE=${1}
-          reset-last
-          ;;
       "--install-path")
           shift
           INSTALL_PATH_INPUT=${1}
@@ -105,8 +97,8 @@ done
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
-   # override path in case ROCM_VERSION has been supplied as input
-   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/parhip
+   # override path in case PARHIP_VERSION has been supplied as input
+   INSTALL_PATH=/opt/parhip-v${PARHIP_VERSION}   
 fi
 
 echo ""
@@ -116,7 +108,6 @@ echo "ROCM_VERSION: $ROCM_VERSION"
 echo "BUILD_PARHIP: $BUILD_PARHIP"
 echo "Installing PARHIP in: $INSTALL_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
-echo "Loading this module for MPI: $MPI_MODULE"
 echo "==================================="
 echo ""
 
@@ -138,7 +129,7 @@ else
       echo ""
 
       #install the cached version
-      cd /opt/rocmplus-${ROCM_VERSION}
+      cd /opt
       tar -xpzf ${CACHE_FILES}/parhip.tgz
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm ${CACHE_FILES}/parhip.tgz
@@ -185,15 +176,27 @@ else
       fi
    fi
 
-   ${SUDO} mkdir -p ${MODULE_PATH}
+   # Create a module file for fftw
+   if [ -d "$MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to module path"
+      fi
+   else
+      # if module path dir does not exist yet, the check on write access will fail
+      SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
+   fi
 
-   PARHIP_PATH=${INSTALL_PATH}
+   ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/$PARHIP_VERSION.lua
         whatis("PARHIP package")
 
-        local base = "${PARHIP_PATH}"
+        local base = "${INSTALL_PATH}"
 
         setenv("PARHIP", base)
         setenv("PARHIP_PATH", base)

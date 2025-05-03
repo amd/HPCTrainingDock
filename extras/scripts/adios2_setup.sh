@@ -5,11 +5,12 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 MODULE_PATH=/etc/lmod/modules/misc/adios2
 BUILD_ADIOS2=1
 ROCM_VERSION=6.4.0
-INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/adios2-v2.10.1
-INSTALL_PATH_INPUT=""
 ADIOS2_VERSION="2.10.1"
+INSTALL_PATH=/opt/adios2-v$ADIOS2_VERSION
+INSTALL_PATH_INPUT=""
 SUDO="sudo"
 MPI_MODULE="openmpi"
+HDF5_MODULE="hdf5"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -25,11 +26,11 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
-   echo "  WARNING: when selecting the module to supply to --mpi-module, make sure it sets the MPI_PATH environment variable"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --install-path [ INSTALL_PATH_INPUT ] default $INSTALL_PATH"
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
+   echo "  --hdf5-module [ HDF5_MODULE ] default $HDF5_MODULE"
    echo "  --adios2-version [ ADIOS2_VERSION ] default $ADIOS2_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
    echo "  --build-adios2 [ BUILD_ADIOS2 ] default is 0"
@@ -76,6 +77,11 @@ do
           MPI_MODULE=${1}
           reset-last
           ;;
+      "--hdf5-module")
+          shift
+          HDF5_MODULE=${1}
+          reset-last
+          ;;
       "--install-path")
           shift
           INSTALL_PATH_INPUT=${1}
@@ -105,8 +111,8 @@ done
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
-   # override path in case ROCM_VERSION has been supplied as input
-   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/adios2
+   # override path in case ADIOS2_VERSION has been supplied as input
+   INSTALL_PATH=/opt/adiosv2-v${ADIOS2_VERSION}   
 fi
 
 echo ""
@@ -138,7 +144,7 @@ else
       echo ""
 
       #install the cached version
-      cd /opt/rocmplus-${ROCM_VERSION}
+      cd /opt
       tar -xpzf ${CACHE_FILES}/adios2.tgz
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm ${CACHE_FILES}/adios2.tgz
@@ -156,11 +162,7 @@ else
       #module load amdflang-new
       module load gcc
       module load $MPI_MODULE
-      module load hdf5
-      if [[ $MPI_PATH == "" ]]; then
-         echo "MPI module $MPI_MODULE is not setting the MPI_PATH env variable, aborting..."
-         exit 1
-      fi
+      module load $HDF5_MODULE
 
       ${SUDO} mkdir -p ${INSTALL_PATH}
 
@@ -168,7 +170,6 @@ else
          ${SUDO} chmod -R a+w ${INSTALL_PATH}
       fi
 
-      ${SUDO} rm -rf $INSTALL_PATH
       git clone --depth 1 --branch v$ADIOS2_VERSION https://github.com/ornladios/ADIOS2.git adios2
       cd adios2
       mkdir build && cd build
@@ -202,12 +203,23 @@ else
 
       module unload gcc
       module unload $MPI_MODULE
-      module unload hdf5
+      module unload $HDF5_MODULE
+   fi
+
+   if [ -d "$MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to module path"
+      fi
+   else
+      # if module path dir does not exist yet, the check on write access will fail
+      SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
 
    ${SUDO} mkdir -p ${MODULE_PATH}
-
-   ADIOS2_PATH=${INSTALL_PATH}
 
         #load("$MPI_MODULE")
         #load("hdf5")
@@ -215,7 +227,7 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/$ADIOS2_VERSION.lua
         whatis("ADIOS2 package")
 
-        local base = "${ADIOS2_PATH}"
+        local base = "${INSTALL_PATH}"
 
         setenv("ADIOS2", base)
         setenv("ADIOS2_PATH", base)
