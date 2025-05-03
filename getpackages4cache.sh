@@ -91,7 +91,7 @@ ssh-copy-id ${IDENTITY_FILE} -p ${PORT_NUMBER} -o UpdateHostKeys=yes ${ADMIN_USE
 PACKAGE_LIST=`ssh -p ${PORT_NUMBER} ${IDENTITY_FILE} ${ADMIN_USER}@localhost -t "ls /opt/rocmplus-${ROCM_VERSION}"`
 # Remove trailing line break
 PACKAGE_LIST=`echo ${PACKAGE_LIST} | tr -d '\r'`
-echo "local package.list"
+echo "local rocmplus package.list"
 echo ":${PACKAGE_LIST}:"
 
 app=rocm-${ROCM_VERSION}
@@ -117,3 +117,26 @@ do
       fi
    fi
 done
+
+PACKAGE_LIST=`ssh -p ${PORT_NUMBER} ${IDENTITY_FILE} ${ADMIN_USER}@localhost -t "ls /opt"`
+# Remove trailing line break
+PACKAGE_LIST=`echo ${PACKAGE_LIST} | tr -d '\r'`
+echo "local linux package.list"
+echo ":${PACKAGE_LIST}:"
+
+for app in ${PACKAGE_LIST}
+do
+   if [[ "$app" == *rocm* ]]; then
+      continue
+   fi
+   if [ ! -f "HPCTrainingDock/CacheFiles/${DISTRO}-${DISTRO_VERSION}/${app}.tgz" ]; then
+      PACKAGE_SIZE=`ssh -p ${PORT_NUMBER} ${IDENTITY_FILE} ${ADMIN_USER}@localhost -t "du -sk /opt/${app} | cut -f1 | tr -d $'\n'" `
+      echo "Package size for ${app} is ${PACKAGE_SIZE}"
+      if [ "${PACKAGE_SIZE}" -gt "100" ]; then
+         echo "Retrieving ${app}"
+         ssh -p ${PORT_NUMBER} ${IDENTITY_FILE} ${ADMIN_USER}@localhost -t "cd /opt && tar -czf /users/${ADMIN_USER}/${app}.tgz ${app}"
+         rsync -avz -e "ssh -p ${PORT_NUMBER} ${IDENTITY_FILE}" ${ADMIN_USER}@localhost:${app}.tgz HPCTrainingDock/CacheFiles/${DISTRO}-${DISTRO_VERSION}/${app}.tgz
+      fi
+   fi
+done
+

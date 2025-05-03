@@ -159,8 +159,6 @@ tools/scripts/tau_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AM
 
 extras/scripts/compiler_setup.sh
 
-extras/scripts/apps_setup_basic.sh
-
 extras/scripts/cupy_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-cupy ${BUILD_CUPY}
 
 extras/scripts/tensorflow_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-tensorflow ${BUILD_TENSORFLOW}
