@@ -1,11 +1,9 @@
 #/bin/bash
 
 # Variables controlling setup process
-MODULE_PATH=/etc/lmod/modules/misc/boost
-BUILD_BOOST=1
-BOOST_VERSION=1_82_0
-INSTALL_PATH=/opt/boost-${BOOST_VERSION}
-INSTALL_PATH_INPUT=""
+MODULE_PATH=/etc/lmod/modules/Linux/scotch
+BUILD_SCOTCH=1
+INSTALL_PATH=/opt/scotch
 SUDO="sudo"
 SUDO=""
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
@@ -25,9 +23,9 @@ usage()
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  WARNING: when selecting the module to supply to --mpi-module, make sure it sets the MPI_PATH environment variable"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
-   echo "  --install-path [ INSTALL_PATH_INPUT ] default $INSTALL_PATH"
-   echo "  --boost-version [ BOOST_VERSION ] default $BOOST_VERSION"
-   echo "  --build-boost [ BUILD_BOOST ] default is 0"
+   echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --install-path [ INSTALL_PATH ] default $INSTALL_PATH"
+   echo "  --build-scotch [ BUILD_SCOTCH ] default is 0"
    echo "  --help: this usage information"
    exit 1
 }
@@ -48,9 +46,9 @@ n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
-      "--build-boost")
+      "--build-scotch")
           shift
-          BUILD_BOOST=${1}
+          BUILD_SCOTCH=${1}
           reset-last
           ;;
       "--help")
@@ -63,12 +61,7 @@ do
           ;;
       "--install-path")
           shift
-          INSTALL_PATH_INPUT=${1}
-          reset-last
-          ;;
-      "--boost-version")
-          shift
-          BOOST_VERSION=${1}
+          INSTALL_PATH=${1}
           reset-last
           ;;
       "--*")
@@ -82,49 +75,42 @@ do
    shift
 done
 
-if [ "${INSTALL_PATH_INPUT}" != "" ]; then
-   INSTALL_PATH=${INSTALL_PATH_INPUT}
-else
-   # override path in case BOOST_VERSION has been supplied as input
-   INSTALL_PATH=/opt/boost-${BOOST_VERSION}
-fi
-
 echo ""
 echo "==================================="
-echo "Starting BOOST Install with"
-echo "BUILD_BOOST: $BUILD_BOOST"
-echo "Installing BOOST in: $INSTALL_PATH"
+echo "Starting SCOTCH Install with"
+echo "BUILD_SCOTCH: $BUILD_SCOTCH"
+echo "Installing SCOTCH in: $INSTALL_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
 echo "==================================="
 echo ""
 
 CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}
 
-if [ "${BUILD_BOOST}" = "0" ]; then
+if [ "${BUILD_SCOTCH}" = "0" ]; then
 
-   echo "BOOST will not be built, according to the specified value of BUILD_BOOST"
-   echo "BUILD_BOOST: $BUILD_BOOST"
+   echo "SCOTCH will not be built, according to the specified value of BUILD_SCOTCH"
+   echo "BUILD_SCOTCH: $BUILD_SCOTCH"
    exit
 
 else
-   if [ -f ${CACHE_FILES}/boost-${BOOST_VERSION}.tgz ]; then
+   if [ -f ${CACHE_FILES}/scotch.tgz ]; then
       echo ""
       echo "============================"
-      echo " Installing Cached BOOST"
+      echo " Installing Cached SCOTCH"
       echo "============================"
       echo ""
 
       #install the cached version
       cd /opt
-      tar -xpzf ${CACHE_FILES}/boost-${BOOST_VERSION}.tgz
+      tar -xpzf ${CACHE_FILES}/scotch.tgz
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm ${CACHE_FILES}/boost-${BOOST_VERSION}.tgz
+         ${SUDO} rm ${CACHE_FILES}/scotch.tgz
       fi
 
    else
       echo ""
       echo "============================"
-      echo " Building BOOST"
+      echo " Building SCOTCH"
       echo "============================"
       echo ""
 
@@ -134,20 +120,23 @@ else
          ${SUDO} chmod -R a+w ${INSTALL_PATH}
       fi
 
-      rm -rf boost_source
-      mkdir boost_source && cd boost_source
-      rm -rf boost_${BOOST_VERSION}.tar.gz boost_${BOOST_VERSION}
-      wget -q https://archives.boost.io/release/1.82.0/source/boost_${BOOST_VERSION}.tar.gz
-      tar -xzf boost_${BOOST_VERSION}.tar.gz
-      cd boost_${BOOST_VERSION}
-      ./bootstrap.sh --prefix=$INSTALL_PATH --with-libraries=all
+      rm -rf scotch_source
+      mkdir scotch_source && cd scotch_source
+      rm -rf scotch
+      git clone git@gitlab.inria.fr:scotch/scotch.git
+      cd scotch
+      mkdir build && cd build
+      cmake --prefix=${INSTALL_PATH} ..
 
-      echo "Installing BOOST ${BOOST_VERSION} in: $INSTALL_PATH"
-      ./b2 install --prefix=$INSTALL_PATH
+      make -j 8
+
+      echo "Installing SCOTCH in: $INSTALL_PATH"
+
+      make install
+
       cd ..
 
-      cd ..
-      rm -rf boost_${BOOST_VERSION}.tar.gz boost_${BOOST_VERSION}
+      rm -rf scotch
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
@@ -159,17 +148,17 @@ else
 
    ${SUDO} mkdir -p ${MODULE_PATH}
 
-   BOOST_PATH=${INSTALL_PATH}
+   SCOTCH_PATH=${INSTALL_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/$BOOST_VERSION.lua
-        whatis("BOOST ${BOOST_VERSION} package")
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/dev.lua
+        whatis("SCOTCH package")
 
-        local base = "${BOOST_PATH}"
+        local base = "${SCOTCH_PATH}"
 
-        setenv("BOOST_ROOT", base)
-        setenv("BOOST_LIBDIR", pathJoin(base, "lib"))
-        setenv("BOOST_INCLUDE", pathJoin(base, "include"))
+        setenv("SCOTCH_ROOT", base)
+        setenv("SCOTCH_LIBDIR", pathJoin(base, "lib"))
+        setenv("SCOTCH_INCLUDE", pathJoin(base, "include"))
 EOF
 
 fi
