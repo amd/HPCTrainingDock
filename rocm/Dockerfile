@@ -43,6 +43,9 @@ RUN  /tmp/lmod_setup.sh && \
 ADD CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING} \
    /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
+ADD CacheFiles/${DISTRO}-${DISTRO_VERSION} \
+   /CacheFiles/${DISTRO}-${DISTRO_VERSION}
+
 COPY rocm/scripts/rocm_setup.sh /tmp/rocm_setup.sh
 
 RUN  /tmp/rocm_setup.sh --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --rocm-version ${ROCM_VERSION} && \
