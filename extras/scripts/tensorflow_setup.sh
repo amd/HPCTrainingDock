@@ -249,9 +249,8 @@ else
 
    ${SUDO} mkdir -p ${MODULE_PATH}
 
-   TF_VERSION=`cat "$TF_PATH/tensorflow/_version.py"  | cut -f3 -d' ' |  tr -d "'"`
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${TF_VERSION}.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GIT_BRANCH}.lua
 	whatis("Tensorflow with ROCm support")
 
 	load("rocm/${ROCM_VERSION}")
