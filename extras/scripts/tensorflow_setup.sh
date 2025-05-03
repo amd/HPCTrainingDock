@@ -201,11 +201,6 @@ else
 
       cd tensorflow-upstream
 
-      ${SUDO} mkdir wheel_path_dir
-      cd wheel_path_dir
-      export WHEEL_DIR_PATH=$PWD
-      cd ..
-
       export CLANG_COMPILER=`which clang`
       sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
 
@@ -220,10 +215,9 @@ else
 
       # build and install tensorflow
       bazel build --config=opt --config=rocm --repo_env=WHEEL_NAME=tensorflow_rocm \
-	          --action_env=project_name=tensorflow_rocm/ //tensorflow/tools/pip_package:wheel \
-		  --verbose_failures --repo_env=OUTPUT_PATH=$WHEEL_DIR_PATH
+	          --action_env=project_name=tensorflow_rocm/ //tensorflow/tools/pip_package:wheel --verbose_failures
 
-      pip3 install -v --target=$TF_PATH --upgrade $WHEEL_DIR_PATH/tensorflow*.whl
+      pip3 install -v --target=$TF_PATH --upgrade bazel-bin/tensorflow/tools/pip_package/wheel_house/tensorflow*.whl
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find $TF_PATH -type f -execdir chown root:root "{}" +
