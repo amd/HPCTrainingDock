@@ -157,20 +157,7 @@ COPY extras/scripts/adios2_setup.sh /tmp/adios2_setup.sh
 RUN /tmp/adios2_setup.sh --rocm-version ${ROCM_VERSION} --build-adios2 ${BUILD_ADIOS2} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/adios2_setup.sh
 
 #
-<<<<<<< HEAD
-# Moved into scripts that need these
-# Install any additional apps or libs that are needed
-#
-#COPY extras/scripts/apps_setup_basic.sh /tmp/apps_setup_basic.sh
-#
-#RUN  chmod u+x /tmp/apps_setup_basic.sh && \
-#     /tmp/apps_setup_basic.sh; rm /tmp/apps_setup_basic.sh
-
-#
-# Install cupy
-=======
 # Install cupy 
->>>>>>> 416b20b (Partial changes for Ubuntu 24.04)
 #
 COPY extras/scripts/cupy_setup.sh /tmp/cupy_setup.sh
 
