@@ -248,7 +248,7 @@ pytorch.timestamp: rocm.timestamp
 	   --build-pytorch 1
 	touch pytorch.timestamp
 
-petsc.timestamp: rocm.timestamp openmpi.timestamp
+petsc.timestamp: rocm.timestamp openmpi.timestamp hdf5.timestamp
 	extras/scripts/petsc_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
