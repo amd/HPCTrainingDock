@@ -1,7 +1,7 @@
 #/bin/bash
 
 # Variables controlling setup process
-MODULE_PATH=/etc/lmod/modules/Linux/scotch
+MODULE_PATH=/etc/lmod/modules/LinuxPlus/scotch
 BUILD_SCOTCH=1
 INSTALL_PATH=/opt/scotch
 SUDO="sudo"

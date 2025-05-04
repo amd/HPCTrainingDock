@@ -19,7 +19,7 @@ echo ""
 if [ "${DISTRO}" = "ubuntu" ]; then
    ${SUDO} apt-get -qq update
    ${SUDO} ${DEB_FRONTEND} apt-get -qqy install lmod
-   #${SUDO}  sed -i -e '1,$s!/etc/lmod/modules!/etc/lmod/modules/Linux\n/etc/lmod/modules/ROCm\n/etc/lmod/modules/ROCmPlus\n/etc/lmod/modules/ROCmPlus-MPI\n/etc/lmod/modules/ROCmPlus-AMDResearchTools\n/etc/lmod/modules/ROCmPlus-LatestCompilers\n/etc/lmod/modules/ROCmPlus-AI\n/etc/lmod/modules/misc!' /etc/lmod/modulespath
+   #${SUDO}  sed -i -e '1,$s!/etc/lmod/modules!/etc/lmod/modules/Linux\n/etc/lmod/modules/LinuxPlus\n/etc/lmod/modules/ROCm\n/etc/lmod/modules/ROCmPlus\n/etc/lmod/modules/ROCmPlus-MPI\n/etc/lmod/modules/ROCmPlus-AMDResearchTools\n/etc/lmod/modules/ROCmPlus-LatestCompilers\n/etc/lmod/modules/ROCmPlus-AI\n/etc/lmod/modules/misc!' /etc/lmod/modulespath
    #cat /etc/lmod/modulespath
 fi
 echo "DISTRO is ${DISTRO}"
@@ -71,7 +71,7 @@ else
   echo "File /etc/profile.d/z01_lmod.sh does not exist"
   echo "Creating /etc/profile.d/z01_lmod.sh file"
   #default is /etc/lmod/modules:/usr/share/lmod/lmod/modulefiles/
-  echo "MODULEPATH=/etc/lmod/modules/Linux:/etc/lmod/modules/ROCm:/etc/lmod/modules/ROCmPlus:/etc/lmod/modules/ROCmPlus-MPI:/etc/lmod/modules/ROCmPlus-AMDResearchTools:/etc/lmod/modules/ROCmPlus-LatestCompilers:/etc/lmod/modules/ROCmPlus-AI:/etc/lmod/modules/misc" > /etc/profile.d/z01_lmod.sh
+  echo "MODULEPATH=/etc/lmod/modules/Linux:/etc/lmod/modules/LinuxPlus:/etc/lmod/modules/ROCm:/etc/lmod/modules/ROCmPlus:/etc/lmod/modules/ROCmPlus-MPI:/etc/lmod/modules/ROCmPlus-AMDResearchTools:/etc/lmod/modules/ROCmPlus-LatestCompilers:/etc/lmod/modules/ROCmPlus-AI:/etc/lmod/modules/misc" > /etc/profile.d/z01_lmod.sh
 fi
 
 if test -L /etc/profile.d/z00_lmod.csh; then
@@ -92,5 +92,5 @@ if test -f /etc/profile.d/z01_StdEnv.csh; then
 else
   echo "File /etc/profile.d/z01_lmod.csh does not exist"
   echo "Creating /etc/profile.d/z01_lmod.csh file"
-  echo "MODULEPATH=/etc/lmod/modules/Linux:/etc/lmod/modules/ROCm:/etc/lmod/modules/ROCmPlus:/etc/lmod/modules/ROCmPlus-MPI:/etc/lmod/modules/ROCmPlus-AMDResearchTools:/etc/lmod/modules/ROCmPlus-LatestCompilers:/etc/lmod/modules/ROCmPlus-AI:/etc/lmod/modules/misc" > /etc/profile.d/z01_lmod.csh
+  echo "MODULEPATH=/etc/lmod/modules/Linux:/etc/lmod/modules/LinuxPlus:/etc/lmod/modules/ROCm:/etc/lmod/modules/ROCmPlus:/etc/lmod/modules/ROCmPlus-MPI:/etc/lmod/modules/ROCmPlus-AMDResearchTools:/etc/lmod/modules/ROCmPlus-LatestCompilers:/etc/lmod/modules/ROCmPlus-AI:/etc/lmod/modules/misc" > /etc/profile.d/z01_lmod.csh
 fi

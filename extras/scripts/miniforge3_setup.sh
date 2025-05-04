@@ -6,7 +6,7 @@ SUDO="sudo"
 PYTHON_VERSION="10"
 ROCM_VERSION=6.0
 BUILD_MINIFORGE3=0
-MODULE_PATH=/etc/lmod/modules/Linux/miniforge3/
+MODULE_PATH=/etc/lmod/modules/LinuxPlus/miniforge3/
 MINIFORGE3_PATH=/opt/miniforge3
 MINIFORGE3_PATH_INPUT=""
 

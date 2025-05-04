@@ -7,7 +7,7 @@ PYTHON_VERSION="10"
 ROCM_VERSION=6.0
 BUILD_MINICONDA3=0
 MINICONDA3_VERSION="24.9.2"
-MODULE_PATH=/etc/lmod/modules/Linux/miniconda3/
+MODULE_PATH=/etc/lmod/modules/LinuxPlus/miniconda3/
 MINICONDA3_PATH=/opt/miniconda3
 MINICONDA3_PATH_INPUT=""
 
