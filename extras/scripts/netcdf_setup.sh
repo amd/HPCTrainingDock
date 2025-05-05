@@ -1,8 +1,8 @@
 #/bin/bash
 
 # Variables controlling setup process
-NETCDF_C_MODULE_PATH=/etc/lmod/modules/misc/netcdf-c
-NETCDF_FC_MODULE_PATH=/etc/lmod/modules/misc/netcdf-fortran
+NETCDF_C_MODULE_PATH=/etc/lmod/modules/LinuxPlus/netcdf-c
+NETCDF_FC_MODULE_PATH=/etc/lmod/modules/LinuxPlus/netcdf-fortran
 BUILD_NETCDF=0
 ROCM_VERSION=6.0
 C_COMPILER=gcc
@@ -236,8 +236,8 @@ else
       fi
 
       ${SUDO} mkdir -p ${NETCDF_PATH}
-      ${SUDO} mkdir -p ${NETCDF_PATH}/netcdf-c
-      ${SUDO} mkdir -p ${NETCDF_PATH}/netcdf-fortran
+      ${SUDO} mkdir -p ${NETCDF_PATH}/netcdf-c-v${NETCDF_C_VERSION}
+      ${SUDO} mkdir -p ${NETCDF_PATH}/netcdf-fortran-v${NETCDF_FC_VERSION}
       ${SUDO} mkdir -p ${NETCDF_PATH}/pnetcdf
 
       if [[ "${USER}" != "root" ]]; then

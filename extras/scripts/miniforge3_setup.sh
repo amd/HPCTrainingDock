@@ -85,6 +85,9 @@ done
 
 if [ "${MINIFORGE3_PATH_INPUT}" != "" ]; then
    MINIFORGE3_PATH=${MINIFORGE3_PATH_INPUT}
+else
+   # override path in case MINIFORGE3_VERSION has been supplied as input
+   MINIFORGE3_PATH=/opt/miniforge3-v${MINIFORGE3_VERSION}
 fi
 
 echo ""

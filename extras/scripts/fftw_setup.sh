@@ -1,7 +1,7 @@
 #/bin/bash
 
 # Variables controlling setup process
-MODULE_PATH=/etc/lmod/modules/misc/fftw
+MODULE_PATH=/etc/lmod/modules/LinuxPlus/fftw
 BUILD_FFTW=0
 ROCM_VERSION=6.0
 C_COMPILER=`which gcc`
