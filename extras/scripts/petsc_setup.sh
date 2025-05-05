@@ -169,6 +169,11 @@ else
       source /etc/profile.d/lmod.sh
       source /etc/profile.d/z01_lmod.sh
       module load rocm/${ROCM_VERSION}
+      if [[ "USE_AMDFLANG" == 1 ]]; then
+         # this module will set the openmpi wrappers to use the compilers from the ROCm AFAR release
+         # the AFAR releases can be found at: https://repo.radeon.com/rocm/misc/flang/
+         module load amdflang-new
+      fi
       module load $MPI_MODULE
       if [[ $MPI_PATH == "" ]]; then
          echo "MPI module $MPI_MODULE is not setting the MPI_PATH env variable, aborting..."
@@ -244,11 +249,6 @@ else
          if [[ "HDF5_PATH" != "" ]]; then
             DOWNLOAD_HDF5=0
          fi
-         if [[ "USE_AMDFLANG" == 1 ]]; then
-            # this module will set the openmpi wrappers to use the compilers from the ROCm AFAR release
-            # the AFAR releases can be found at: https://repo.radeon.com/rocm/misc/flang/
-            module load amdflang-new
-         fi
 
          ./configure --with-debugging=0 --with-x=0 COPTFLAGS="-O3 -march=native -mtune=native" \
                      CXXOPTFLAGS="-O3 -march=native -mtune=native" FOPTFLAGS="-O3 -march=native -mtune=native" \
@@ -306,6 +306,7 @@ else
 
       module unload rocm/${ROCM_VERSION}
       module unload $MPI_MODULE
+      module unload hdf5 amdflang-new
 
    fi
 
