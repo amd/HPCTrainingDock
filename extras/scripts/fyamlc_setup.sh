@@ -98,7 +98,7 @@ if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
    # override path in case FYAMLC_VERSION has been supplied as input
-   INSTALL_PATH=/opt/fyamlc-v${FYAMLC_VERSION}   
+   INSTALL_PATH=/opt/fyamlc-v${FYAMLC_VERSION}
 fi
 
 echo ""

@@ -10,6 +10,7 @@ INSTALL_PATH_INPUT=""
 PETSC_VERSION="3.23.0"
 SUDO="sudo"
 USE_SPACK=0
+USE_AMDFLANG=0
 MPI_MODULE="openmpi"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
@@ -30,6 +31,7 @@ usage()
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --install-path [ INSTALL_PATH_INPUT ] default $INSTALL_PATH"
+   echo "  --use-amdflang [ USE_AMDFLANG ] set to 1 to build petsc with the AMD next generation Fortran compiler, default $USE_AMDFLANG"
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
    echo "  --petsc-version [ PETSC_VERSION ] default $PETSC_VERSION"
    echo "  --use-spack [ USE_SPACK ] default $USE_SPACK"
@@ -91,6 +93,11 @@ do
       "--use-spack")
           shift
           USE_SPACK=${1}
+          reset-last
+          ;;
+      "--use-amdflang")
+          shift
+          USE_AMDFLANG=${1}
           reset-last
           ;;
       "--rocm-version")
@@ -237,6 +244,11 @@ else
          if [[ "HDF5_PATH" != "" ]]; then
             DOWNLOAD_HDF5=0
          fi
+         if [[ "USE_AMDFLANG" == 1 ]]; then
+            # this module will set the openmpi wrappers to use the compilers from the ROCm AFAR release
+            # the AFAR releases can be found at: https://repo.radeon.com/rocm/misc/flang/
+            module load amdflang-new
+         fi
 
          ./configure --with-debugging=0 --with-x=0 COPTFLAGS="-O3 -march=native -mtune=native" \
                      CXXOPTFLAGS="-O3 -march=native -mtune=native" FOPTFLAGS="-O3 -march=native -mtune=native" \
@@ -312,6 +324,11 @@ else
    fi
 
    ${SUDO} mkdir -p ${MODULE_PATH}
+
+   if [[ "USE_AMDFLANG" == 1 ]]; then
+      MODULE_PATH=$MODULE_PATH"_amdflang"
+   fi
+
 
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/$PETSC_VERSION.lua

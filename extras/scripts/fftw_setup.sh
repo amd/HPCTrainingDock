@@ -133,7 +133,7 @@ if [ "${FFTW_PATH_INPUT}" != "" ]; then
    FFTW_PATH=${FFTW_PATH_INPUT}
 else
    # override path in case FFTW_VERSION has been supplied as input
-   INSTALL_PATH=/opt/fftw-v${FFTW_VERSION}   
+   INSTALL_PATH=/opt/fftw-v${FFTW_VERSION}
 fi
 
 

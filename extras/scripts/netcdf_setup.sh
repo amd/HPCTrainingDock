@@ -187,7 +187,7 @@ else
       #install the cached version
       cd /opt
       tar -xzf ${CACHE_FILES}/netcdf.tgz
-      chown -R root:root /opt/netcdf 
+      chown -R root:root /opt/netcdf
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm -f ${CACHE_FILES}/netcdf.tgz
       fi
