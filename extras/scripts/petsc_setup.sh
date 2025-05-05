@@ -7,7 +7,7 @@ BUILD_PETSC=0
 ROCM_VERSION=6.0
 INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/petsc
 INSTALL_PATH_INPUT=""
-PETSC_VERSION="3.23.0"
+PETSC_VERSION="3.23.1"
 SUDO="sudo"
 USE_SPACK=0
 USE_AMDFLANG=0
@@ -35,7 +35,7 @@ usage()
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
    echo "  --petsc-version [ PETSC_VERSION ] default $PETSC_VERSION"
    echo "  --use-spack [ USE_SPACK ] default $USE_SPACK"
-   echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --build-petsc [ BUILD_PETSC ] default is 0"
    echo "  --help: this usage information"
    exit 1
@@ -138,6 +138,7 @@ echo ""
 
 AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
 CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
+AMDGPU_GFXMODEL=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/,/g'`
 
 if [ "${BUILD_PETSC}" = "0" ]; then
 
