@@ -301,7 +301,7 @@ else
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${SCOREP_VERSION}-dev.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${SCOREP_VERSION}.lua
 	whatis(" Score-P Performance Analysis Tool ")
 
         load("rocm/${ROCM_VERSION}")
