@@ -18,13 +18,17 @@ ${SUDO} apt-get install -y valgrind \
                         libmpfrc++-dev libmpfr6 \
                         openssl \
 			swig \
-			libparmetis-dev
+			libparmetis-dev \
+                        libfftw3-dev \
+           		libhdf5-openmpi-103-1 libhdf5-dev \
+			petsc-dev petsc64-dev \
+			libadios-dev libadios-openmpi-dev libadios-bin \
+			libparmetis-dev libscotchparmetis-dev \
+			scotch \
+                        libeigen3-dev \
+                        libmagma-dev
 
-
-#                       libeigen3-dev \
-#                       libfftw3-dev \
-#		libhdf5-openmpi-103-1 libhdf5-dev \
-#                       libmagma-dev \
+# adios2 is available in ubuntu 24.04
 #                       python3-matplotlib \
 #                       python3-mpi4py \
 #                       python3-numpy \
