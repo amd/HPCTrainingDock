@@ -65,6 +65,7 @@ hpctoolkit_tests: hpctoolkit_tests.timestamp
 cupy_tests: cupy_tests.timestamp
 pytorch_tests: pytorch_tests.timestamp
 petsc_tests: petsc_tests.timestamp
+fftw_tests: fftw_tests.timestamp
 tensorflow_tests: tensorflow_tests.timestamp
 hypre_tests: hypre_tests.timestamp
 jax_tests: jax_tests.timestamp
