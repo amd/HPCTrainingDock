@@ -328,7 +328,7 @@ else
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    if [[ "USE_AMDFLANG" == "1" ]]; then
-      MODULE_PATH=$MODULE_PATH"_amdflang"
+      MODULE_PATH=${MODULE_PATH}_amdflang
    fi
 
 
@@ -345,8 +345,6 @@ else
 	setenv("PETSC_DIR", base)
 	setenv("SLEPC_PATH", "$SLEPC_PATH")
 	setenv("SLEPC_DIR", "$SLEPC_PATH")
-	prepend_path("PATH", "${PETSC_PATH}/bin")
-	prepend_path("PATH", "${SLEPC_PATH}/bin")
 	prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
 	prepend_path("LD_LIBRARY_PATH",pathJoin("${SLEPC_PATH}", "lib"))
 	prepend_path("LD_LIBRARY_PATH","/usr/lib")
