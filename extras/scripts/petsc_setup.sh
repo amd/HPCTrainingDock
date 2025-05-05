@@ -131,6 +131,7 @@ echo "BUILD_PETSC: $BUILD_PETSC"
 echo "Installing PETSc in: $INSTALL_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
 echo "USE_SPACK: $USE_SPACK"
+echo "USE_AMDFLANG: $USE_AMDFLANG"
 echo "Loading this module for MPI: $MPI_MODULE"
 echo "==================================="
 echo ""
@@ -169,7 +170,7 @@ else
       source /etc/profile.d/lmod.sh
       source /etc/profile.d/z01_lmod.sh
       module load rocm/${ROCM_VERSION}
-      if [[ "USE_AMDFLANG" == 1 ]]; then
+      if [[ "USE_AMDFLANG" == "1" ]]; then
          # this module will set the openmpi wrappers to use the compilers from the ROCm AFAR release
          # the AFAR releases can be found at: https://repo.radeon.com/rocm/misc/flang/
          module load amdflang-new
@@ -326,7 +327,7 @@ else
 
    ${SUDO} mkdir -p ${MODULE_PATH}
 
-   if [[ "USE_AMDFLANG" == 1 ]]; then
+   if [[ "USE_AMDFLANG" == "1" ]]; then
       MODULE_PATH=$MODULE_PATH"_amdflang"
    fi
 
