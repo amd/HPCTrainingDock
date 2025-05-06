@@ -2,7 +2,7 @@
 
 # Variables controlling setup process
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-MODULE_PATH=/etc/lmod/modules/misc/asimov_ccs
+MODULE_PATH=/etc/lmod/modules/LinuxPlus/asimov_ccs
 BUILD_ASIMOV_CCS=1
 ROCM_VERSION=6.4.0
 SUDO="sudo"
