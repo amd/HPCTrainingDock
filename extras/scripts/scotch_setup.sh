@@ -6,7 +6,6 @@ BUILD_SCOTCH=1
 SCOTCH_VERSION=7.0.7
 INSTALL_PATH=/opt/scotch-v${SCOTCH_VERSION}
 SUDO="sudo"
-SUDO=""
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
