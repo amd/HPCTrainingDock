@@ -2,7 +2,7 @@
 
 # Variables controlling setup process
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-MODULE_PATH=/etc/lmod/modules/misc/parhip
+MODULE_PATH=/etc/lmod/modules/LinuxPlus/parhip
 BUILD_PARHIP=1
 ROCM_VERSION=6.4.0
 PARHIP_VERSION="3.14"

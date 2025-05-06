@@ -2,7 +2,7 @@
 
 # Variables controlling setup process
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-MODULE_PATH=/etc/lmod/modules/misc/pyyaml_lit
+MODULE_PATH=/etc/lmod/modules/LinuxPlus/pyyaml_lit
 BUILD_PYYAML_LIT=1
 ROCM_VERSION=6.4.0
 PYYAML_LIT_VERSION="3.14"

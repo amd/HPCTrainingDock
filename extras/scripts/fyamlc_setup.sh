@@ -2,7 +2,7 @@
 
 # Variables controlling setup process
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-MODULE_PATH=/etc/lmod/modules/misc/fyamlc
+MODULE_PATH=/etc/lmod/modules/LinuxPlus/fyamlc
 BUILD_FYAMLC=1
 ROCM_VERSION=6.4.0
 FYAMLC_VERSION="0.2.6"

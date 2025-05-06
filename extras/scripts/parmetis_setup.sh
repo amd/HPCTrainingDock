@@ -2,7 +2,7 @@
 
 # Variables controlling setup process
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-MODULE_PATH=/etc/lmod/modules/misc/parmetis
+MODULE_PATH=/etc/lmod/modules/LinuxPlus/parmetis
 BUILD_PARMETIS=1
 ROCM_VERSION=6.4.0
 PARMETIS_VERSION="3.14"

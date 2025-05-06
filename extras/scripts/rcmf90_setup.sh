@@ -2,7 +2,7 @@
 
 # Variables controlling setup process
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-MODULE_PATH=/etc/lmod/modules/misc/rcmf90
+MODULE_PATH=/etc/lmod/modules/LinuxPlus/rcmf90
 BUILD_RCMF90=1
 ROCM_VERSION=6.4.0
 RCMF90_VERSION="3.14"

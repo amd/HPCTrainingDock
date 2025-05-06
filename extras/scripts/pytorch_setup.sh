@@ -119,6 +119,9 @@ fi
 
 ZSTD_PATH=$INSTALL_PATH/zstd
 TRANSFORMERS_PATH=$INSTALL_PATH/transformers
+TRITON_PATH=$INSTALL_PATH/triton
+SAGEATTENTION_PATH=$INSTALL_PATH/sageattention
+FLASHATTENTION_PATH=$INSTALL_PATH/flashattention
 AOTRITON_PATH=$INSTALL_PATH/aotriton
 PYTORCH_PATH=$INSTALL_PATH/pytorch
 TORCHVISION_PATH=$INSTALL_PATH/vision
@@ -206,6 +209,9 @@ else
 
       ${SUDO} mkdir -p ${INSTALL_PATH}
       ${SUDO} mkdir -p ${TRANSFORMERS_PATH}
+      ${SUDO} mkdir -p ${TRITON_PATH}
+      ${SUDO} mkdir -p ${SAGEATTENTION_PATH}
+      ${SUDO} mkdir -p ${FLASHATTENTION_PATH}
       ${SUDO} mkdir -p ${PYTORCH_PATH}
       ${SUDO} mkdir -p ${TORCHAUDIO_PATH}
       ${SUDO} mkdir -p ${TORCHVISION_PATH}
@@ -224,6 +230,9 @@ else
       pip3 install torchaudio==${TORCHAUDIO_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHAUDIO_PATH}
       pip3 install torchvision==${TORCHVISION_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHVISION_PATH}
       pip3 install --target=${TRANSFORMERS_PATH} transformers
+      pip3 install --target=${TRITON_PATH} triton
+      pip3 install --target=${SAGEATTENTION_PATH} sageattention
+      pip3 install --target=${FLASHATTENTION_PATH} flashattention
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
@@ -271,6 +280,9 @@ else
 
       ${SUDO} mkdir -p ${INSTALL_PATH}
       ${SUDO} mkdir -p ${TRANSFORMERS_PATH}
+      ${SUDO} mkdir -p ${TRITON_PATH}
+      ${SUDO} mkdir -p ${SAGEATTENTION_PATH}
+      ${SUDO} mkdir -p ${FLASHATTENTION_PATH}
       ${SUDO} mkdir -p ${ZSTD_PATH}
       ${SUDO} mkdir -p ${AOTRITON_PATH}
       ${SUDO} mkdir -p ${PYTORCH_PATH}
@@ -424,6 +436,9 @@ else
       python3 setup.py install --prefix=${TORCHAUDIO_PATH}
 
       pip3 install --target=${TRANSFORMERS_PATH} transformers
+      pip3 install --target=${TRITON_PATH} triton
+      pip3 install --target=${SAGEATTENTION_PATH} sageattention
+      pip3 install --target=${FLASHATTENTION_PATH} sageattention
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
@@ -469,6 +484,9 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/pillow-${PILLOW_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","${TRANSFORMERS_PATH}")
+	prepend_path("PYTHONPATH","${TRITON_PATH}")
+	prepend_path("PYTHONPATH","${SAGEATTENTION_PATH}")
+	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}")
 	prepend_path("PYTHONPATH","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages")
 	prepend_path("PYTHONPATH","${PYTORCH_PATH}")
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}")
