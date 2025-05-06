@@ -3,7 +3,8 @@
 # Variables controlling setup process
 MODULE_PATH=/etc/lmod/modules/LinuxPlus/scotch
 BUILD_SCOTCH=1
-INSTALL_PATH=/opt/scotch
+SCOTCH_VERSION=7.0.7
+INSTALL_PATH=/opt/scotch-v${SCOTCH_VERSION}
 SUDO="sudo"
 SUDO=""
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
@@ -21,11 +22,11 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
-   echo "  WARNING: when selecting the module to supply to --mpi-module, make sure it sets the MPI_PATH environment variable"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --install-path [ INSTALL_PATH ] default $INSTALL_PATH"
    echo "  --build-scotch [ BUILD_SCOTCH ] default is 0"
+   echo "  --scotch-version [ SCOTCH_VERSION ] default is $SCOTCH_VERSION"
    echo "  --help: this usage information"
    exit 1
 }
@@ -49,6 +50,11 @@ do
       "--build-scotch")
           shift
           BUILD_SCOTCH=${1}
+          reset-last
+          ;;
+      "--scotch-version")
+          shift
+          SCOTCH_VERSION=${1}
           reset-last
           ;;
       "--help")
@@ -75,10 +81,18 @@ do
    shift
 done
 
+if [ "${INSTALL_PATH_INPUT}" != "" ]; then
+   INSTALL_PATH=${INSTALL_PATH_INPUT}
+else
+   # override path in case SCOTCH_VERSION has been supplied as input
+   INSTALL_PATH=/opt/scotch-v${SCOTCH_VERSION}
+fi
+
 echo ""
 echo "==================================="
 echo "Starting SCOTCH Install with"
 echo "BUILD_SCOTCH: $BUILD_SCOTCH"
+echo "SCOTCH_VERSION: $SCOTCH_VERSION"
 echo "Installing SCOTCH in: $INSTALL_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
 echo "==================================="
@@ -123,10 +137,10 @@ else
       rm -rf scotch_source
       mkdir scotch_source && cd scotch_source
       rm -rf scotch
-      git clone git@gitlab.inria.fr:scotch/scotch.git
+      git clone -b v${SCOTCH_VERSION} https://gitlab.inria.fr/scotch/scotch.git 
       cd scotch
       mkdir build && cd build
-      cmake --prefix=${INSTALL_PATH} ..
+      cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_PATH} -DCMAKE_BUILD_TYPE=Release ..
 
       make -j 8
 
@@ -134,9 +148,9 @@ else
 
       make install
 
-      cd ..
+      cd ../../..
 
-      rm -rf scotch
+      rm -rf scotch_source
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
@@ -146,15 +160,26 @@ else
       fi
    fi
 
-   ${SUDO} mkdir -p ${MODULE_PATH}
+   if [ -d "$MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to module path"
+      fi
+   else
+      # if module path dir does not exist yet, the check on write access will fail
+      SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
+   fi
 
-   SCOTCH_PATH=${INSTALL_PATH}
+   ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/dev.lua
         whatis("SCOTCH package")
 
-        local base = "${SCOTCH_PATH}"
+        local base = "${INSTALL_PATH}"
 
         setenv("SCOTCH_ROOT", base)
         setenv("SCOTCH_LIBDIR", pathJoin(base, "lib"))

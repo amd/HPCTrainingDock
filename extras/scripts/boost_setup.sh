@@ -1,13 +1,13 @@
 #/bin/bash
 
 # Variables controlling setup process
-MODULE_PATH=/etc/lmod/modules/misc/boost
+MODULE_PATH=/etc/lmod/modules/LinuxPlus/boost
 BUILD_BOOST=1
 BOOST_VERSION=1_82_0
-INSTALL_PATH=/opt/boost-${BOOST_VERSION}
+BOOST_VERSION_DOTS=`echo "${BOOST_VERSION}" | sed 's/_/./g'`
+INSTALL_PATH=/opt/boost-v${BOOST_VERSION_DOTS}
 INSTALL_PATH_INPUT=""
 SUDO="sudo"
-SUDO=""
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -23,7 +23,6 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
-   echo "  WARNING: when selecting the module to supply to --mpi-module, make sure it sets the MPI_PATH environment variable"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --install-path [ INSTALL_PATH_INPUT ] default $INSTALL_PATH"
    echo "  --boost-version [ BOOST_VERSION ] default $BOOST_VERSION"
@@ -86,13 +85,15 @@ if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
    # override path in case BOOST_VERSION has been supplied as input
-   INSTALL_PATH=/opt/boost-${BOOST_VERSION}
+   BOOST_VERSION_DOTS=`echo "${BOOST_VERSION}" | sed 's/_/./g'`
+   INSTALL_PATH=/opt/boost-v${BOOST_VERSION_DOTS}
 fi
 
 echo ""
 echo "==================================="
 echo "Starting BOOST Install with"
 echo "BUILD_BOOST: $BUILD_BOOST"
+echo "Building version: $BOOST_VERSION_DOTS"
 echo "Installing BOOST in: $INSTALL_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
 echo "==================================="
@@ -137,7 +138,7 @@ else
       rm -rf boost_source
       mkdir boost_source && cd boost_source
       rm -rf boost_${BOOST_VERSION}.tar.gz boost_${BOOST_VERSION}
-      wget -q https://archives.boost.io/release/1.82.0/source/boost_${BOOST_VERSION}.tar.gz
+      wget -q https://archives.boost.io/release/${BUILD_VERSION_DOTS}/source/boost_${BOOST_VERSION}.tar.gz
       tar -xzf boost_${BOOST_VERSION}.tar.gz
       cd boost_${BOOST_VERSION}
       ./bootstrap.sh --prefix=$INSTALL_PATH --with-libraries=all
@@ -147,7 +148,7 @@ else
       cd ..
 
       cd ..
-      rm -rf boost_${BOOST_VERSION}.tar.gz boost_${BOOST_VERSION}
+      rm -rf boost_${BOOST_VERSION}.tar.gz boost_${BOOST_VERSION} boost_source
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
@@ -157,15 +158,26 @@ else
       fi
    fi
 
+   if [ -d "$MODULE_PATH" ]; then
+      # use sudo if user does not have write access to module path
+      if [ ! -w ${MODULE_PATH} ]; then
+         SUDO="sudo"
+      else
+         echo "WARNING: not using sudo since user has write access to module path"
+      fi
+   else
+      # if module path dir does not exist yet, the check on write access will fail
+      SUDO="sudo"
+      echo "WARNING: using sudo, make sure you have sudo privileges"
+   fi
+
    ${SUDO} mkdir -p ${MODULE_PATH}
 
-   BOOST_PATH=${INSTALL_PATH}
-
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/$BOOST_VERSION.lua
-        whatis("BOOST ${BOOST_VERSION} package")
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${BOOST_VERSION_DOTS}.lua
+        whatis("BOOST ${BOOST_VERSION_DOTS} package")
 
-        local base = "${BOOST_PATH}"
+        local base = "${INSTALL_PATH}"
 
         setenv("BOOST_ROOT", base)
         setenv("BOOST_LIBDIR", pathJoin(base, "lib"))
