@@ -5,7 +5,6 @@ MODULE_PATH=/etc/lmod/modules/LinuxPlus/scotch
 BUILD_SCOTCH=1
 INSTALL_PATH=/opt/scotch
 SUDO="sudo"
-SUDO=""
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -123,10 +122,10 @@ else
       rm -rf scotch_source
       mkdir scotch_source && cd scotch_source
       rm -rf scotch
-      git clone git@gitlab.inria.fr:scotch/scotch.git
+      git clone https://gitlab.inria.fr/scotch/scotch.git
       cd scotch
       mkdir build && cd build
-      cmake --prefix=${INSTALL_PATH} ..
+      cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_PATH} -DCMAKE_BUILD_TYPE=Release ..
 
       make -j 8
 
