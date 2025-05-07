@@ -235,9 +235,11 @@ else
 	 echo "opensuse is not tested yet, not installing libcurl"
       fi
 
+      NETCDF_C_PATH=${NETCDF_PATH}/netcdf-c-v${NETCDF_C_VERSION}
+      NETCDF_FC_PATH=${NETCDF_PATH}/netcdf-fortran-v${NETCDF_FC_VERSION}
       ${SUDO} mkdir -p ${NETCDF_PATH}
-      ${SUDO} mkdir -p ${NETCDF_PATH}/netcdf-c-v${NETCDF_C_VERSION}
-      ${SUDO} mkdir -p ${NETCDF_PATH}/netcdf-fortran-v${NETCDF_FC_VERSION}
+      ${SUDO} mkdir -p ${NETCDF_C_PATH}
+      ${SUDO} mkdir -p ${NETCDF_FC_PATH}
       ${SUDO} mkdir -p ${NETCDF_PATH}/pnetcdf
 
       if [[ "${USER}" != "root" ]]; then
@@ -290,7 +292,7 @@ else
       sed -i 's/if\ (H5FD_HTTP_g)/if\ (H5FD_HTTP_g\ \&\&\ (H5Iis_valid(H5FD_HTTP_g)\ >\ 0))/g' libhdf5/H5FDhttp.c
       mkdir build && cd build
 
-      cmake -DCMAKE_INSTALL_PREFIX=${NETCDF_PATH}/netcdf-c \
+      cmake -DCMAKE_INSTALL_PREFIX=${NETCDF_C_PATH} \
 	    -DNETCDF_ENABLE_HDF5=ON -DNETCDF_ENABLE_DAP=ON \
 	    -DNETCDF_BUILD_UTILITIES=ON -DNETCDF_ENABLE_CDF5=ON \
 	    -DNETCDF_ENABLE_TESTS=OFF -DNETCDF_ENABLE_PARALLEL_TESTS=OFF \
@@ -307,8 +309,8 @@ else
       cd ../..
 
       # put netcdf-c install path in PATH for netcdf-fortran install
-      export PATH=${NETCDF_PATH}/netcdf-c:$PATH
-      export HDF5_PLUGIN_PATH=${NETCDF_PATH}/netcdf-c/hdf5/lib/plugin/
+      export PATH=${NETCDF_C_PATH}:$PATH
+      export HDF5_PLUGIN_PATH=${NETCDF_C_PATH}/hdf5/lib/plugin/
 
       git clone --branch v${NETCDF_FC_VERSION} https://github.com/Unidata/netcdf-fortran.git
       cd netcdf-fortran
@@ -319,7 +321,7 @@ else
       sed -i ''"${LINE}"'i set(HAVE_DEF_VAR_SZIP TRUE)' CMakeLists.txt
 
       mkdir build && cd build
-      cmake -DCMAKE_INSTALL_PREFIX=${NETCDF_PATH}/netcdf-fortran \
+      cmake -DCMAKE_INSTALL_PREFIX=${NETCDF_FC_PATH} \
 	    -DENABLE_TESTS=OFF -DBUILD_EXAMPLES=OFF \
 	    -DCMAKE_Fortran_COMPILER=$FC_COMPILER ..
 
@@ -360,7 +362,7 @@ else
 	whatis("Netcdf-c Library")
 
         load("hdf5")
-        local base = "${NETCDF_PATH}/netcdf-c"
+        local base = "${NETCDF_C_PATH}"
         local base_pnetcdf = "${NETCDF_PATH}/pnetcdf"
         prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
         prepend_path("LD_LIBRARY_PATH", pathJoin(base_pnetcdf, "lib"))
@@ -394,7 +396,7 @@ EOF
 	whatis("Netcdf-fortan Library")
 
         load("hdf5")
-        local base = "${NETCDF_PATH}/netcdf-fortran"
+        local base = "${NETCDF_FC_PATH}"
         local base_pnetcdf = "${NETCDF_PATH}/pnetcdf"
         prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
         prepend_path("LD_LIBRARY_PATH", pathJoin(base_pnetcdf, "lib"))
