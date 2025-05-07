@@ -10,8 +10,8 @@ UNTAR_DIR_INPUT=""
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_SHORT=$DISTRO
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-ARCHIVE_NAME="rocm-afar-7450-drop-6.0.0"
-ARCHIVE_DIR="rocm-afar-6.0.0"
+AFAR_NUMBER="7450"
+FLANG_RELEASE_NUMBER="6.0.0"
 
 SUDO="sudo"
 
@@ -26,9 +26,10 @@ usage()
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected "
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
    echo "  --install-path [ UNTAR_DIR_INPUT ] default $UNTAR_DIR "
-   echo "  --archive-name [ ARCHIVE NAME ] default $ARCHIVE_NAME "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
    echo "  --build-flang-new [ BUILD_FLANGNEW ] default $BUILD_FLANGNEW "
+   echo "  --afar-number [ AFAR_NUMBER ] default $AFAR_NUMBER "
+   echo "  --flang-release-number [ FLANG_RELEASE_NUMBER ] default $FLANG_RELEASE_NUMBER "
    echo "  --help: print this usage information"
    exit 1
 }
@@ -54,6 +55,16 @@ do
           AMDGPU_GFXMODEL=${1}
           reset-last
           ;;
+      "--afar-number")
+          shift
+          AFAR_NUMBER=${1}
+          reset-last
+          ;;
+      "--flang-release-number")
+          shift
+          FLANG_RELEASE_NUMBER=${1}
+          reset-last
+          ;;
       "--build-flang-new")
           shift
           BUILD_FLANGNEW=${1}
@@ -70,11 +81,6 @@ do
       "--module-path")
           shift
           MODULE_PATH=${1}
-          reset-last
-          ;;
-      "--archive-name")
-          shift
-          ARCHIVE_NAME=${1}
           reset-last
           ;;
       "--rocm-version")
@@ -103,12 +109,29 @@ fi
 AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
 CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
+ARCHIVE_NAME="rocm-afar-${AFAR_NUMBER}-drop-${FLANG_RELEASE_NUMBER}"
+ARCHIVE_DIR="rocm-afar-${FLANG_RELEASE_NUMBER}"
+
+if [[ ${DISTRO} == "ubuntu" ]]; then
+# if FLANG_RELEASE_NUMBER is greater than 5.9.9, the awk command will give the FLANG_RELEASE_NUMBER
+# if FLANG_RELEASE_NUMBER is less than or equal to 5.9.9, the awk command result will be blank
+   result=`echo $FLANG_RELEASE_NUMBER | awk '$1>5.9.9'` && echo $result
+   if [[ ${result} ]]; then
+      DISTRO_SHORT="ubu"
+   fi
+fi
+FULL_ARCHIVE_NAME="$ARCHIVE_NAME-$DISTRO_SHORT"
+
 echo ""
 echo "========================================="
 echo "Starting flang-new Install with"
 echo "ROCM_VERSION: $ROCM_VERSION"
 echo "BUILD_FLANGNEW: $BUILD_FLANGNEW"
 echo "Archive will be untarred in: $UNTAR_DIR"
+echo "ARCHIVE_NAME is $ARCHIVE_NAME"
+echo "FULL_ARCHIVE_NAME is $FULL_ARCHIVE_NAME"
+echo "ARCHIVE_DIR is $ARCHIVE_DIR"
+echo "INSTALL_DIR or UNTAR_DIR is $UNTAR_DIR"
 echo "========================================="
 echo ""
 
@@ -135,21 +158,15 @@ else
          echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
-       ${SUDO} mkdir -p ${UNTAR_DIR}
+      ${SUDO} mkdir -p ${UNTAR_DIR}
       cd ${UNTAR_DIR}
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod a+w ${UNTAR_DIR}
       fi
 
-      if [[ ${DISTRO} == "ubuntu" ]]; then
-         if [[ ${ARCHIVE_NAME} == "rocm-afar-7450-drop-6.0.0" ]]; then
-            DISTRO_SHORT="ubu"
-         fi
-      fi
-
-      wget -q https://repo.radeon.com/rocm/misc/flang/${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
-      tar -xjf ${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
-      rm -f ${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
+      wget -q https://repo.radeon.com/rocm/misc/flang/${FULL_ARCHIVE_NAME}.tar.bz2
+      tar -xjf ${FULL_ARCHIVE_NAME}.tar.bz2
+      rm -f ${FULL_ARCHIVE_NAME}.tar.bz2
 
       ${SUDO} mv ${ARCHIVE_NAME} ${ARCHIVE_DIR}
 
@@ -159,7 +176,7 @@ else
       fi
 
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm ${CACHE_FILES}/${ARCHIVE_NAME}-${DISTRO_SHORT}.tar.bz2
+         ${SUDO} rm ${CACHE_FILES}/${FULL_ARCHIVE_NAME}.tar.bz2
       fi
 
       # Create a module file for flang-new
