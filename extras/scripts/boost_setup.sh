@@ -138,7 +138,7 @@ else
       rm -rf boost_source
       mkdir boost_source && cd boost_source
       rm -rf boost_${BOOST_VERSION}.tar.gz boost_${BOOST_VERSION}
-      wget -q https://archives.boost.io/release/${BUILD_VERSION_DOTS}/source/boost_${BOOST_VERSION}.tar.gz
+      wget -q https://archives.boost.io/release/${BOOST_VERSION_DOTS}/source/boost_${BOOST_VERSION}.tar.gz
       tar -xzf boost_${BOOST_VERSION}.tar.gz
       cd boost_${BOOST_VERSION}
       ./bootstrap.sh --prefix=$INSTALL_PATH --with-libraries=all
