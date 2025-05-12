@@ -11,6 +11,7 @@ PETSC_VERSION="3.23.1"
 SUDO="sudo"
 USE_SPACK=0
 USE_AMDFLANG=0
+AMDFLANG_RELEASE_NUMBER="6.0.0"
 MPI_MODULE="openmpi"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
@@ -32,6 +33,7 @@ usage()
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --install-path [ INSTALL_PATH_INPUT ] default $INSTALL_PATH"
    echo "  --use-amdflang [ USE_AMDFLANG ] set to 1 to build petsc with the AMD next generation Fortran compiler, default $USE_AMDFLANG"
+   echo "  --amdflang-release-number [ AMDFLANG_RELEASE_NUMBER ] default $AMDFLANG_RELEASE_NUMBER. Note: this flag is only used if --use-amdflang 1 is specified."
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
    echo "  --petsc-version [ PETSC_VERSION ] default $PETSC_VERSION"
    echo "  --use-spack [ USE_SPACK ] default $USE_SPACK"
@@ -98,6 +100,11 @@ do
       "--use-amdflang")
           shift
           USE_AMDFLANG=${1}
+          reset-last
+          ;;
+      "--amdflang-release-number")
+          shift
+          AMDFLANG_RELEASE_NUMBER=${1}
           reset-last
           ;;
       "--rocm-version")
@@ -333,13 +340,19 @@ else
 
    ${SUDO} mkdir -p ${MODULE_PATH}
 
+   ROCM_MODULE_LOAD=rocm/${ROCM_VERSION}
+   if [[ "${USE_AMDFLANG}" == 1 ]]; then
+      # the amdflang-new module also loads rocm
+      ROCM_MODULE_LOAD=amdflang-new/rocm-afar-${AMDFLANG_RELEASE_NUMBER}
+   fi
+
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/$PETSC_VERSION.lua
 	whatis("PETSC - solver package")
 
 	local base = "${PETSC_PATH}"
 
-	load("rocm/${ROCM_VERSION}")
+	load("$ROCM_MODULE_LOAD")
 	load("$MPI_MODULE")
 	setenv("PETSC_PATH", base)
 	setenv("PETSC", base)
