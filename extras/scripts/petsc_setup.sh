@@ -186,7 +186,7 @@ else
       if [[ ${USE_AMDFLANG} == "1" ]]; then
          # this module will set the openmpi wrappers to use the compilers from the ROCm AFAR release
          # the AFAR releases can be found at: https://repo.radeon.com/rocm/misc/flang/
-         module load amdflang-new
+         module load amdflang-new/rocm-afar-${AMDFLANG_RELEASE_NUMBER}
       fi
       module load $MPI_MODULE
       if [[ $MPI_PATH == "" ]]; then
@@ -348,7 +348,7 @@ else
 
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/$PETSC_VERSION.lua
-	whatis("PETSC - solver package")
+	whatis("PETSC Version $PETSC_VERSION - solver package")
 
 	local base = "${PETSC_PATH}"
 
