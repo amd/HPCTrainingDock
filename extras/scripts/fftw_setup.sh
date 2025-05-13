@@ -206,12 +206,12 @@ else
       module load ${MPI_MODULE}
       if [[ `which mpicc | wc -l` -eq 1 ]]; then
 	 # if mpi is found in the path, build fftw parallel
-         ENABLE_PARALLEL="--enable-mpi"
+         ENABLE_MPI="--enable-mpi"
       fi
 
       # override flags with user defined values if present
-      if [ "${ENABLE_PARALLEL_INPUT}" == "1" ]; then
-         ENABLE_PARALLEL="--enable-mpi"
+      if [ "${ENABLE_MPI_INPUT}" == "1" ]; then
+         ENABLE_MPI="--enable-mpi"
       fi
 
       wget -q https://www.fftw.org/fftw-${FFTW_VERSION}.tar.gz
