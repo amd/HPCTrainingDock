@@ -491,6 +491,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	prepend_path("PYTHONPATH","${PYTORCH_PATH}")
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}")
 	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}")
+	prepend_path("PATH","${PYTORCH_PATH}/pytorch/bin")
 EOF
 #        cmd1="mkdir -p $$HOME/miopen_tmpdir; export TMPDIR=$$HOME/miopen_tmpdir"
 #        cmd2="rm -rf $$HOME/miopen_tmpdir; unset TMPDIR"
