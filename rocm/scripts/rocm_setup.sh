@@ -3,6 +3,11 @@
 # Variables controlling setup process
 : ${ROCM_VERSION:="6.0"}
 REPLACE=0
+MODULE_PATH=/etc/lmod/modules/ROCm
+if [[ ! "${MODULEPATH}" == *"/etc/lmod/modules/ROCm"* ]]; then
+   echo "Did not find substring"
+   MODULE_PATH=/etc/lmod/modules
+fi
 
 # Autodetect defaults
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -27,7 +32,9 @@ usage()
 {
    echo "Usage:"
    echo "  --replace default off"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
    echo "  --help: this usage information"
    exit 1
 }
@@ -54,6 +61,11 @@ do
       "--amdgpu-gfxmodel")
           shift
           AMDGPU_GFXMODEL=${1}
+          reset-last
+          ;;
+      "--module-path")
+          shift
+          MODULE_PATH=${1}
           reset-last
           ;;
       "--replace")
@@ -382,7 +394,7 @@ fi
 # set up up module files
 
 # Create a module file for rocm sdk
-export MODULE_PATH=/etc/lmod/modules/ROCm/rocm
+MODULE_PATH=${MODULE_PATH}/rocm
 
 ${SUDO} mkdir -p ${MODULE_PATH}
 
