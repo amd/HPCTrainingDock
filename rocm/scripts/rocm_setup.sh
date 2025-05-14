@@ -5,7 +5,6 @@
 REPLACE=0
 MODULE_PATH=/etc/lmod/modules/ROCm
 if [[ ! "${MODULEPATH}" == *"/etc/lmod/modules/ROCm"* ]]; then
-   echo "Did not find substring"
    MODULE_PATH=/etc/lmod/modules
 fi
 
