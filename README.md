@@ -381,7 +381,7 @@ If you are satisfied with the test installation, you can proceed with the actual
 ```bash
 git clone --recursive git@github.com:amd/HPCTrainingDock.git && \
 cd HPCTrainingDock && \
-./bare_system/main_install.sh --rocm-version <rocm-version> + other options
+./bare_system/main_setup.sh --rocm-version <rocm-version> + other options
 ```
 
 The above command will execute the `main_install.sh` script on your system that will proceed with the installation for you. Note that you need to be able to run `sudo` on your system for things to work.  To visualize all the input flags that can be provided to the script, run: `./bare_system/main_setup.sh --help`.
