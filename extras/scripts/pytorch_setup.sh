@@ -14,6 +14,7 @@ PILLOW_VERSION=11.2.1
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/pytorch
 INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch
 INSTALL_PATH_INPUT=""
+MPI_MODULE="openmpi"
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 USE_WHEEL=0
@@ -35,6 +36,7 @@ usage()
    echo "--pytorch-version [ PYTORCH_VERSION ] version of PyTorch, default is $PYTORCH_VERSION"
    echo "--python-version [ PYTHON_VERSION ] version of Python, default is $PYTHON_VERSION"
    echo "--install-path [ INSTALL_PATH ] directory where PyTorch, Torchaudio and Torchvision will be installed, default is $INSTALL_PATH"
+   echo "--mpi-module [ MPI_MODULE ] mpi module to build pytorch with, default is $MPI_MODULE"
    echo "--help: this usage information"
    echo "--module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
@@ -80,6 +82,11 @@ do
       "--python-version")
           shift
           PYTHON_VERSION=${1}
+	  reset-last
+          ;;
+      "--mpi-module")
+          shift
+          MPI_MODULE=${1}
 	  reset-last
           ;;
       "--pytorch-version")
@@ -172,10 +179,6 @@ else
    echo "======================================"
    echo ""
 
-   ${SUDO} apt-get update
-   ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
-   ${SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
-
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
    if [ -f ${CACHE_FILES}/pytorch.tgz ]; then
@@ -265,7 +268,10 @@ else
       if [[ ${SUDO} != "" ]]; then
          ${SUDO} apt-get update
          ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
-         ${SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
+         module load ${MPI_MODULE}
+         if [[ `which mpicc | wc -l` -eq 0 ]]; then
+            ${SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
+         fi
          wget -q https://registrationcenter-download.intel.com/akdlm/IRC_NAS/79153e0f-74d7-45af-b8c2-258941adf58a/intel-onemkl-2025.0.0.940.sh
          ${SUDO} sh ./intel-onemkl-2025.0.0.940.sh -a -s --eula accept
          export PATH=/opt/intel/oneapi:$PATH
@@ -341,11 +347,6 @@ else
       echo " from source"
       echo "============================"
       echo ""
-
-      # Build with GPU aware MPI not working yet
-      # Need to use the update-alternatives in openmpi setup to get
-      # GPU aware MPI
-      #module load openmpi
 
       export PYTHONPATH=${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages:$PYTHONPATH
       export _GLIBCXX_USE_CXX11_ABI=1
