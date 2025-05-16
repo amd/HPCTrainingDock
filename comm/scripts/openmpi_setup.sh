@@ -11,6 +11,10 @@
 ROCM_VERSION=
 ROCM_PATH=
 REPLACE=0
+REPLACE_XPMEM=0
+REPLACE_UCX=0
+REPLACE_UCC=0
+REPLACE_OPENMPI=0
 DRY_RUN=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/openmpi
 INSTALL_PATH_INPUT=""
@@ -63,6 +67,10 @@ usage()
     echo "  --openmpi-version [VERSION] default $OPENMPI_VERSION"
     echo "  --openmpi-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
     echo "  --replace default off"
+    echo "  --replace-xpmem default off"
+    echo "  --replace-ucx default off"
+    echo "  --replace-ucc default off"
+    echo "  --replace-openmpi default off"
     echo "  --rocm-version [ ROCM_VERSION ] default none"
     echo "  --rocm-path [ ROCM_PATH ] default none"
     echo "  --ucc-path default $INSTALL_PATH/ucc-$UCC_VERSION-ucx-$UCX_VERSION-xpmem-$XPMEM_VERSION"
@@ -138,7 +146,7 @@ do
           ;;
       "--openmpi-path")
           shift
-          OPENMPI_PATH=${1}
+          OPENMPI_PATH_INPUT=${1}
           reset-last
           ;;
       "--openmpi-version")
@@ -156,6 +164,22 @@ do
           ;;
       "--replace")
           REPLACE=1
+          reset-last
+          ;;
+      "--replace-xpmen")
+          REPLACE_XPMEM=1
+          reset-last
+          ;;
+      "--replace-ucc")
+          REPLACE_UCC=1
+          reset-last
+          ;;
+      "--replace-ucx")
+          REPLACE_UCX=1
+          reset-last
+          ;;
+      "--replace-openmpi")
+          REPLACE_OPENMPI=1
           reset-last
           ;;
       "--rocm-path")
@@ -289,6 +313,12 @@ else
    OPENMPI_PATH="${INSTALL_PATH}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}
 fi
 
+if [ "${REPLACE}" == "1" ]; then
+   REPLACE_XPMEM=1
+   REPLACE_UCX=1
+   REPLACE_UCC=1
+   REPLACE_OPENMPI=1
+fi
 
 if [ -d "$INSTALL_PATH" ]; then
    # don't use sudo if user has write access to install path
@@ -339,11 +369,11 @@ CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGP
 #
 
 if [ "${BUILD_XPMEM}" == "1" ]; then
-   if [[ -d "${XPMEM_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
+   if [[ -d "${XPMEM_PATH}" ]] && [[ "${REPLACE_XPMEM}" == "0" ]] ; then
       echo "There is a previous installation and the replace flag is false"
       echo "  use --replace to request replacing the current installation"
    else
-      if [[ -d "${XPMEM_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
+      if [[ -d "${XPMEM_PATH}" ]] && [[ "${REPLACE_XPMEM}" != "0" ]] ; then
          ${SUDO} rm -rf "${XPMEM_PATH}"
       fi
       if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${CACHE_FILES}/xpmem-${XPMEM_VERSION}.tgz ]]; then
@@ -425,11 +455,11 @@ fi
 # Install UCX
 #
 
-if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
+if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE_UCX}" == "0" ]] ; then
    echo "There is a previous installation and the replace flag is false"
    echo "  use --replace to request replacing the current installation"
 else
-   if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
+   if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE_UCX}" != "0" ]] ; then
       ${SUDO} rm -rf "${UCX_PATH}"
    fi
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${CACHE_FILES}/ucx-${UCX_VERSION}${XPMEM_STRING}.tgz ]]; then
@@ -542,11 +572,11 @@ fi
 # Install UCC
 #
 
-if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
+if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE_UCC}" == "0" ]] ; then
    echo "There is a previous installation and the replace flag is false"
    echo "  use --replace to request replacing the current installation"
 else
-   if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
+   if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE_UCC}" != "0" ]] ; then
       ${SUDO} rm -rf "${UCC_PATH}"
    fi
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz ]]; then
@@ -643,11 +673,11 @@ fi
 # Install OpenMPI
 #
 
-if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE}" == "0" ]] ; then
+if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE_OPENMPI}" == "0" ]] ; then
    echo "There is a previous installation and the replace flag is false"
    echo "  use --replace to request replacing the current installation"
 else
-   if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
+   if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE_OPENMPI}" != "0" ]] ; then
       ${SUDO} rm -rf "${OPENMPI_PATH}"
    fi
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz ]]; then
