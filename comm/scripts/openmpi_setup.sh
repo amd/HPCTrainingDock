@@ -632,10 +632,16 @@ else
       export AMDGPU_GFXMODEL_UCC=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/ --offload-arch=/g'`
       AMDGPU_GFXMODEL_UCC="--offload-arch=${AMDGPU_GFXMODEL_UCC}"
 
-      sed -i '31i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu "${AMDGPU_GFXMODEL_UCC}" ${@:5} -fPIC -O3 -o ${pic_filepath}"' cuda_lt.sh
-      sed -i '32d' cuda_lt.sh
-      sed -i '41i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu "${AMDGPU_GFXMODEL_UCC}" ${@:5} -O3 -o ${npic_filepath}"' cuda_lt.sh
-      sed -i '42d' cuda_lt.sh
+      # if UCC_VERSION is greater than 1.4.0, the awk command will give the UCC_VERSION number
+      # if UCC_VERSION is less than or equal to 1.4.0, the awk command result will be blank
+      result=`echo $ROCM_VERSION | awk '$1<1.4.0'` && echo $result
+      echo "result is $result"
+      if [[ "${result}" ]]; then # UCC_VERSION < 1.4.0
+         sed -i '31i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu "${AMDGPU_GFXMODEL_UCC}" ${@:5} -fPIC -O3 -o ${pic_filepath}"' cuda_lt.sh
+         sed -i '32d' cuda_lt.sh
+         sed -i '41i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu "${AMDGPU_GFXMODEL_UCC}" ${@:5} -O3 -o ${npic_filepath}"' cuda_lt.sh
+         sed -i '42d' cuda_lt.sh
+      fi
 
       ./autogen.sh
 
