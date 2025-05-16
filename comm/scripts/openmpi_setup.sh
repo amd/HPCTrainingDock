@@ -722,6 +722,8 @@ else
       # dad 3/25/3023 removed --enable-mpi-f90 --enable-mpi-c as they apparently are not options
       # dad 3/30/2023 remove --with-pmix
 
+      cd 
+
       OPENMPI_SHORT_VERSION=`echo ${OPENMPI_VERSION} | cut -f1-2 -d'.' `
       count=0
       while [ "$count" -lt 3 ]; do
