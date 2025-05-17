@@ -4,9 +4,9 @@
 : ${ROCM_VERSION:="6.0"}
 REPLACE=0
 MODULE_PATH=/etc/lmod/modules/ROCm
-if [[ ! "${MODULEPATH}" == *"/etc/lmod/modules/ROCm"* ]]; then
-   MODULE_PATH=/etc/lmod/modules
-fi
+#if [[ ! "${MODULEPATH}" == *"/etc/lmod/modules/ROCm"* ]]; then
+#   MODULE_PATH=/etc/lmod/modules
+#fi
 
 # Autodetect defaults
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
