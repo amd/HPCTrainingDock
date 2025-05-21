@@ -9,6 +9,7 @@ fi
 
 ${SUDO} apt-get update
 ${SUDO} apt-get install -y valgrind \
+	                emacs \
                         kcachegrind kcachegrind-converters \
                         libboost-all-dev \
                         libgmp-dev \
