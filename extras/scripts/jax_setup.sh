@@ -250,6 +250,8 @@ else
          if [[ $JAX_VERSION == "4.35" ]]; then
             sed -i '$a build:rocm --copt=-Wno-error=c23-extensions' .bazelrc
             module load amdclang
+            export CLANG_COMPILER=`which clang`
+            sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
             # build the wheel for jaxlib using clang (which is the default)
             python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
                                    --bazel_options=--override_repository=xla=$XLA_PATH \
@@ -264,6 +266,9 @@ else
             ${SUDO} apt-get update
             ${SUDO} apt-get install patchelf
             module load amdclang
+            export CLANG_COMPILER=`which clang`
+            sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
+            sed -i "s|gfx906,gfx908,gfx90a,gfx942,gfx1030,gfx1100,gfx1101,gfx1200,gfx1201|$AMDGPU_GFXMODEL|" .bazelrc
             python3 build/build.py build --rocm_path=$ROCM_PATH \
                                          --bazel_options=--override_repository=xla=$XLA_PATH \
                                          --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
@@ -285,6 +290,9 @@ else
            ${SUDO} apt-get update
            ${SUDO} apt-get install patchelf
            module load amdclang
+           export CLANG_COMPILER=`which clang`
+           sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
+           sed -i "s|gfx906,gfx908,gfx90a,gfx942,gfx1030,gfx1100,gfx1101,gfx1200,gfx1201|$AMDGPU_GFXMODEL|" .bazelrc
            python3 build/build.py build --rocm_path=$ROCM_PATH \
                                         --bazel_options=--override_repository=xla=$XLA_PATH \
                                         --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
