@@ -235,6 +235,7 @@ else
       cd ..
       git clone --depth 1 --branch rocm-jaxlib-v0.${JAX_VERSION} https://github.com/ROCm/jax.git
       cd jax
+      sed -i "s|gfx906,gfx908,gfx90a,gfx942,gfx1030,gfx1100,gfx1101,gfx1200,gfx1201|$AMDGPU_GFXMODEL|" .bazelrc
 
       # install necessary packages in installation directory
       ${SUDO} mkdir -p ${JAXLIB_PATH}
@@ -268,7 +269,6 @@ else
             module load amdclang
             export CLANG_COMPILER=`which clang`
             sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
-            sed -i "s|gfx906,gfx908,gfx90a,gfx942,gfx1030,gfx1100,gfx1101,gfx1200,gfx1201|$AMDGPU_GFXMODEL|" .bazelrc
             python3 build/build.py build --rocm_path=$ROCM_PATH \
                                          --bazel_options=--override_repository=xla=$XLA_PATH \
                                          --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
@@ -292,7 +292,6 @@ else
            module load amdclang
            export CLANG_COMPILER=`which clang`
            sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
-           sed -i "s|gfx906,gfx908,gfx90a,gfx942,gfx1030,gfx1100,gfx1101,gfx1200,gfx1201|$AMDGPU_GFXMODEL|" .bazelrc
            python3 build/build.py build --rocm_path=$ROCM_PATH \
                                         --bazel_options=--override_repository=xla=$XLA_PATH \
                                         --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
