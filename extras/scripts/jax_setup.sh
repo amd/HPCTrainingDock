@@ -10,6 +10,7 @@ JAX_PATH=/opt/rocmplus-${ROCM_VERSION}/jax
 JAX_PATH_INPUT=""
 JAXLIB_PATH=/opt/rocmplus-${ROCM_VERSION}/jaxlib
 JAXLIB_PATH_INPUT=""
+PATCHELF_VERSION=0.18.0
 
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
@@ -261,11 +262,17 @@ else
                                    --bazel_options=--jobs=128 \
                                    --bazel_startup_options=--host_jvm_args=-Xmx512m
          elif [[ $JAX_VERSION == "5.0" ]]; then
-            if [[ ${SUDO} == "" ]]; then
-               echo "WARNING: need sudo to install patchelf, unless patchelf is installed already the build will likely fail"
-            fi
-            ${SUDO} apt-get update
-            ${SUDO} apt-get install patchelf
+            PATCHELF_PATH=${JAX_PATH}/patchelf
+            ${SUDO} mkdir -p ${PATCHELF_PATH}
+            git clone -b ${PATCHELF_VERSION} https://github.com/NixOS/patchelf.git
+            cd patchelf
+            ./bootstrap.sh
+            ./configure --prefix=$PATHELF_PATH
+            make -j
+            ${SUDO} make install
+            export PATH=$PATH:$PATCHELF_PATH/bin
+            cd ../
+            rm -rf patchelf
             module load amdclang
             export CLANG_COMPILER=`which clang`
             sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
@@ -275,8 +282,8 @@ else
                                          --clang_path=$ROCM_PATH/llvm/bin/clang \
                                          --rocm_version=60 \
                                          --use_clang=true \
-                                         --bazel_options=--jobs=128 \
                                          --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
+                                         --bazel_options=--jobs=128 \
                                          --bazel_startup_options=--host_jvm_args=-Xmx512m
          else
             echo " JAX version $JAX_VERSION not compatible with ROCm 6.4.0 "
@@ -284,23 +291,29 @@ else
          fi
       else
          if [[ $JAX_VERSION == "5.0" ]]; then
-           if [[ ${SUDO} == "" ]]; then
-              echo "WARNING: need sudo to install patchelf, unless patchelf is installed already the build will likely fail"
-           fi
-           ${SUDO} apt-get update
-           ${SUDO} apt-get install patchelf
-           module load amdclang
-           export CLANG_COMPILER=`which clang`
-           sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
-           python3 build/build.py build --rocm_path=$ROCM_PATH \
-                                        --bazel_options=--override_repository=xla=$XLA_PATH \
-                                        --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
-                                        --clang_path=$ROCM_PATH/llvm/bin/clang \
-                                        --rocm_version=60 \
-                                        --use_clang=true \
-                                        --bazel_options=--jobs=128 \
-                                        --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
-                                        --bazel_startup_options=--host_jvm_args=-Xmx512m
+            PATCHELF_PATH=${JAX_PATH}/patchelf
+            ${SUDO} mkdir -p ${PATCHELF_PATH}
+            git clone -b ${PATCHELF_VERSION} https://github.com/NixOS/patchelf.git
+            cd patchelf
+            ./bootstrap.sh
+            ./configure --prefix=$PATHELF_PATH
+            make -j
+            ${SUDO} make install
+            export PATH=$PATH:$PATCHELF_PATH/bin
+            cd ../
+            rm -rf patchelf
+            module load amdclang
+            export CLANG_COMPILER=`which clang`
+            sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
+            python3 build/build.py build --rocm_path=$ROCM_PATH \
+                                         --bazel_options=--override_repository=xla=$XLA_PATH \
+                                         --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
+                                         --clang_path=$ROCM_PATH/llvm/bin/clang \
+                                         --rocm_version=60 \
+                                         --use_clang=true \
+                                         --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
+                                         --bazel_options=--jobs=128 \
+                                         --bazel_startup_options=--host_jvm_args=-Xmx512m
          else
             # build the wheel for jaxlib using gcc
             python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
