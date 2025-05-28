@@ -164,7 +164,7 @@ else
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   if [ -f ${CACHE_FILES}/jax.tgz ] && [ -f ${CACHE_FILES}/jaxlib.tgz ]; then
+   if [ -f "${CACHE_FILES}/jax.tgz" ] && [ -f "${CACHE_FILES}/jaxlib.tgz" ]; then
       echo ""
       echo "==================================="
       echo " Installing Cached JAXLIB and JAX"
@@ -267,7 +267,7 @@ else
             git clone -b ${PATCHELF_VERSION} https://github.com/NixOS/patchelf.git
             cd patchelf
             ./bootstrap.sh
-            ./configure --prefix=$PATHELF_PATH
+            ./configure --prefix=$PATCHELF_PATH
             make -j
             ${SUDO} make install
             export PATH=$PATH:$PATCHELF_PATH/bin
@@ -296,7 +296,7 @@ else
             git clone -b ${PATCHELF_VERSION} https://github.com/NixOS/patchelf.git
             cd patchelf
             ./bootstrap.sh
-            ./configure --prefix=$PATHELF_PATH
+            ./configure --prefix=$PATCHELF_PATH
             make -j
             ${SUDO} make install
             export PATH=$PATH:$PATCHELF_PATH/bin
