@@ -112,15 +112,17 @@ CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGP
 ARCHIVE_NAME="rocm-afar-${AFAR_NUMBER}-drop-${FLANG_RELEASE_NUMBER}"
 ARCHIVE_DIR="rocm-afar-${FLANG_RELEASE_NUMBER}"
 
+FULL_ARCHIVE_NAME="$ARCHIVE_NAME-$DISTRO"
 if [[ ${DISTRO} == "ubuntu" ]]; then
 # if FLANG_RELEASE_NUMBER is greater than 5.9.9, the awk command will give the FLANG_RELEASE_NUMBER
 # if FLANG_RELEASE_NUMBER is less than or equal to 5.9.9, the awk command result will be blank
    result=`echo $FLANG_RELEASE_NUMBER | awk '$1>5.9.9'` && echo $result
    if [[ ${result} ]]; then
       DISTRO_SHORT="ubu"
+      FULL_ARCHIVE_NAME="$ARCHIVE_NAME-$DISTRO_SHORT"
    fi
 fi
-FULL_ARCHIVE_NAME="$ARCHIVE_NAME-$DISTRO_SHORT"
+
 
 echo ""
 echo "========================================="
