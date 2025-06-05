@@ -130,6 +130,13 @@ if [ -d "$INSTALL_PATH" ]; then
 else
    # if install path does not exist yet, the check on write access will fail
    echo "WARNING: using sudo, make sure you have sudo privileges"
+   if [ "${DISTRO}" == "ubuntu" ]; then
+      sudo apt-get update
+      sudo apt-get install -y libdw-dev
+   else
+      echo " ------ WARNING: your distribution is not ubuntu ------"
+      echo " ------ WARNING: install will fail if libdw is not found ------ "
+   fi
 fi
 
 echo ""
