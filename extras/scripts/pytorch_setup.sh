@@ -495,6 +495,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	prepend_path("PATH","${PYTORCH_PATH}/pytorch/bin")
 	setenv("MIOPEN_USER_DB_PATH","/tmp/$USER/my-miopen-cache")
 	setenv("MIOPEN_CUSTOM_CACHE_DIR","/tmp/$USER/my-miopen-cache")
+        setenv("Torch_DIR","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages")
 EOF
 #        cmd1="mkdir -p $$HOME/miopen_tmpdir; export TMPDIR=$$HOME/miopen_tmpdir"
 #        cmd2="rm -rf $$HOME/miopen_tmpdir; unset TMPDIR"

@@ -171,7 +171,7 @@ else
       cd FTorch
 
       mkdir build && cd build
-      cmake -DCMAKE_INSTALL_PREFIX=$FTORCH_PATH  ..
+      cmake -DCMAKE_INSTALL_PREFIX=$FTORCH_PATH  -DGPU_DEVICE=HIP ..
       make -j
       ${SUDO} make install
 
@@ -211,6 +211,9 @@ else
 
 	load("rocm/${ROCM_VERSION}")
 	load("${PYTORCH_MODULE}")
+        prepend_path("LD_LIBRARY_PATH", pathJoin("${FTORCH_PATH}", "lib"))
+        setenv("FTORCH_HOME","${FTORCH_PATH})
+
 EOF
 
 fi
