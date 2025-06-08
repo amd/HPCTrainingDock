@@ -24,7 +24,7 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
-   echo "  --build-ftorch [ BUILD_CUPY ] default $BUILD_FTORCH "
+   echo "  --build-ftorch [ BUILD_FTORCH ] default $BUILD_FTORCH "
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --pytorch-module [ PYTORCH_MODULE ] default $PYTORCH_MODULE"
    echo "  --install-path [ FTORCH_PATH ] default $FTORCH_PATH"
@@ -70,7 +70,7 @@ do
           ;;
       "--install-path")
           shift
-          CUPY_PATH_INPUT=${1}
+          FTORCH_PATH_INPUT=${1}
           reset-last
           ;;
       "--rocm-version")
