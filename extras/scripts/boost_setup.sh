@@ -129,6 +129,19 @@ else
       echo "============================"
       echo ""
 
+      # don't use sudo if user has write access to install path
+      if [ -d "$INSTALL_PATH" ]; then
+         # don't use sudo if user has write access to install path
+         if [ -w ${INSTALL_PATH} ]; then
+            SUDO=""
+         else
+            echo "WARNING: using an install path that requires sudo"
+         fi
+      else
+         # if install path does not exist yet, the check on write access will fail
+         echo "WARNING: using sudo, make sure you have sudo privileges"
+      fi
+
       ${SUDO} mkdir -p ${INSTALL_PATH}
 
       if [[ "${USER}" != "root" ]]; then
@@ -180,6 +193,7 @@ else
         local base = "${INSTALL_PATH}"
 
         setenv("BOOST_ROOT", base)
+        setenv("BOOST_HOME", base)
         setenv("BOOST_LIBDIR", pathJoin(base, "lib"))
         setenv("BOOST_INCLUDE", pathJoin(base, "include"))
 EOF
