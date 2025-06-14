@@ -6,7 +6,8 @@ SUDO="sudo"
 PYTHON_VERSION="10"
 ROCM_VERSION=6.0
 BUILD_MINICONDA3=0
-MINICONDA3_VERSION="24.9.2"
+MINICONDA3_VERSION="25.3.1"
+MINICONDA3_VERSION_DOWNLOAD=${MINICONDA3_VERSION}-1
 MODULE_PATH=/etc/lmod/modules/LinuxPlus/miniconda3/
 MINICONDA3_PATH=/opt/miniconda3-v${MINICONDA3_VERSION}
 MINICONDA3_PATH_INPUT=""
@@ -132,7 +133,7 @@ else
    fi
 
    if [ "${DISTRO}" = "ubuntu" ] ; then
-      wget -q https://repo.anaconda.com/miniconda/Miniconda3-py3${PYTHON_VERSION}_${MINICONDA3_VERSION}-0-Linux-x86_64.sh -O /tmp/miniconda-installer.sh
+      wget -q https://repo.anaconda.com/miniconda/Miniconda3-py3${PYTHON_VERSION}_${MINICONDA3_VERSION_DOWNLOAD}-Linux-x86_64.sh -O /tmp/miniconda-installer.sh
       chmod +x /tmp/miniconda-installer.sh
       ${SUDO} mkdir -p ${MINICONDA3_PATH}
       ${SUDO} /tmp/miniconda-installer.sh -b -u -p ${MINICONDA3_PATH}

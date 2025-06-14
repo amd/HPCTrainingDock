@@ -5,7 +5,7 @@ ROCM_VERSION=6.0
 BUILD_JAX=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/jax
 AMDGPU_GFXMODEL_INPUT=""
-JAX_VERSION=5.0
+JAX_VERSION=6.0
 JAX_PATH=/opt/rocmplus-${ROCM_VERSION}/jax
 JAX_PATH_INPUT=""
 JAXLIB_PATH=/opt/rocmplus-${ROCM_VERSION}/jaxlib
@@ -261,7 +261,7 @@ else
                                    --build_gpu_plugin --gpu_plugin_rocm_version=60 --build_gpu_kernel_plugin=rocm \
                                    --bazel_options=--jobs=128 \
                                    --bazel_startup_options=--host_jvm_args=-Xmx512m
-         elif [[ $JAX_VERSION == "5.0" ]]; then
+         elif [[ $JAX_VERSION == "5.0" || $JAX_VERSION == "6.0" ]]; then
             PATCHELF_PATH=${JAX_PATH}/patchelf
             ${SUDO} mkdir -p ${PATCHELF_PATH}
             git clone -b ${PATCHELF_VERSION} https://github.com/NixOS/patchelf.git
@@ -290,7 +290,7 @@ else
             compat_info
          fi
       else
-         if [[ $JAX_VERSION == "5.0" ]]; then
+         if [[ $JAX_VERSION == "5.0" || $JAX_VERSION == "6.0" ]]; then
             PATCHELF_PATH=${JAX_PATH}/patchelf
             ${SUDO} mkdir -p ${PATCHELF_PATH}
             git clone -b ${PATCHELF_VERSION} https://github.com/NixOS/patchelf.git
