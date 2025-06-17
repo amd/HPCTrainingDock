@@ -128,14 +128,12 @@ else
       echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
 
-   if [ "${DISTRO}" = "ubuntu" ] ; then
-      # getting Miniforge3 version 24.9.0
-      wget -q "https://github.com/conda-forge/miniforge/releases/download/24.9.0-0/Miniforge3-$(uname)-$(uname -m).sh" -O /tmp/Miniforge3-$(uname)-$(uname -m).sh
-      chmod +x /tmp/Miniforge3-*.sh
-      ${SUDO} mkdir -p ${MINIFORGE3_PATH}
-      ${SUDO} /tmp/Miniforge3-*.sh -b -u -p ${MINIFORGE3_PATH}
-      rm -f /tmp/Miniforge3-*.sh
-   fi
+   # getting Miniforge3 version 24.9.0
+   wget -q "https://github.com/conda-forge/miniforge/releases/download/24.9.0-0/Miniforge3-$(uname)-$(uname -m).sh" -O /tmp/Miniforge3-$(uname)-$(uname -m).sh
+   chmod +x /tmp/Miniforge3-*.sh
+   ${SUDO} mkdir -p ${MINIFORGE3_PATH}
+   ${SUDO} /tmp/Miniforge3-*.sh -b -u -p ${MINIFORGE3_PATH}
+   rm -f /tmp/Miniforge3-*.sh
 
    # Create a module file for miniforge3
    if [ -d "$MODULE_PATH" ]; then

@@ -132,22 +132,20 @@ else
       echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
 
-   if [ "${DISTRO}" = "ubuntu" ] ; then
-      wget -q https://repo.anaconda.com/miniconda/Miniconda3-py3${PYTHON_VERSION}_${MINICONDA3_VERSION_DOWNLOAD}-Linux-x86_64.sh -O /tmp/miniconda-installer.sh
-      chmod +x /tmp/miniconda-installer.sh
-      ${SUDO} mkdir -p ${MINICONDA3_PATH}
-      ${SUDO} /tmp/miniconda-installer.sh -b -u -p ${MINICONDA3_PATH}
-      export PATH="${MINICONDA3_PATH}/bin:${PATH}"
-      conda config --set always_yes yes --set changeps1 no
-      # conda update -c defaults -n base conda
-      ${SUDO} mkdir -p ${MINICONDA3_PATH}/envs/py3.${PYTHON_VERSION}
-      ${SUDO} chown -R ${USER}:${USER} ${MINICONDA3_PATH}/*
-      conda create -p ${MINICONDA3_PATH}/envs/py3.${PYTHON_VERSION} -c defaults -c conda-forge python=3.${PYTHON_VERSION} pip
-      ${MINICONDA3_PATH}/envs/py3.${PYTHON_VERSION}/bin/python -m pip install numpy perfetto dataclasses
-      conda clean -a -y
-      ${SUDO} chown -R root:root ${MINICONDA3_PATH}/*
-      rm -f /tmp/miniconda-installer.sh
-   fi
+   wget -q https://repo.anaconda.com/miniconda/Miniconda3-py3${PYTHON_VERSION}_${MINICONDA3_VERSION_DOWNLOAD}-$(uname)-$(uname -m).sh -O /tmp/miniconda-installer.sh
+   chmod +x /tmp/miniconda-installer.sh
+   ${SUDO} mkdir -p ${MINICONDA3_PATH}
+   ${SUDO} /tmp/miniconda-installer.sh -b -u -p ${MINICONDA3_PATH}
+   export PATH="${MINICONDA3_PATH}/bin:${PATH}"
+   conda config --set always_yes yes --set changeps1 no
+   # conda update -c defaults -n base conda
+   ${SUDO} mkdir -p ${MINICONDA3_PATH}/envs/py3.${PYTHON_VERSION}
+   ${SUDO} chown -R ${USER}:${USER} ${MINICONDA3_PATH}/*
+   conda create -p ${MINICONDA3_PATH}/envs/py3.${PYTHON_VERSION} -c defaults -c conda-forge python=3.${PYTHON_VERSION} pip
+   ${MINICONDA3_PATH}/envs/py3.${PYTHON_VERSION}/bin/python -m pip install numpy perfetto dataclasses
+   conda clean -a -y
+   ${SUDO} chown -R root:root ${MINICONDA3_PATH}/*
+   rm -f /tmp/miniconda-installer.sh
 
    # Create a module file for miniconda3
    if [ -d "$MODULE_PATH" ]; then

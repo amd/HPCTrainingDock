@@ -145,10 +145,8 @@ else
    PYTORCH_SHORT_VERSION=`echo ${PYTORCH_VERSION} | cut -f1-2 -d'.'`
    if [ "${PYTORCH_SHORT_VERSION}" == "2.7" ]; then
       AOTRITON_VERSION="0.9.2b"
-      ${SUDO} ${DEB_FRONTEND} apt-get install -y liblzma-dev
    elif [ "${PYTORCH_SHORT_VERSION}" == "2.6" ]; then
       AOTRITON_VERSION="0.8b"
-      ${SUDO} ${DEB_FRONTEND} apt-get install -y liblzma-dev
    elif [ "${PYTORCH_SHORT_VERSION}" == "2.5" ]; then
       AOTRITON_VERSION="0.7b"
    elif [ "${PYTORCH_SHORT_VERSION}" == "2.4" ]; then
@@ -267,7 +265,7 @@ else
 
       if [[ ${SUDO} != "" ]]; then
          ${SUDO} apt-get update
-         ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
+         ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3 liblzma-dev
          module load ${MPI_MODULE}
          if [[ `which mpicc | wc -l` -eq 0 ]]; then
             ${SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
