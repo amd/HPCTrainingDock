@@ -30,6 +30,7 @@
 : ${BUILD_HYPRE:="0"}
 : ${BUILD_NETCDF:="0"}
 : ${BUILD_ADIOS2:="0"}
+: ${BUILD_FTORCH:="0"}
 : ${BUILD_X11VNC:="0"}
 : ${BUILD_FLANGNEW:="0"}
 : ${BUILD_OLLAMA:="1"}
@@ -119,27 +120,27 @@ usage()
     print_default_option build-llvm-latest "[BUILD_LLVM_LATEST: 0 or 1]"  "build the latest version of LLVM for offloading" "${BUILD_LLVM_LATEST} (false)"
     print_default_option build-gcc-latest "[BUILD_GCC_LATEST: 0 or 1]"  "build the latest version of gcc with offloading" "${BUILD_GCC_LATEST} (false)"
     print_default_option build-clacc-latest "[BUILD_CLACC_LATEST: 0 or 1]"  "build the latest version of clacc with offloading" "${BUILD_CLACC_LATEST} (false)"
-    print_default_option build-pytorch "[BUILD_PYTORCH: 0 or 1]"  "build version 2.6  of PyTorch" "${BUILD_PYTORCH} (false)"
-    print_default_option build-miniconda3 "[BUILD_MINICONDA3: 0 or 1]" "build version 24.9.2 of Miniconda3" "${BUILD_MINICONDA3} (false)"
+    print_default_option build-pytorch "[BUILD_PYTORCH: 0 or 1]"  "build version 2.7.1  of PyTorch" "${BUILD_PYTORCH} (false)"
+    print_default_option build-miniconda3 "[BUILD_MINICONDA3: 0 or 1]" "build version 25.3.1 of Miniconda3" "${BUILD_MINICONDA3} (false)"
     print_default_option build-miniforge3 "[BUILD_MINIFORGE3: 0 or 1]" "build version 24.9.0 of Miniforge3" "${BUILD_MINIFORGE3} (false)"
-    print_default_option build-hdf5 "[BUILD_HDF5: 0 or 1]" "build version 1.14.5 of HDF5" "${BUILD_HDF5} (false)"
-    print_default_option build-netcdf "[BUILD_NETCDF: 0 or 1]" "build version 4.9.3-rc1 of netcdf-c and 4.6.2-rc1 of netcdf-fortran" "${BUILD_NETCDF} (false)"
+    print_default_option build-hdf5 "[BUILD_HDF5: 0 or 1]" "build version 1.14.6 of HDF5" "${BUILD_HDF5} (false)"
+    print_default_option build-netcdf "[BUILD_NETCDF: 0 or 1]" "build version 4.9.3 of netcdf-c and 4.6.2 of netcdf-fortran" "${BUILD_NETCDF} (false)"
     print_default_option build-adios2 "[BUILD_ADIOS2: 0 or 1]" "build version 2.10.1" "${BUILD_ADIOS2} (false)"
+    print_default_option build-ftorch "[BUILD_FTORCH: 0 or 1]" "build version dev" "${BUILD_FTORCH} (false)"
     print_default_option build-hipfort "[BUILD_HIPFORT: 0 or 1]" "build version 6.3.2 of Hipfort" "${BUILD_HIPFORT} (false)"
     print_default_option build-cupy "[BUILD_CUPY: 0 or 1]" "build version 14.0.0a1 of CuPy" "${BUILD_CUPY} (false)"
     print_default_option build-tensorflow "[BUILD_TENSORFLOW: 0 or 1]" "build branch merge-250318 of TensorFlow" "${BUILD_TENSORFLOW} (false)"
-    print_default_option build-jax "[BUILD_JAX: 0 or 1]" "build version 0.5.0 of JAX" "${BUILD_JAX} (false)"
+    print_default_option build-jax "[BUILD_JAX: 0 or 1]" "build version 0.6.0 of JAX" "${BUILD_JAX} (false)"
     print_default_option build-kokkos "[BUILD_KOKKOS: 0 or 1]"  "build version 4.5.01 of Kokkos" "${BUILD_KOKKOS} (false)"
     print_default_option build-hpctoolkit "[BUILD_HPCTOOLKIT: 0 or 1]"  "build the 2024.11.27dev version of HPCToolkit" "${BUILD_HPCTOOLKIT} (false)"
     print_default_option build-tau "[BUILD_TAU: 0 or 1]"  "build the development version of TAU" "${BUILD_TAU} (false)"
-    print_default_option build-scorep "[BUILD_SCOREP: 0 or 1]" "build version 9.0-dev of Score-P" "${BUILD_SCOREP} (false)"
+    print_default_option build-scorep "[BUILD_SCOREP: 0 or 1]" "build version 9.0 of Score-P" "${BUILD_SCOREP} (false)"
     print_default_option build-x11vnc "[BUILD_X11VNC: 0 or 1]" "enable x11 screen forwarding in the container" "${BUILD_X11VNC} (false)"
-    print_default_option build-petsc "[BUILD_PETSC: 0 or 1]" "build version 3.23.0 of petsc" "${BUILD_PETSC} (false)"
+    print_default_option build-petsc "[BUILD_PETSC: 0 or 1]" "build version 3.23.1 of petsc" "${BUILD_PETSC} (false)"
     print_default_option build-hypre "[BUILD_HYPRE: 0 or 1]" "build version 2.33 of hypre" "${BUILD_HYPRE} (false)"
     print_default_option build-mpi4py "[BUILD_MPI4PY: 0 or 1]" "build version 4.0.1 of mpi4py" "${BUILD_MPI4PY} (false)"
-    print_default_option build-hipfort "[BUILD_HIPFORT: 0 or 1]" "build version 6.3.2 of hipfort" "${BUILD_HIPFORT} (false)"
     print_default_option build-fftw "[BUILD_FFTW: 0 or 1]" "build version 3.3.10 of fftw" "${BUILD_FFTW} (false)"
-    print_default_option build-flang-new "[BUILD_FLANGNEW: 0 or 1]" "unpack rocm-afar-6711-drop-5.1.0" "${BUILD_FLANGNEW} (false)"
+    print_default_option build-flang-new "[BUILD_FLANGNEW: 0 or 1]" "unpack rocm-afar-7992-drop-6.2.0" "${BUILD_FLANGNEW} (false)"
     print_default_option install-grafana "[INSTALL_GRAFANA: 0 or 1]" "install Grafana" "${INSTALL_GRAFANA} (false)"
     print_default_option build-all-latest "[BUILD_ALL_LATEST: 0 or 1]" "build all the additional libraries that need a flag to be built except LLVM latest, GCC latest and CLACC latest" "${BUILD_ALL_LATEST} (false)"
     print_default_option use_cached-apps "[USE_CACHED_APPS: 0 or 1]" "use pre-built gcc and aomp located in CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} directory" "${USE_CACHED_APPS} (false)"
@@ -335,6 +336,10 @@ do
             BUILD_HIPFORT="1"
             reset-last
             ;;
+        "--build-ftorch")
+            BUILD_FTORCH="1"
+            reset-last
+            ;;
         "--install-grafana")
             INSTALL_GRAFANA="1"
             reset-last
@@ -365,6 +370,7 @@ do
 	    BUILD_X11VNC="1"
 	    BUILD_FLANGNEW="1"
 	    BUILD_HIPFORT="1"
+	    BUILD_FTORCH="1"
 	    INSTALL_ROCPROF_SYS_FROM_SOURCE="1"
             INSTALL_ROCPROF_COMPUTE_FROM_SOURCE="1"
             reset-last
@@ -462,6 +468,10 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
 	    echo "Setting HIPFORT build"
             BUILD_HIPFORT=1
 	    ;;
+         "ftorch")
+	    echo "Setting FTORCH build"
+            BUILD_FTORCH=1
+	    ;;
          "gcc_latest")
 	    echo "Setting GCC_LATEST build"
             BUILD_GCC_LATEST=1
@@ -539,6 +549,7 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             BUILD_X11VNC="1"
             BUILD_FLANGNEW="1"
             BUILD_HIPFORT="1"
+            BUILD_FTORCH="1"
 	    INSTALL_ROCPROF_SYS_FROM_SOURCE="1"
             INSTALL_ROCPROF_COMPUTE_FROM_SOURCE="1"
 	    ;;
@@ -668,6 +679,7 @@ do
        --build-arg BUILD_OLLAMA=${BUILD_OLLAMA} \
        --build-arg HIPIFLY_MODULE=${HIPIFLY_MODULE} \
        --build-arg BUILD_HIPFORT=${BUILD_HIPFORT} \
+       --build-arg BUILD_FTORCH=${BUILD_FTORCH} \
        --build-arg BUILD_DATE=$(date +'%Y-%m-%dT%H:%M:%SZ') \
        --build-arg OG_BUILD_DATE=$(date -u +'%y-%m-%d') \
        --build-arg BUILD_VERSION=1.1 \

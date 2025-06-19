@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
-all: rocm openmpi rocprof-sys_rocm rocprof-sys_source rocprof-compute_rocm rocprof-compute_source kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk compiler petsc hypre tensorflow
-.PHONY: baseospackages rocm openmpi mvapich slurm rocprof-sys_rocm rocprof-sys_source amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk rocprof-compute_rocm rocprof-compute_source compiler petsc hypre tensorflow
+all: rocm openmpi rocprof-sys_rocm rocprof-sys_source rocprof-compute_rocm rocprof-compute_source kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk compiler petsc hypre tensorflow ftorch
+.PHONY: baseospackages rocm openmpi mvapich slurm rocprof-sys_rocm rocprof-sys_source amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk rocprof-compute_rocm rocprof-compute_source compiler petsc hypre tensorflow ftorch
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
@@ -32,6 +32,7 @@ cupy: cupy.timestamp
 pytorch: pytorch.timestamp
 petsc: petsc.timestamp
 tensorflow: tensorflow.timestamp
+ftorch: ftorch.timestamp
 hypre: hypre.timestamp
 x11vnc: x11vnc.timestamp
 jax: jax.timestamp
@@ -67,6 +68,7 @@ pytorch_tests: pytorch_tests.timestamp
 petsc_tests: petsc_tests.timestamp
 fftw_tests: fftw_tests.timestamp
 tensorflow_tests: tensorflow_tests.timestamp
+ftorch_tests: ftorch_tests.timestamp
 hypre_tests: hypre_tests.timestamp
 jax_tests: jax_tests.timestamp
 
@@ -265,12 +267,12 @@ hypre.timestamp: rocm.timestamp openmpi.timestamp
 	   --build-hypre 1
 	touch hypre.timestamp
 
-tensorflow.timestamp: rocm.timestamp
-	extras/scripts/tensorflow_setup.sh \
+ftorch.timestamp: rocm.timestamp
+	extras/scripts/ftorch_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
-	   --build-tensorflow 1
-	touch tensorflow.timestamp
+	   --build-ftorch 1
+	touch ftorch.timestamp
 
 jax.timestamp: rocm.timestamp
 	extras/scripts/jax_setup.sh \
@@ -424,6 +426,10 @@ petsc_tests.timestamp: petsc.timestamp HPCTrainingExamples
 tensorflow_tests.timestamp: tensorflow.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R TensorFlow
 	touch tensorflow_tests.timestamp
+
+ftorch_tests.timestamp: ftorch.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R FTorch
+	touch ftorch_tests.timestamp
 
 hypre_tests.timestamp: hypre.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R HYPRE
