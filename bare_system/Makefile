@@ -267,7 +267,7 @@ hypre.timestamp: rocm.timestamp openmpi.timestamp
 	   --build-hypre 1
 	touch hypre.timestamp
 
-ftorch.timestamp: rocm.timestamp
+ftorch.timestamp: rocm.timestamp pytorch.timestamp
 	extras/scripts/ftorch_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
