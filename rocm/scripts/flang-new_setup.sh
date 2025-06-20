@@ -116,8 +116,7 @@ FULL_ARCHIVE_NAME="$ARCHIVE_NAME-$DISTRO"
 if [[ ${DISTRO} == "ubuntu" ]]; then
 # if FLANG_RELEASE_NUMBER is greater than 5.9.9, the awk command will give the FLANG_RELEASE_NUMBER
 # if FLANG_RELEASE_NUMBER is less than or equal to 5.9.9, the awk command result will be blank
-   result=`echo $FLANG_RELEASE_NUMBER | awk '$1>5.9.9'` && echo $result
-   if [[ ${result} ]]; then
+   if [[ ${FLANG_RELEASE_NUMBER}=="6.0.0" || ${FLANG_RELEASE_NUMBER}=="6.1.0" ]]; then
       DISTRO_SHORT="ubu"
       FULL_ARCHIVE_NAME="$ARCHIVE_NAME-$DISTRO_SHORT"
    fi
