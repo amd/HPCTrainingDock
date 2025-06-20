@@ -322,9 +322,10 @@ if [ "${DISTRO}" == "ubuntu" ]; then
 	 else
             # removing asan to reduce image size
             #amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk,asan --no-dkms
-            amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,,rocmdevtools,lrt,openclsdk,openmpsdk,mlsdk --no-dkms
+            amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,rocmdevtools,lrt,openclsdk,openmpsdk,mlsdk --no-dkms
             #${SUDO} apt-get install rocm_bandwidth_test
 	 fi
+         ${SUDO} apt-get install rocm-llvm-dev
       else # ROCM_VERSION < 6.2
          amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms
       fi
