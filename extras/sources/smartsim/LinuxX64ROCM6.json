@@ -1,0 +1,32 @@
+{
+    "platform": {
+        "operating_system":"linux",
+        "architecture":"x86_64",
+        "device":"rocm-6"
+    },
+    "ml_packages": [
+        {
+            "name": "dlpack",
+            "version": "v0.5_RAI",
+            "pip_index": "",
+            "python_packages": [],
+            "lib_source": "https://github.com/RedisAI/dlpack.git"
+        },
+        {
+            "name": "libtorch",
+            "version": "${PYTORCH_VERSION}",
+            "pip_index": "https://download.pytorch.org/whl/rocm6.3",
+            "python_packages": [
+            ],
+            "lib_source": "${Torch_DIR}/torch/lib",
+            "rai_patches": [
+                {
+                    "description": "Patch RedisAI module to require C++17 standard instead of C++14",
+                    "source_file": "src/backends/libtorch_c/CMakeLists.txt",
+                    "regex": "set_property\\(TARGET\\storch_c\\sPROPERTY\\sCXX_STANDARD\\s(98|11|14)\\)",
+                    "replacement": "set_property(TARGET torch_c PROPERTY CXX_STANDARD 17)"
+                }
+           ]
+        }
+    ]
+}
