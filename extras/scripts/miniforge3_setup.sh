@@ -4,10 +4,11 @@ DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | t
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 SUDO="sudo"
 PYTHON_VERSION="10"
-ROCM_VERSION=6.0
 BUILD_MINIFORGE3=0
 MODULE_PATH=/etc/lmod/modules/LinuxPlus/miniforge3/
-MINIFORGE3_PATH=/opt/miniforge3
+MINIFORGE3_VERSION="24.9.0"
+MINIFORGE3_VERSION_DOWNLOAD=${MINIFORGE3_VERSION}-0
+MINIFORGE3_PATH=/opt/miniforge3-v${MINIFORGE3_VERSION}
 MINIFORGE3_PATH_INPUT=""
 
 
@@ -19,9 +20,9 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
-   echo "  --rocm-version [ ROCM_VERSION ], default $ROCM_VERSION"
    echo "  --python-version [ PYTHON_VERSION ], python3 minor release, default $PYTHON_VERSION"
    echo "  --build-miniforge3 [ BUILD_MINIFORGE3 ], installs Miniforge3, default $BUILD_MINIFORGE3"
+   echo "  --miniforge3-version [ MINIFORGE3_VERSION ], Miniforge3 version, default $MINIFORGE3_VERSION"
    echo "  --install-path [ MINIFORGE3_PATH_INPUT ], default is $MINIFORGE3_PATH "
    echo "  --module-path [ MODULE_PATH ], default is $MODULE_PATH "
    echo "  --help: print this usage information"
@@ -44,9 +45,9 @@ n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
-      "--rocm-version")
+      "--miniforge3-version")
           shift
-          ROCM_VERSION=${1}
+          MINIFORGE3_VERSION=${1}
 	  reset-last
           ;;
        "--build-miniforge3")
@@ -93,7 +94,7 @@ fi
 echo ""
 echo "============================"
 echo " Installing Miniforge3 with:"
-echo "ROCM_VERSION is $ROCM_VERSION"
+echo "MINIFORGE3_VERSION is $MINIFORGE3_VERSION"
 echo "PYTHON_VERSION (python3 minor release) is $PYTHON_VERSION"
 echo "BUILD_MINIFORGE3 is $BUILD_MINIFORGE3"
 echo "Installing in: $MINIFORGE3_PATH"
@@ -129,7 +130,7 @@ else
    fi
 
    # getting Miniforge3 version 24.9.0
-   wget -q "https://github.com/conda-forge/miniforge/releases/download/24.9.0-0/Miniforge3-$(uname)-$(uname -m).sh" -O /tmp/Miniforge3-$(uname)-$(uname -m).sh
+   wget -q "https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE3_VERSION_DOWNLOAD}/Miniforge3-$(uname)-$(uname -m).sh" -O /tmp/Miniforge3-$(uname)-$(uname -m).sh
    chmod +x /tmp/Miniforge3-*.sh
    ${SUDO} mkdir -p ${MINIFORGE3_PATH}
    ${SUDO} /tmp/Miniforge3-*.sh -b -u -p ${MINIFORGE3_PATH}

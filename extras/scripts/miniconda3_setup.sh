@@ -4,7 +4,6 @@ DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | t
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 SUDO="sudo"
 PYTHON_VERSION="10"
-ROCM_VERSION=6.0
 BUILD_MINICONDA3=0
 MINICONDA3_VERSION="25.3.1"
 MINICONDA3_VERSION_DOWNLOAD=${MINICONDA3_VERSION}-1
@@ -22,9 +21,9 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
-   echo "  --rocm-version [ ROCM_VERSION ], default $ROCM_VERSION"
    echo "  --python-version [ PYTHON_VERSION ], python3 minor release, default $PYTHON_VERSION"
    echo "  --build-miniconda3 [BUILD_MINICONDA3], installs Miniconda3, default $BUILD_MINICONDA3"
+   echo "  --miniconda3-version [MINICONDA3_VERSION], Miniconda3 version, default $MINICONDA3_VERSION"
    echo "  --install-path [ MINICONDA3_PATH_INPUT ], default is $MINICONDA3_PATH "
    echo "  --module-path [ MODULE_PATH ], default is $MODULE_PATH "
    echo "  --help: print this usage information"
@@ -47,11 +46,6 @@ n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
-      "--rocm-version")
-          shift
-          ROCM_VERSION=${1}
-          reset-last
-          ;;
        "--build-miniconda3")
           shift
           BUILD_MINICONDA3=${1}
@@ -68,6 +62,11 @@ do
        "--module-path")
           shift
           MODULE_PATH=${1}
+          reset-last
+          ;;
+       "--miniconda3-version")
+          shift
+          MINICONDA3_VERSION=${1}
           reset-last
           ;;
       "--python-version")
@@ -96,7 +95,7 @@ fi
 echo ""
 echo "============================"
 echo " Installing Miniconda3 with:"
-echo "ROCM_VERSION is $ROCM_VERSION"
+echo "MINICONDA3_VERSION is $MINICONDA3_VERSION"
 echo "PYTHON_VERSION (python 3 minor release) is $PYTHON_VERSION"
 echo "BUILD_MINICONDA3 is $BUILD_MINICONDA3"
 echo "Installing in: $MINICONDA3_PATH"
