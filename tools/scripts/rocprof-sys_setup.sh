@@ -205,7 +205,6 @@ if [ "${INSTALL_ROCPROF_SYS_FROM_SOURCE}" = "1" ] ; then
       source /etc/profile.d/z01_lmod.sh
       module load rocm/${ROCM_VERSION}
       module load ${MPI_MODULE}
-      module load rocm/${ROCM_VERSION}
    
       CPU_TYPE=zen3
       if [ "${AMDGFX_GFXMODEL}" = "gfx1030" ]; then

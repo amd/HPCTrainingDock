@@ -99,6 +99,7 @@ source /etc/profile.d/lmod.sh
 source /etc/profile.d/z01_lmod.sh
 module load rocm/${ROCM_VERSION}
 module load amdflang-new
+module load pytorch
 
 echo ""
 echo "==================================="
@@ -204,6 +205,7 @@ else
       rm -rf smartsim
       module unload rocm/${ROCM_VERSION}
       module unload amdflang-new
+      module unload pytorch
    fi
 
    # Create a module file for smartsim
