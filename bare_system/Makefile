@@ -275,7 +275,7 @@ julia.timestamp: rocm.timestamp
 	   --build-julia 1
 	touch julia.timestamp
 
-smartsim.timestamp: rocm.timestamp flang-new.timestamp
+smartsim.timestamp: rocm.timestamp flang-new.timestamp pytorch.timestamp
 	extras/scripts/smartsim_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --build-smartsim 1

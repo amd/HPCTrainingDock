@@ -114,7 +114,7 @@ else
       fi
 
       ${SUDO} mkdir -p ${HIPIFLY_PATH}
-      wget https://github.com/amd/HPCTrainingDock/blob/main/extras/sources/hipifly/hipifly.h
+      wget https://raw.githubusercontent.com/amd/HPCTrainingDock/main/extras/sources/hipifly/hipifly.h
       ${SUDO} cp ./hipifly.h ${HIPIFLY_PATH}
       rm ./hipifly.h
 

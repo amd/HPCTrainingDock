@@ -568,18 +568,18 @@ prepend_path("PYTHONPATH","/opt/rocmplus-6.2.1/cupy")
 
 # 4. Adding Your Own Modules
 
-As a simple example, below we show how to install `Julia` as a module within the container.
+As a simple example, below we show how to install `Julia` as a module in your home directory within the container.
 First, install the Julia installation manager Juliaup:
 
 ```bash
-curl -fsSL https://install.julialang.org | sh
+curl -fsSL https://install.julialang.org | sh -s -- --yes --add-to-path=no -p=$HOME/julia_install
 exit
 ```
-
-Then, update your `.bashrc`:
+Specifying the `-p` flag above, will select the location of the Julia binaries.
+Then, add the Julia binaries `juliaup` and `julia` to your path:
 
 ```bash
-source ~/.bashrc
+export PATH=$PATH:$HOME/julia_install/bin
 ```
 
 To see what versions of `Julia` can be installed do:
@@ -588,38 +588,59 @@ To see what versions of `Julia` can be installed do:
 juliaup list
 ```
 
-Once you selected the version you want (let's assume it's 1.10), you can install it by doing:
+Once you selected the version you want (let's assume it's 1.12), you can install it by doing:
 
 ```bash
-juliaup add 1.10
+juliaup add 1.12
 ```
 
-The package will be installed in `$HOME/.julia/juliaup/julia-1.10.3+0.x64.linux.gnu` (or later minor version, please check).
-
-Next, `cd` into a directory where you have write access, let's call it `MODULE_PATH` and create a folder for `Julia`:
+The package will be installed in `$HOME/.julia/juliaup`. Then, set it is a default with
 
 ```bash
-mkdir $MODULE_PATH/Julia
+juliaup default 1.12
+```
+You can type `juliaup status` to check that it has indeed been set as default. You will also see all the Julia versions currently installed.
+To create a module for Julia, create a directory where you have write access, say:
+
+```bash
+mkdir -p $HOME/modules
 ```
 
-Go in the folder just created and create a modulefile (here called `julia.1.10.lua`) with this content (replace `<admin>` with your admin username):
+Next, add `modules` to the `MODULE_PATH` environment variable by doing: 
 
 ```bash
-whatis("Julia Version 1.10")
-append_path("PATH", "/home/<admin>/.julia/juliaup/julia-1.10.3+0.x64.linux.gnu/bin")
+module use --append $HOME/modules
 ```
 
-Finally, add the new modulefile location to `MODULEPATH` (needs to be repeated every time you exit the container):
+Next, do:
+
+```
+cd $HOME/modules
+mkdir julia
+cd julia
+touch 1.12.lua
+vi 1.12.lua
+```
+
+Copy paste the lines below in `1.11.5.lua` and save:
 
 ```bash
-module use --append $MODULE_PATH/Julia
+whatis("Julia Version 1.12")
+append_path("PATH", "$HOME/julia_install/bin")
 ```
 
 Now, `module avail` will show this additional module:
 
 ```bash
--------------------------------------------------------------------------------- $MODULE_PATH/Julia --------------------------------------------------------------------------------
-   julia.1.10
+-------------------------------------------------------------------------------- $HOME/modules --------------------------------------------------------------------------------
+   julia/1.12
+```
+
+To install the `AMDGPU` package to enable running on AMD GPUs, do:
+
+```
+module load julia
+julia -e 'using Pkg; Pkg.add("AMDGPU")'
 ```
 
 # 5. Testing the Installation

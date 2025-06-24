@@ -185,7 +185,7 @@ else
       pip3 install --target=$SMART_SIM_PATH .
       export PATH=$PATH:$SMART_SIM_PATH/bin
       export PYTHONPATH=$PYTHONPATH:$SMART_SIM_PATH
-      wget https://github.com/amd/HPCTrainingDock/blob/main/extras/sources/smartsim/LinuxX64ROCM6.json
+      wget https://raw.githubusercontent.com/amd/HPCTrainingDock/main/extras/sources/smartsim/LinuxX64ROCM6.json 
       sed -i 's/${PYTORCH_VERSION}/'${PYTORCH_VERSION}'/g' LinuxX64ROCM6.json
       sed -i 's|${Torch_DIR}|'${Torch_DIR}'|g' LinuxX64ROCM6.json
       PWD=`pwd`
