@@ -230,7 +230,6 @@ hipfort.timestamp: rocm.timestamp
 hipifly.timestamp: rocm.timestamp
 	extras/scripts/hipifly_setup.sh \
            --rocm-version ${ROCM_VERSION} \
-	   --hipifly-header-path extras/sources/hipifly \
            --hipifly-module 1
 	touch hipifly.timestamp
 
