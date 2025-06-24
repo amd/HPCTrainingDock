@@ -205,6 +205,7 @@ if [ "${INSTALL_ROCPROF_SYS_FROM_SOURCE}" = "1" ] ; then
       source /etc/profile.d/z01_lmod.sh
       module load rocm/${ROCM_VERSION}
       module load ${MPI_MODULE}
+      module load rocm/${ROCM_VERSION}
    
       CPU_TYPE=zen3
       if [ "${AMDGFX_GFXMODEL}" = "gfx1030" ]; then
@@ -238,6 +239,7 @@ if [ "${INSTALL_ROCPROF_SYS_FROM_SOURCE}" = "1" ] ; then
              -D DYNINST_BUILD_ELFUTILS=ON            \
              -D DYNINST_BUILD_LIBIBERTY=ON           \
              -D AMDGPU_TARGETS="${AMDGPU_GFXMODEL}"  \
+             -D GPU_TARGETS="${AMDGPU_GFXMODEL}"  \
              -D CpuArch_TARGET=${CPU_TYPE} \
              -D ${TOOL_CONFIG}_DEFAULT_ROCM_PATH=${ROCM_PATH} \
              -D ${TOOL_CONFIG}_USE_COMPILE_TIMING=ON \

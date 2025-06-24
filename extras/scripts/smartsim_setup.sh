@@ -173,8 +173,8 @@ else
       ${SUDO} make install
       cd ..
 
-      export PATH=$PATH/$SMART_REDIS_PATH/bin
-      export PYTHONPATH=$PYTHONPATH/$SMART_REDIS_PATH
+      export PATH=$PATH:"$SMART_REDIS_PATH/bin"
+      export PYTHONPATH=$PYTHONPATH:$SMART_REDIS_PATH
 
       pip3 install --target=$SMART_REDIS_PATH .
 
@@ -183,7 +183,7 @@ else
       git clone https://github.com/CrayLabs/SmartSim.git
       cd SmartSim
       pip3 install --target=$SMART_SIM_PATH .
-      export PATH=$PATH:$SMART_SIM_PATH/bin
+      export PATH=$PATH:"$SMART_SIM_PATH/bin"
       export PYTHONPATH=$PYTHONPATH:$SMART_SIM_PATH
       wget https://raw.githubusercontent.com/amd/HPCTrainingDock/main/extras/sources/smartsim/LinuxX64ROCM6.json 
       sed -i 's/${PYTORCH_VERSION}/'${PYTORCH_VERSION}'/g' LinuxX64ROCM6.json
