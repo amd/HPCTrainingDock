@@ -5,7 +5,6 @@ ROCM_VERSION=6.0
 BUILD_SMARTSIM=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/smartsim
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-SMART_SIM_JSON_PATH=`pwd`
 CRAYLABS_PATH=/opt/rocmplus-${ROCM_VERSION}/cray-labs
 CRAYLABS_PATH_INPUT=""
 
@@ -24,7 +23,7 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
-   echo "  --build-smarstim [ BUILD_SMARTSIM ] default $BUILD_SMARTSIM "
+   echo "  --build-smartsim [ BUILD_SMARTSIM ] default $BUILD_SMARTSIM "
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --install-path [ CRAYLABS_PATH ] default $CRAYLABS_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
@@ -54,7 +53,7 @@ do
           AMDGPU_GFXMODEL=${1}
 	  reset-last
           ;;
-      "--build-smarstim")
+      "--build-smartsim")
           shift
           BUILD_SMARTSIM=${1}
 	  reset-last
@@ -123,7 +122,7 @@ else
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   if [ -f ${CACHE_FILES}/smarstim.tgz ]; then
+   if [ -f ${CACHE_FILES}/smartsim.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached SmartSim"
@@ -131,11 +130,11 @@ else
       echo ""
 
       #install the cached version
-      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/smarstim
+      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/smartsim
       cd /opt/rocmplus-${ROCM_VERSION}
-      ${SUDO} tar -xzpf ${CACHE_FILES}/smarstim.tgz
+      ${SUDO} tar -xzpf ${CACHE_FILES}/smartsim.tgz
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm ${CACHE_FILES}/smarstim.tgz
+         ${SUDO} rm ${CACHE_FILES}/smartsim.tgz
       fi
    else
       echo ""
@@ -184,9 +183,9 @@ else
       git clone https://github.com/CrayLabs/SmartSim.git
       cd SmartSim
       pip3 install --target=$SMART_SIM_PATH .
-      export PATH=$PATH/$SMART_SIM_PATH/bin
-      export PYTHONPATH=$PYTHONPATH/$SMART_SIM_PATH
-      cp ${SMART_SIM_JSON_PATH}/LinuxX64ROCM6.json .
+      export PATH=$PATH:$SMART_SIM_PATH/bin
+      export PYTHONPATH=$PYTHONPATH:$SMART_SIM_PATH
+      wget https://github.com/amd/HPCTrainingDock/blob/main/extras/sources/smartsim/LinuxX64ROCM6.json
       sed -i 's/${PYTORCH_VERSION}/'${PYTORCH_VERSION}'/g' LinuxX64ROCM6.json
       sed -i 's|${Torch_DIR}|'${Torch_DIR}'|g' LinuxX64ROCM6.json
       PWD=`pwd`
@@ -202,12 +201,12 @@ else
 
       # cleanup
       cd ..
-      rm -rf smarstim
+      rm -rf smartsim
       module unload rocm/${ROCM_VERSION}
       module unload amdflang-new
    fi
 
-   # Create a module file for smarstim
+   # Create a module file for smartsim
    if [ -d "$MODULE_PATH" ]; then
       # use sudo if user does not have write access to module path
       if [ ! -w ${MODULE_PATH} ]; then

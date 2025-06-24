@@ -4,8 +4,8 @@
 MODULE_PATH=/etc/lmod/modules/LinuxPlus/julia
 BUILD_JULIA=0
 JULIA_VERSION="1.12"
-JULIA_PATH=/opt/julia-v${JULIA_VERSION}
-JULIA_PATH_INPUT=""
+JULIA_PARENT_DIR=/opt/
+JULIA_PARENT_DIR_INPUT=""
 
 SUDO="sudo"
 
@@ -18,7 +18,7 @@ usage()
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
-   echo "  --install-path [ JULIA_PATH ] default $JULIA_PATH"
+   echo "  --parent-dir [ JULIA_PARENT_DIR ] Julia will be installed in ${JULIA_PARENT_DIR}/julia-v${JULIA_VERSION}"
    echo "  --build-julia [ BUILD_JULIA ], set to 1 to build Julia, default is 0"
    echo "  --help: print this usage information"
    exit 1
@@ -53,9 +53,9 @@ do
           MODULE_PATH=${1}
           reset-last
           ;;
-      "--install-path")
+      "--parent-dir")
           shift
-          JULIA_PATH_INPUT=${1}
+          JULIA_PARENT_DIR=${1}
           reset-last
           ;;
       "--*")
@@ -69,11 +69,8 @@ do
    shift
 done
 
-if [ "${JULIA_PATH_INPUT}" != "" ]; then
-   JULIA_PATH=${JULIA_PATH_INPUT}
-else
-   # override path in case JULIA_VERSION has been supplied as input
-   JULIA_PATH=/opt/julia-v${JULIA_VERSION}
+if [ "${JULIA_PARENT_DIR_INPUT}" != "" ]; then
+   JULIA_PARENT_DIR=${JULIA_PARENT_DIR_INPUT}
 fi
 
 echo ""
@@ -81,7 +78,7 @@ echo "==================================="
 echo "Starting Julia Install with"
 echo "JULIA_VERSION: $JULIA_VERSION"
 echo "BUILD_JULIA: $BUILD_JULIA"
-echo "JULIA_PATH:  $JULIA_PATH"
+echo "JULIA_PARENT_DIR:  $JULIA_PARENT_DIR"
 echo "MODULE_PATH:  $MODULE_PATH"
 echo "==================================="
 echo ""
@@ -99,10 +96,10 @@ else
    echo "============================"
    echo ""
 
-   # don't use sudo if user has write access to install path
-   if [ -d "$JULIA_PATH" ]; then
-      # don't use sudo if user has write access to install path
-      if [ -w ${JULIA_PATH} ]; then
+   # don't use sudo if user has write access to the julia parent dir
+   if [ -d "${JULIA_PARENT_DIR}" ]; then
+      # don't use sudo if user has write access to the julia parent dir
+      if [ -w ${JULIA_PARENT_DIR} ]; then
          SUDO=""
       else
          echo "WARNING: using an install path that requires sudo"
@@ -112,36 +109,30 @@ else
       echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
 
-   ${SUDO} mkdir -p ${JULIA_PATH}
-
-   # Create a module file for kokkos
-   if [ -d "$MODULE_PATH" ]; then
-      # use sudo if user does not have write access to module path
-      if [ ! -w ${MODULE_PATH} ]; then
-         SUDO="sudo"
-      else
-         echo "WARNING: not using sudo since user has write access to module path"
-      fi
-   else
-      # if module path dir does not exist yet, the check on write access will fail
-      SUDO="sudo"
-      echo "WARNING: using sudo, make sure you have sudo privileges"
+   if [[ "${USER}" != "root" ]]; then
+      ${SUDO} chmod -R a+w $JULIA_PARENT_DIR
    fi
 
-   ${SUDO} mkdir -p ${MODULE_PATH}
+   # the julia install wants to create the directory to install so it has not exist already
+   JULIA_PATH=${JULIA_PARENT_DIR}/julia-v${JULIA_VERSION}
+   curl -fsSL https://install.julialang.org | sh -s -- --yes --add-to-path=no -p=${JULIA_PATH}
+   export JULIA_DEPOT_PATH=$JULIA_PATH
+   export PATH=$PATH:"$JULIA_PATH/bin"
+   juliaup add 1.12
+   juliaup default 1.12
+   julia -e 'using Pkg; Pkg.add("AMDGPU")'
+   ${SUDO} mv ~/.julia $JULIA_PATH
+   cd ${JULIA_PATH}/.julia
+   ${SUDO} mv ../* .
+   cd ..
+   ${SUDO} mv .julia/bin .
+   ${SUDO} mv .julia/juliaupself.json .
+   ${SUDO} chmod -R 755 .julia/*
 
    if [[ "${USER}" != "root" ]]; then
-      ${SUDO} chmod a+w $JULIA_PATH
-   fi
-
-   curl -fsSL https://install.julialang.org curl | sh -s -- --yes --add-to-path=no -p=${JULIA_PATH}
-   export PATH=$PATH:${JULIA_PATH}/bin
-   juliaup add ${JULIA_VERSION}
-
-   if [[ "${USER}" != "root" ]]; then
-      ${SUDO} find $JULIA_PATH -type f -execdir chown root:root "{}" +
-      ${SUDO} find $JULIA_PATH -type d -execdir chown root:root "{}" +
-      ${SUDO} chmod go-w $JULIA_PATH
+      ${SUDO} find $JULIA_PARENT_DIR -type f -execdir chown root:root "{}" +
+      ${SUDO} find $JULIA_PARENT_DIR -type d -execdir chown root:root "{}" +
+      ${SUDO} chmod -R go-w $JULIA_PARENT_DIR
    fi
 
    # Create a module file for julia
@@ -166,6 +157,11 @@ else
 
 	prepend_path("PATH","${JULIA_PATH}/bin")
 	setenv("JULIA_PATH","${JULIA_PATH}")
+	setenv("JULIA_VERSION","${JULIA_VERSION}")
+        cmd1="cp -r ${JULIA_PATH}/.julia $HOME"
+        execute{cmd=cmd1, modeA={"load"}}
+
+
 EOF
 
 fi

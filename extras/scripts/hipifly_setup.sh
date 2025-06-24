@@ -22,7 +22,6 @@ usage()
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --hipifly-module [ HIPIFLY_MODULE ], set to 1 to create hipifly, default is $HIPIFLY_MODULE"
    echo "  --hipifly-path [ HIPIFLY_PATH ], default is $HIPIFLY_PATH"
-   echo "  --hipifly-header-path [ HIPIFLY_HEADER_PATH ], location to copy the hipifly.h header from, default $HIPIFLY_HEADER_PATH"
    echo "  --help: print this usage information"
    exit 1
 }
@@ -46,11 +45,6 @@ do
       "--hipifly-module")
           shift
           HIPIFLY_MODULE=${1}
-          reset-last
-          ;;
-      "--hipifly-header-path")
-          shift
-          HIPIFLY_HEADER_PATH=${1}
           reset-last
           ;;
       "--hipifly-path")
@@ -94,7 +88,6 @@ echo "==========================================="
 echo "Setting Up the HIPIFLY Module"
 echo "HIPIFLY_MODULE: $HIPIFLY_MODULE"
 echo "HIPIFLY_PATH: $HIPIFLY_PATH"
-echo "HIPIFLY_HEADER_PATH: $HIPIFLY_HEADER_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
 echo "============================================"
 echo ""
@@ -121,7 +114,9 @@ else
       fi
 
       ${SUDO} mkdir -p ${HIPIFLY_PATH}
-      ${SUDO} cp ${HIPIFLY_HEADER_PATH}/hipifly.h ${HIPIFLY_PATH}
+      wget https://github.com/amd/HPCTrainingDock/blob/main/extras/sources/hipifly/hipifly.h
+      ${SUDO} cp ./hipifly.h ${HIPIFLY_PATH}
+      rm ./hipifly.h
 
       if [ -d "$MODULE_PATH" ]; then
          # use sudo if user does not have write access to module path

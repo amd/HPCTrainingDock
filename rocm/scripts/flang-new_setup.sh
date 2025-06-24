@@ -116,7 +116,7 @@ FULL_ARCHIVE_NAME="$ARCHIVE_NAME-$DISTRO"
 if [[ ${DISTRO} == "ubuntu" ]]; then
 # if FLANG_RELEASE_NUMBER is greater than 5.9.9, the awk command will give the FLANG_RELEASE_NUMBER
 # if FLANG_RELEASE_NUMBER is less than or equal to 5.9.9, the awk command result will be blank
-   if [[ ${FLANG_RELEASE_NUMBER}=="6.0.0" || ${FLANG_RELEASE_NUMBER}=="6.1.0" ]]; then
+   if [[ ${FLANG_RELEASE_NUMBER} == "6.0.0" || ${FLANG_RELEASE_NUMBER} == "6.1.0" ]]; then
       DISTRO_SHORT="ubu"
       FULL_ARCHIVE_NAME="$ARCHIVE_NAME-$DISTRO_SHORT"
    fi
@@ -133,6 +133,7 @@ echo "ARCHIVE_NAME is $ARCHIVE_NAME"
 echo "FULL_ARCHIVE_NAME is $FULL_ARCHIVE_NAME"
 echo "ARCHIVE_DIR is $ARCHIVE_DIR"
 echo "INSTALL_DIR or UNTAR_DIR is $UNTAR_DIR"
+echo "Looking for the file: https://repo.radeon.com/rocm/misc/flang/${FULL_ARCHIVE_NAME}.tar.bz2"
 echo "========================================="
 echo ""
 
