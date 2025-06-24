@@ -460,6 +460,12 @@ extras/scripts/kokkos_setup.sh
 // install flang-new and create flang-new module
 extras/scripts/flang-new_setup.sh
 
+// install julia and create julia module
+extras/scripts/julia_setup.sh
+
+// install ftorch and create ftorch module
+extras/scripts/ftorch_setup.sh
+
 // install X11 VNC support
 extras/scripts/x11vnc_setup.sh
 
@@ -535,20 +541,20 @@ The training environment comes with a variety of modules installed, with their n
    clang/base    clang/14 (D)    clang/15    gcc/base    gcc/11 (D)    gcc/12    gcc/13    miniconda3/24.9.2    miniforge3/24.9.0
 
 ------------------------------------------------------------------- /etc/lmod/modules/ROCm -------------------------------------------------------------------
-   amdclang/18.0.0-6.3.3    hipfort/6.3.3 (D)    opencl/6.3.3    rocm/6.3.3    rocprofiler-compute/6.3.3    rocprofiler-systems/6.3.3
+   amdclang/19.0.0-6.4.1    hipfort/6.4.1 (D)    opencl/6.4.1    rocm/6.4.1    rocprofiler-compute/6.4.1    rocprofiler-systems/6.4.1
 
 --------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-MPI ---------------------------------------------------------------
    mpi4py/4.0.1    openmpi/5.0.7-ucc1.3.0-ucx1.18.0
 
 --------------------------------------------------------- /etc/lmod/modules/ROCmPlus-LatestCompilers ---------------------------------------------------------
-   amdflang-new/rocm-afar-7110-drop-5.3.0    aomp/amdclang-19.0    hipfort/6.3.3
+   amdflang-new/rocm-afar-7110-drop-5.3.0    aomp/amdclang-19.0    hipfort/6.4.1
 
 --------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-AI ----------------------------------------------------------------
-   cupy/14.0.0a1    jax/0.4.35    pytorch/2.6.0
+   cupy/14.0.0a1    jax/0.6.0    pytorch/2.7.1   ftorch/dev
 
 ------------------------------------------------------------------- /etc/lmod/modules/misc -------------------------------------------------------------------
-   fftw/3.3.10    hipifly/dev                 kokkos/4.5.01         netcdf-fortran/4.6.2-rc1    tau/dev
-   hdf5/1.14.5    hpctoolkit/2024.11.27dev    netcdf-c/4.9.3-rc1    scorep/9.0-dev
+   fftw/3.3.10    hipifly/dev                 kokkos/4.5.01         netcdf-fortran/4.6.2    tau/dev
+   hdf5/1.14.5    hpctoolkit/2024.11.27dev    netcdf-c/4.9.3    scorep/9.0
 
   Where:
    D:  Default Module

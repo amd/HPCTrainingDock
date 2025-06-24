@@ -28,6 +28,7 @@ ARG BUILD_PYTORCH
 ARG BUILD_CUPY
 ARG BUILD_TENSORFLOW
 ARG BUILD_FTORCH
+ARG BUILD_JULIA
 ARG BUILD_PETSC
 ARG BUILD_HYPRE
 ARG BUILD_KOKKOS
@@ -178,6 +179,14 @@ WORKDIR /app
 COPY extras/scripts/ftorch_setup.sh /tmp/ftorch_setup.sh
 
 RUN /tmp/ftorch_setup.sh --build-ftorch ${BUILD_FTORCH} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/ftorch_setup.sh
+
+WORKDIR /app
+
+# Install julia
+#
+COPY extras/scripts/julia_setup.sh /tmp/julia_setup.sh
+
+RUN /tmp/julia_setup.sh --build-julia ${BUILD_JULIA}  && rm /tmp/julia_setup.sh
 
 WORKDIR /app
 

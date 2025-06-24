@@ -6,6 +6,8 @@
 : ${BUILD_CUPY:="1"}
 : ${BUILD_TENSORFLOW:="1"}
 : ${BUILD_JAX:="1"}
+: ${BUILD_FTORCH:="1"}
+: ${BUILD_JULIA:="1"}
 : ${BUILD_PETSC:="1"}
 : ${BUILD_HYPRE:="1"}
 : ${BUILD_SCOREP:="1"}
@@ -164,6 +166,10 @@ extras/scripts/cupy_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${
 extras/scripts/tensorflow_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-tensorflow ${BUILD_TENSORFLOW}
 
 extras/scripts/jax_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-jax ${BUILD_JAX}
+
+extras/scripts/julia_setup.sh --build-julia ${BUILD_JULIA}
+
+extras/scripts/ftorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-ftorch ${BUILD_FTORCH}
 
 extras/scripts/pytorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-pytorch ${BUILD_PYTORCH}
 
