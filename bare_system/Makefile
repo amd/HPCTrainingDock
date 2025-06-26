@@ -288,6 +288,13 @@ ftorch.timestamp: rocm.timestamp pytorch.timestamp
 	   --build-ftorch 1
 	touch ftorch.timestamp
 
+tensorflow.timestamp: rocm.timestamp
+	extras/scripts/tensorflow_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
+	   --build-tensorflow 1
+	touch tensorflow.timestamp
+
 jax.timestamp: rocm.timestamp
 	extras/scripts/jax_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
