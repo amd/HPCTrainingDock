@@ -229,6 +229,8 @@ else
 	whatis("SmartSim from CrayLabs")
 
 	load("rocm/${ROCM_VERSION}")
+	load("amdflang-new")
+	load("pytorch")
 	prepend_path("PYTHONPATH","$SMART_REDIS_PATH")
 	prepend_path("PYTHONPATH","$SMART_SIM_PATH")
 	prepend_path("PATH","${SMART_SIM_PATH}/bin")
