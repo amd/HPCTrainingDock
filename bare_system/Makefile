@@ -247,7 +247,7 @@ cupy.timestamp: rocm.timestamp
 	   --build-cupy 1
 	touch cupy.timestamp
 
-pytorch.timestamp: rocm.timestamp
+pytorch.timestamp: rocm.timestamp openmpi.timestamp
 	extras/scripts/pytorch_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
