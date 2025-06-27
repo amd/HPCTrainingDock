@@ -69,172 +69,44 @@ RUN  /tmp/sshd_setup.sh && rm /tmp/sshd_setup.sh
 
 EXPOSE 22
 
-#
-# Install miniconda3
-#
-COPY extras/scripts/miniconda3_setup.sh /tmp/miniconda3_setup.sh
-
-RUN /tmp/miniconda3_setup.sh \
-        --rocm-version ${ROCM_VERSION} \
-        --python-version ${PYTHON_VERSION} \
-        --build-miniconda3 ${BUILD_MINICONDA3} && \
-    rm -f /tmp/miniconda3_setup.sh
-
-#
-# Install miniforge3
-#
-COPY extras/scripts/miniforge3_setup.sh /tmp/miniforge3_setup.sh
-
-RUN /tmp/miniforge3_setup.sh \
-        --rocm-version ${ROCM_VERSION} \
-        --build-miniforge3 ${BUILD_MINICONDA3} && \
-    rm -f /tmp/miniforge3_setup.sh
-
-#
-# Install our desired compilers
-#
-COPY extras/scripts/compiler_setup.sh /tmp/compiler_setup.sh
-
-RUN /tmp/compiler_setup.sh && \
-    rm /tmp/compiler_setup.sh
-
-# Build the latest AMD OpenMP compiler if requested -- moved to aomp_setup.sh
-#RUN apt-get update && apt-get install -y gawk ninja-build generate-ninja ccache
-#RUN pip3 install CppHeaderParser
-
-# Build the latest GCC for AMD compiler if requested
-COPY extras/scripts/amd_gcc_setup.sh /tmp/amd_gcc_setup.sh
-RUN /tmp/amd_gcc_setup.sh --build-gcc-latest ${BUILD_GCC_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
-    rm /tmp/amd_gcc_setup.sh
-
-# install aomp
-COPY extras/scripts/aomp_setup.sh /tmp/aomp_setup.sh
-RUN /tmp/aomp_setup.sh --build-aomp-latest ${BUILD_AOMP_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}  |& tee /app/aomp_build.out && rm /tmp/aomp_setup.sh
-
-# install hipfort
-COPY extras/scripts/hipfort_setup.sh /tmp/hipfort_setup.sh
-RUN /tmp/hipfort_setup.sh --build-hipfort ${BUILD_HIPFORT} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/hipfort_setup.sh
-
-# create hipifly module
-COPY extras/scripts/hipifly_setup.sh /tmp/hipifly_setup.sh
-RUN /tmp/hipifly_setup.sh --hipifly-module ${HIPIFLY_MODULE} --rocm-version ${ROCM_VERSION} && rm /tmp/hipifly_setup.sh
-
-# install fftw
-COPY extras/scripts/fftw_setup.sh /tmp/fftw_setup.sh
-RUN /tmp/fftw_setup.sh --build-fftw ${BUILD_FFTW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/fftw_setup.sh
-
-# install latest llvm
-COPY extras/scripts/llvm-build.sh /tmp/llvm-build.sh
-RUN /tmp/llvm-build.sh --build-llvm-latest ${BUILD_LLVM_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/llvm-build.sh
-
-# Grab any cache files of compiler builds
-
-# Build the clacc_clang compiler
-COPY extras/scripts/clacc_setup.sh /tmp/clacc_setup.sh
-RUN /tmp/clacc_setup.sh --build-clacc-latest ${BUILD_CLACC_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/clacc_setup.sh
+COPY extras/scripts /tmp/extras
 
 WORKDIR /tmp
 
-#
-# Install kokkos
-#
-COPY extras/scripts/kokkos_setup.sh /tmp/kokkos_setup.sh
-RUN /tmp/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-kokkos ${BUILD_KOKKOS} && rm /tmp/kokkos_setup.sh
+RUN /tmp/extras/miniconda3_setup.sh \
+        --rocm-version ${ROCM_VERSION} \
+        --python-version ${PYTHON_VERSION} \
+        --build-miniconda3 ${BUILD_MINICONDA3} && \
+   /tmp/extras/miniforge3_setup.sh \
+        --rocm-version ${ROCM_VERSION} \
+        --build-miniforge3 ${BUILD_MINICONDA3} && \
+   /tmp/extras/compiler_setup.sh && \
+   /tmp/extras/amd_gcc_setup.sh --build-gcc-latest ${BUILD_GCC_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+   /tmp/extras/aomp_setup.sh --build-aomp-latest ${BUILD_AOMP_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}  |& tee /app/aomp_build.out && \
+   /tmp/extras/hipfort_setup.sh --build-hipfort ${BUILD_HIPFORT} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+   /tmp/extras/hipifly_setup.sh --hipifly-module ${HIPIFLY_MODULE} --rocm-version ${ROCM_VERSION} && \
+   /tmp/extras/fftw_setup.sh --build-fftw ${BUILD_FFTW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+   /tmp/extras/llvm-build.sh --build-llvm-latest ${BUILD_LLVM_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+   /tmp/extras/clacc_setup.sh --build-clacc-latest ${BUILD_CLACC_LATEST} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+   /tmp/extras/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --build-kokkos ${BUILD_KOKKOS} \\
+   /tmp/extras/hdf5_setup.sh --rocm-version ${ROCM_VERSION} --build-hdf5 ${BUILD_HDF5} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+   /tmp/extras/netcdf_setup.sh --rocm-version ${ROCM_VERSION} --build-netcdf ${BUILD_NETCDF} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+   /tmp/extras/adios2_setup.sh --rocm-version ${ROCM_VERSION} --build-adios2 ${BUILD_ADIOS2} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+   /tmp/extras/cupy_setup.sh --build-cupy ${BUILD_CUPY} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+   /tmp/extras/tensorflow_setup.sh --build-tensorflow ${BUILD_TENSORFLOW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+   /tmp/extras/ftorch_setup.sh --build-ftorch ${BUILD_FTORCH} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+   /tmp/extras/julia_setup.sh --build-julia ${BUILD_JULIA}  && \
+   /tmp/extras/jax_setup.sh --build-jax ${BUILD_JAX} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+   /tmp/extras/petsc_setup.sh --build-petsc ${BUILD_PETSC} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+   /tmp/extras/hypre_setup.sh --build-hypre ${BUILD_HYPRE} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+   /tmp/extras/pytorch_setup.sh --build-pytorch ${BUILD_PYTORCH} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --python-version ${PYTHON_VERSION} |& tee /app/pytorch_build.out && \
+   /tmp/extras/ollama_setup.sh --build-ollama ${BUILD_OLLAMA} && \
+   chmod u+x /tmp/extras/apps_setup.sh && \
+   /tmp/extras/apps_setup.sh && \
+   rm -rf /tmp/extras
 
-#
-# Install hdf5
-#
-COPY extras/scripts/hdf5_setup.sh /tmp/hdf5_setup.sh
-RUN /tmp/hdf5_setup.sh --rocm-version ${ROCM_VERSION} --build-hdf5 ${BUILD_HDF5} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/hdf5_setup.sh
 
-# Install netcdf
-#
-COPY extras/scripts/netcdf_setup.sh /tmp/netcdf_setup.sh
-RUN /tmp/netcdf_setup.sh --rocm-version ${ROCM_VERSION} --build-netcdf ${BUILD_NETCDF} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/netcdf_setup.sh
-
-# Install adios2
-#
-COPY extras/scripts/adios2_setup.sh /tmp/adios2_setup.sh
-RUN /tmp/adios2_setup.sh --rocm-version ${ROCM_VERSION} --build-adios2 ${BUILD_ADIOS2} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/adios2_setup.sh
-
-#
-# Install cupy 
-#
-COPY extras/scripts/cupy_setup.sh /tmp/cupy_setup.sh
-
-RUN /tmp/cupy_setup.sh --build-cupy ${BUILD_CUPY} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/cupy_setup.sh
-
-WORKDIR /app
-
-# Install tensorflow
-#
-COPY extras/scripts/tensorflow_setup.sh /tmp/tensorflow_setup.sh
-
-RUN /tmp/tensorflow_setup.sh --build-tensorflow ${BUILD_TENSORFLOW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/tensorflow_setup.sh
-
-WORKDIR /app
-
-# Install ftorch
-#
-COPY extras/scripts/ftorch_setup.sh /tmp/ftorch_setup.sh
-
-RUN /tmp/ftorch_setup.sh --build-ftorch ${BUILD_FTORCH} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/ftorch_setup.sh
-
-WORKDIR /app
-
-# Install julia
-#
-COPY extras/scripts/julia_setup.sh /tmp/julia_setup.sh
-
-RUN /tmp/julia_setup.sh --build-julia ${BUILD_JULIA}  && rm /tmp/julia_setup.sh
-
-WORKDIR /app
-
-#
-# Install jax
-#
-COPY extras/scripts/jax_setup.sh /tmp/jax_setup.sh
-
-RUN /tmp/jax_setup.sh --build-jax ${BUILD_JAX} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/jax_setup.sh
-
-WORKDIR /app
-
-#
-# Install petsc
-#
-COPY extras/scripts/petsc_setup.sh /tmp/petsc_setup.sh
-
-RUN /tmp/petsc_setup.sh --build-petsc ${BUILD_PETSC} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/petsc_setup.sh
-
-WORKDIR /app
-
-#
-# Install hypre
-#
-COPY extras/scripts/hypre_setup.sh /tmp/hypre_setup.sh
-
-RUN /tmp/hypre_setup.sh --build-hypre ${BUILD_HYPRE} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/hypre_setup.sh
-
-WORKDIR /app
-
-#
-# Install pytorch
-#
-
-COPY extras/scripts/pytorch_setup.sh /tmp/pytorch_setup.sh
-COPY extras/scripts/pytorch_build_triton_wheel_py.patch /tmp/pytorch_build_triton_wheel_py.patch
-
-RUN /tmp/pytorch_setup.sh --build-pytorch ${BUILD_PYTORCH} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --python-version ${PYTHON_VERSION} |& tee /app/pytorch_build.out && rm /tmp/pytorch_setup.sh
-
-RUN echo "At end of pytorch install" && cd /app && ls -l && cd /tmp && ls -l && cd && ls -l
-WORKDIR /app
-
-#
-# Install ollama
-#
-COPY extras/scripts/ollama_setup.sh /tmp/ollama_setup.sh
-
-RUN /tmp/ollama_setup.sh --build-ollama ${BUILD_OLLAMA} && rm /tmp/ollama_setup.sh
+RUN echo "At end of packages install, now doing VNC" && cd /app && ls -l && cd /tmp && ls -l && cd && ls -l
 
 WORKDIR /app
 
@@ -250,16 +122,6 @@ COPY extras/scripts/x11vnc_setup.sh /tmp/x11vnc_setup.sh
 
 RUN  chmod u+x /tmp/x11vnc_setup.sh && \
      /tmp/x11vnc_setup.sh --build-x11vnc ${BUILD_X11VNC} ; rm /tmp/x11vnc_setup.sh
-
-#
-# Install any additional apps or libs that are needed
-#
-COPY extras/scripts/apps_setup.sh /tmp/apps_setup.sh
-
-RUN  chmod u+x /tmp/apps_setup.sh && \
-     /tmp/apps_setup.sh; rm /tmp/apps_setup.sh
-
-RUN echo "At end of apps setup install" && cd /app && ls -l && cd /tmp && ls -l && cd && ls -l
 
 #
 # create a default .bashrc  (based on Ubuntu 22 /etc/skel/.bashrc )

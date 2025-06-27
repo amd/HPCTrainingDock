@@ -46,35 +46,25 @@ ADD CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODE
 ADD CacheFiles/${DISTRO}-${DISTRO_VERSION} \
    /CacheFiles/${DISTRO}-${DISTRO_VERSION}
 
-COPY rocm/scripts/rocm_setup.sh /tmp/rocm_setup.sh
+COPY rocm/scripts/ /tmp/rocm
 
-RUN  /tmp/rocm_setup.sh --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --rocm-version ${ROCM_VERSION} && \
-     rm /tmp/rocm_setup.sh
+RUN  /tmp/rocm/rocm_setup.sh --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --rocm-version ${ROCM_VERSION}
 
 COPY rocm/sources/lua/bash.bashrc /tmp/bash.bashrc
 RUN cat /tmp/bash.bashrc >> /etc/bash.bashrc && rm -f /tmp/bash.bashrc
 
-COPY rocm/scripts/rocm_rocprof-sys_setup.sh /tmp/rocm_rocprof-sys_setup.sh
-
-RUN  /tmp/rocm_rocprof-sys_setup.sh --rocm-version ${ROCM_VERSION} && \
-     rm /tmp/rocm_rocprof-sys_setup.sh
-
-COPY rocm/scripts/rocm_rocprof-compute_setup.sh /tmp/rocm_rocprof-compute_setup.sh
-
-RUN  /tmp/rocm_rocprof-compute_setup.sh --rocm-version ${ROCM_VERSION} --python-version ${PYTHON_VERSION} && \
-     rm /tmp/rocm_rocprof-compute_setup.sh
-
-# install flang-new
-COPY rocm/scripts/flang-new_setup.sh /tmp/flang-new_setup.sh
-RUN /tmp/flang-new_setup.sh --build-flang-new ${BUILD_FLANGNEW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && rm /tmp/flang-new_setup.sh
+RUN  /tmp/rocm/rocm_rocprof-sys_setup.sh --rocm-version ${ROCM_VERSION} && \
+     /tmp/rocm/rocm_rocprof-compute_setup.sh --rocm-version ${ROCM_VERSION} --python-version ${PYTHON_VERSION} && \
+     /tmp/rocm/flang-new_setup.sh --build-flang-new ${BUILD_FLANGNEW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+     rm -rf /tmp/rocm
 
 USER root
 
 # using /app rather than /tmp because prte encodes the HLD and removing /tmp files may cause problems
-WORKDIR /app 
+WORKDIR /app
 
-# 
-# add slurm 
+#
+# add slurm
 #
 # Adding render group early to avoid something else grabbing it and causing problems for slurm
 RUN groupadd render -g 109

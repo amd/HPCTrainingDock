@@ -1,7 +1,7 @@
 # -----------------------------------------------------------------------
 # NOTE:
 # Dependencies are not included as part of Omniperf.
-# It's the user's responsibility to accept any licensing implications 
+# It's the user's responsibility to accept any licensing implications
 # before building the project
 # -----------------------------------------------------------------------
 
@@ -55,25 +55,20 @@ RUN chmod 1777 /tmp
 # Install Grafana
 #
 
-COPY tools/scripts/grafana_setup.sh /tmp/grafana_setup.sh
+COPY tools/scripts/ /tmp/tools
 
-RUN  /tmp/grafana_setup.sh --install-grafana ${INSTALL_GRAFANA} && \
-     rm /tmp/grafana_setup.sh
-
-ENV PATH=$HOME/.yarn/bin:$HOME/.config/yarn/global/node_modules/.bin:$PATH
-
-#
-# Install rocprof-compute (omniperf)
-#
-
-COPY tools/scripts/rocprof-compute_setup.sh /tmp/rocprof-compute_setup.sh
-
-RUN  /tmp/rocprof-compute_setup.sh \
+RUN  /tmp/tools/grafana_setup.sh --install-grafana ${INSTALL_GRAFANA} && \
+     /tmp/tools/rocprof-compute_setup.sh \
         --rocm-version ${ROCM_VERSION} \
         --python-version ${PYTHON_VERSION} \
         --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
         --install-rocprof-compute-from-source ${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE} && \
-     rm /tmp/rocprof-compute_setup.sh
+     /tmp/tools/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_HPCTOOLKIT} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+     /tmp/tools/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-tau ${BUILD_TAU} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+     /tmp/tools/scorep_setup.sh --rocm-version ${ROCM_VERSION} --build-scorep ${BUILD_SCOREP} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+     rm -rf /tmp/tools
+
+ENV PATH=$HOME/.yarn/bin:$HOME/.config/yarn/global/node_modules/.bin:$PATH
 
 # Overwrite grafana ini file
 COPY tools/docker/grafana.ini /etc/grafana
@@ -84,31 +79,5 @@ RUN rm -rf /tmp/*
 # starts mongo and grafana-server at startup
 COPY tools/docker/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod a+x /docker-entrypoint.sh
-
-#
-# Install HPCToolkit
-#
-COPY tools/scripts/hpctoolkit_setup.sh /tmp/hpctoolkit_setup.sh
-
-RUN  /tmp/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_HPCTOOLKIT} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
-     rm /tmp/hpctoolkit_setup.sh
-
-
-#
-# Install TAU
-#
-COPY tools/scripts/tau_setup.sh /tmp/tau_setup.sh
-
-RUN  /tmp/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-tau ${BUILD_TAU} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
-     rm /tmp/tau_setup.sh
-
-
-#
-# Install Score-P
-#
-COPY tools/scripts/scorep_setup.sh /tmp/scorep_setup.sh
-
-RUN  /tmp/scorep_setup.sh --rocm-version ${ROCM_VERSION} --build-scorep ${BUILD_SCOREP} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
-     rm /tmp/scorep_setup.sh
 
 ENTRYPOINT [ "/docker-entrypoint.sh" ]
