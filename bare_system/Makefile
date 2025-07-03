@@ -251,6 +251,7 @@ pytorch.timestamp: rocm.timestamp openmpi.timestamp
 	extras/scripts/pytorch_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
+	   --python-version '${PYTHON_VERSION}' \
 	   --build-pytorch 1
 	touch pytorch.timestamp
 

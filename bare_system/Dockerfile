@@ -1,5 +1,5 @@
-ARG DISTRO
-ARG DISTRO_VERSION
+ARG DISTRO=ubuntu
+ARG DISTRO_VERSION=22.04
 FROM ${DISTRO}:${DISTRO_VERSION}
 
 ARG DISTRO
@@ -12,13 +12,13 @@ ARG USE_MAKEFILE
 
 LABEL maintainer="bob.robey@amd.com"
 
-ENV HOME /root
-ENV LANG en_US.UTF-8
-ENV LANGUAGE en_US
-ENV LC_ALL C
-ENV SHELL /bin/bash
-ENV BASH_ENV /etc/bash.bashrc
-ENV DEBIAN_FRONTEND noninteractive
+ENV HOME=/root
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US
+ENV LC_ALL=C
+ENV SHELL=/bin/bash
+ENV BASH_ENV=/etc/bash.bashrc
+ENV DEBIAN_FRONTEND=noninteractive
 
 # Adding render group early to avoid something else grabbing it and causing problems for slurm
 #RUN groupadd render -g 109
@@ -80,7 +80,6 @@ ADD extras/image/home /home/sysadmin
 RUN sudo chown -R sysadmin:sysadmin /home/sysadmin
 
 RUN bare_system/main_setup.sh --rocm-version ${ROCM_VERSION} --rocm-install-path ${ROCM_INSTALLPATH} \
-    --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --use-makefile ${USE_MAKEFILE} --python-version ${PYTHON_VERSION} \
-    --distro ${DISTRO} --distro-version ${DISTRO_VERSION}
+    --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --use-makefile ${USE_MAKEFILE} --python-version ${PYTHON_VERSION}
 
 ENTRYPOINT ["bash"]

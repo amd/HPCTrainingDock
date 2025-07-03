@@ -185,7 +185,7 @@ do
             ;;
         "--python-version")
             shift
-            PYTHON_VERSION=${1}
+            PYTHON_VERSION_INPUT=${1}
             reset-last
             ;;
         "--docker-user")
@@ -397,10 +397,12 @@ do
     shift
 done
 
-if [[ "${DISTRO}" == "ubuntu" ]]; then
-   if [[ "${DISTRO_VERSION}" == "24.04" ]]; then
+if [[ "${PYTHON_VERSION_INPUT}" == "" ]]; then
+   if [[ "${DISTRO}" == "ubuntu" &&  "${DISTRO_VERSION}" == "24.04" ]]; then
       PYTHON_VERSION="12"
    fi
+else
+   PYTHON_VERSION=${PYTHON_VERSION_INPUT}
 fi
 
 if [ "${BUILD_OPTIONS}" != "" ]; then

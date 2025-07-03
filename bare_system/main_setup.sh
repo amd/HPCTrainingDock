@@ -171,7 +171,7 @@ extras/scripts/julia_setup.sh --build-julia ${BUILD_JULIA}
 
 extras/scripts/ftorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-ftorch ${BUILD_FTORCH}
 
-extras/scripts/pytorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-pytorch ${BUILD_PYTORCH}
+extras/scripts/pytorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-pytorch ${BUILD_PYTORCH} --python_version ${PYTHON_VERSION}
 
 extras/scripts/apps_setup.sh
 

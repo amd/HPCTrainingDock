@@ -10,12 +10,6 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
-if [[ "${DISTRO}" == "ubuntu" ]]; then
-   if [[ "${DISTRO_VERSION}" == "24.04" ]]; then
-      PYTHON_VERSION="12"
-   fi
-fi
-
 send-error()
 {
     usage
@@ -66,7 +60,7 @@ do
           ;;
       "--python-version")
           shift
-          PYTHON_VERSION=${1}
+          PYTHON_VERSION_INPUT=${1}
           reset-last
           ;;
       "--distro")
@@ -105,6 +99,19 @@ do
    n=$((${n} + 1))
    shift
 done
+
+if [[ "${PYTHON_VERSION_INPUT}" == "" ]]; then
+   if [[ "${DISTRO}" == "ubuntu" ]]; then
+      if [[ "${DISTRO_VERSION}" == "24.04" ]]; then
+         PYTHON_VERSION="12"
+      fi
+      if [[ "${DISTRO_VERSIONS}" == "24.04" ]]; then
+         PYTHON_VERSION="12"
+      fi
+   fi
+else
+   PYTHON_VERSION=${PYTHON_VERSION_INPUT}
+fi
 
 
 CACHE_FILES="CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}"
