@@ -20,6 +20,7 @@ MPI_MODULE="openmpi"
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 USE_WHEEL=0
+DEBUG=0
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -352,7 +353,10 @@ else
       echo "============================"
       echo ""
 
-      export PYTHONPATH=${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages:$PYTHONPATH
+      python3 -m venv pytorch_build
+      source pytorch_build/bin/activate
+      cd pytorch_build
+
       export _GLIBCXX_USE_CXX11_ABI=1
       export ROCM_HOME=${ROCM_PATH}
       export ROCM_SOURCE_DIR=${ROCM_PATH}
@@ -403,9 +407,8 @@ else
          sed -i '/FILES_MATCHING PATTERN \"\*\.py")/s/^/#/g' caffe2/CMakeLists.txt
       fi
 
-      pip3 install -r requirements.txt
-      #pip3 install -r requirements.txt --target=$INSTALL_PATH
-      #PYTHONPATH="PYTHONPATH:$INSTALL_PATH"
+      python3 -m pip install -r requirements.txt
+      pip3 install -r requirements.txt --target=${INSTALL_PATH}/pypackages
       python3 tools/amd_build/build_amd.py >& /dev/null
 
       echo ""
@@ -422,24 +425,47 @@ else
 
       cd ..
       rm -rf pytorch
-      cd /tmp
+      if [[ "${DEBUG}" != 0 ]]; then
+         echo "Testing import torch"
+         python3 -c 'import torch'
+         echo "Finished testing import torch"
+      fi
 
       export PYTHONPATH=${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages
-      export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchvision-${TORCHVISION_VERSION}a0+${TORCHVISION_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
-      export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/pillow-${PILLOW_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
-      export PYTHONPATH=${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
-      export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages:$PYTHONPATH
-      export PYTHONPATH=${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages:$PYTHONPATH
+      export PYTHONPATH=${PYTHONPATH}:${INSTALL_PATH}/pypackages
+      if [[ "${DEBUG}" != 0 ]]; then
+         echo "Testing import torch"
+         echo "PYTHONPATH is ${PYTHONPATH}"
+         python3 -c 'import torch'
+         echo "Finished testing import torch"
+      fi
 
       git clone --recursive --depth 1 --branch v${TORCHVISION_VERSION} https://github.com/pytorch/vision
       cd vision
       python3 setup.py install --prefix=${TORCHVISION_PATH}
       cd ..
+      export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchvision-0.22.1+59a3e1f-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
+      export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/pillow-11.3.0-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
+      if [[ "${DEBUG}" != 0 ]]; then
+         echo "Testing import torchvision"
+         python3 -c 'import torchvision'
+         echo "Finished testing import torchvision"
+      fi
 
       git clone --recursive --depth 1 --branch v${TORCHAUDIO_VERSION} https://github.com/pytorch/audio
       cd audio
       python3 setup.py install --prefix=${TORCHAUDIO_PATH}
+      export PYTHONPATH=${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-2.7.1a0+95c61b4-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
+      if [[ "${DEBUG}" != 0 ]]; then
+         echo "Testing import torchaudio"
+         python3 -c 'import torchaudio'
+         echo "Finished testing import torchaudio"
+      fi
       cd ..
+
+      deactivate
+      cd ..
+      rm -rf pytorch_build
 
       ROCM_VERSION_WHEEL=${ROCM_VERSION}
       if [[ `echo ${ROCM_VERSION} | cut -f3-3 -d'.'` == 0 ]]; then
@@ -496,21 +522,27 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	load("rocm/${ROCM_VERSION}")
         load("${MPI_MODULE}")
 	conflict("miniconda3")
+	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}/local/lib/python3.10/dist-packages")
+	prepend_path("PYTHONPATH","${SAGEATTENTION_PATH}")
+	prepend_path("PYTHONPATH","${TRANSFORMERS_PATH}")
+	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchvision-${TORCHVISION_VERSION}+${TORCHVISION_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/pillow-${PILLOW_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
-	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
-	prepend_path("PYTHONPATH","${TRANSFORMERS_PATH}")
-	prepend_path("PYTHONPATH","${TRITON_PATH}")
-	prepend_path("PYTHONPATH","${SAGEATTENTION_PATH}")
-	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}/local/lib/python3.10/dist-packages")
 	prepend_path("PYTHONPATH","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages")
-	prepend_path("PYTHONPATH","${PYTORCH_PATH}")
-	prepend_path("PYTHONPATH","${TORCHVISION_PATH}")
-	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}")
+	prepend_path("PYTHONPATH","${INSTALL_PATH}/pypackages")
+	prepend_path("PYTHONPATH","${TRITON_PATH}")
+
 	prepend_path("PATH","${PYTORCH_PATH}/pytorch/bin")
 	setenv("MIOPEN_USER_DB_PATH","/tmp/$USER/my-miopen-cache")
 	setenv("MIOPEN_CUSTOM_CACHE_DIR","/tmp/$USER/my-miopen-cache")
         setenv("Torch_DIR","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages")
+EOF
+# An alternate module with tunable gemms
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}_tunableop_enabled.lua
+	whatis("PyTorch version ${PYTORCH_VERSION} with ROCm Support and Tunable GEMMS")
+
+	load pytorch
+	setenv("PYTORCH_TUNABLEOP_ENABLED","1")
 EOF
 #        cmd1="mkdir -p $$HOME/miopen_tmpdir; export TMPDIR=$$HOME/miopen_tmpdir"
 #        cmd2="rm -rf $$HOME/miopen_tmpdir; unset TMPDIR"
