@@ -7,6 +7,7 @@ ZSTD_VERSION=1.5.6
 PYTORCH_VERSION=2.7.1
 PYTHON_VERSION=10
 TORCHVISION_VERSION=0.22.1
+FLASHATTENTION_VERSION=2.8.0
 TORCHVISION_HASH="59a3e1f"
 TORCHAUDIO_VERSION=2.7.1
 TORCHAUDIO_HASH="95c61b4"
@@ -230,10 +231,16 @@ else
       pip3 install torch==${PYTORCH_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${PYTORCH_PATH}
       pip3 install torchaudio==${TORCHAUDIO_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHAUDIO_PATH}
       pip3 install torchvision==${TORCHVISION_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHVISION_PATH}
-      pip3 install --target=${TRANSFORMERS_PATH} transformers
-      pip3 install --target=${TRITON_PATH} triton
-      pip3 install --target=${SAGEATTENTION_PATH} sageattention
-      pip3 install --target=${FLASHATTENTION_PATH} flashattention
+
+      export PYTHONPATH=$PYTHONPATH:$PYTORCH_PATH
+      pip3 install --target=${TRANSFORMERS_PATH} transformers --no-build-isolation
+      pip3 install --target=${TRITON_PATH} triton --no-build-isolation
+      pip3 install --target=${SAGEATTENTION_PATH} sageattention --no-build-isolation
+      pip3 install --target=${FLASHATTENTION_PATH} packaging
+      export PYTHONPATH=$PYTHONPATH:${FLASHATTENTION_PATH}
+      git clone --branch v${FLASHATTENTION_VERSION} https://github.com/Dao-AILab/flash-attention.git
+      cd flash-attention
+      python3 setup.py install --prefix=${FLASHATTENTION_PATH}
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
@@ -433,11 +440,16 @@ else
       git clone --recursive --depth 1 --branch v${TORCHAUDIO_VERSION} https://github.com/pytorch/audio
       cd audio
       python3 setup.py install --prefix=${TORCHAUDIO_PATH}
+      cd ..
 
-      pip3 install --target=${TRANSFORMERS_PATH} transformers
-      pip3 install --target=${TRITON_PATH} triton
-      pip3 install --target=${SAGEATTENTION_PATH} sageattention
-      pip3 install --target=${FLASHATTENTION_PATH} sageattention
+      pip3 install --target=${TRANSFORMERS_PATH} transformers --no-build-isolation
+      pip3 install --target=${TRITON_PATH} triton --no-build-isolation
+      pip3 install --target=${SAGEATTENTION_PATH} sageattention --no-build-isolation
+      pip3 install --target=${FLASHATTENTION_PATH} packaging
+      export PYTHONPATH=$PYTHONPATH:${FLASHATTENTION_PATH}
+      git clone --branch v${FLASHATTENTION_VERSION} https://github.com/Dao-AILab/flash-attention.git
+      cd flash-attention
+      python3 setup.py install --prefix=${FLASHATTENTION_PATH}
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
@@ -450,7 +462,7 @@ else
 
       # cleanup
       cd ..
-      rm -rf vision audio
+      rm -rf vision audio flash-attention
       rm -f intel-onemkl-2025.0.0.940.sh
       ${SUDO} rm -rf /tmp/amd_triton_kernel* /tmp/can*
 
@@ -486,7 +498,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	prepend_path("PYTHONPATH","${TRANSFORMERS_PATH}")
 	prepend_path("PYTHONPATH","${TRITON_PATH}")
 	prepend_path("PYTHONPATH","${SAGEATTENTION_PATH}")
-	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}")
+	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}/local/lib/python3.10/dist-packages")
 	prepend_path("PYTHONPATH","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages")
 	prepend_path("PYTHONPATH","${PYTORCH_PATH}")
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}")

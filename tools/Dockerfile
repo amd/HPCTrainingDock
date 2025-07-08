@@ -8,10 +8,11 @@
 ARG DISTRO_VERSION
 ARG ROCM_VERSION
 ARG DOCKER_USER
+ARG DISTRO
 
 # This image will be built on top of the image below
 # which is the communication packages image built before this one
-FROM ${DOCKER_USER}/comm:release-base-ubuntu-${DISTRO_VERSION}-rocm-${ROCM_VERSION}
+FROM ${DOCKER_USER}/comm:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}
 ARG ROCM_VERSION
 ARG PYTHON_VERSION
 ARG AMDGPU_GFXMODEL
