@@ -8,6 +8,7 @@ PYTORCH_VERSION=2.7.1
 PYTHON_VERSION=10
 TORCHVISION_VERSION=0.22.1
 FLASHATTENTION_VERSION=2.8.0
+TRITON_VERSION=3.3.1
 TORCHVISION_HASH="59a3e1f"
 TORCHAUDIO_VERSION=2.7.1
 TORCHAUDIO_HASH="95c61b4"
@@ -224,17 +225,15 @@ else
       # install of pre-built pytorch using a wheel
       echo "Installing PyTorch, Torchaudio and Torchvision with wheel"
       ROCM_VERSION_WHEEL=${ROCM_VERSION}
-      echo ${ROCM_VERSION_WHEEL}
       if [[ `echo ${ROCM_VERSION} | cut -f3-3 -d'.'` == 0 ]]; then
          ROCM_VERSION_WHEEL=`echo ${ROCM_VERSION} | cut -f1-2 -d'.'`
       fi
       pip3 install torch==${PYTORCH_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${PYTORCH_PATH}
-      pip3 install torchaudio==${TORCHAUDIO_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHAUDIO_PATH}
-      pip3 install torchvision==${TORCHVISION_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHVISION_PATH}
-
       export PYTHONPATH=$PYTHONPATH:$PYTORCH_PATH
+      pip3 install torchaudio==${TORCHAUDIO_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHAUDIO_PATH} --no-build-isolation
+      pip3 install torchvision==${TORCHVISION_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHVISION_PATH} --no-build-isolation
+
       pip3 install --target=${TRANSFORMERS_PATH} transformers --no-build-isolation
-      pip3 install --target=${TRITON_PATH} triton --no-build-isolation
       pip3 install --target=${SAGEATTENTION_PATH} sageattention --no-build-isolation
       pip3 install --target=${FLASHATTENTION_PATH} packaging
       export PYTHONPATH=$PYTHONPATH:${FLASHATTENTION_PATH}
@@ -442,8 +441,13 @@ else
       python3 setup.py install --prefix=${TORCHAUDIO_PATH}
       cd ..
 
+      ROCM_VERSION_WHEEL=${ROCM_VERSION}
+      if [[ `echo ${ROCM_VERSION} | cut -f3-3 -d'.'` == 0 ]]; then
+         ROCM_VERSION_WHEEL=`echo ${ROCM_VERSION} | cut -f1-2 -d'.'`
+      fi
+
       pip3 install --target=${TRANSFORMERS_PATH} transformers --no-build-isolation
-      pip3 install --target=${TRITON_PATH} triton --no-build-isolation
+      pip3 install pytorch_triton_rocm==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
       pip3 install --target=${SAGEATTENTION_PATH} sageattention --no-build-isolation
       pip3 install --target=${FLASHATTENTION_PATH} packaging
       export PYTHONPATH=$PYTHONPATH:${FLASHATTENTION_PATH}
