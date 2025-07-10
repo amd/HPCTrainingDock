@@ -1,0 +1,33 @@
+#!/bin/bash
+# spack install
+sudo apt-get install libssl-dev unzip
+module load rocm amdclang
+git clone --branch=v0.23.1 https://github.com/spack/spack
+source spack/share/spack/setup-env.sh
+spack compiler find
+spack external find
+spack install lammps +rocm amdgpu_target=gfx90a
+
+rm -rf spack .spack
+
+# cmake install
+kokkos_arch_flag, which needs to be -DKokkos_ARCH_VEGA942=ON (for MI300)
+
+cmake -DPKG_KOKKOS=on \
+            -DPKG_REAXFF=on \
+            -DPKG_MANYBODY=on \
+            -DPKG_MOLECULE=on \
+            -DPKG_KSPACE=on \
+            -DPKG_RIGID=on \
+            -DPKG_ML-SNAP=on \
+            -DBUILD_MPI=on \
+            -DCMAKE_INSTALL_PREFIX={self.build_folder}/{self.name}/install \
+            -DMPI_CXX_COMPILER={self.get_requires_paths()}/bin/mpicxx \
+            -DCMAKE_BUILD_TYPE=Release -DKokkos_ENABLE_HIP=on -DKokkos_ENABLE_SERIAL=on \
+            -DBUILD_OMP=off -DFFT_KOKKOS=HIPFFT -DCMAKE_CXX_STANDARD=17 \
+            -DCMAKE_CXX_COMPILER=${{ROCM_PATH}}/bin/hipcc \
+            -DKokkos_ARCH_=ON {kokkos_arch_flag} \
+            -DKokkos_ENABLE_HIP_MULTIPLE_KERNEL_INSTANTIATIONS=ON -DKokkos_ENABLE_HWLOC=on \
+            -DLAMMPS_SIZES=smallbig \
+            -DCMAKE_CXX_FLAGS="-fdenormal-fp-math=ieee -fcuda-flush-denormals-to-zero -munsafe-fp-atomics" \
+            ../cmake
