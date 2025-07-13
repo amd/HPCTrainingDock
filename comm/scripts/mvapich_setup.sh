@@ -153,19 +153,19 @@ ${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/3.0.lua
-        whatis("Name: GPU-aware mvapich")
-        whatis("Version: 3.0.0")
-        whatis("Description: An open source Message Passing Interface implementation")
-        whatis(" This is a GPU-aware version of Mvapich3")
+	whatis("Name: GPU-aware mvapich")
+	whatis("Version: 3.0.0")
+	whatis("Description: An open source Message Passing Interface implementation")
+	whatis(" This is a GPU-aware version of Mvapich3")
 
-        local base = "/opt/rocmplus-${ROCM_VERSION}/mvapich/"
-        local mbase = "/etc/lmod/modules/ROCmPlus-MPI"
+	local base = "/opt/rocmplus-${ROCM_VERSION}/mvapich/"
+	local mbase = "/etc/lmod/modules/ROCmPlus-MPI"
 
-        setenv("MV2_PATH", base)
-        prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib64"))
-        prepend_path("C_INCLUDE_PATH",pathJoin(base, "include"))
-        prepend_path("CPLUS_INCLUDE_PATH",pathJoin(base, "include"))
-        prepend_path("PATH",pathJoin(base, "bin"))
-        load("rocm/${ROCM_VERSION}")
-        family("MPI")
+	setenv("MV2_PATH", base)
+	prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib64"))
+	prepend_path("C_INCLUDE_PATH",pathJoin(base, "include"))
+	prepend_path("CPLUS_INCLUDE_PATH",pathJoin(base, "include"))
+	prepend_path("PATH",pathJoin(base, "bin"))
+	load("rocm/${ROCM_VERSION}")
+	family("MPI")
 EOF

@@ -227,8 +227,8 @@ else
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${MPI4PY_VERSION}.lua
 	whatis(" MPI4PY - provides Python bindings for MPI")
-
-        prepend_path("PYTHONPATH", "${MPI4PY_PATH}")
+	
+	prepend_path("PYTHONPATH", "${MPI4PY_PATH}")
 	load("${MPI_MODULE}")
 EOF
 

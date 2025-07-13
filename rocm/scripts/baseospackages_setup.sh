@@ -27,9 +27,6 @@ echo "==================================="
 echo ""
 
 if [ "${DISTRO}" = "ubuntu" ]; then
-   # Not needed -- should already be these owner/permissions
-   #${SUDO} chown -Rv _apt:root /var/cache/apt/archives/partial/
-   #${SUDO} chmod -Rv 700 /var/cache/apt/archives/partial/
 
    export DEBIAN_FRONTEND=noninteractive
    # Python3-dev and python3-venv are for AI/ML

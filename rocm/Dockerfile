@@ -29,15 +29,16 @@ ARG AMDGPU_GFXMODEL_STRING=gfx90a
 ARG BUILD_FLANGNEW=1
 ENV PATH ${HOME}/.local/bin:${PATH}
 
-COPY rocm/scripts/baseospackages_setup.sh /tmp/baseospackages_setup.sh
+COPY rocm/scripts/baseospackages_setup.sh /tmp/rocm/baseospackages_setup.sh
+RUN  /tmp/rocm/baseospackages_setup.sh && \
+     rm /tmp/rocm/baseospackages_setup.sh
 
-RUN  /tmp/baseospackages_setup.sh && \
-     rm /tmp/baseospackages_setup.sh
+COPY rocm/scripts/lmod_setup.sh /tmp/rocm/lmod_setup.sh
+RUN  /tmp/rocm/lmod_setup.sh && \
+     rm /tmp/rocm/lmod_setup.sh
 
-COPY rocm/scripts/lmod_setup.sh /tmp/lmod_setup.sh
-
-RUN  /tmp/lmod_setup.sh && \
-     rm /tmp/lmod_setup.sh
+COPY rocm/sources/lua/bash.bashrc /tmp/bash.bashrc
+RUN cat /tmp/bash.bashrc >> /etc/bash.bashrc && rm -f /tmp/bash.bashrc
 
 # Grab any cached files of MPI builds and place them in /opt/rocmplus-VERSION
 ADD CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING} \
@@ -46,17 +47,20 @@ ADD CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODE
 ADD CacheFiles/${DISTRO}-${DISTRO_VERSION} \
    /CacheFiles/${DISTRO}-${DISTRO_VERSION}
 
-COPY rocm/scripts/ /tmp/rocm
 
-RUN  /tmp/rocm/rocm_setup.sh --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --rocm-version ${ROCM_VERSION}
+COPY rocm/scripts/rocm_setup.sh /tmp/rocm/rocm_setup.sh
+RUN  /tmp/rocm/rocm_setup.sh \
+        --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
+        --rocm-version ${ROCM_VERSION} \
+        --python-version ${PYTHON_VERSION} && \
+     rm -f /tmp/rocm/rocm_setup.sh
 
-COPY rocm/sources/lua/bash.bashrc /tmp/bash.bashrc
-RUN cat /tmp/bash.bashrc >> /etc/bash.bashrc && rm -f /tmp/bash.bashrc
-
-RUN  /tmp/rocm/rocm_rocprof-sys_setup.sh --rocm-version ${ROCM_VERSION} && \
-     /tmp/rocm/rocm_rocprof-compute_setup.sh --rocm-version ${ROCM_VERSION} --python-version ${PYTHON_VERSION} && \
-     /tmp/rocm/flang-new_setup.sh --build-flang-new ${BUILD_FLANGNEW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
-     rm -rf /tmp/rocm
+COPY rocm/scripts/flang-new_setup.sh /tmp/rocm/flang-new_setup.sh
+RUN  /tmp/rocm/flang-new_setup.sh \
+        --build-flang-new ${BUILD_FLANGNEW} \
+        --rocm-version ${ROCM_VERSION} \
+        --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+     rm -f /tmp/rocm/flang-new_setup.sh
 
 USER root
 
@@ -67,19 +71,18 @@ WORKDIR /app
 # add slurm
 #
 # Adding render group early to avoid something else grabbing it and causing problems for slurm
-RUN groupadd render -g 109
-RUN groupadd renderalt -g 110
+RUN groupadd render -g 109 && groupadd renderalt -g 110
 
 #
 # Install Slurm
 #
 
-COPY rocm/scripts/slurm_setup.sh /tmp/slurm_setup.sh
+COPY rocm/scripts/slurm_setup.sh /tmp/rocm/slurm_setup.sh
 
 COPY rocm/sources/slurm/slurm_${AMDGPU_GFXMODEL_FIRST}.conf /tmp/slurm.conf
 COPY rocm/sources/slurm/gres_${AMDGPU_GFXMODEL_FIRST}.conf /tmp/gres.conf
 
-RUN  /tmp/slurm_setup.sh && rm /tmp/slurm_setup.sh
+RUN  /tmp/rocm/slurm_setup.sh && rm /tmp/rocm/slurm_setup.sh
 
 ENV LC_ALL C.UTF-8
 
