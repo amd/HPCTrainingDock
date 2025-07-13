@@ -250,5 +250,5 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GITHUB_BRANCH}.lua
 	--  prereq("mongodb-tools")
 	local home = os.getenv("HOME")
 	setenv("MPLCONFIGDIR",pathJoin(home,".matplotlib"))
-        set_shell_function("omniperf",'${INSTALL_PATH}/bin/rocprof-compute "$@"',"${INSTALL_PATH}/bin/rocprof-compute $*")
+	set_shell_function("omniperf",'${INSTALL_PATH}/bin/rocprof-compute "$@"',"${INSTALL_PATH}/bin/rocprof-compute $*")
 EOF

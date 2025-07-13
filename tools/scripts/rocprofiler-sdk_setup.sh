@@ -185,18 +185,18 @@ fi
 ${SUDO} mkdir -p ${MODULE_PATH}
 
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
-        whatis("Name: Rocprofiler-sdk")
-        whatis("ROCm Version: ${ROCM_VERSION}")
-        whatis("Category: AMD")
-        whatis("Github Branch: ${GITHUB_BRANCH}")
+	whatis("Name: Rocprofiler-sdk")
+	whatis("ROCm Version: ${ROCM_VERSION}")
+	whatis("Category: AMD")
+	whatis("Github Branch: ${GITHUB_BRANCH}")
 
-        local base = "${INSTALL_PATH}"
+	local base = "${INSTALL_PATH}"
 
-        prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-        prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
-        prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-        prepend_path("CPATH", pathJoin(base, "include"))
-        prepend_path("PATH", pathJoin(base, "bin"))
-        prepend_path("INCLUDE", pathJoin(base, "include"))
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPATH", pathJoin(base, "include"))
+	prepend_path("PATH", pathJoin(base, "bin"))
+	prepend_path("INCLUDE", pathJoin(base, "include"))
 EOF
 
