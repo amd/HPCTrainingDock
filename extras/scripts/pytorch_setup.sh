@@ -12,7 +12,7 @@ TRITON_VERSION=3.3.1
 TORCHVISION_HASH="59a3e1f"
 TORCHAUDIO_VERSION=2.7.1
 TORCHAUDIO_HASH="95c61b4"
-PILLOW_VERSION=11.2.1
+PILLOW_VERSION=11.3.0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/pytorch
 INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch
 INSTALL_PATH_INPUT=""
@@ -444,8 +444,8 @@ else
       cd vision
       python3 setup.py install --prefix=${TORCHVISION_PATH}
       cd ..
-      export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchvision-0.22.1+59a3e1f-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
-      export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/pillow-11.3.0-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
+      export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchvision-${TORCHVISION_VERSION}+${TORCHVISION_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
+      export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/pillow-${PILLOW_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
       if [[ "${DEBUG}" != 0 ]]; then
          echo "Testing import torchvision"
          python3 -c 'import torchvision'
@@ -455,7 +455,7 @@ else
       git clone --recursive --depth 1 --branch v${TORCHAUDIO_VERSION} https://github.com/pytorch/audio
       cd audio
       python3 setup.py install --prefix=${TORCHAUDIO_PATH}
-      export PYTHONPATH=${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-2.7.1a0+95c61b4-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
+      export PYTHONPATH=${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
       if [[ "${DEBUG}" != 0 ]]; then
          echo "Testing import torchaudio"
          python3 -c 'import torchaudio'
