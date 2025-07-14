@@ -52,6 +52,7 @@ COPY rocm/scripts/rocm_setup.sh /tmp/rocm/rocm_setup.sh
 RUN  /tmp/rocm/rocm_setup.sh \
         --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
         --rocm-version ${ROCM_VERSION} \
+        --include-tools 1 \
         --python-version ${PYTHON_VERSION} && \
      rm -f /tmp/rocm/rocm_setup.sh
 

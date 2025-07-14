@@ -5,7 +5,6 @@ ROCM_VERSION=6.0
 GITHUB_BRANCH="develop"
 REPLACE=0
 INSTALL_ROCPROF_COMPUTE_FROM_SOURCE=0
-PYTHON_VERSION=10
 SUDO="sudo"
 TOOL_NAME="rocprofiler-compute"
 TOOL_CONFIG="ROCPROF_COMPUTE"
@@ -29,7 +28,7 @@ usage()
    echo "  --help: print this usage information"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default is $AMDGPU_GFXMODEL "
    echo "  --install-path: default is: $INSTALL_PATH"
-   echo "  --python-version: minor version of Python3, default is: $PYTHON_VERSION"
+   echo "  --python-version: minor version of Python3, default not set"
    echo "  --module-path: default is: $MODULE_PATH"
    echo "  --install-rocprof-compute-from-source: default is $INSTALL_ROCPROF_COMPUTE_FROM_SOURCE"
    echo "  --rocm-version: default is $ROCM_VERSION"
@@ -158,7 +157,7 @@ else
 
    git clone -b ${GITHUB_BRANCH} https://github.com/ROCm/rocprofiler-compute
    cd rocprofiler-compute
-   
+
    if [ -d "$INSTALL_PATH" ]; then
       # don't use sudo if user has write access to install path
       if [ -w ${INSTALL_PATH} ]; then
@@ -170,14 +169,19 @@ else
       # if install path does not exist yet, the check on write access will fail
       echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
-   
+
    ${SUDO} mkdir -p ${INSTALL_PATH}
    if [[ "${USER}" != "root" ]]; then
       ${SUDO} chmod -R a+w ${INSTALL_PATH}
    fi
-   
-   python3.${PYTHON_VERSION} -m pip install -t ${INSTALL_PATH}/python-libs -r requirements.txt --upgrade
-   python3.${PYTHON_VERSION} -m pip install -t ${INSTALL_PATH}/python-libs pytest --upgrade
+
+   PYTHON=python3
+   if [ "${PYTHON_VERSION}" != "" ]; then
+      PYTHON=python3.${PYTHON_VERSION}
+   fi
+
+   ${PYTHON} -m pip install -t ${INSTALL_PATH}/python-libs -r requirements.txt --upgrade
+   ${PYTHON} -m pip install -t ${INSTALL_PATH}/python-libs pytest --upgrade
    mkdir build && cd build
    cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_PATH}/ \
          -DCMAKE_BUILD_TYPE=Release \
@@ -186,7 +190,7 @@ else
          make install
    cd ../..
    rm -rf rocprofiler-compute
-   
+
    if [[ "${USER}" != "root" ]]; then
       ${SUDO} chmod go-w ${INSTALL_PATH}
    fi

@@ -8,6 +8,7 @@ MODULE_PATH=/etc/lmod/modules/ROCm
 #   MODULE_PATH=/etc/lmod/modules
 #fi
 
+INCLUDE_TOOLS=0
 # Autodetect defaults
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -32,9 +33,10 @@ usage()
    echo "Usage:"
    echo "  --replace default off"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected "
-   echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "  --python-version [ PYTHON_VERSION ] Python3 minor version, default $PYTHON_VERSION"
+   echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
+   echo "  --python-version [ PYTHON_VERSION ] Python3 minor version, default not set"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
+   echo "  --include-tools [INCLUDE_TOOLS] default $INCLUDE_TOOLS "
    echo "  --help: this usage information"
    exit 1
 }
@@ -80,6 +82,11 @@ do
       "--python-version")
           shift
           PYTHON_VERSION=${1}
+          reset-last
+          ;;
+      "--include-tools")
+          shift
+          INCLUDE_TOOLS=${1}
           reset-last
           ;;
       "--*")
@@ -214,29 +221,29 @@ else
 fi
 
 #echo "After autodetection"
-#echo "DISTRO is $DISTRO" 
-#echo "DISTRO_VERSION is $DISTRO_VERSION" 
+#echo "DISTRO is $DISTRO"
+#echo "DISTRO_VERSION is $DISTRO_VERSION"
 #echo ""
 
-#echo "ROCM_VERSION is $ROCM_VERSION" 
+#echo "ROCM_VERSION is $ROCM_VERSION"
 #echo ""
-#echo "ROCM_REPO_DIST is $ROCM_REPO_DIST" 
+#echo "ROCM_REPO_DIST is $ROCM_REPO_DIST"
 #echo ""
 
 # This sets variations of the ROCM_VERSION needed by installers
 # AMDGPU_ROCM_VERSION
-# AMDGPU_INSTALL_VERSION 
+# AMDGPU_INSTALL_VERSION
 version-set
 
 echo ""
 echo "=================================="
 echo "Starting ROCm Install with"
-echo "DISTRO: $DISTRO" 
-echo "DISTRO_VERSION: $DISTRO_VERSION" 
-echo "ROCM_REPO_DIST: $ROCM_REPO_DIST" 
-echo "ROCM_VERSION: $ROCM_VERSION" 
-echo "AMDGPU_ROCM_VERSION: $AMDGPU_ROCM_VERSION" 
-echo "AMDGPU_INSTALL_VERSION: $AMDGPU_INSTALL_VERSION" 
+echo "DISTRO: $DISTRO"
+echo "DISTRO_VERSION: $DISTRO_VERSION"
+echo "ROCM_REPO_DIST: $ROCM_REPO_DIST"
+echo "ROCM_VERSION: $ROCM_VERSION"
+echo "AMDGPU_ROCM_VERSION: $AMDGPU_ROCM_VERSION"
+echo "AMDGPU_INSTALL_VERSION: $AMDGPU_INSTALL_VERSION"
 echo "=================================="
 echo ""
 
@@ -366,7 +373,7 @@ fi
 #RUN echo "gfx906" >>/opt/rocm/bin/target.lst
 #RUN echo "gfx1030" >>/opt/rocm/bin/target.lst
 
-#ENV ROCM_TARGET_LST=/opt/rocm/bin/target.lst 
+#ENV ROCM_TARGET_LST=/opt/rocm/bin/target.lst
 
 #RUN mkdir -p rocinfo \
 #    && cd rocinfo \
@@ -376,7 +383,7 @@ fi
 #    && mkdir -p build \
 #    && cd build  \
 #    && cmake -DCMAKE_PREFIX_PATH=/opt/rocm .. \
-#    && make install  
+#    && make install
 
 #RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
 #        if [ -d /etc/apt/trusted.gpg.d ]; then \
@@ -391,8 +398,8 @@ fi
 #        apt-get install -y hip-base hip-runtime-amd hip-dev && \
 #        apt-get install -y rocm-llvm rocm-core rocm-smi-lib rocm-device-libs && \
 #        apt-get install -y roctracer-dev rocprofiler-dev rccl-dev ${EXTRA_PACKAGES} && \
-#        apt-get install -y rocfft  hipfft  rocm-libs rocsolver rocblas && \ 
-#        apt-get install -y rocminfo rocm-bandwidth-test  && \ 
+#        apt-get install -y rocfft  hipfft  rocm-libs rocsolver rocblas && \
+#        apt-get install -y rocminfo rocm-bandwidth-test  && \
 #        if [ "$(echo ${ROCM_VERSION} | awk -F '.' '{print $1}')" -lt "5" ]; then apt-get install -y rocm-dev; fi && \
 #        apt-get autoclean; \
 #    fi
@@ -494,49 +501,51 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	family("OpenCL")
 EOF
 
-TOOL_NAME=omnitrace
-TOOL_EXEC_NAME=omnitrace
-TOOL_NAME_MC=Omnitrace
-TOOL_NAME_UC=OMNITRACE
-# if ROCM_VERSION is greater than 6.2.9, the awk command will give the ROCM_VERSION number
-result=`echo ${ROCM_VERSION} | awk '$1>6.2.9'` && echo $result
-if [[ "${result}" ]]; then
-   TOOL_NAME=rocprofiler-systems
-   TOOL_EXEC_NAME=rocprof-sys-avail
-   TOOL_NAME_MC=Rocprofiler-systems
-   TOOL_NAME_UC=ROCPROFILER_SYSTEMS
-fi
+if [ "${INCLUDE_TOOLS}" = "1" ]; then
 
-echo ""
-echo "=================================="
-echo "Starting ROCm ${TOOL_NAME_MC} Install with"
-echo "DISTRO: $DISTRO"
-echo "DISTRO_VERSION: $DISTRO_VERSION"
-echo "ROCM_VERSION: $ROCM_VERSION"
-echo "AMDGPU_ROCM_VERSION: $AMDGPU_ROCM_VERSION"
-echo "AMDGPU_INSTALL_VERSION: $AMDGPU_INSTALL_VERSION"
-echo "=================================="
-echo ""
-
-# if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
-# if ROCM_VERSION is less than or equal to 6.1.2, the awk command result will be blank
-result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
-if [[ "${result}" == "" ]]; then
-   echo "ROCm built-in ${TOOL_NAME_MC} version cannot be installed on ROCm versions before 6.2.0"
-   exit
-fi
-if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
-   echo "ROCm built-in ${TOOL_NAME_MC} already installed"
-else
-   if [ "${DISTRO}" == "ubuntu" ]; then
-      ${SUDO} ${DEB_FRONTEND} apt-get install -q -y ${TOOL_NAME}
+   TOOL_NAME=omnitrace
+   TOOL_EXEC_NAME=omnitrace
+   TOOL_NAME_MC=Omnitrace
+   TOOL_NAME_UC=OMNITRACE
+   # if ROCM_VERSION is greater than 6.2.9, the awk command will give the ROCM_VERSION number
+   result=`echo ${ROCM_VERSION} | awk '$1>6.2.9'` && echo $result
+   if [[ "${result}" ]]; then
+      TOOL_NAME=rocprofiler-systems
+      TOOL_EXEC_NAME=rocprof-sys-avail
+      TOOL_NAME_MC=Rocprofiler-systems
+      TOOL_NAME_UC=ROCPROFILER_SYSTEMS
    fi
-fi
 
-if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
-   export MODULE_PATH=/etc/lmod/modules/ROCm/${TOOL_NAME}
-   ${SUDO} mkdir -p ${MODULE_PATH}
-   # The - option suppresses tabs
+   echo ""
+   echo "=================================="
+   echo "Starting ROCm ${TOOL_NAME_MC} Install with"
+   echo "DISTRO: $DISTRO"
+   echo "DISTRO_VERSION: $DISTRO_VERSION"
+   echo "ROCM_VERSION: $ROCM_VERSION"
+   echo "AMDGPU_ROCM_VERSION: $AMDGPU_ROCM_VERSION"
+   echo "AMDGPU_INSTALL_VERSION: $AMDGPU_INSTALL_VERSION"
+   echo "=================================="
+   echo ""
+
+   # if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
+   # if ROCM_VERSION is less than or equal to 6.1.2, the awk command result will be blank
+   result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
+   if [[ "${result}" == "" ]]; then
+      echo "ROCm built-in ${TOOL_NAME_MC} version cannot be installed on ROCm versions before 6.2.0"
+      exit
+   fi
+   if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
+      echo "ROCm built-in ${TOOL_NAME_MC} already installed"
+   else
+      if [ "${DISTRO}" == "ubuntu" ]; then
+         ${SUDO} ${DEB_FRONTEND} apt-get install -q -y ${TOOL_NAME}
+      fi
+   fi
+
+   if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
+      export MODULE_PATH=/etc/lmod/modules/ROCm/${TOOL_NAME}
+      ${SUDO} mkdir -p ${MODULE_PATH}
+      # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ${TOOL_NAME}")
 	whatis("Version: ${ROCM_VERSION}")
@@ -560,59 +569,64 @@ if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
         set_shell_function("omnitrace-run",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-run "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-run $*")
 EOF
 
-fi
-
-TOOL_NAME=omniperf
-TOOL_EXEC_NAME=omniperf
-TOOL_NAME_MC=Omniperf
-TOOL_NAME_UC=OMNIPERF
-# if ROCM_VERSION is greater than 6.2.9, the awk command will give the ROCM_VERSION number
-result=`echo ${ROCM_VERSION} | awk '$1>6.2.9'` && echo $result
-if [[ "${result}" ]]; then
-   TOOL_NAME=rocprofiler-compute
-   TOOL_EXEC_NAME=rocprof-compute
-   TOOL_NAME_MC=Rocprofiler-compute
-   TOOL_NAME_UC=ROCPROFILER_COMPUTE
-fi
-
-echo ""
-echo "=================================="
-echo "Starting ROCm ${TOOL_NAME_MC} Install with"
-echo "DISTRO: $DISTRO"
-echo "DISTRO_VERSION: $DISTRO_VERSION"
-echo "ROCM_VERSION: $ROCM_VERSION"
-echo "=================================="
-echo ""
-
-# if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
-# if ROCM_VERSION is less than or equal to 6.1.2, the awk command result will be blank
-result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
-if [[ "${result}" == "" ]]; then
-   echo "ROCm built-in ${TOOL_NAME_MC} version cannot be installed on ROCm versions before 6.2.0"
-   exit
-fi
-if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
-   echo "ROCm built-in ${TOOL_NAME_MC} already installed"
-else
-   if [ "${DISTRO}" == "ubuntu" ]; then
-      ${SUDO} ${DEB_FRONTEND} apt-get install -q -y ${TOOL_NAME}
    fi
-fi
 
-if [[ "${USER}" != "root" ]]; then
-   ${SUDO} chmod -R a+w /opt/rocm-${ROCM_VERSION}
-fi
+   TOOL_NAME=omniperf
+   TOOL_EXEC_NAME=omniperf
+   TOOL_NAME_MC=Omniperf
+   TOOL_NAME_UC=OMNIPERF
+   # if ROCM_VERSION is greater than 6.2.9, the awk command will give the ROCM_VERSION number
+   result=`echo ${ROCM_VERSION} | awk '$1>6.2.9'` && echo $result
+   if [[ "${result}" ]]; then
+      TOOL_NAME=rocprofiler-compute
+      TOOL_EXEC_NAME=rocprof-compute
+      TOOL_NAME_MC=Rocprofiler-compute
+      TOOL_NAME_UC=ROCPROFILER_COMPUTE
+   fi
 
-python3.${PYTHON_VERSION} -m pip install -t /opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/python-libs -r /opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/requirements.txt
+   echo ""
+   echo "=================================="
+   echo "Starting ROCm ${TOOL_NAME_MC} Install with"
+   echo "DISTRO: $DISTRO"
+   echo "DISTRO_VERSION: $DISTRO_VERSION"
+   echo "ROCM_VERSION: $ROCM_VERSION"
+   echo "=================================="
+   echo ""
 
-if [[ "${USER}" != "root" ]]; then
-   ${SUDO} chmod go-w /opt/rocm-${ROCM_VERSION}
-fi
+   # if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
+   # if ROCM_VERSION is less than or equal to 6.1.2, the awk command result will be blank
+   result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
+   if [[ "${result}" == "" ]]; then
+      echo "ROCm built-in ${TOOL_NAME_MC} version cannot be installed on ROCm versions before 6.2.0"
+      exit
+   fi
+   if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
+      echo "ROCm built-in ${TOOL_NAME_MC} already installed"
+   else
+      if [ "${DISTRO}" == "ubuntu" ]; then
+         ${SUDO} ${DEB_FRONTEND} apt-get install -q -y ${TOOL_NAME}
+      fi
+   fi
 
-if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
-   export MODULE_PATH=/etc/lmod/modules/ROCm/${TOOL_NAME}
-   ${SUDO} mkdir -p ${MODULE_PATH}
-   # The - option suppresses tabs
+   if [[ "${USER}" != "root" ]]; then
+      ${SUDO} chmod -R a+w /opt/rocm-${ROCM_VERSION}
+   fi
+
+   PYTHON=python3
+   if [ "${PYTHON_VERSION}" != "" ]; then
+      PYTHON=python3.${PYTHON_VERSION}
+   fi
+
+   ${PYTHON} -m pip install -t /opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/python-libs -r /opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/requirements.txt
+
+   if [[ "${USER}" != "root" ]]; then
+      ${SUDO} chmod go-w /opt/rocm-${ROCM_VERSION}
+   fi
+
+   if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
+      export MODULE_PATH=/etc/lmod/modules/ROCm/${TOOL_NAME}
+      ${SUDO} mkdir -p ${MODULE_PATH}
+      # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	local help_message = [[
 
@@ -659,4 +673,4 @@ if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
 
 EOF
 
-fi
+   fi

@@ -16,7 +16,7 @@ usage()
 {
    echo "Usage:"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "  --python-version [ PYTHON_VERSION ] Python3 minor version, default $PYTHON_VERSION"
+   echo "  --python-version [ PYTHON_VERSION ] Python3 minor version, default not set"
    echo "  --help: this usage information"
    exit 1
 }
@@ -102,7 +102,12 @@ if [[ "${USER}" != "root" ]]; then
    ${SUDO} chmod -R a+w /opt/rocm-${ROCM_VERSION}
 fi
 
-python3.${PYTHON_VERSION} -m pip install -t /opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/python-libs -r /opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/requirements.txt
+PYTHON=python3
+if [ "${PYTHON_VERSION}" != "" ]; then
+   PYTHON=python3.${PYTHON_VERSION}
+fi
+
+${PYTHON} -m pip install -t /opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/python-libs -r /opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/requirements.txt
 
 if [[ "${USER}" != "root" ]]; then
    ${SUDO} chmod go-w /opt/rocm-${ROCM_VERSION}
