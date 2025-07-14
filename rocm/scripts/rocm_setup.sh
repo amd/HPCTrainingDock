@@ -250,7 +250,7 @@ echo ""
 if [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
 	${SUDO} touch /etc/yum.repos.d/rocm.repo
 	${SUDO} chmod a+w /etc/yum.repos.d/rocm.repo
-	cat <<-EOF | ${SUD0} tee -a /etc/yum.repos.d/rocm.repo
+	cat <<-EOF | ${SUDO} tee -a /etc/yum.repos.d/rocm.repo
 	[ROCm-${AMDGPU_ROCM_VERSION}]
 	name=ROCm${AMDGPU_ROCM_VERSION}
 	baseurl=https://repo.radeon.com/rocm/rhel9/${AMDGPU_ROCM_VERSION}/main
@@ -674,3 +674,4 @@ EOF
 EOF
 
    fi
+fi
