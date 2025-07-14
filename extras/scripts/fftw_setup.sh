@@ -268,10 +268,10 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${FFTW_VERSION}.lua
 	whatis("FFTW: Fastest Fourier Transform in the West")
 
-        local base = "${FFTW_PATH}"
-        prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-        setenv("FFTW_PATH", base)
-        prepend_path("PATH", pathJoin(base, "bin"))
+	local base = "${FFTW_PATH}"
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	setenv("FFTW_PATH", base)
+	prepend_path("PATH", pathJoin(base, "bin"))
 EOF
 
 fi

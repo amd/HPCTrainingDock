@@ -55,9 +55,9 @@ do
 	setenv("F77", "/usr/bin/gfortran-${GCC_VERSION}")
 	setenv("F90", "/usr/bin/gfortran-${GCC_VERSION}")
 	setenv("FC", "/usr/bin/gfortran-${GCC_VERSION}")
-        setenv("OMPI_CC", "/usr/bin/gcc-${GCC_VERSION}")
-        setenv("OMPI_CXX", "/usr/bin/g++-${GCC_VERSION}")
-        setenv("OMPI_FC", "/usr/bin/gfortran-${GCC_VERSION}")
+	setenv("OMPI_CC", "/usr/bin/gcc-${GCC_VERSION}")
+	setenv("OMPI_CXX", "/usr/bin/g++-${GCC_VERSION}")
+	setenv("OMPI_FC", "/usr/bin/gfortran-${GCC_VERSION}")
 	append_path("INCLUDE_PATH", "/usr/include")
 	prepend_path("LIBRARY_PATH", "/usr/lib/gcc/x86_64-linux-gnu/${GCC_VERSION}")
 	prepend_path("LD_LIBRARY_PATH", "/usr/lib/gcc/x86_64-linux-gnu/${GCC_VERSION}")
@@ -72,9 +72,9 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/base.lua
 	setenv("F77", "/usr/bin/gfortran")
 	setenv("F90", "/usr/bin/gfortran")
 	setenv("FC", "/usr/bin/gfortran")
-        setenv("OMPI_CC", "/usr/bin/gcc")
-        setenv("OMPI_CXX", "/usr/bin/g++")
-        setenv("OMPI_FC", "/usr/bin/gfortran")
+	setenv("OMPI_CC", "/usr/bin/gcc")
+	setenv("OMPI_CXX", "/usr/bin/g++")
+	setenv("OMPI_FC", "/usr/bin/gfortran")
 	append_path("INCLUDE_PATH", "/usr/include")
 	prepend_path("LIBRARY_PATH", "/usr/lib/gcc/x86_64-linux-gnu/${GCC_BASE_VERSION}")
 	prepend_path("LD_LIBRARY_PATH", "/usr/lib/gcc/x86_64-linux-gnu/${GCC_BASE_VERSION}")
@@ -104,9 +104,9 @@ do
    fi
    ${SUDO} apt-get -qq update && ${SUDO} ${DEB_FRONTEND} apt-get -q install -y clang-$CLANG_VERSION libomp-$CLANG_VERSION-dev
    ${SUDO} update-alternatives \
-         --install /usr/bin/clang     clang     /usr/bin/clang-$CLANG_VERSION      $val \
-         --slave   /usr/bin/clang++   clang++   /usr/bin/clang++-$CLANG_VERSION         \
-         --slave   /usr/bin/clang-cpp clang-cpp /usr/bin/clang-cpp-$CLANG_VERSION
+	 --install /usr/bin/clang     clang     /usr/bin/clang-$CLANG_VERSION      $val \
+	 --slave   /usr/bin/clang++   clang++   /usr/bin/clang++-$CLANG_VERSION         \
+	 --slave   /usr/bin/clang-cpp clang-cpp /usr/bin/clang-cpp-$CLANG_VERSION
    val=$((val - 5))
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${CLANG_VERSION}.lua
 	whatis("Clang (LLVM) Version ${CLANG_VERSION} compiler")
@@ -115,9 +115,9 @@ do
 	setenv("F77", "/usr/bin/flang-${CLANG_VERSION}")
 	setenv("F90", "/usr/bin/flang-${CLANG_VERSION}")
 	setenv("FC", "/usr/bin/flang-${CLANG_VERSION}")
-        setenv("OMPI_CC", "/usr/bin/clang-${CLANG_VERSION}")
-        setenv("OMPI_CXX", "/usr/bin/clang++-${CLANG_VERSION}")
-        setenv("OMPI_FC", "/usr/bin/flang-${CLANG_VERSION}")
+	setenv("OMPI_CC", "/usr/bin/clang-${CLANG_VERSION}")
+	setenv("OMPI_CXX", "/usr/bin/clang++-${CLANG_VERSION}")
+	setenv("OMPI_FC", "/usr/bin/flang-${CLANG_VERSION}")
 	append_path("INCLUDE_PATH", "/usr/include")
 	prepend_path("LIBRARY_PATH", "/usr/lib/llvm-${CLANG_VERSION}/lib")
 	prepend_path("LD_LIBRARY_PATH", "/usr/lib/llvm-${CLANG_VERSION}/lib")
@@ -132,9 +132,9 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/base.lua
 	setenv("F77", "/usr/bin/flang")
 	setenv("F90", "/usr/bin/flang")
 	setenv("FC", "/usr/bin/flang")
-        setenv("OMPI_CC", "/usr/bin/clang")
-        setenv("OMPI_CXX", "/usr/bin/clang++")
-        setenv("OMPI_FC", "/usr/bin/flang")
+	setenv("OMPI_CC", "/usr/bin/clang")
+	setenv("OMPI_CXX", "/usr/bin/clang++")
+	setenv("OMPI_FC", "/usr/bin/flang")
 	append_path("INCLUDE_PATH", "/usr/include")
 	prepend_path("LIBRARY_PATH", "/usr/lib/llvm-${CLANG_BASE_VERSION}/lib")
 	prepend_path("LD_LIBRARY_PATH", "/usr/lib/llvm-${CLANG_BASE_VERSION}/lib")

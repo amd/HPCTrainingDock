@@ -520,7 +520,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	whatis("PyTorch version ${PYTORCH_VERSION} with ROCm Support")
 
 	load("rocm/${ROCM_VERSION}")
-        load("${MPI_MODULE}")
+	load("${MPI_MODULE}")
 	conflict("miniconda3")
 	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}/local/lib/python3.10/dist-packages")
 	prepend_path("PYTHONPATH","${SAGEATTENTION_PATH}")
@@ -535,7 +535,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	prepend_path("PATH","${PYTORCH_PATH}/pytorch/bin")
 	setenv("MIOPEN_USER_DB_PATH","/tmp/$USER/my-miopen-cache")
 	setenv("MIOPEN_CUSTOM_CACHE_DIR","/tmp/$USER/my-miopen-cache")
-        setenv("Torch_DIR","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages")
+	setenv("Torch_DIR","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages")
 EOF
 # An alternate module with tunable gemms
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}_tunableop_enabled.lua
@@ -544,15 +544,15 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}_tunableop_enabled.lua
 	load pytorch
 	setenv("PYTORCH_TUNABLEOP_ENABLED","1")
 EOF
-#        cmd1="mkdir -p $$HOME/miopen_tmpdir; export TMPDIR=$$HOME/miopen_tmpdir"
-#        cmd2="rm -rf $$HOME/miopen_tmpdir; unset TMPDIR"
-#        execute{cmd=cmd1, modeA={"load"}}
-#        execute{cmd=cmd2, modeA={"unload"}}
+#	cmd1="mkdir -p $$HOME/miopen_tmpdir; export TMPDIR=$$HOME/miopen_tmpdir"
+#	cmd2="rm -rf $$HOME/miopen_tmpdir; unset TMPDIR"
+#	execute{cmd=cmd1, modeA={"load"}}
+#	execute{cmd=cmd2, modeA={"unload"}}
 
 #pip download --only-binary :all: --dest /opt/wheel_files_6.0/pytorch-rocm --no-cache --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/rocm6.0
 #cat > /opt/wheel_files_6.0/README_pytorch <<-EOF
-#        To install the pytorch package for ROCM 6.0
-#           pip3 install /opt/wheel_files-6.0/pytorch-rocm/torch-2.3.0.dev20240301+rocm6.0-cp310-cp310-linux_x86_64.whl
+#	To install the pytorch package for ROCM 6.0
+#	   pip3 install /opt/wheel_files-6.0/pytorch-rocm/torch-2.3.0.dev20240301+rocm6.0-cp310-cp310-linux_x86_64.whl
 #	   pip3 install /opt/wheel_files-6.0/pytorch-rocm/torchvision-0.18.0.dev20240301+rocm6.0-cp310-cp310-linux_x86_64.whl
 #EOF
 

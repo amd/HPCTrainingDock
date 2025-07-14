@@ -371,7 +371,7 @@ else
 	whatis("JAX version ${JAX_VERSION} with ROCm support")
 
 	load("rocm/${ROCM_VERSION}")
-        setenv("XLA_FLAGS","--xla_gpu_enable_triton_gemm=False --xla_gpu_autotune_level=3")
+	setenv("XLA_FLAGS","--xla_gpu_enable_triton_gemm=False --xla_gpu_autotune_level=3")
 	prepend_path("PYTHONPATH","${JAX_PATH}")
 	prepend_path("PYTHONPATH","${JAXLIB_PATH}")
 EOF

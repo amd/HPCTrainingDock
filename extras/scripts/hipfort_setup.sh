@@ -213,15 +213,15 @@ else
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis(" hipfort module ")
-        whatis(" this hipfort build has been compiled with: $FC_COMPILER. ")
+	whatis(" this hipfort build has been compiled with: $FC_COMPILER. ")
 	load("rocm/${ROCM_VERSION}")
-        append_path("LD_LIBRARY_PATH","${HIPFORT_PATH}/lib")
-        setenv("LIBS","-L${HIPFORT_PATH}/lib -lhipfort-amdgcn.a")
-        setenv("HIPFORT_PATH","${HIPFORT_PATH}")
-        local fc_compiler = "${FC_COMPILER}"
-        if fc_compiler == "amdflang-new" then
+	append_path("LD_LIBRARY_PATH","${HIPFORT_PATH}/lib")
+	setenv("LIBS","-L${HIPFORT_PATH}/lib -lhipfort-amdgcn.a")
+	setenv("HIPFORT_PATH","${HIPFORT_PATH}")
+	local fc_compiler = "${FC_COMPILER}"
+	if fc_compiler == "amdflang-new" then
 		load("amdflang-new")
-        end
+	end
 	prepend_path("PATH","${HIPFORT_PATH}/bin")
 EOF
 

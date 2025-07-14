@@ -225,15 +225,15 @@ else
         #load("hdf5")
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/$ADIOS2_VERSION.lua
-        whatis("ADIOS2 package")
+	whatis("ADIOS2 package")
 
-        local base = "${INSTALL_PATH}"
+	local base = "${INSTALL_PATH}"
 
-        setenv("ADIOS2", base)
-        setenv("ADIOS2_PATH", base)
-        setenv("ADIOS2_DIR", base)
-        prepend_path("PATH", "${ADIOS2_PATH}/bin")
-        prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
+	setenv("ADIOS2", base)
+	setenv("ADIOS2_PATH", base)
+	setenv("ADIOS2_DIR", base)
+	prepend_path("PATH", "${ADIOS2_PATH}/bin")
+	prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
 EOF
 
 fi

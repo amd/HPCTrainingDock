@@ -164,45 +164,45 @@ else
 
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${MINICONDA3_VERSION}.lua
-           conflict("miniforge3")
-           local root = "${MINICONDA3_PATH}"
-           local python_version = capture(root .. "/bin/python -V | awk '{print $2}'")
-           local conda_version = capture(root .. "/bin/conda --version | awk '{print $2}'")
-           function trim(s)
-             return (s:gsub("^%s*(.-)%s*$", "%1"))
-           end
-           conda_version = trim(conda_version)
-           help([[ Loads the Miniconda environment supporting Community-Collections. ]])
-           whatis("Sets the environment to use the Community-Collections Miniconda.")
+	conflict("miniforge3")
+	local root = "${MINICONDA3_PATH}"
+	local python_version = capture(root .. "/bin/python -V | awk '{print $2}'")
+	local conda_version = capture(root .. "/bin/conda --version | awk '{print $2}'")
+	function trim(s)
+	  return (s:gsub("^%s*(.-)%s*$", "%1"))
+	end
+	conda_version = trim(conda_version)
+	help([[ Loads the Miniconda environment supporting Community-Collections. ]])
+	whatis("Sets the environment to use the Community-Collections Miniconda.")
 
-           setenv("PYTHONPREFIX",root)
-           prepend_path("PATH",pathJoin(root,"bin"))
-           prepend_path("PATH",pathJoin(root,"condabin"))
+	setenv("PYTHONPREFIX",root)
+	prepend_path("PATH",pathJoin(root,"bin"))
+	prepend_path("PATH",pathJoin(root,"condabin"))
 
-           local myShell = myShellName()
-           if (mode() == "load") then
-              if (myShell == "bash") then
-                 cmd = "source " .. root .. "/etc/profile.d/conda.sh"
-              else
-                 cmd = "source " .. root .. "/etc/profile.d/conda.csh"
-              end
-              execute{cmd=cmd, modeA = {"load"}}
-           end
+	local myShell = myShellName()
+	if (mode() == "load") then
+	   if (myShell == "bash") then
+	      cmd = "source " .. root .. "/etc/profile.d/conda.sh"
+	   else
+	      cmd = "source " .. root .. "/etc/profile.d/conda.csh"
+	   end
+	   execute{cmd=cmd, modeA = {"load"}}
+	end
 
-           if (myShell == "bash") then
-              if (mode() == "unload") then
-              remove_path("PATH", pathJoin(root,"condabin"))
-              end
-              cmd1 = "unset CONDA_EXE; unset _CE_CONDA; unset _CE_M; " ..
-                    "unset -f __conda_activate; unset -f __conda_reactivate; " ..
-                    "unset -f __conda_hashr; unset CONDA_SHLVL; unset _CONDA_EXE; " ..
-                    "unset _CONDA_ROOT; unset -f conda; unset CONDA_PYTHON_EXE"
-              execute{cmd=cmd1, modeA={"unload"}}
-           else
-              cmd2 = "unsetenv CONDA_EXE; unsetenv _CONDA_ROOT; unsetenv _CONDA_EXE; " ..
-              "unsetenv CONDA_SHLVL; unalias conda; unsetenv CONDA_PYTHON_EXE"
-              execute{cmd=cmd2, modeA={"unload"}}
-           end
+	if (myShell == "bash") then
+	   if (mode() == "unload") then
+	   remove_path("PATH", pathJoin(root,"condabin"))
+	   end
+	   cmd1 = "unset CONDA_EXE; unset _CE_CONDA; unset _CE_M; " ..
+	         "unset -f __conda_activate; unset -f __conda_reactivate; " ..
+	         "unset -f __conda_hashr; unset CONDA_SHLVL; unset _CONDA_EXE; " ..
+	         "unset _CONDA_ROOT; unset -f conda; unset CONDA_PYTHON_EXE"
+	   execute{cmd=cmd1, modeA={"unload"}}
+	else
+	   cmd2 = "unsetenv CONDA_EXE; unsetenv _CONDA_ROOT; unsetenv _CONDA_EXE; " ..
+	   "unsetenv CONDA_SHLVL; unalias conda; unsetenv CONDA_PYTHON_EXE"
+	   execute{cmd=cmd2, modeA={"unload"}}
+	end
 
 EOF
 

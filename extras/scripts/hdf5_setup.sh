@@ -299,19 +299,19 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${HDF5_VERSION}.lua
 	whatis("HDF5 Data Model")
 
-        local base = "${HDF5_PATH}/HDF_Group/HDF5/${HDF5_VERSION}"
-        prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-        prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
-        prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-        setenv("HDF5_PATH", base)
-        setenv("HDF5_ROOT", base)
-        setenv("HDF5_C_COMPILER", "${C_COMPILER}")
-        setenv("HDF5_FC_COMPILER", "${FC_COMPILER}")
-        setenv("HDF5_CXX_COMPILER", "${CXX_COMPILER}")
-        setenv("HDF5_ENABLE_PARALLEL", "${ENABLE_PARALLEL}")
-        setenv("HDF5_MPI_MODULE", "${MPI_MODULE}")
-        prepend_path("PATH", pathJoin(base, "bin"))
-        prepend_path("PATH", base)
+	local base = "${HDF5_PATH}/HDF_Group/HDF5/${HDF5_VERSION}"
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+	setenv("HDF5_PATH", base)
+	setenv("HDF5_ROOT", base)
+	setenv("HDF5_C_COMPILER", "${C_COMPILER}")
+	setenv("HDF5_FC_COMPILER", "${FC_COMPILER}")
+	setenv("HDF5_CXX_COMPILER", "${CXX_COMPILER}")
+	setenv("HDF5_ENABLE_PARALLEL", "${ENABLE_PARALLEL}")
+	setenv("HDF5_MPI_MODULE", "${MPI_MODULE}")
+	prepend_path("PATH", pathJoin(base, "bin"))
+	prepend_path("PATH", base)
 EOF
 
 fi

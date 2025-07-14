@@ -211,9 +211,9 @@ else
 
 	load("rocm/${ROCM_VERSION}")
 	load("${PYTORCH_MODULE}")
-        prepend_path("LD_LIBRARY_PATH", pathJoin("${FTORCH_PATH}", "lib"))
-        setenv("FTORCH_HOME","${FTORCH_PATH}")
-        setenv("FTorch_DIR","${FTORCH_PATH}")
+	prepend_path("LD_LIBRARY_PATH", pathJoin("${FTORCH_PATH}", "lib"))
+	setenv("FTORCH_HOME","${FTORCH_PATH}")
+	setenv("FTorch_DIR","${FTORCH_PATH}")
 
 EOF
 

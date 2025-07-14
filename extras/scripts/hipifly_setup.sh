@@ -137,7 +137,7 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/dev.lua
 	whatis(" Hipifly header file ")
 	load("rocm/${ROCM_VERSION}")
-        setenv("HIPIFLY_PATH","${HIPIFLY_PATH}")
+	setenv("HIPIFLY_PATH","${HIPIFLY_PATH}")
 EOF
 
 fi

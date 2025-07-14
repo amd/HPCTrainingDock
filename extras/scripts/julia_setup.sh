@@ -158,8 +158,8 @@ else
 	prepend_path("PATH","${JULIA_PATH}/bin")
 	setenv("JULIA_PATH","${JULIA_PATH}")
 	setenv("JULIA_VERSION","${JULIA_VERSION}")
-        cmd1="cp -r ${JULIA_PATH}/.julia $HOME"
-        execute{cmd=cmd1, modeA={"load"}}
+	cmd1="cp -r ${JULIA_PATH}/.julia $HOME"
+	execute{cmd=cmd1, modeA={"load"}}
 
 
 EOF

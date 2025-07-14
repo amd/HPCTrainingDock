@@ -154,54 +154,54 @@ else
 
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/24.9.0.lua
-           conflict("miniconda3")
-           local root = "${MINIFORGE3_PATH}"
-           setenv("MINIFORGE3_ROOT", root)
-           setenv("CONDA_ENVS_PATH", pathJoin(root, "envs"))
-           setenv("MAMBA_ROOT_PREFIX", root)
-           prepend_path("PATH",pathJoin(root,"bin"))
-           prepend_path("PATH",pathJoin(root,"condabin"))
+	conflict("miniconda3")
+	local root = "${MINIFORGE3_PATH}"
+	setenv("MINIFORGE3_ROOT", root)
+	setenv("CONDA_ENVS_PATH", pathJoin(root, "envs"))
+	setenv("MAMBA_ROOT_PREFIX", root)
+	prepend_path("PATH",pathJoin(root,"bin"))
+	prepend_path("PATH",pathJoin(root,"condabin"))
 
-           local myShell = myShellName()
-           if (mode() == "load") then
-              if (myShell == "bash") then
-                 cmd = "source " .. root .. "/etc/profile.d/conda.sh"
-                 cmd1 = "source " .. root .. "/etc/profile.d/mamba.sh"
-              else
-                 cmd = "source " .. root .. "/etc/profile.d/conda.csh"
-                 cmd1 = "source " .. root .. "/etc/profile.d/mamba.csh"
-              end
-              execute{cmd=cmd, modeA = {"load"}}
-              execute{cmd=cmd1, modeA = {"load"}}
-           end
+	local myShell = myShellName()
+	if (mode() == "load") then
+	   if (myShell == "bash") then
+	      cmd = "source " .. root .. "/etc/profile.d/conda.sh"
+	      cmd1 = "source " .. root .. "/etc/profile.d/mamba.sh"
+	   else
+	      cmd = "source " .. root .. "/etc/profile.d/conda.csh"
+	      cmd1 = "source " .. root .. "/etc/profile.d/mamba.csh"
+	   end
+	   execute{cmd=cmd, modeA = {"load"}}
+	   execute{cmd=cmd1, modeA = {"load"}}
+	end
 
-           if (mode() == "unload") then
-              remove_path("PATH",pathJoin(root,"bin"))
-              remove_path("PATH",pathJoin(root,"condabin"))
+	if (mode() == "unload") then
+	   remove_path("PATH",pathJoin(root,"bin"))
+	   remove_path("PATH",pathJoin(root,"condabin"))
 
-              if (myShell == "bash") then
-                 cmd2 = "unset CONDA_EXE; unset _CE_CONDA; unset _CE_M; " ..
-                       "unset CONDA_PYTHON_EXE; unset CONDA_SHLVL; " ..
-                       "unset MAMBA_ROOT_PREFIX; " ..
-                       "unset -f __m_activate; unset -f __conda_reactivate; " ..
-                       "unset -f __conda_hashr; unset -f conda; " ..
-                       "unset CONDA_PREFIX; unset CONDA_DEFAULT_ENV; " ..
-                       "unset CONDA_PROMPT_MODIFIER; unset CONDA_ENV_PATH; " ..
-                       "unset _CONDA_EXE; unset _CONDA_ROOT; unset CONDA_BACKUP_PATH; " ..
-                       "unset MAMBA_NO_BANNER; " ..
-                       "unset -f __conda_activate; unset -f __conda_reactivate; " ..
-                       "unset -f __conda_hashr; unset -f conda; unset -f __conda_exe"
-              else
-                 cmd2 = "unsetenv CONDA_EXE; unsetenv CONDA_PYTHON_EXE; unsetenv CONDA_SHLVL; " ..
-                        "unsetenv _CONDA_EXE; unsetenv _CONDA_ROOT;" ..
-                        "unsetenv MAMBA_NO_BANNER; unalias conda; " ..
-                        "unsetenv _CE_CONDA; unsetenv _CE_M; " ..
-                        "unsetenv CONDA_PREFIX; unsetenv CONDA_DEFAULT_ENV; " ..
-                        "unsetenv CONDA_PROMPT_MODIFIER; unsetenv CONDA_ENV_PATH; " ..
-                        "unsetenv CONDA_BACKUP_PATH; unsetenv MAMBA_ROOT_PREFIX; "
-              end
-              execute{cmd=cmd2, modeA={"unload"}}
-           end
+	   if (myShell == "bash") then
+	      cmd2 = "unset CONDA_EXE; unset _CE_CONDA; unset _CE_M; " ..
+	            "unset CONDA_PYTHON_EXE; unset CONDA_SHLVL; " ..
+	            "unset MAMBA_ROOT_PREFIX; " ..
+	            "unset -f __m_activate; unset -f __conda_reactivate; " ..
+	            "unset -f __conda_hashr; unset -f conda; " ..
+	            "unset CONDA_PREFIX; unset CONDA_DEFAULT_ENV; " ..
+	            "unset CONDA_PROMPT_MODIFIER; unset CONDA_ENV_PATH; " ..
+	            "unset _CONDA_EXE; unset _CONDA_ROOT; unset CONDA_BACKUP_PATH; " ..
+	            "unset MAMBA_NO_BANNER; " ..
+	            "unset -f __conda_activate; unset -f __conda_reactivate; " ..
+	            "unset -f __conda_hashr; unset -f conda; unset -f __conda_exe"
+	   else
+	      cmd2 = "unsetenv CONDA_EXE; unsetenv CONDA_PYTHON_EXE; unsetenv CONDA_SHLVL; " ..
+	             "unsetenv _CONDA_EXE; unsetenv _CONDA_ROOT;" ..
+	             "unsetenv MAMBA_NO_BANNER; unalias conda; " ..
+	             "unsetenv _CE_CONDA; unsetenv _CE_M; " ..
+	             "unsetenv CONDA_PREFIX; unsetenv CONDA_DEFAULT_ENV; " ..
+	             "unsetenv CONDA_PROMPT_MODIFIER; unsetenv CONDA_ENV_PATH; " ..
+	             "unsetenv CONDA_BACKUP_PATH; unsetenv MAMBA_ROOT_PREFIX; "
+	   end
+	   execute{cmd=cmd2, modeA={"unload"}}
+	end
 
 EOF
 

@@ -395,16 +395,16 @@ EOF
    cat <<-EOF | ${SUDO} tee ${NETCDF_FC_MODULE_PATH}/${NETCDF_FC_VERSION}.lua
 	whatis("Netcdf-fortan Library")
 
-        load("hdf5")
-        local base = "${NETCDF_FC_PATH}"
-        local base_pnetcdf = "${NETCDF_PATH}/pnetcdf"
-        prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-        prepend_path("LD_LIBRARY_PATH", pathJoin(base_pnetcdf, "lib"))
-        prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
-        prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-        prepend_path("PATH", pathJoin(base, "bin"))
-        prepend_path("PATH", base)
-        prepend_path("PATH", pathJoin(base_pnetcdf, "bin"))
+	load("hdf5")
+	local base = "${NETCDF_FC_PATH}"
+	local base_pnetcdf = "${NETCDF_PATH}/pnetcdf"
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base_pnetcdf, "lib"))
+	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("PATH", pathJoin(base, "bin"))
+	prepend_path("PATH", base)
+	prepend_path("PATH", pathJoin(base_pnetcdf, "bin"))
 	setenv("NETCDF_FC_ROOT", base)
 	setenv("PNETCDF_ROOT", base_pnetcdf)
 EOF
