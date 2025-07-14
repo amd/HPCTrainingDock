@@ -87,8 +87,8 @@ RUN  /tmp/extras/compiler_setup.sh && \
      rm -f /tmp/extras/compiler_setup.sh
 
 COPY extras/scripts/hipfort_setup.sh /tmp/extras/hipfort_setup.sh
-RUN  /tmp/extras/hipfort_setup.sh --build-hipfort ${BUILD_HIPFORT} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
-     rm -f /tmp/extras/hipfort_setup.sh
+RUN  /tmp/extras/hipfort_setup.sh --build-hipfort ${BUILD_HIPFORT} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
+                                  --fc-compiler amdflang-new && rm -f /tmp/extras/hipfort_setup.sh
 
 COPY extras/scripts/hipifly_setup.sh /tmp/extras/hipifly_setup.sh
 RUN  /tmp/extras/hipifly_setup.sh --hipifly-module ${HIPIFLY_MODULE} --rocm-version ${ROCM_VERSION} && \
