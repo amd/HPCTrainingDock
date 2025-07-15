@@ -45,11 +45,9 @@ if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" = "rocky linux" ||
    RHEL_COMPATIBLE=1
 fi
 SUDO="sudo"
-DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
-   DEB_FRONTEND=""
 fi
 
 usage()
@@ -338,10 +336,10 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    if [[ "${DRY_RUN}" == "0" ]]; then
       # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
       ${SUDO} apt-get update
-      ${SUDO} ${DEB_FRONTEND} apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
+      ${SUDO} apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
          libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen
       if [ "${IS_DOCKER}" != "1" ]; then
-         ${SUDO} ${DEB_FRONTEND} apt-get install -y linux-headers-$(uname -r)
+         ${SUDO} apt-get install -y linux-headers-$(uname -r)
       fi
    fi
 elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
@@ -858,3 +856,10 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 EOF
 
 fi
+
+#git clone https://github.com/amd/HPCTrainingExamples
+#cd HPCTrainingExamples/MPI-examples
+#export OMPI_CXX=hipcc
+#
+#mpicxx -o ./pt2pt ./pt2pt.cpp
+#mpirun -n 2 ./pt2pt
