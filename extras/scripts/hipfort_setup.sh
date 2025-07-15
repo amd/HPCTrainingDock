@@ -215,13 +215,13 @@ else
 	whatis(" hipfort module ")
 	whatis(" this hipfort build has been compiled with: $FC_COMPILER. ")
 	load("rocm/${ROCM_VERSION}")
-	append_path("LD_LIBRARY_PATH","${HIPFORT_PATH}/lib")
-	setenv("LIBS","-L${HIPFORT_PATH}/lib -lhipfort-amdgcn.a")
-	setenv("HIPFORT_PATH","${HIPFORT_PATH}")
 	local fc_compiler = "${FC_COMPILER}"
 	if fc_compiler == "amdflang-new" then
 		load("amdflang-new")
 	end
+	append_path("LD_LIBRARY_PATH","${HIPFORT_PATH}/lib")
+	setenv("LIBS","-L${HIPFORT_PATH}/lib -lhipfort-amdgcn.a")
+	setenv("HIPFORT_PATH","${HIPFORT_PATH}")
 	prepend_path("PATH","${HIPFORT_PATH}/bin")
 EOF
 

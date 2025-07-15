@@ -220,10 +220,11 @@ netcdf.timestamp: hdf5.timestamp
            --build-netcdf 1
 	touch netcdf.timestamp
 
-hipfort.timestamp: rocm.timestamp
+hipfort.timestamp: rocm.timestamp flang-new.timestamp
 	extras/scripts/hipfort_setup.sh \
            --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
+           --fc-compiler amdflang-new \
            --build-hipfort 1
 	touch hipfort.timestamp
 
