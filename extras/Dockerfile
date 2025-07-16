@@ -150,9 +150,9 @@ COPY extras/scripts/ollama_setup.sh /tmp/extras/ollama_setup.sh
 RUN  /tmp/extras/ollama_setup.sh --build-ollama ${BUILD_OLLAMA} && \
      rm -f /tmp/extras/ollama_setup.sh
 
-#COPY extras/scripts/apps_setup.sh /tmp/extras/apps_setup.sh
-#RUN  /tmp/extras/apps_setup.sh && \
-#     rm -f /tmp/extras/apps_setup
+COPY extras/scripts/apps_setup.sh /tmp/extras/apps_setup.sh
+RUN  /tmp/extras/apps_setup.sh && \
+     rm -f /tmp/extras/apps_setup
 
 WORKDIR /tmp
 

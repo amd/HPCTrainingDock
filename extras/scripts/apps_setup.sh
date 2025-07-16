@@ -8,32 +8,25 @@ if [  -f /.singularity.d/Singularity ]; then
 fi
 
 ${SUDO} apt-get update
-${SUDO} apt-get install -y emacs
-#\
-#${SUDO} apt-get install -y valgrind \
-#	                emacs \
-#                        kcachegrind kcachegrind-converters \
-#                        libboost-all-dev \
-#                        libgmp-dev \
-#                        libgsl-dev \
-#                        libtool \
-#                        libxml2 \
-#                        libmpfrc++-dev libmpfr6 \
-#                        openssl \
-#			swig \
-#			libparmetis-dev \
-#                        libfftw3-dev \
-#           		libhdf5-openmpi-103-1 libhdf5-dev \
-#			petsc-dev petsc64-dev \
-#			libadios-dev libadios-openmpi-dev libadios-bin \
-#			libparmetis-dev libscotchparmetis-dev \
-#			scotch \
-#                        libeigen3-dev \
-#                        libmagma-dev
+${SUDO} apt-get install -y \
+                         libgmp-dev \
+                         libgsl-dev \
+                         kcachegrind kcachegrind-converters \
+                         libmpfrc++-dev libmpfr6 \
+ 			 swig \
+ 			 libparmetis-dev \
+                         libfftw3-dev \
+            		 libhdf5-openmpi-103-1 libhdf5-dev \
+ 			 scotch \
+                         libeigen3-dev \
+                         libmagma-dev \
+			 libparmetis-dev \
+ 			 libadios-dev libadios-openmpi-dev libadios-bin \
+ 			 petsc-dev petsc64-dev
 
+# note that installing emacs will break hipcc unless libstdc++-14 is added 
+${SUDO} apt-get install --no-install-recommends -y \
+ 	                emacs \
+			libstdc++-14-dev
+	
 # adios2 is available in ubuntu 24.04
-#                       python3-matplotlib \
-#                       python3-mpi4py \
-#                       python3-numpy \
-#                       python3-scipy  python3-h5sparse \
-#		libtbb-dev

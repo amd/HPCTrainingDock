@@ -127,7 +127,7 @@ echo "==================================="
 echo ""
 
 AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
-CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
+CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}
 
 if [ "${BUILD_ADIOS2}" = "0" ]; then
 
@@ -136,7 +136,7 @@ if [ "${BUILD_ADIOS2}" = "0" ]; then
    exit
 
 else
-   if [ -f ${CACHE_FILES}/adios2.tgz ]; then
+   if [ -f ${CACHE_FILES}/adios2-v${ADIOS2_VERSION}.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached ADIOS2"
@@ -145,9 +145,9 @@ else
 
       #install the cached version
       cd /opt
-      tar -xpzf ${CACHE_FILES}/adios2.tgz
+      tar -xpzf ${CACHE_FILES}/adios2-v${ADIOS2_VERSION}.tgz
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm ${CACHE_FILES}/adios2.tgz
+         ${SUDO} rm ${CACHE_FILES}/adios2-v${ADIOS2_VERSION}.tgz
       fi
 
    else

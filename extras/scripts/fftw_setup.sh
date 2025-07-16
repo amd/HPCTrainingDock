@@ -157,9 +157,10 @@ else
    echo ""
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
-   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
+   # Should remove ROCM_VERSION from script
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}
 
-   if [ -f ${CACHE_FILES}/fftw.tgz ]; then
+   if [ -f ${CACHE_FILES}/fftw-v${FFTW_VERSION}.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached FFTW"
@@ -168,10 +169,10 @@ else
 
       #install the cached version
       cd /opt
-      tar -xzf  ${CACHE_FILES}/fftw.tgz
-      chown -R root:root /opt/fftw
+      tar -xzf  ${CACHE_FILES}/fftw-v${FFTW_VERSION}.tgz
+      chown -R root:root /opt/fftw-v${FFTW_VERSION}
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm  ${CACHE_FILES}/fftw.tgz
+         ${SUDO} rm  ${CACHE_FILES}/fftw-v${FFTW_VERSION}.tgz
       fi
 
    else

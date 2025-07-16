@@ -115,6 +115,7 @@ else
 
    # the julia install wants to create the directory to install so it has not exist already
    JULIA_PATH=${JULIA_PARENT_DIR}/julia-v${JULIA_VERSION}
+   JULIA_DEPOT_PATH=${JULIA_PATH}
    curl -fsSL https://install.julialang.org | sh -s -- --yes --add-to-path=no -p=${JULIA_PATH}
    export JULIA_DEPOT_PATH=$JULIA_PATH
    export PATH=$PATH:"$JULIA_PATH/bin"
@@ -155,6 +156,7 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${JULIA_VERSION}.lua
 	whatis("Julia programming language, version ${JULIA_VERSION}")
 
+	setenv("JULIA_DEPOT_PATH","${JULIA_PATH}")
 	prepend_path("PATH","${JULIA_PATH}/bin")
 	setenv("JULIA_PATH","${JULIA_PATH}")
 	setenv("JULIA_VERSION","${JULIA_VERSION}")

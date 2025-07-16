@@ -156,8 +156,9 @@ else
    echo ""
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
-   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   if [ -f ${CACHE_FILES}/hdf5.tgz ]; then
+   # Should remove ROCM_VERSION from script
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}
+   if [ -f ${CACHE_FILES}/hdf5-v${HDF5_VERSION}.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached HDF5"
@@ -166,10 +167,10 @@ else
 
       #install the cached version
       cd /opt
-      tar -xzf  ${CACHE_FILES}/hdf5.tgz
-      chown -R root:root /opt/hdf5
+      tar -xzf  ${CACHE_FILES}/hdf5-v${HDF5_VERSION}.tgz
+      chown -R root:root /opt/hdf5-v${HDF5_VERSION}
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm -f ${CACHE_FILES}/hdf5.tgz
+         ${SUDO} rm -f ${CACHE_FILES}/hdf5${HDF5_VERSION}.tgz
       fi
 
    else

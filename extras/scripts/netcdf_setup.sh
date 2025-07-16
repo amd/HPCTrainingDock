@@ -175,7 +175,9 @@ else
    fi
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
-   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
+   #CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
+   # Should take out ROCM_VERSION from script
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}
 
    if [ -f ${CACHE_FILES}/netcdf.tgz ]; then
       echo ""
