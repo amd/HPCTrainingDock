@@ -140,7 +140,7 @@ else
       # don't use sudo if user has write access to install path
       if [ -d "$KOKKOS_PATH" ]; then
          # don't use sudo if user has write access to install path
-         if [ -w ${KOKKS_PATH} ]; then
+         if [ -w ${KOKKOS_PATH} ]; then
             SUDO=""
          else
             echo "WARNING: using an install path that requires sudo"
