@@ -529,6 +529,9 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchvision-${TORCHVISION_VERSION}+${TORCHVISION_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/pillow-${PILLOW_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages")
+	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}")
+	prepend_path("PYTHONPATH","${TORCHVISION_PATH}")
+	prepend_path("PYTHONPATH","${PYTORCH_PATH}")
 	prepend_path("PYTHONPATH","${INSTALL_PATH}/pypackages")
 	prepend_path("PYTHONPATH","${TRITON_PATH}")
 
