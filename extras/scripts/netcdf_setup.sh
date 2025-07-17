@@ -1,8 +1,8 @@
 #/bin/bash
 
 # Variables controlling setup process
-NETCDF_C_MODULE_PATH=/etc/lmod/modules/LinuxPlus/netcdf-c
-NETCDF_FC_MODULE_PATH=/etc/lmod/modules/LinuxPlus/netcdf-fortran
+NETCDF_C_MODULE_PATH=/etc/lmod/modules/ROCmPlus/netcdf-c
+NETCDF_FC_MODULE_PATH=/etc/lmod/modules/ROCmPlus/netcdf-fortran
 BUILD_NETCDF=0
 ROCM_VERSION=6.0
 C_COMPILER=gcc
@@ -14,7 +14,7 @@ FC_COMPILER_INPUT=""
 NETCDF_C_VERSION="4.9.3"
 NETCDF_FC_VERSION="4.6.2"
 HDF5_MODULE="hdf5"
-NETCDF_PATH=/opt/netcdf
+NETCDF_PATH=/opt/rocmplus-${ROCM_VERSION}/netcdf
 NETCDF_PATH_INPUT=""
 ENABLE_PNETCDF="OFF"
 
@@ -175,9 +175,7 @@ else
    fi
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
-   #CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   # Should take out ROCM_VERSION from script
-   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
    if [ -f ${CACHE_FILES}/netcdf.tgz ]; then
       echo ""

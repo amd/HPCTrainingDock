@@ -157,7 +157,6 @@ else
    echo ""
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
-   # Should remove ROCM_VERSION from script
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
    if [ -f ${CACHE_FILES}/fftw-v${FFTW_VERSION}.tgz ]; then

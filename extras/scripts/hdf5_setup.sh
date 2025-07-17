@@ -1,7 +1,7 @@
 #/bin/bash
 
 # Variables controlling setup process
-MODULE_PATH=/etc/lmod/modules/LinuxPlus/hdf5
+MODULE_PATH=/etc/lmod/modules/ROCmPlus/hdf5
 BUILD_HDF5=0
 ROCM_VERSION=6.0
 C_COMPILER=`which gcc`
@@ -13,7 +13,7 @@ FC_COMPILER_INPUT=""
 ENABLE_PARALLEL_INPUT=""
 HDF5_VERSION=1.14.6
 MPI_MODULE="openmpi"
-HDF5_PATH=/opt/hdf5-v${HDF5_VERSION}
+HDF5_PATH=/opt/rocmplus-${ROCM_VERSION}/hdf5-v${HDF5_VERSION}
 HDF5_PATH_INPUT=""
 
 SUDO="sudo"
@@ -133,7 +133,7 @@ if [ "${HDF5_PATH_INPUT}" != "" ]; then
    HDF5_PATH=${HDF5_PATH_INPUT}
 else
    # override path in case HDF5_VERSION has been supplied as input
-   HDF5_PATH=/opt/hdf5-v${HDF5_VERSION}
+   HDF5_PATH=/opt/rocmplus-${ROCM_VERSION}/hdf5-v${HDF5_VERSION}
 fi
 
 if [ "${BUILD_HDF5}" = "0" ]; then
@@ -156,8 +156,7 @@ else
    echo ""
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
-   # Should remove ROCM_VERSION from script
-   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
    if [ -f ${CACHE_FILES}/hdf5-v${HDF5_VERSION}.tgz ]; then
       echo ""
       echo "============================"
