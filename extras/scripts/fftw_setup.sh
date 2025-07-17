@@ -1,7 +1,7 @@
 #/bin/bash
 
 # Variables controlling setup process
-MODULE_PATH=/etc/lmod/modules/LinuxPlus/fftw
+MODULE_PATH=/etc/lmod/modules/ROCmPlus/fftw
 BUILD_FFTW=0
 ROCM_VERSION=6.0
 C_COMPILER=`which gcc`
@@ -13,7 +13,7 @@ FC_COMPILER_INPUT=""
 ENABLE_MPI_INPUT=""
 FFTW_VERSION=3.3.10
 MPI_MODULE="openmpi"
-FFTW_PATH=/opt/fftw-v$FFTW_VERSION
+FFTW_PATH=/opt/rocmplus-${ROCM_VERSION}/fftw-v$FFTW_VERSION
 FFTW_PATH_INPUT=""
 
 SUDO="sudo"
@@ -133,7 +133,7 @@ if [ "${FFTW_PATH_INPUT}" != "" ]; then
    FFTW_PATH=${FFTW_PATH_INPUT}
 else
    # override path in case FFTW_VERSION has been supplied as input
-   INSTALL_PATH=/opt/fftw-v${FFTW_VERSION}
+   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/fftw-v${FFTW_VERSION}
 fi
 
 
@@ -158,7 +158,7 @@ else
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    # Should remove ROCM_VERSION from script
-   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
    if [ -f ${CACHE_FILES}/fftw-v${FFTW_VERSION}.tgz ]; then
       echo ""
