@@ -377,7 +377,7 @@ do
 	    BUILD_FLANGNEW="1"
 	    BUILD_HIPFORT="1"
 	    BUILD_FTORCH="1"
-	    BUILD_JULIA="1"
+	    #BUILD_JULIA="1"
 	    INSTALL_ROCPROF_SYS_FROM_SOURCE="1"
             INSTALL_ROCPROF_COMPUTE_FROM_SOURCE="1"
             reset-last
@@ -563,7 +563,7 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             BUILD_FLANGNEW="1"
             BUILD_HIPFORT="1"
             BUILD_FTORCH="1"
-            BUILD_JULIA="1"
+            #BUILD_JULIA="1"
 	    INSTALL_ROCPROF_SYS_FROM_SOURCE="1"
             INSTALL_ROCPROF_COMPUTE_FROM_SOURCE="1"
 	    ;;
