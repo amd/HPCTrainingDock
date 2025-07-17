@@ -522,7 +522,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	load("rocm/${ROCM_VERSION}")
 	load("${MPI_MODULE}")
 	conflict("miniconda3")
-	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}/local/lib/python3.10/dist-packages")
+	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}/local/lib/python3.${PYTHON_VERSION}/dist-packages")
 	prepend_path("PYTHONPATH","${SAGEATTENTION_PATH}")
 	prepend_path("PYTHONPATH","${TRANSFORMERS_PATH}")
 	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
