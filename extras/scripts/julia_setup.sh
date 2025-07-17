@@ -4,7 +4,7 @@
 MODULE_PATH=/etc/lmod/modules/LinuxPlus/julia
 BUILD_JULIA=0
 JULIA_VERSION="1.12"
-JULIA_PARENT_DIR=/opt/
+JULIA_PARENT_DIR=/opt
 JULIA_PARENT_DIR_INPUT=""
 
 SUDO="sudo"
@@ -115,9 +115,8 @@ else
 
    # the julia install wants to create the directory to install so it has not exist already
    JULIA_PATH=${JULIA_PARENT_DIR}/julia-v${JULIA_VERSION}
-   JULIA_DEPOT_PATH=${JULIA_PATH}
-   curl -fsSL https://install.julialang.org | sh -s -- --yes --add-to-path=no -p=${JULIA_PATH}
    export JULIA_DEPOT_PATH=$JULIA_PATH
+   curl -fsSL https://install.julialang.org | sh -s -- --yes --add-to-path=no -p=${JULIA_PATH}
    export PATH=$PATH:"$JULIA_PATH/bin"
    juliaup add 1.12
    juliaup default 1.12
@@ -152,11 +151,11 @@ else
 
    ${SUDO} mkdir -p ${MODULE_PATH}
 
+	#setenv("JULIA_DEPOT_PATH","${JULIA_PATH}")
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${JULIA_VERSION}.lua
 	whatis("Julia programming language, version ${JULIA_VERSION}")
 
-	setenv("JULIA_DEPOT_PATH","${JULIA_PATH}")
 	prepend_path("PATH","${JULIA_PATH}/bin")
 	setenv("JULIA_PATH","${JULIA_PATH}")
 	setenv("JULIA_VERSION","${JULIA_VERSION}")

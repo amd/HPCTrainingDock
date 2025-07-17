@@ -218,7 +218,7 @@ else
       cd tau2
       git checkout $GIT_COMMIT
 
-      # install third pary dependencies
+      # install third party dependencies
       wget http://tau.uoregon.edu/ext.tgz
 
       tar zxf ext.tgz

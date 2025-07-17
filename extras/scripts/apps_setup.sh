@@ -22,6 +22,7 @@ ${SUDO} apt-get install -y \
                          libmagma-dev \
 			 libparmetis-dev \
  			 libadios-dev libadios-openmpi-dev libadios-bin \
+			 libhypre-dev libhypre64-dev \
  			 petsc-dev petsc64-dev
 
 # note that installing emacs will break hipcc unless libstdc++-14 is added 

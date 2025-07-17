@@ -411,6 +411,9 @@ MODULE_PATH=${MODULE_PATH}/rocm
 
 ${SUDO} mkdir -p ${MODULE_PATH}
 
+# autodetecting default version for distro and getting available gcc version list
+GCC_BASE_VERSION=`ls /usr/bin/gcc-* | cut -f2 -d'-' | grep '^[[:digit:]]'`
+
 # The - option suppresses tabs
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ROCm")
@@ -428,6 +431,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	prepend_path("CPATH", pathJoin(base, "include"))
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("INCLUDE", pathJoin(base, "include"))
+	setenv("HIPCC_COMPILE_FLAGS_APPEND","--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_BASE_VERSION}")
 	setenv("ROCM_PATH", base)
 	family("GPUSDK")
 EOF
