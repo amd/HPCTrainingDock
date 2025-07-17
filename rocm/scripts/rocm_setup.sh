@@ -420,6 +420,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Version: ${ROCM_VERSION}")
 	whatis("Category: AMD")
 	whatis("ROCm")
+	whatis("Set HIPCC_VERBOSE=7 to see what hipcc is doing for the compilation and link")
 
 	local base = "/opt/rocm-${ROCM_VERSION}"
 	local mbase = " /etc/lmod/modules/ROCm/rocm"
@@ -432,6 +433,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("INCLUDE", pathJoin(base, "include"))
 	setenv("HIPCC_COMPILE_FLAGS_APPEND","--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_BASE_VERSION}")
+	setenv("HIPCC_LINK_FLAGS_APPEND","--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_BASE_VERSION}")
 	setenv("ROCM_PATH", base)
 	family("GPUSDK")
 EOF
