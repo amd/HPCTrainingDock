@@ -2,7 +2,7 @@
 
 # Variables controlling setup process
 AMDGPU_GFXMODEL_INPUT=""
-MODULE_PATH=/etc/lmod/modules/misc/tau
+MODULE_PATH=/etc/lmod/modules/ROCmPlus/tau
 BUILD_TAU=0
 ROCM_VERSION=6.0
 TAU_PATH=/opt/rocmplus-${ROCM_VERSION}/tau

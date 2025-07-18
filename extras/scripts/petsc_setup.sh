@@ -2,7 +2,7 @@
 
 # Variables controlling setup process
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-MODULE_PATH=/etc/lmod/modules/misc/petsc
+MODULE_PATH=/etc/lmod/modules/ROCmPlus/petsc
 BUILD_PETSC=0
 ROCM_VERSION=6.0
 INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/petsc

@@ -2,7 +2,7 @@
 
 # Variables controlling setup process
 AMDGPU_GFXMODEL_INPUT=""
-MODULE_PATH=/etc/lmod/modules/misc/kokkos
+MODULE_PATH=/etc/lmod/modules/ROCmPlus/kokkos
 BUILD_KOKKOS=0
 ROCM_VERSION=6.0
 KOKKOS_ARCH_AMD_GFX942="OFF"

@@ -2,11 +2,11 @@
 
 # Variables controlling setup process
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-MODULE_PATH=/etc/lmod/modules/misc/adios2
+MODULE_PATH=/etc/lmod/modules/ROCmPlus/adios2
 BUILD_ADIOS2=1
 ROCM_VERSION=6.4.0
 ADIOS2_VERSION="2.10.1"
-INSTALL_PATH=/opt/adios2-v$ADIOS2_VERSION
+INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/adios2-v$ADIOS2_VERSION
 INSTALL_PATH_INPUT=""
 SUDO="sudo"
 MPI_MODULE="openmpi"
@@ -112,7 +112,7 @@ if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
    # override path in case ADIOS2_VERSION has been supplied as input
-   INSTALL_PATH=/opt/adiosv2-v${ADIOS2_VERSION}
+   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/adiosv2-v${ADIOS2_VERSION}
 fi
 
 echo ""
@@ -127,7 +127,7 @@ echo "==================================="
 echo ""
 
 AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
-CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}
+CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
 if [ "${BUILD_ADIOS2}" = "0" ]; then
 
