@@ -233,7 +233,6 @@ else
       export PYTHONPATH=$PYTHONPATH:$PYTORCH_PATH
       pip3 install torchaudio==${TORCHAUDIO_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHAUDIO_PATH} --no-build-isolation
       pip3 install torchvision==${TORCHVISION_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHVISION_PATH} --no-build-isolation
-
       pip3 install --target=${TRANSFORMERS_PATH} transformers --no-build-isolation
       pip3 install --target=${SAGEATTENTION_PATH} sageattention --no-build-isolation
       pip3 install --target=${FLASHATTENTION_PATH} packaging
@@ -272,7 +271,7 @@ else
 
       if [[ ${SUDO} != "" ]]; then
          ${SUDO} apt-get update
-         ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3 liblzma-dev
+         ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3 liblzma-dev libzstd-dev git-lfs
          module load ${MPI_MODULE}
          if [[ `which mpicc | wc -l` -eq 0 ]]; then
             ${SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
@@ -477,9 +476,10 @@ else
       pip3 install --target=${SAGEATTENTION_PATH} sageattention --no-build-isolation
       pip3 install --target=${FLASHATTENTION_PATH} packaging
       export PYTHONPATH=$PYTHONPATH:${FLASHATTENTION_PATH}
+      export PYTHONPATH=$PYTHONPATH:${FLASHATTENTION_PATH}/local/lib/python3.${PYTHON_VERSION}/dist-packages
       git clone --branch v${FLASHATTENTION_VERSION} https://github.com/Dao-AILab/flash-attention.git
       cd flash-attention
-      python3 setup.py install --prefix=${FLASHATTENTION_PATH}
+      FLASH_ATTENTION_TRITON_AMD_ENABLE="TRUE" python3 setup.py install --prefix=${FLASHATTENTION_PATH}
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
@@ -522,7 +522,10 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	load("rocm/${ROCM_VERSION}")
 	load("${MPI_MODULE}")
 	conflict("miniconda3")
+	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}")
 	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}/local/lib/python3.${PYTHON_VERSION}/dist-packages")
+	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}/local/lib/python3.12/dist-packages/flash_attn-2.8.0-py3.12.egg")
+	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}/local/lib/python3.12/dist-packages/einops-0.8.1-py3.12.egg")
 	prepend_path("PYTHONPATH","${SAGEATTENTION_PATH}")
 	prepend_path("PYTHONPATH","${TRANSFORMERS_PATH}")
 	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg")

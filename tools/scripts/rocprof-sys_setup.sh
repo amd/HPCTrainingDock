@@ -150,7 +150,7 @@ if [ -d "$INSTALL_PATH" ]; then
       echo "WARNING: using an install path that requires sudo"
       if [ ! -x /usr/bin/gettext ]; then
          ${SUDO} apt-get update
-         ${SUDO} apt-get install -y gettext autopoint
+         ${SUDO} apt-get install -y gettext autopoint liblzma-dev libzstd-dev
       fi
    fi
 else
