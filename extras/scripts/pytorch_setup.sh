@@ -476,7 +476,8 @@ else
       export PYTHONPATH=$PYTHONPATH:${FLASHATTENTION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages
       git clone --branch v${FLASHATTENTION_VERSION} https://github.com/Dao-AILab/flash-attention.git
       cd flash-attention
-      FLASH_ATTENTION_SKIP_CUDA_BUILD="FALSE" FLASH_ATTENTION_TRITON_AMD_ENABLE="TRUE" python3 setup.py install --prefix=${FLASHATTENTION_PATH}
+      #FLASH_ATTENTION_SKIP_CUDA_BUILD="FALSE" FLASH_ATTENTION_TRITON_AMD_ENABLE="TRUE" python3 setup.py install --prefix=${FLASHATTENTION_PATH}
+      FLASH_ATTENTION_SKIP_CUDA_BUILD="FALSE" python3 setup.py install --prefix=${FLASHATTENTION_PATH}
 
       deactivate
       cd ..
@@ -525,7 +526,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	load("${MPI_MODULE}")
 	conflict("miniconda3")
 	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}")
-	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/flash_attn-${FLASHATTENTION_VERSION}-py3.${PYTHON_VERSION}.egg")
+	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/flash_attn-${FLASHATTENTION_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","${SAGEATTENTION_PATH}")
 	prepend_path("PYTHONPATH","${TRANSFORMERS_PATH}")
 	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
