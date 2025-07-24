@@ -466,7 +466,6 @@ else
       if [[ `echo ${ROCM_VERSION} | cut -f3-3 -d'.'` == 0 ]]; then
          ROCM_VERSION_WHEEL=`echo ${ROCM_VERSION} | cut -f1-2 -d'.'`
       fi
-      echo "ROCM_VERSION_WHEEL is ${ROCM_VERSION_WHEEL}"
 
       pip3 install --target=${TRANSFORMERS_PATH} transformers --no-build-isolation
       pip3 install pytorch_triton_rocm==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
@@ -477,7 +476,7 @@ else
       git clone --branch v${FLASHATTENTION_VERSION} https://github.com/Dao-AILab/flash-attention.git
       cd flash-attention
       #FLASH_ATTENTION_SKIP_CUDA_BUILD="FALSE" FLASH_ATTENTION_TRITON_AMD_ENABLE="TRUE" python3 setup.py install --prefix=${FLASHATTENTION_PATH}
-      FLASH_ATTENTION_SKIP_CUDA_BUILD="FALSE" python3 setup.py install --prefix=${FLASHATTENTION_PATH}
+      BUILD_TARGET="rocm" GPU_ARCHS="$AMDGPU_GFXMODEL" FLASH_ATTENTION_SKIP_CUDA_BUILD="FALSE" python3 setup.py install --prefix=${FLASHATTENTION_PATH}
 
       deactivate
       cd ..
