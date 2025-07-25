@@ -6,9 +6,9 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 ROCM_VERSION="6.2.0"
-INSTALL_PATH="/opt/rocm-${ROCM_VERSION}/rocprofiler-sdk"
+INSTALL_PATH="/opt/rocm-${ROCM_VERSION}/aqlprofile"
 INSTALL_PATH_INPUT=""
-MODULE_PATH="/etc/lmod/modules/ROCm/rocprofiler-sdk"
+MODULE_PATH="/etc/lmod/modules/ROCm/aqlprofile"
 GITHUB_BRANCH="amd-staging"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -81,7 +81,7 @@ done
 
 result=`echo $ROCM_VERSION | awk '$1>6.2.0'` && echo $result
 if [[ "${result}" == "" ]]; then # ROCM_VERSION < 6.2.0
-   echo "The rocprofiler-sdk library can be installed only for ROCm versions greater than or equal to 6.2.0"
+   echo "The aqlprofile library can be installed only for ROCm versions greater than or equal to 6.2.0"
    echo "You selected this as ROCm version: $ROCM_VERSION"
    echo "Select appropriate ROCm version by specifying --rocm-version $ROCM_VERSION, with $ROCM_VERSION >= 6.2.0"
    exit 1
@@ -91,7 +91,7 @@ if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
    # override path in case ROCM_VERSION has been supplied as input
-   INSTALL_PATH="/opt/rocm-${ROCM_VERSION}/rocprofiler-sdk"
+   INSTALL_PATH="/opt/rocm-${ROCM_VERSION}/aqlprofile"
 fi
 
 LIBDW_FLAGS=""
@@ -141,7 +141,7 @@ fi
 
 echo ""
 echo "=================================="
-echo "Starting Rocprofiler-sdk Install with"
+echo "Starting AQLprofile Install with"
 echo "DISTRO: $DISTRO"
 echo "DISTRO_VERSION: $DISTRO_VERSION"
 echo "ROCM_VERSION: $ROCM_VERSION"
@@ -153,19 +153,19 @@ echo ""
 
 ${SUDO} mkdir -p $INSTALL_PATH
 
-git clone --branch $GITHUB_BRANCH https://github.com/ROCm/rocprofiler-sdk.git
+git clone --branch $GITHUB_BRANCH https://github.com/ROCm/aqlprofile.git
 
-cd rocprofiler-sdk
+cd aqlprofile
 
 mkdir build && cd build
 
-cmake -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH -DCMAKE_CXX_FLAGS=$LIBDW_FLAGS ..
+cmake  -DCMAKE_PREFIX_PATH=/opt/rocm/lib:/opt/rocm/include/hsa -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH -DCMAKE_CXX_FLAGS=$LIBDW_FLAGS ..
 make -j
 ${SUDO} make install
 
 cd ../..
 
-sudo rm -rf rocprofiler-sdk
+sudo rm -rf aqlprofile
 
 # Create a module file for rocprofiler-sdk
 if [ -d "$MODULE_PATH" ]; then
@@ -185,7 +185,7 @@ fi
 ${SUDO} mkdir -p ${MODULE_PATH}
 
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
-	whatis("Name: Rocprofiler-sdk")
+	whatis("Name: AQLprofile")
 	whatis("ROCm Version: ${ROCM_VERSION}")
 	whatis("Category: AMD")
 	whatis("Github Branch: ${GITHUB_BRANCH}")

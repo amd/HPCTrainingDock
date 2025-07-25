@@ -1,12 +1,13 @@
 SHELL:=/bin/bash
-all: rocm openmpi rocprof-sys_rocm rocprof-sys_source rocprof-compute_rocm rocprof-compute_source kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk compiler petsc hypre tensorflow ftorch julia smartsim
-.PHONY: baseospackages rocm openmpi mvapich slurm rocprof-sys_rocm rocprof-sys_source amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk rocprof-compute_rocm rocprof-compute_source compiler petsc hypre tensorflow ftorch julia smartsim
+all: rocm openmpi rocprof-sys_rocm rocprof-sys_source rocprof-compute_rocm rocprof-compute_source kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk aqlprofile compiler petsc hypre tensorflow ftorch julia smartsim
+.PHONY: baseospackages rocm openmpi mvapich slurm rocprof-sys_rocm rocprof-sys_source amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk aqlprofile rocprof-compute_rocm rocprof-compute_source compiler petsc hypre tensorflow ftorch julia smartsim
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
 rocprof-compute_rocm: rocprof-compute_rocm.timestamp
 rocprof-sys_rocm: rocprof-sys_rocm.timestamp
 rocprofiler-sdk: rocprofiler-sdk.timestamp
+aqlprofile: aqlprofile.timestamp
 openmpi: openmpi.timestamp
 mvapich: mvapich.timestamp
 slurm: slurm.timestamp
@@ -106,6 +107,11 @@ rocprofiler-sdk.timestamp: rocm.timestamp
 	tools/scripts/rocprofiler-sdk_setup.sh \
 	   --rocm-version ${ROCM_VERSION}
 	touch rocprofiler-sdk.timestamp
+
+aqlprofile.timestamp: rocm.timestamp
+	tools/scripts/aqlprofile_setup.sh \
+	   --rocm-version ${ROCM_VERSION}
+	touch aqlprofile.timestamp
 
 slurm.timestamp:
 	rocm/scripts/slurm_setup.sh
@@ -349,6 +355,10 @@ rocprofv3_tests.timestamp: rocm.timestamp HPCTrainingExamples
 rocprofiler-sdk_tests.timestamp: rocprofiler-sdk.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Rocprofv3
 	touch rocprofv3_tests.timestamp
+
+aqlprofile_tests.timestamp: aqlprofile.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R AQLprofile
+	touch aqlprofile_tests.timestamp
 
 openmp_tests.timestamp: rocm.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R "^OpenMP_"
