@@ -165,7 +165,7 @@ ${SUDO} make install
 
 cd ../..
 
-sudo rm -rf rocprofiler-sdk
+${SUDO} rm -rf rocprofiler-sdk
 
 # Create a module file for rocprofiler-sdk
 if [ -d "$MODULE_PATH" ]; then
