@@ -22,6 +22,8 @@ ARG BUILD_TAU
 ARG BUILD_SCOREP
 ARG INSTALL_ROCPROF_SYS_FROM_SOURCE
 ARG INSTALL_ROCPROF_COMPUTE_FROM_SOURCE
+ARG BUILD_ROCPROFILER_SDK
+ARG BUILD_AQLPROFILE
 
 LABEL maintainer="bob.robey@amd.com"
 
@@ -53,6 +55,19 @@ RUN  /tmp/tools/rocprof-compute_setup.sh \
         --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
         --install-rocprof-compute-from-source ${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE} && \
      rm -f /tmp/tools/rocprof-compute_setup.sh
+
+COPY tools/scripts/rocprofiler-sdk_setup.sh /tmp/tools/rocprofiler-sdk_setup.sh
+RUN  /tmp/tools/rocprofiler-sdk_setup.sh \
+        --rocm-version ${ROCM_VERSION} \
+        --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
+        --build-rocprofiler-sdk ${BUILD_ROCPROFILER_SDK} && \
+     rm -f /tmp/tools/rocprofiler-sdk_setup.sh
+
+COPY tools/scripts/aqlprofile_setup.sh /tmp/tools/aqlprofile_setup.sh
+RUN  /tmp/tools/aqlprofile_setup.sh \
+        --rocm-version ${ROCM_VERSION} \
+        --build-aqlprofile ${BUILD_AQLPROFILE} && \
+     rm -f /tmp/tools/aqlprofile_setup.sh
 
 COPY tools/scripts/hpctoolkit_setup.sh /tmp/tools/hpctoolkit_setup.sh
 RUN /tmp/tools/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_HPCTOOLKIT} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \

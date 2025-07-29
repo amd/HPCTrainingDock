@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
-all: rocm openmpi rocprof-sys_rocm rocprof-sys_source rocprof-compute_rocm rocprof-compute_source kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk aqlprofile compiler petsc hypre tensorflow ftorch julia smartsim lammps
-.PHONY: baseospackages rocm openmpi mvapich slurm rocprof-sys_rocm rocprof-sys_source amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk aqlprofile rocprof-compute_rocm rocprof-compute_source compiler petsc hypre tensorflow ftorch julia smartsim lammps
+all: rocm openmpi rocprof-sys_rocm rocprof-sys_source rocprof-compute_rocm rocprof-compute_source kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk aqlprofile compiler petsc hypre tensorflow ftorch julia smartsim lammps rocprof-tracedecoder
+.PHONY: baseospackages rocm openmpi mvapich slurm rocprof-sys_rocm rocprof-sys_source amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk aqlprofile rocprof-compute_rocm rocprof-compute_source compiler petsc hypre tensorflow ftorch julia smartsim lammps rocprof-tracedecoder
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
@@ -13,6 +13,7 @@ mvapich: mvapich.timestamp
 slurm: slurm.timestamp
 rocprof-sys_source: rocprof-sys_source.timestamp
 rocprof-compute_source: rocprof-compute_source.timestamp
+rocprof-tracedecoder: rocprof-tracedecoder.timestamp
 amd_gcc: amd_gcc.timestamp
 aomp: aomp.timestamp
 fftw: fftw.timestamp
@@ -77,6 +78,7 @@ julia_tests: julia_tests.timestamp
 smartsim_tests: smartsim_tests.timestamp
 hypre_tests: hypre_tests.timestamp
 jax_tests: jax_tests.timestamp
+rocprof-tracedecoder_tests: rocprof-tracedecoder_tests.timestamp
 
 rocm_package: rocm_package.timestamp
 openmpi_package: openmpi_package.timestamp
@@ -106,13 +108,26 @@ rocprof-compute_rocm.timestamp: rocm.timestamp
 
 rocprofiler-sdk.timestamp: rocm.timestamp
 	tools/scripts/rocprofiler-sdk_setup.sh \
-	   --rocm-version ${ROCM_VERSION}
+	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
+	   --build-rocprofiler-sdk 1
 	touch rocprofiler-sdk.timestamp
 
 aqlprofile.timestamp: rocm.timestamp
 	tools/scripts/aqlprofile_setup.sh \
-	   --rocm-version ${ROCM_VERSION}
+	   --rocm-version ${ROCM_VERSION} \
+	   --build-aqlprofile 1
 	touch aqlprofile.timestamp
+
+rocprof-tracedecoder.timestamp: rocprofiler-sdk.timestamp aqlprofile.timestamp
+	tools/scripts/rocprofiler-sdk_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}'
+	   --build-rocprofiler-sdk 1
+	tools/scripts/aqlprofile_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --build-aqlprofile 1
+	touch rocprof-tracedecoder.timestamp
 
 slurm.timestamp:
 	rocm/scripts/slurm_setup.sh
@@ -402,6 +417,10 @@ rocprof-sys_rocm_tests.timestamp: rocprof-sys_rocm.timestamp HPCTrainingExamples
 rocprof-sys_source_tests.timestamp: rocprof-sys_source.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Rocprof-sys_Source
 	touch rocprof-sys_source_tests.timestamp
+
+rocprof-tracedecoder_tests.timestamp: rocprof-tracedecoder.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R RocprofV3_TraceDecoder
+	touch rocprof-tracedecoder.timestamp
 
 scorep_tests.timestamp: scorep.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Score-P

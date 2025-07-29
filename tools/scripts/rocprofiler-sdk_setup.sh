@@ -1,16 +1,18 @@
 #!/bin/bash
 
 # Autodetect defaults
+AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 ROCM_VERSION="6.2.0"
-INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/rocprofiler-sdk"
+#INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/rocprofiler-sdk"
 INSTALL_PATH="/opt/rocm-${ROCM_VERSION}"
 INSTALL_PATH_INPUT=""
 MODULE_PATH="/etc/lmod/modules/ROCm/rocprofiler-sdk"
 GITHUB_BRANCH="amd-staging"
+BUILD_ROCPROFILER_SDK=0
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
@@ -26,6 +28,8 @@ usage()
    echo "  --install-path [INSTALL_PATH ] default $INSTALL_PATH"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --github-branch [ GITHUB_BRANCH ] default $GITHUB_BRANCH"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default is $AMDGPU_GFXMODEL "
+   echo "  --build-rocprofiler-sdk: default $BUILD_ROCPROFILER_SDK"
    echo "  --help: print this usage information"
    exit 1
 }
@@ -49,6 +53,11 @@ do
       "--help")
          usage
          ;;
+      "--amdgpu-gfxmodel")
+          shift
+          AMDGPU_GFXMODEL=${1}
+          reset-last
+          ;;
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
@@ -67,6 +76,11 @@ do
       "--module-path")
           shift
           MODULE_PATH=${1}
+          reset-last
+          ;;
+      "--build-rocprofiler-sdk")
+          shift
+          BUILD_ROCPROFILER_SDK=${1}
           reset-last
           ;;
       "--*")
@@ -92,7 +106,8 @@ if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
    # override path in case ROCM_VERSION has been supplied as input
-   INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/rocprofiler-sdk"
+   #INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/rocprofiler-sdk"
+   INSTALL_PATH="/opt/rocm-${ROCM_VERSION}"
 fi
 
 LIBDW_FLAGS=""
@@ -154,54 +169,62 @@ echo ""
 
 ${SUDO} mkdir -p $INSTALL_PATH
 
-git clone --branch $GITHUB_BRANCH https://github.com/ROCm/rocprofiler-sdk.git
+git clone --branch $GITHUB_BRANCH https://github.com/ROCm/rocprofiler-sdk.git rocprofiler-sdk-source
 
-cd rocprofiler-sdk
-
-mkdir build && cd build
-
-cmake -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH -DCMAKE_CXX_FLAGS=$LIBDW_FLAGS ..
-make -j
-${SUDO} make install
+#you can either install the decoder in '/opt/rocm-6.4.1/lib64' or '/opt/rocm-6.4.1/lib' or use --att-library-path /path/to/lib
 wget https://github.com/ROCm/rocprof-trace-decoder/releases/download/0.1.2/rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux.tar.gz
 tar -xzvf rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux.tar.gz
 ${SUDO} cp rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux/opt/rocm/lib/librocprof-trace-decoder.so $INSTALL_PATH/lib
 
-cd ../..
+AMDGPU_GFXMODEL_SINGLE=`echo $AMDGPU_GFXMODEL | cut -f1 -d';'`
 
-${SUDO} rm -rf rocprofiler-sdk
+cmake                                         \
+      -B rocprofiler-sdk-build                \
+      -DCMAKE_INSTALL_PREFIX=${INSTALL_PATH}  \
+      -DROCPROFILER_BUILD_TESTS=ON -DROCPROFILER_BUILD_SAMPLES=ON \
+      -DOPENMP_GPU_TARGETS=${AMDGPU_GFXMODEL_SINGLE} \
+      -DCMAKE_PREFIX_PATH=${INSTALL_PATH}     \
+       rocprofiler-sdk-source
+
+nproc=8
+cmake --build rocprofiler-sdk-build --target all --parallel $(nproc)
+
+${SUDO} cmake --build rocprofiler-sdk-build --target install
+
+rm -rf rocprofiler-sdk-source rocprofiler-sdk-build
+rm -rf rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux
 
 # Create a module file for rocprofiler-sdk
-if [ -d "$MODULE_PATH" ]; then
-   # use sudo if user does not have write access to module path
-   if [ ! -w ${MODULE_PATH} ]; then
-      SUDO="sudo"
-    else
-       echo "WARNING: not using sudo since user has write access to module path"
-    fi
-else
-    # if module path dir does not exist yet, the check on write access will fail
-    SUDO="sudo"
-    echo "WARNING: using sudo, make sure you have sudo privileges"
-fi
+#if [ -d "$MODULE_PATH" ]; then
+#   # use sudo if user does not have write access to module path
+#   if [ ! -w ${MODULE_PATH} ]; then
+#      SUDO="sudo"
+#    else
+#       echo "WARNING: not using sudo since user has write access to module path"
+#    fi
+#else
+#    # if module path dir does not exist yet, the check on write access will fail
+#    SUDO="sudo"
+#    echo "WARNING: using sudo, make sure you have sudo privileges"
+#fi
 
 
-${SUDO} mkdir -p ${MODULE_PATH}
+#${SUDO} mkdir -p ${MODULE_PATH}
 
-cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
-	whatis("Name: Rocprofiler-sdk")
-	whatis("ROCm Version: ${ROCM_VERSION}")
-	whatis("Category: AMD")
-	whatis("Github Branch: ${GITHUB_BRANCH}")
-
-	local base = "${INSTALL_PATH}"
-
-	load("rocm/${ROCM_VERSION}")
-	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
-	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-	prepend_path("CPATH", pathJoin(base, "include"))
-	prepend_path("PATH", pathJoin(base, "bin"))
-	prepend_path("INCLUDE", pathJoin(base, "include"))
-EOF
+#cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
+#	whatis("Name: Rocprofiler-sdk")
+#	whatis("ROCm Version: ${ROCM_VERSION}")
+#	whatis("Category: AMD")
+#	whatis("Github Branch: ${GITHUB_BRANCH}")
+#
+#	local base = "${INSTALL_PATH}"
+#
+#	load("rocm/${ROCM_VERSION}")
+#	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+#	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
+#	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+#	prepend_path("CPATH", pathJoin(base, "include"))
+#	prepend_path("PATH", pathJoin(base, "bin"))
+#	prepend_path("INCLUDE", pathJoin(base, "include"))
+#EOF
 

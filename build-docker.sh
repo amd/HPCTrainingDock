@@ -47,6 +47,8 @@
 : ${INSTALL_GRAFANA:=0}
 : ${INSTALL_ROCPROF_SYS_FROM_SOURCE:=0}
 : ${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE:=0}
+: ${BUILD_ROCPROFILER_SDK:=0}
+: ${BUILD_AQLPROFILE:=0}
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -148,6 +150,8 @@ usage()
     print_default_option use_cached-apps "[USE_CACHED_APPS: 0 or 1]" "use pre-built gcc and aomp located in CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} directory" "${USE_CACHED_APPS} (don't use)"
     print_default_option install-rocprof-sys-from-source "[INSTALL_ROCPROF_SYS_FROM_SOURCE: 0 or 1]" "include this flag to build rocprof-sys from source, the default branch is amd-staging" "${INSTALL_ROCPROF_SYS_FROM_SOURCE} (don't install)"
     print_default_option install-rocprof-compute-from-source "[INSTALL_ROCPROF_COMPUTE_FROM_SOURCE: 0 or 1]" "include this flag to build rocprof-compute from source, the default branch is amd-staging" "${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE} (don't install)"
+    print_default_option build-rocprofiler-sdk "[BUILD_ROCPROFILER_SDK: 0 or 1]" "include this flag to build rocprofiler-sdk from source, the default branch is amd-staging" "${BUILD_ROCPROFILER_SDK} (don't install)"
+    print_default_option build-aqlprofile "[BUILD_AQLPROFILE: 0 or 1]" "include this flag to build aqlprofile from source, the default branch is amd-staging" "${BUILD_AQLPROFILE} (don't install)"
     print_default_option output-verbosity "[OUTPUT_VERBOSITY: not set or set to '--progress-plain']" "include this flag to show more docker build output" "not set"
     print_default_option distro "[DISTRO: ubuntu|rockylinux|opensuse/leap]" "OS distribution" "autodetected -> ${DISTRO}"
     print_default_option distro-versions "[DISTRO_VERSION] [VERSION...]" "Ubuntu, OpenSUSE, or RHEL release" "autodetected -> ${DISTRO_VERSION}"
@@ -214,6 +218,14 @@ do
             ;;
         "--install-rocprof-compute-from-source")
             INSTALL_ROCPROF_COMPUTE_FROM_SOURCE=1
+            reset-last
+            ;;
+        "--build-rocprofiler-sdk")
+            BUILD_ROCPROFILER_SDK=1
+            reset-last
+            ;;
+        "--build-aqlprofile")
+            BUILD_AQLPROFILE=1
             reset-last
             ;;
         "--push")
@@ -380,6 +392,8 @@ do
 	    #BUILD_JULIA="1"
 	    INSTALL_ROCPROF_SYS_FROM_SOURCE="1"
             INSTALL_ROCPROF_COMPUTE_FROM_SOURCE="1"
+	    BUILD_ROCPROFILER_SDK="1"
+	    BUILD_AQLPROFILE="1"
             reset-last
             ;;
         "--use-cached-apps")
@@ -566,6 +580,8 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             #BUILD_JULIA="1"
 	    INSTALL_ROCPROF_SYS_FROM_SOURCE="1"
             INSTALL_ROCPROF_COMPUTE_FROM_SOURCE="1"
+	    BUILD_ROCPROFILER_SDK="1"
+	    BUILD_AQLPROFILE="1"
 	    ;;
          *)
             echo "Unsupported build option request \"$i\""
@@ -665,6 +681,8 @@ do
        --build-arg PYTHON_VERSION=${PYTHON_VERSION}  \
        --build-arg INSTALL_ROCPROF_SYS_FROM_SOURCE=${INSTALL_ROCPROF_SYS_FROM_SOURCE} \
        --build-arg INSTALL_ROCPROF_COMPUTE_FROM_SOURCE=${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE} \
+       --build-arg BUILD_ROCPROFILER_SDK=${BUILD_ROCPROFILER_SDK} \
+       --build-arg BUILD_AQLPROFILE=${BUILD_AQLPROFILE} \
        -t ${DOCKER_USER}/tools:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        -f tools/Dockerfile .
 

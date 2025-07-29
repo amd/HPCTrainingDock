@@ -6,11 +6,11 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 ROCM_VERSION="6.2.0"
-INSTALL_PATH="/opt/rocm-${ROCM_VERSION}/aqlprofile"
 INSTALL_PATH="/opt/rocm-${ROCM_VERSION}"
 INSTALL_PATH_INPUT=""
 MODULE_PATH="/etc/lmod/modules/ROCm/aqlprofile"
 GITHUB_BRANCH="amd-staging"
+BUILD_AQLPROFILE=0
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
@@ -21,11 +21,12 @@ fi
 usage()
 {
    echo "Usage:"
-   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  gARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --install-path [INSTALL_PATH ] default $INSTALL_PATH"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --github-branch [ GITHUB_BRANCH ] default $GITHUB_BRANCH"
+   echo "  --build-aqlprofile: default $BUILD_AQLPROFILE"
    echo "  --help: print this usage information"
    exit 1
 }
@@ -69,6 +70,11 @@ do
           MODULE_PATH=${1}
           reset-last
           ;;
+      "--build-aqlprofile")
+          shift
+          BUILD_AQLPROFILE=${1}
+          reset-last
+          ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
@@ -92,7 +98,7 @@ if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
    # override path in case ROCM_VERSION has been supplied as input
-   INSTALL_PATH="/opt/rocm-${ROCM_VERSION}/aqlprofile"
+   INSTALL_PATH="/opt/rocm-${ROCM_VERSION}"
 fi
 
 LIBDW_FLAGS=""
