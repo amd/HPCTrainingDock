@@ -6,7 +6,8 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 ROCM_VERSION="6.2.0"
-INSTALL_PATH="/opt/rocm-${ROCM_VERSION}/rocprofiler-sdk"
+INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/rocprofiler-sdk"
+INSTALL_PATH="/opt/rocm-${ROCM_VERSION}"
 INSTALL_PATH_INPUT=""
 MODULE_PATH="/etc/lmod/modules/ROCm/rocprofiler-sdk"
 GITHUB_BRANCH="amd-staging"
@@ -91,7 +92,7 @@ if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
    # override path in case ROCM_VERSION has been supplied as input
-   INSTALL_PATH="/opt/rocm-${ROCM_VERSION}/rocprofiler-sdk"
+   INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/rocprofiler-sdk"
 fi
 
 LIBDW_FLAGS=""
@@ -162,6 +163,9 @@ mkdir build && cd build
 cmake -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH -DCMAKE_CXX_FLAGS=$LIBDW_FLAGS ..
 make -j
 ${SUDO} make install
+wget https://github.com/ROCm/rocprof-trace-decoder/releases/download/0.1.2/rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux.tar.gz
+tar -xzvf rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux.tar.gz
+sudo cp rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux/opt/rocm/lib/librocprof-trace-decoder.so $INSTALL_PATH/lib
 
 cd ../..
 
@@ -192,6 +196,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 
 	local base = "${INSTALL_PATH}"
 
+	load("rocm/${ROCM_VERSION}")
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
