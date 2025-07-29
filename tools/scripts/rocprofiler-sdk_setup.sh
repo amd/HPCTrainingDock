@@ -165,7 +165,7 @@ make -j
 ${SUDO} make install
 wget https://github.com/ROCm/rocprof-trace-decoder/releases/download/0.1.2/rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux.tar.gz
 tar -xzvf rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux.tar.gz
-sudo cp rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux/opt/rocm/lib/librocprof-trace-decoder.so $INSTALL_PATH/lib
+${SUDO} cp rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux/opt/rocm/lib/librocprof-trace-decoder.so $INSTALL_PATH/lib
 
 cd ../..
 
