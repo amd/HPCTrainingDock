@@ -66,6 +66,7 @@ RUN  /tmp/tools/rocprofiler-sdk_setup.sh \
 COPY tools/scripts/aqlprofile_setup.sh /tmp/tools/aqlprofile_setup.sh
 RUN  /tmp/tools/aqlprofile_setup.sh \
         --rocm-version ${ROCM_VERSION} \
+        --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
         --build-aqlprofile ${BUILD_AQLPROFILE} && \
      rm -f /tmp/tools/aqlprofile_setup.sh
 

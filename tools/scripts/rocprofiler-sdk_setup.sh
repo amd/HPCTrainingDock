@@ -110,50 +110,50 @@ else
    INSTALL_PATH="/opt/rocm-${ROCM_VERSION}"
 fi
 
-LIBDW_FLAGS=""
-# don't use sudo if user has write access to install path
-if [ -d "$INSTALL_PATH" ]; then
-   # don't use sudo if user has write access to install path
-   if [ -w ${INSTALL_PATH} ]; then
-      SUDO=""
-      if [ "${DISTRO}" == "ubuntu" ]; then
-         export LIBDW_PATH=$INSTALL_PATH/libdw
-         mkdir libdw_install
-         cd libdw_install
-         apt-get source libdw-dev
-         cd elfutils-*
-         ./configure --prefix=$LIBDW_PATH --disable-libdebuginfod --disable-debuginfod
-         make -j
-         make install
-         export PATH=$PATH:$LIBDW_PATH:$LIBDW_PATH/bin
-         cd ../../
-         rm -rf libdw_install
-         LIBDW_FLAGS="-I$LIBDW_PATH/include -L$LIBDW_PATH/lib -ldw"
-      else
-         echo " ------ WARNING: your distribution is not ubuntu ------ "
-         echo " ------ WARNING: install will fail if libdw is not found ------ "
-      fi
-   else
-      echo " ------ WARNING: using an install path that requires sudo ------ "
-      if [ "${DISTRO}" == "ubuntu" ]; then
-         sudo apt-get update
-         sudo apt-get install -y libdw-dev
-      else
-         echo " ------ WARNING: your distribution is not ubuntu ------"
-         echo " ------ WARNING: install will fail if libdw is not found ------ "
-      fi
-   fi
-else
-   # if install path does not exist yet, the check on write access will fail
-   echo "WARNING: using sudo, make sure you have sudo privileges"
+#LIBDW_FLAGS=""
+## don't use sudo if user has write access to install path
+#if [ -d "$INSTALL_PATH" ]; then
+#   # don't use sudo if user has write access to install path
+#   if [ -w ${INSTALL_PATH} ]; then
+#      SUDO=""
+#      if [ "${DISTRO}" == "ubuntu" ]; then
+#         export LIBDW_PATH=$INSTALL_PATH/libdw
+#         mkdir libdw_install
+#         cd libdw_install
+#         apt-get source libdw-dev
+#         cd elfutils-*
+#         ./configure --prefix=$LIBDW_PATH --disable-libdebuginfod --disable-debuginfod
+#         make -j
+#         make install
+#         export PATH=$PATH:$LIBDW_PATH:$LIBDW_PATH/bin
+#         cd ../../
+#         rm -rf libdw_install
+#         LIBDW_FLAGS="-I$LIBDW_PATH/include -L$LIBDW_PATH/lib -ldw"
+#      else
+#         echo " ------ WARNING: your distribution is not ubuntu ------ "
+#         echo " ------ WARNING: install will fail if libdw is not found ------ "
+#      fi
+#   else
+#      echo " ------ WARNING: using an install path that requires sudo ------ "
+#      if [ "${DISTRO}" == "ubuntu" ]; then
+#         sudo apt-get update
+#         sudo apt-get install -y libdw-dev
+#      else
+#         echo " ------ WARNING: your distribution is not ubuntu ------"
+#         echo " ------ WARNING: install will fail if libdw is not found ------ "
+#      fi
+#   fi
+#else
+#   # if install path does not exist yet, the check on write access will fail
+#   echo "WARNING: using sudo, make sure you have sudo privileges"
    if [ "${DISTRO}" == "ubuntu" ]; then
       sudo apt-get update
       sudo apt-get install -y libdw-dev
-   else
-      echo " ------ WARNING: your distribution is not ubuntu ------"
-      echo " ------ WARNING: install will fail if libdw is not found ------ "
+#   else
+#      echo " ------ WARNING: your distribution is not ubuntu ------"
+#      echo " ------ WARNING: install will fail if libdw is not found ------ "
    fi
-fi
+#fi
 
 echo ""
 echo "=================================="
@@ -167,6 +167,10 @@ echo "GITHUB_BRANCH: $GITHUB_BRANCH"
 echo "=================================="
 echo ""
 
+source /etc/profile.d/lmod.sh
+module load rocm/${ROCM_VERSION}
+module load openmpi
+
 ${SUDO} mkdir -p $INSTALL_PATH
 
 git clone --branch $GITHUB_BRANCH https://github.com/ROCm/rocprofiler-sdk.git rocprofiler-sdk-source
@@ -177,12 +181,15 @@ tar -xzvf rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux.tar.gz
 ${SUDO} cp rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux/opt/rocm/lib/librocprof-trace-decoder.so $INSTALL_PATH/lib
 
 AMDGPU_GFXMODEL_SINGLE=`echo $AMDGPU_GFXMODEL | cut -f1 -d';'`
+echo "AMDGPU_GFXMODEL is ${AMDGPU_GFXMODEL}"
+echo "AMDGPU_GFXMODEL_SINGLE is ${AMDGPU_GFXMODEL_SINGLE}"
 
 cmake                                         \
       -B rocprofiler-sdk-build                \
       -DCMAKE_INSTALL_PREFIX=${INSTALL_PATH}  \
       -DROCPROFILER_BUILD_TESTS=ON -DROCPROFILER_BUILD_SAMPLES=ON \
-      -DOPENMP_GPU_TARGETS=${AMDGPU_GFXMODEL_SINGLE} \
+      -DGPU_TARGETS="${AMDGPU_GFXMODEL}" \
+      -DOPENMP_GPU_TARGETS="${AMDGPU_GFXMODEL}" \
       -DCMAKE_PREFIX_PATH=${INSTALL_PATH}     \
        rocprofiler-sdk-source
 

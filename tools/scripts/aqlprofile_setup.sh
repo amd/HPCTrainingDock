@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # Autodetect defaults
+AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 SUDO="sudo"
@@ -26,6 +27,7 @@ usage()
    echo "  --install-path [INSTALL_PATH ] default $INSTALL_PATH"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --github-branch [ GITHUB_BRANCH ] default $GITHUB_BRANCH"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default is $AMDGPU_GFXMODEL "
    echo "  --build-aqlprofile: default $BUILD_AQLPROFILE"
    echo "  --help: print this usage information"
    exit 1
@@ -50,6 +52,11 @@ do
       "--help")
          usage
          ;;
+      "--amdgpu-gfxmodel")
+          shift
+          AMDGPU_GFXMODEL=${1}
+          reset-last
+          ;;
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
@@ -101,51 +108,6 @@ else
    INSTALL_PATH="/opt/rocm-${ROCM_VERSION}"
 fi
 
-LIBDW_FLAGS=""
-# don't use sudo if user has write access to install path
-if [ -d "$INSTALL_PATH" ]; then
-   # don't use sudo if user has write access to install path
-   if [ -w ${INSTALL_PATH} ]; then
-      SUDO=""
-      if [ "${DISTRO}" == "ubuntu" ]; then
-         export LIBDW_PATH=$INSTALL_PATH/libdw
-         mkdir libdw_install
-         cd libdw_install
-         apt-get source libdw-dev
-         cd elfutils-*
-         ./configure --prefix=$LIBDW_PATH --disable-libdebuginfod --disable-debuginfod
-         make -j
-         make install
-         export PATH=$PATH:$LIBDW_PATH:$LIBDW_PATH/bin
-         cd ../../
-         rm -rf libdw_install
-         LIBDW_FLAGS="-I$LIBDW_PATH/include -L$LIBDW_PATH/lib -ldw"
-      else
-         echo " ------ WARNING: your distribution is not ubuntu ------ "
-         echo " ------ WARNING: install will fail if libdw is not found ------ "
-      fi
-   else
-      echo " ------ WARNING: using an install path that requires sudo ------ "
-      if [ "${DISTRO}" == "ubuntu" ]; then
-         sudo apt-get update
-         sudo apt-get install -y libdw-dev
-      else
-         echo " ------ WARNING: your distribution is not ubuntu ------"
-         echo " ------ WARNING: install will fail if libdw is not found ------ "
-      fi
-   fi
-else
-   # if install path does not exist yet, the check on write access will fail
-   echo "WARNING: using sudo, make sure you have sudo privileges"
-   if [ "${DISTRO}" == "ubuntu" ]; then
-      sudo apt-get update
-      sudo apt-get install -y libdw-dev
-   else
-      echo " ------ WARNING: your distribution is not ubuntu ------"
-      echo " ------ WARNING: install will fail if libdw is not found ------ "
-   fi
-fi
-
 echo ""
 echo "=================================="
 echo "Starting AQLprofile Install with"
@@ -158,7 +120,13 @@ echo "GITHUB_BRANCH: $GITHUB_BRANCH"
 echo "=================================="
 echo ""
 
+${SUDO} apt-get update
+${SUDO} apt-get -y install libdw-dev
+
 ${SUDO} mkdir -p $INSTALL_PATH
+
+source /etc/profile.d/lmod.sh
+module load rocm/${ROCM_VERSION}
 
 git clone --branch $GITHUB_BRANCH https://github.com/ROCm/aqlprofile.git
 
@@ -166,7 +134,7 @@ cd aqlprofile
 
 mkdir build && cd build
 
-cmake  -DCMAKE_PREFIX_PATH=/opt/rocm/lib:/opt/rocm/include/hsa -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH -DCMAKE_CXX_FLAGS=$LIBDW_FLAGS ..
+cmake -DGPU_TARGETS="${AMDGPU_GFXMODEL}" -DCMAKE_PREFIX_PATH=/opt/rocm/lib:/opt/rocm/include/hsa -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH ..
 make -j
 ${SUDO} make install
 
@@ -189,21 +157,21 @@ else
 fi
 
 
-${SUDO} mkdir -p ${MODULE_PATH}
+#${SUDO} mkdir -p ${MODULE_PATH}
 
-cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
-	whatis("Name: AQLprofile")
-	whatis("ROCm Version: ${ROCM_VERSION}")
-	whatis("Category: AMD")
-	whatis("Github Branch: ${GITHUB_BRANCH}")
-
-	local base = "${INSTALL_PATH}"
-
-	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
-	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-	prepend_path("CPATH", pathJoin(base, "include"))
-	prepend_path("PATH", pathJoin(base, "bin"))
-	prepend_path("INCLUDE", pathJoin(base, "include"))
-EOF
+#cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
+#	whatis("Name: AQLprofile")
+#	whatis("ROCm Version: ${ROCM_VERSION}")
+#	whatis("Category: AMD")
+#	whatis("Github Branch: ${GITHUB_BRANCH}")
+#
+#	local base = "${INSTALL_PATH}"
+#
+#	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+#	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
+#	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+#	prepend_path("CPATH", pathJoin(base, "include"))
+#	prepend_path("PATH", pathJoin(base, "bin"))
+#	prepend_path("INCLUDE", pathJoin(base, "include"))
+#EOF
 

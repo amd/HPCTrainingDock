@@ -106,7 +106,7 @@ rocprof-compute_rocm.timestamp: rocm.timestamp
 	   --rocm-version ${ROCM_VERSION}
 	touch rocprof-compute_rocm.timestamp
 
-rocprofiler-sdk.timestamp: rocm.timestamp
+rocprofiler-sdk.timestamp: rocm.timestamp openmpi.timestamp
 	tools/scripts/rocprofiler-sdk_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
@@ -116,6 +116,7 @@ rocprofiler-sdk.timestamp: rocm.timestamp
 aqlprofile.timestamp: rocm.timestamp
 	tools/scripts/aqlprofile_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
 	   --build-aqlprofile 1
 	touch aqlprofile.timestamp
 
@@ -126,6 +127,7 @@ rocprof-tracedecoder.timestamp: rocprofiler-sdk.timestamp aqlprofile.timestamp
 	   --build-rocprofiler-sdk 1
 	tools/scripts/aqlprofile_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
 	   --build-aqlprofile 1
 	touch rocprof-tracedecoder.timestamp
 
