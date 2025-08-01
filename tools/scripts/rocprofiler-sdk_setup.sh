@@ -173,6 +173,20 @@ module load openmpi
 
 ${SUDO} mkdir -p $INSTALL_PATH
 
+AMDGPU_GFXMODEL_SINGLE=`echo $AMDGPU_GFXMODEL | cut -f1 -d';'`
+echo "AMDGPU_GFXMODEL is ${AMDGPU_GFXMODEL}"
+echo "AMDGPU_GFXMODEL_SINGLE is ${AMDGPU_GFXMODEL_SINGLE}"
+      #-DROCPROFILER_BUILD_TESTS=ON \
+
+#cmake                                         \
+#      -B rocprofiler-sdk-build                \
+#      -DCMAKE_INSTALL_PREFIX=${INSTALL_PATH}  \
+#      -DOPENMP_GPU_TARGETS="${AMDGPU_GFXMODEL}" \
+#      -DGPU_TARGETS="${AMDGPU_GFXMODEL}" \
+#      -DROCPROFILER_BUILD_TESTS=ON -DROCPROFILER_BUILD_SAMPLES=ON \
+#      -DCMAKE_PREFIX_PATH=${INSTALL_PATH}     \
+#       rocprofiler-sdk-source
+
 git clone --branch $GITHUB_BRANCH https://github.com/ROCm/rocprofiler-sdk.git rocprofiler-sdk-source
 
 #you can either install the decoder in '/opt/rocm-6.4.1/lib64' or '/opt/rocm-6.4.1/lib' or use --att-library-path /path/to/lib
@@ -180,16 +194,10 @@ wget https://github.com/ROCm/rocprof-trace-decoder/releases/download/0.1.2/rocpr
 tar -xzvf rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux.tar.gz
 ${SUDO} cp rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux/opt/rocm/lib/librocprof-trace-decoder.so $INSTALL_PATH/lib
 
-AMDGPU_GFXMODEL_SINGLE=`echo $AMDGPU_GFXMODEL | cut -f1 -d';'`
-echo "AMDGPU_GFXMODEL is ${AMDGPU_GFXMODEL}"
-echo "AMDGPU_GFXMODEL_SINGLE is ${AMDGPU_GFXMODEL_SINGLE}"
-
 cmake                                         \
       -B rocprofiler-sdk-build                \
       -DCMAKE_INSTALL_PREFIX=${INSTALL_PATH}  \
-      -DROCPROFILER_BUILD_TESTS=ON -DROCPROFILER_BUILD_SAMPLES=ON \
       -DGPU_TARGETS="${AMDGPU_GFXMODEL}" \
-      -DOPENMP_GPU_TARGETS="${AMDGPU_GFXMODEL}" \
       -DCMAKE_PREFIX_PATH=${INSTALL_PATH}     \
        rocprofiler-sdk-source
 

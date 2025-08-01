@@ -128,19 +128,33 @@ ${SUDO} mkdir -p $INSTALL_PATH
 source /etc/profile.d/lmod.sh
 module load rocm/${ROCM_VERSION}
 
+#cmake -DGPU_TARGETS="${AMDGPU_GFXMODEL}" -DCMAKE_PREFIX_PATH=/opt/${ROCM_VERSION}/lib:/opt/${ROCM_VERSION}/include/hsa -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH ..
+
+ls -l /opt/rocm-${ROCM_VERSION}/lib/libhsa-amd-aqlprofile64.so*
 git clone --branch $GITHUB_BRANCH https://github.com/ROCm/aqlprofile.git
 
 cd aqlprofile
 
 mkdir build && cd build
 
-cmake -DGPU_TARGETS="${AMDGPU_GFXMODEL}" -DCMAKE_PREFIX_PATH=/opt/rocm/lib:/opt/rocm/include/hsa -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH ..
+cmake -DCMAKE_PREFIX_PATH=/opt/rocm-${ROCM_VERSION}/lib:/opt/rocm-${ROCM_VERSION}/include/hsa -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH ..
 make -j
+echo "Checking for successful build with listing of library"
+ls -l libhsa-amd-aqlprofile64.so
 ${SUDO} make install
+echo "Checking if aqlprofile library is currently installed and removing it"
+if [[ `ls -l /opt/rocm-${ROCM_VERSION}/lib/libhsa-amd-aqlprofile64.so* |wc -l` -ge 1 ]]; then
+   ls -l /opt/rocm-${ROCM_VERSION}/lib/libhsa-amd-aqlprofile64.so*
+   rm -f /opt/rocm-${ROCM_VERSION}/lib/libhsa-amd-aqlprofile64.so*
+fi
+${SUDO} make install
+echo "Checking that new library has been installed"
+ls -l /opt/rocm-${ROCM_VERSION}/lib/libhsa-amd-aqlprofile64.so*
+
 
 cd ../..
 
-sudo rm -rf aqlprofile
+#sudo rm -rf aqlprofile
 
 # Create a module file for rocprofiler-sdk
 if [ -d "$MODULE_PATH" ]; then

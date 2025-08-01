@@ -101,12 +101,6 @@ else
    FTORCH_PATH=/opt/rocmplus-${ROCM_VERSION}/ftorch
 fi
 
-# Load the ROCm version for this FTorch build
-source /etc/profile.d/lmod.sh
-source /etc/profile.d/z01_lmod.sh
-module load rocm/${ROCM_VERSION}
-module load ${PYTORCH_MODULE}
-
 echo ""
 echo "==================================="
 echo "Starting FTorch Install with"
@@ -149,6 +143,12 @@ else
       echo " Building FTorch"
       echo "============================"
       echo ""
+
+      # Load the ROCm version for this FTorch build
+      source /etc/profile.d/lmod.sh
+      source /etc/profile.d/z01_lmod.sh
+      module load rocm/${ROCM_VERSION}
+      module load ${PYTORCH_MODULE}
 
       if [ -d "$FTORCH_PATH" ]; then
          # don't use sudo if user has write access to install path

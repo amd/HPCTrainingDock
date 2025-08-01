@@ -627,30 +627,26 @@ else
       tar xzf v${UCC_VERSION}.tar.gz
       cd ucc-${UCC_VERSION}
 
-      #./autogen.sh
+      ./autogen.sh
 
 #      export AMDGPU_GFXMODEL_UCC=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/ --offload-arch=/g'`
 #      AMDGPU_GFXMODEL_UCC="--offload-arch=${AMDGPU_GFXMODEL_UCC}"
-
-#      # if UCC_VERSION is greater than 1.4.0, the awk command will give the UCC_VERSION number
-#      # if UCC_VERSION is less than or equal to 1.4.0, the awk command result will be blank
-#      result=`echo $UCC_VERSION | awk '$1<1.4.0'` && echo $result
-#      echo "result is $result"
-#      if [[ "${result}" ]]; then # UCC_VERSION < 1.4.0
-#         sed -i '31i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu "${AMDGPU_GFXMODEL_UCC}" ${@:5} -fPIC -O3 -o ${pic_filepath}"' cuda_lt.sh
-#         sed -i '32d' cuda_lt.sh
-#         sed -i '41i cmd="${@:3:2} -x hip -target x86_64-unknown-linux-gnu "${AMDGPU_GFXMODEL_UCC}" ${@:5} -O3 -o ${npic_filepath}"' cuda_lt.sh
-#         sed -i '42d' cuda_lt.sh
-#      fi
+#     AMDGPU_GFXMODEL_LIST=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/ --with-rocm-arch=--offload-arch=/g' -e 's/^/--with-rocm-arch=--offload-arch=/'`
+#     echo "AMDGPU_GFXMODEL_LIST ${AMDGPU_GFXMODEL_LIST}"
+      #AMDGPU_GFXMODEL_LIST=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/,/g' `
 
 # giving the --with-rocm-arch option with all-arch-no-native removes the native architecture from the gfx list. Native does not always work.
-#   failing in Docker when compiling as root
+#   remove --offload-arch=native from list (failing in Docker when compiling as root)
 #	--with-rocm-arch=all-arch-no-native \
+#   for a single gfx model, the following works
+#	--with-rocm-arch=--offload-arch=${AMDGPU_GFXMODEL} \
+#   for a multiple gfx models, the following should work
+#	--with-rocm-arch="--offload-arch=gfx90a --offload-arch=gfx942" \
 
       UCC_CONFIGURE_COMMAND="./configure \
         --prefix=${UCC_PATH} \
         --with-rocm=${ROCM_PATH} \
-	--with-rocm-arch=all-arch-no-native \
+        --with-rocm-arch=all-arch-no-native \
         --with-ucx=${UCX_PATH}"
 
       echo ""
