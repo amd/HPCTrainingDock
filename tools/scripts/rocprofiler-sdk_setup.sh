@@ -171,10 +171,9 @@ module load openmpi
 
 ${SUDO} mkdir -p ${INSTALL_PATH}/lib/rocprofiler-sdk
 
-#you can either install the decoder in '/opt/rocm-6.4.1/lib64' or '/opt/rocm-6.4.1/lib' or use --att-library-path /path/to/lib
 wget https://github.com/ROCm/rocprof-trace-decoder/releases/download/0.1.2/rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux.tar.gz
 tar -xzvf rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux.tar.gz
-${SUDO} cp rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux/opt/rocm/lib/librocprof-trace-decoder.so $INSTALL_PATH/lib
+${SUDO} mv rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux/opt/rocm/lib/librocprof-trace-decoder.so $INSTALL_PATH/lib
 
 #cmake                                         \
 #      -B rocprofiler-sdk-build                \
@@ -202,6 +201,19 @@ ${SUDO} cmake --build rocprofiler-sdk-build --target install
 
 rm -rf rocprofiler-sdk-source rocprofiler-sdk-build
 rm -rf rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux
+
+git clone --branch $GITHUB_BRANCH https://github.com/ROCm/aqlprofile.git
+
+cd aqlprofile
+
+mkdir build && cd build
+
+cmake  -DGPU_TARGETS="${AMDGPU_GFXMODEL}" -DCMAKE_PREFIX_PATH=/opt/rocm-${ROCM_VERSION}/lib:/opt/rocm-${ROCM_VERSION}/include/hsa -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH ..
+make -j
+${SUDO} make install
+
+cd ../..
+rm -rf aqlprofile
 
 # Create a module file for rocprofiler-sdk
 #if [ -d "$MODULE_PATH" ]; then
@@ -236,3 +248,23 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	prepend_path("INCLUDE", pathJoin(base, "include"))
 EOF
 
+MODULE_PATH="/etc/lmod/modules/ROCm/rocprof-tracedecoder"
+
+${SUDO} mkdir -p ${MODULE_PATH}
+
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
+	whatis("Name: Rocprof-tracedecoder")
+	whatis("ROCm Version: ${ROCM_VERSION}")
+	whatis("Category: AMD")
+	whatis("Github Branch: ${GITHUB_BRANCH}")
+
+	local base = "${INSTALL_PATH}"
+
+	load("rocm/${ROCM_VERSION}")
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPATH", pathJoin(base, "include"))
+	prepend_path("PATH", pathJoin(base, "bin"))
+	prepend_path("INCLUDE", pathJoin(base, "include"))
+EOF

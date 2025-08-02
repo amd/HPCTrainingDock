@@ -63,13 +63,6 @@ RUN  /tmp/tools/rocprofiler-sdk_setup.sh \
         --build-rocprofiler-sdk ${BUILD_ROCPROFILER_SDK} && \
      rm -f /tmp/tools/rocprofiler-sdk_setup.sh
 
-COPY tools/scripts/aqlprofile_setup.sh /tmp/tools/aqlprofile_setup.sh
-RUN  /tmp/tools/aqlprofile_setup.sh \
-        --rocm-version ${ROCM_VERSION} \
-        --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
-        --build-aqlprofile ${BUILD_AQLPROFILE} && \
-     rm -f /tmp/tools/aqlprofile_setup.sh
-
 COPY tools/scripts/hpctoolkit_setup.sh /tmp/tools/hpctoolkit_setup.sh
 RUN /tmp/tools/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --build-hpctoolkit ${BUILD_HPCTOOLKIT} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
      rm -f /tmp/tools/hpctoolkit_setup.sh
