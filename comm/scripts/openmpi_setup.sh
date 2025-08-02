@@ -783,6 +783,9 @@ else
       fi
       # make ucx the default point-to-point
       echo "pml = ucx" | ${SUDO} tee -a "${OMPI_PATH}"/etc/openmpi-mca-params.conf
+      echo "osc = ucx" | ${SUDO} tee -a "${OMPI_PATH}"/etc/openmpi-mca-params.conf
+      echo "coll_ucc_enable = 1" | ${SUDO} tee -a "${OMPI_PATH}"/etc/openmpi-mca-params.conf
+      echo "coll_ucc_priority = 100" | ${SUDO} tee -a "${OMPI_PATH}"/etc/openmpi-mca-params.conf
       cd ../..
       rm -rf openmpi-${OPENMPI_VERSION} openmpi-${OPENMPI_VERSION}.tar.bz2
    fi

@@ -137,7 +137,7 @@ cd aqlprofile
 
 mkdir build && cd build
 
-cmake -DCMAKE_PREFIX_PATH=/opt/rocm-${ROCM_VERSION}/lib:/opt/rocm-${ROCM_VERSION}/include/hsa -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH ..
+cmake  -DGPU_TARGETS="${AMDGPU_GFXMODEL}" -DCMAKE_PREFIX_PATH=/opt/rocm-${ROCM_VERSION}/lib:/opt/rocm-${ROCM_VERSION}/include/hsa -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH ..
 make -j
 echo "Checking for successful build with listing of library"
 ls -l libhsa-amd-aqlprofile64.so

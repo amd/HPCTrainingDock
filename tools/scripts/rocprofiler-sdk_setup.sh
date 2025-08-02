@@ -7,8 +7,7 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 ROCM_VERSION="6.2.0"
-#INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/rocprofiler-sdk"
-INSTALL_PATH="/opt/rocm-${ROCM_VERSION}"
+INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/rocprofiler-sdk"
 INSTALL_PATH_INPUT=""
 MODULE_PATH="/etc/lmod/modules/ROCm/rocprofiler-sdk"
 GITHUB_BRANCH="amd-staging"
@@ -106,8 +105,7 @@ if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
    # override path in case ROCM_VERSION has been supplied as input
-   #INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/rocprofiler-sdk"
-   INSTALL_PATH="/opt/rocm-${ROCM_VERSION}"
+   INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/rocprofiler-sdk"
 fi
 
 #LIBDW_FLAGS=""
@@ -171,12 +169,12 @@ source /etc/profile.d/lmod.sh
 module load rocm/${ROCM_VERSION}
 module load openmpi
 
-${SUDO} mkdir -p $INSTALL_PATH
+${SUDO} mkdir -p ${INSTALL_PATH}/lib/rocprofiler-sdk
 
-AMDGPU_GFXMODEL_SINGLE=`echo $AMDGPU_GFXMODEL | cut -f1 -d';'`
-echo "AMDGPU_GFXMODEL is ${AMDGPU_GFXMODEL}"
-echo "AMDGPU_GFXMODEL_SINGLE is ${AMDGPU_GFXMODEL_SINGLE}"
-      #-DROCPROFILER_BUILD_TESTS=ON \
+#you can either install the decoder in '/opt/rocm-6.4.1/lib64' or '/opt/rocm-6.4.1/lib' or use --att-library-path /path/to/lib
+wget https://github.com/ROCm/rocprof-trace-decoder/releases/download/0.1.2/rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux.tar.gz
+tar -xzvf rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux.tar.gz
+${SUDO} cp rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux/opt/rocm/lib/librocprof-trace-decoder.so $INSTALL_PATH/lib
 
 #cmake                                         \
 #      -B rocprofiler-sdk-build                \
@@ -189,16 +187,12 @@ echo "AMDGPU_GFXMODEL_SINGLE is ${AMDGPU_GFXMODEL_SINGLE}"
 
 git clone --branch $GITHUB_BRANCH https://github.com/ROCm/rocprofiler-sdk.git rocprofiler-sdk-source
 
-#you can either install the decoder in '/opt/rocm-6.4.1/lib64' or '/opt/rocm-6.4.1/lib' or use --att-library-path /path/to/lib
-wget https://github.com/ROCm/rocprof-trace-decoder/releases/download/0.1.2/rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux.tar.gz
-tar -xzvf rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux.tar.gz
-${SUDO} cp rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux/opt/rocm/lib/librocprof-trace-decoder.so $INSTALL_PATH/lib
-
 cmake                                         \
       -B rocprofiler-sdk-build                \
       -DCMAKE_INSTALL_PREFIX=${INSTALL_PATH}  \
-      -DGPU_TARGETS="${AMDGPU_GFXMODEL}" \
-      -DCMAKE_PREFIX_PATH=${INSTALL_PATH}     \
+      -DGPU_TARGETS=\"${AMDGPU_GFXMODEL}\" \
+      -DOPENMP_GPU_TARGETS=\"${AMDGPU_GFXMODEL}\" \
+      -DCMAKE_PREFIX_PATH=/opt/rocm-${ROCM_VERSION} \
        rocprofiler-sdk-source
 
 nproc=8
@@ -223,23 +217,22 @@ rm -rf rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux
 #    echo "WARNING: using sudo, make sure you have sudo privileges"
 #fi
 
+${SUDO} mkdir -p ${MODULE_PATH}
 
-#${SUDO} mkdir -p ${MODULE_PATH}
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
+	whatis("Name: Rocprofiler-sdk")
+	whatis("ROCm Version: ${ROCM_VERSION}")
+	whatis("Category: AMD")
+	whatis("Github Branch: ${GITHUB_BRANCH}")
 
-#cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
-#	whatis("Name: Rocprofiler-sdk")
-#	whatis("ROCm Version: ${ROCM_VERSION}")
-#	whatis("Category: AMD")
-#	whatis("Github Branch: ${GITHUB_BRANCH}")
-#
-#	local base = "${INSTALL_PATH}"
-#
-#	load("rocm/${ROCM_VERSION}")
-#	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-#	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
-#	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-#	prepend_path("CPATH", pathJoin(base, "include"))
-#	prepend_path("PATH", pathJoin(base, "bin"))
-#	prepend_path("INCLUDE", pathJoin(base, "include"))
-#EOF
+	local base = "${INSTALL_PATH}"
+
+	load("rocm/${ROCM_VERSION}")
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPATH", pathJoin(base, "include"))
+	prepend_path("PATH", pathJoin(base, "bin"))
+	prepend_path("INCLUDE", pathJoin(base, "include"))
+EOF
 
