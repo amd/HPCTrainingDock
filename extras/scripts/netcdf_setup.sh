@@ -146,6 +146,8 @@ done
 
 if [ "${NETCDF_PATH_INPUT}" != "" ]; then
    NETCDF_PATH=${NETCDF_PATH_INPUT}
+else
+   NETCDF_PATH=/opt/rocmplus-${ROCM_VERSION}/netcdf
 fi
 
 if [ "${BUILD_NETCDF}" = "0" ]; then
