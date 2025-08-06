@@ -6,8 +6,8 @@ ifconfig | grep inet
 
 # need munge, slurmctld and slurmd  for slurm
 
-cp /etc/slurm/slurm.conf slurm.conf.orig
-cp /etc/slurm/gres.conf gres.conf.orig
+cp /etc/slurm/slurm.conf /tmp/slurm.conf.orig
+cp /etc/slurm/gres.conf /tmp/gres.conf.orig
 
 nodeconfig=`slurmd -C | head -1`
 partitionconfig="PartitionName=LocalQ Nodes=ALL Default=YES MaxTime=02:00:00 State=UP OverSubscribe=YES"
@@ -22,7 +22,7 @@ if [ "${MI210_COUNT}" -ge 1 ]; then
    file_string=/dev/dri/renderD[${first_number}-${last_number}]
    sed -e 's/Type=[[:alnum:]]* /Type=MI210 /' \
        -e 's/NodeName=[[:alnum:]]* /NodeName=localhost /' \
-       -e "s!File=.*!File=${file_string}!" gres.conf.orig > gres.conf
+       -e "s!File=.*!File=${file_string}!" /tmp/gres.conf.orig > /tmp/gres.conf
 fi
 if [ "${MI250_COUNT}" -ge 1 ]; then
    gpustring=Gres=gpu:MI250:${MI250_COUNT}
@@ -31,14 +31,14 @@ if [ "${MI250_COUNT}" -ge 1 ]; then
    file_string=/dev/dri/renderD[${first_number}-${last_number}]
    sed -e 's/Type=[[:alnum:]]* /Type=MI250 /' \
        -e 's/NodeName=[[:alnum:]]* /NodeName=localhost /' \
-       -e "s!File=.*!File=${file_string}!" gres.conf.orig > gres.conf
+       -e "s!File=.*!File=${file_string}!" /tmp/gres.conf.orig > /tmp/gres.conf
 fi
 if [ "${MI300_COUNT}" -ge 1 ]; then
    gpustring=Gres=gpu:MI300:${MI300_COUNT}
    file_string=/dev/dri/renderD[128,136,144,152]
    sed -e 's/Type=[[:alnum:]]* /Type=MI300A /' \
        -e 's/NodeName=[[:alnum:]]* /NodeName=localhost /' \
-       -e "s!File=.*!File=${file_string}!" gres.conf.orig > gres.conf
+       -e "s!File=.*!File=${file_string}!" /tmp/gres.conf.orig > /tmp/gres.conf
 fi
 
 sed -e "s/^NodeName=.*/${nodeconfig} ${gpustring} /" \
@@ -52,10 +52,10 @@ sed -e "s/^NodeName=.*/${nodeconfig} ${gpustring} /" \
     -e '/^Waittime/s/=.*/=300/' \
     -e '/^TaskPlugin/s/affinity/none/' \
     -e '/^TaskPlugin/s!task/none!task/cgroup!' \
-    ./slurm.conf.orig > slurm.conf
+    /tmp/slurm.conf.orig > /tmp/slurm.conf
 
-sudo cp slurm.conf /etc/slurm/slurm.conf
-sudo cp gres.conf /etc/slurm/gres.conf
+sudo cp /tmp/slurm.conf /etc/slurm/slurm.conf
+sudo cp /tmp/gres.conf /etc/slurm/gres.conf
 
 sudo service munge start
 sleep 1
