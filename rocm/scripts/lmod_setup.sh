@@ -27,8 +27,8 @@ echo "DISTRO is ${DISTRO}"
 if [ "${DISTRO}" = "rocky linux" ]; then
    ${SUDO} yum -y install epel-release
    ${SUDO} yum repolist
-   ${SUDO} yum update
-   ${SUDO} yum upgrade
+   ${SUDO} yum update -y
+   ${SUDO} yum upgrade -y
    ${SUDO} dnf -y install Lmod
 fi
 if [ "${DISTRO}" = "opensuse leap" ]; then

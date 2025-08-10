@@ -19,7 +19,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    groupadd renderalt -g 110
 elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    yum update -y
-   yum install -y ${SUDO} make
+   yum install -y ${SUDO} make which yum
    groupadd render -g 109
    groupadd renderalt -g 110
 elif [ "${DISTRO}" = "opensuse leap" ]; then

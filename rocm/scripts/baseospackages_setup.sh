@@ -48,8 +48,11 @@ if [ "${DISTRO}" = "ubuntu" ]; then
 
    ${SUDO} localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
 elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
+   if [[ `type sudo |& grep "not found" | wc -l` == "1" ]]; then
+      yum install -y which sudo
+   fi
    ${SUDO} yum groupinstall -y "Development Tools"
-   ${SUDO} yum install -y ${SUDO}
+   #${SUDO} yum install -y ${SUDO}
    ${SUDO} yum install -y epel-release
    ${SUDO} yum install -y --allowerasing curl dpkg-devel numactl-devel openmpi-devel papi-devel python3-pip wget zlib-devel 
    ${SUDO} yum clean all
