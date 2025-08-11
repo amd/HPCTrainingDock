@@ -247,24 +247,6 @@ echo "AMDGPU_INSTALL_VERSION: $AMDGPU_INSTALL_VERSION"
 echo "=================================="
 echo ""
 
-if [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
-	${SUDO} touch /etc/yum.repos.d/rocm.repo
-	${SUDO} chmod a+w /etc/yum.repos.d/rocm.repo
-	cat <<-EOF | ${SUDO} tee -a /etc/yum.repos.d/rocm.repo
-	[ROCm-${AMDGPU_ROCM_VERSION}]
-	name=ROCm${AMDGPU_ROCM_VERSION}
-	baseurl=https://repo.radeon.com/rocm/rhel9/${AMDGPU_ROCM_VERSION}/main
-	enabled=1
-	priority=50
-	gpgcheck=1
-	gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
-EOF
-#cat /etc/yum.repos.d/rocm.repo
-
-   #yum clean all
-   ${SUDO} yum install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${ROCM_REPO_DIST}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
-fi
-
 AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
 CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
@@ -275,10 +257,6 @@ if [[ -d "/opt/rocm-${ROCM_VERSION}" ]] && [[ "${REPLACE}" == "0" ]] ; then
 fi
 
 INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
-
-if [ "${DISTRO}" == "ubuntu" ]; then
-   ${SUDO} apt-get update
-   ${SUDO} ${DEB_FRONTEND} apt-get install -y libdrm-dev logrotate
 
    if [[ -d "${INSTALL_PATH}" ]] && [[ "${REPLACE}" != "0" ]] ; then
       ${SUDO} rm -rf ${INSTALL_PATH}
@@ -308,22 +286,48 @@ if [ "${DISTRO}" == "ubuntu" ]; then
 
    else
 
-      #mkdir --parents --mode=0755 /etc/apt/keyrings
-      #${SUDO} mkdir --parents --mode=0755 /etc/apt/keyrings
+      if [ "${DISTRO}" == "ubuntu" ]; then
+         ${SUDO} apt-get update
+         ${SUDO} ${DEB_FRONTEND} apt-get install -y libdrm-dev logrotate
 
-      # The installation below makes use of an AMD provided install script
+         #mkdir --parents --mode=0755 /etc/apt/keyrings
+         #${SUDO} mkdir --parents --mode=0755 /etc/apt/keyrings
 
-      # Get the key for the ROCm software
-      wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | ${SUDO} tee /etc/apt/keyrings/rocm.gpg > /dev/null
+         # The installation below makes use of an AMD provided install script
 
-      # Update package list
-      ${SUDO} apt-get update
+         # Get the key for the ROCm software
+         wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | ${SUDO} tee /etc/apt/keyrings/rocm.gpg > /dev/null
 
-      # Get the amdgpu-install script
-      wget -q https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/${DISTRO}/${ROCM_REPO_DIST}/amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+         # Update package list
+         ${SUDO} apt-get update
 
-      # Run the amdgpu-install script. We have already installed the kernel driver, so use we use --no-dkms
-      ${SUDO} ${DEB_FRONTEND} apt-get install -q -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+         # Get the amdgpu-install script
+         wget -q https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/${DISTRO}/${ROCM_REPO_DIST}/amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+
+         # Run the amdgpu-install script. We have already installed the kernel driver, so use we use --no-dkms
+         ${SUDO} ${DEB_FRONTEND} apt-get install -q -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+      elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
+	 ${SUDO} dnf config-manager --set-enabled crb
+         ${SUDO} dnf install -y python3-setuptools python3-wheel
+#	 ${SUDO} dnf --enablerepo=crb install python3-wheel -y
+#	 ${SUDO} dnf install python3-setuptools python3-wheel -y
+
+	 ${SUDO} touch /etc/yum.repos.d/rocm.repo
+	 ${SUDO} chmod a+w /etc/yum.repos.d/rocm.repo
+
+	 cat <<-EOF | ${SUDO} tee -a /etc/yum.repos.d/rocm.repo
+	[ROCm-${AMDGPU_ROCM_VERSION}]
+	name=ROCm${AMDGPU_ROCM_VERSION}
+	baseurl=https://repo.radeon.com/rocm/rhel9/${AMDGPU_ROCM_VERSION}/main
+	enabled=1
+	priority=50
+	gpgcheck=1
+	gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
+EOF
+         cat /etc/yum.repos.d/rocm.repo
+
+	 ${SUDO} dnf install -y https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/rhel/${DISTRO_VERSION}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
+      fi
 # if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
 # if ROCM_VERSION is less than or equal to 6.1.2, the awk command result will be blank
       result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
@@ -338,7 +342,12 @@ if [ "${DISTRO}" == "ubuntu" ]; then
             amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,rocmdevtools,lrt,openclsdk,openmpsdk,mlsdk --no-dkms
             #${SUDO} apt-get install rocm_bandwidth_test
 	 fi
-         ${SUDO} apt-get install rocm-llvm-dev
+         if [ "${DISTRO}" == "ubuntu" ]; then
+            ${SUDO} apt-get install rocm-llvm-dev
+         #elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
+            # error message that rocm-llvm-dev does not exist
+            #${SUDO} dnf install -y rocm-llvm-dev
+	 fi
       else # ROCM_VERSION < 6.2
          amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms
       fi
@@ -351,17 +360,11 @@ if [ "${DISTRO}" == "ubuntu" ]; then
 
       rm -rf amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
    fi
-elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
-# WIP, tested for RHEL 9.2
-   wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | ${SUDO} tee /etc/apt/keyrings/rocm.gpg > /dev/null
-   yum updateinfo
-   wget -q https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${ROCM_REPO_DIST}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
-   ${SUDO} yum install -q -y ./amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
    amdgpu-install -q -y --usecase=rocm,hip,hiplibsdk --no-dkms
-else
-   echo "DISTRO version ${DISTRO} not recognized or supported"
-   exit
-fi
+#else
+#   echo "DISTRO version ${DISTRO} not recognized or supported"
+#   exit
+#fi
 
 # rocm-validation-suite is optional
 #apt-get install -qy rocm-validation-suite

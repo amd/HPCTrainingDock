@@ -414,6 +414,8 @@ done
 if [[ "${PYTHON_VERSION_INPUT}" == "" ]]; then
    if [[ "${DISTRO}" == "ubuntu" &&  "${DISTRO_VERSION}" == "24.04" ]]; then
       PYTHON_VERSION="12"
+   elif [[ "${DISTRO}" == "almalinux" &&  "${DISTRO_VERSION}" == "9.4" ]]; then
+      PYTHON_VERSION="9"
    fi
 else
    PYTHON_VERSION=${PYTHON_VERSION_INPUT}

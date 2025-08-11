@@ -21,6 +21,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    ${SUDO} ${DEB_FRONTEND} apt-get -qqy install lmod
    #${SUDO}  sed -i -e '1,$s!/etc/lmod/modules!/etc/lmod/modules/Linux\n/etc/lmod/modules/LinuxPlus\n/etc/lmod/modules/ROCm\n/etc/lmod/modules/ROCmPlus\n/etc/lmod/modules/ROCmPlus-MPI\n/etc/lmod/modules/ROCmPlus-AMDResearchTools\n/etc/lmod/modules/ROCmPlus-LatestCompilers\n/etc/lmod/modules/ROCmPlus-AI\n/etc/lmod/modules/misc!' /etc/lmod/modulespath
    #cat /etc/lmod/modulespath
+   export BASH_INIT_FILE=/etc/bash.bashrc
 fi
 echo "DISTRO is ${DISTRO}"
 
@@ -30,17 +31,18 @@ if [ "${DISTRO}" = "rocky linux" ]; then
    ${SUDO} yum update -y
    ${SUDO} yum upgrade -y
    ${SUDO} dnf -y install Lmod
+   export BASH_INIT_FILE=/etc/bashrc
 fi
 if [ "${DISTRO}" = "opensuse leap" ]; then
    zypper --non-interactive install lua-lmod
 fi
 
-NUM_PROFILE_D=`grep '/etc/profile.d' /etc/bash.bashrc |wc -l`
+NUM_PROFILE_D=`grep '/etc/profile.d' ${BASH_INIT_FILE} |wc -l`
 if test "$NUM_PROFILE_D" -lt 1; then
-  echo "Lmod setup in /etc/bash.bashrc not found"
-  echo "Adding the following to the end of the /etc/bash.bashrc"
+  echo "Lmod setup in ${BASH_INIT_FILE} not found"
+  echo "Adding the following to the end of the ${BASH_INIT_FILE}"
 
-cat << EOF | ${SUDO} tee -a /etc/bash.bashrc
+cat << EOF | ${SUDO} tee -a ${BASH_INIT_FILE}
 if ! shopt -q login_shell; then
   if [ -d /etc/profile.d ]; then
     for i in /etc/profile.d/*.sh; do
@@ -53,7 +55,7 @@ fi
 EOF
 
 else
-  echo "Lmod setup in /etc/bash.bashrc found"
+  echo "Lmod setup in ${BASH_INIT_FILE} found"
 fi
 
 if test -L /etc/profile.d/z00_lmod.sh; then

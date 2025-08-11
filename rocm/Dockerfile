@@ -72,7 +72,7 @@ WORKDIR /app
 # add slurm
 #
 # Adding render group early to avoid something else grabbing it and causing problems for slurm
-RUN groupadd render -g 109 && groupadd renderalt -g 110
+RUN if [[ -z "`getent group render`" ]]; then groupadd render -g 109 && groupadd renderalt -g 110; fi
 
 #
 # Install Slurm

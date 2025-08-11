@@ -346,7 +346,7 @@ elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    echo "Install of pmix and hwloc packages"
    if [[ "${DRY_RUN}" == "0" ]]; then
       # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
-      ${SUDO} yum update
+      ${SUDO} yum update -y
       ${SUDO} yum install -y pmix hwloc
    fi
 else
