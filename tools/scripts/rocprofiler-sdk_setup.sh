@@ -4,17 +4,18 @@
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-SUDO="sudo"
+SUDO_PACKAGE_INSTALL="sudo"
+SUDO_MODULE_INSTALL="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 ROCM_VERSION="6.2.0"
 INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/rocprofiler-sdk"
 INSTALL_PATH_INPUT=""
 MODULE_PATH="/etc/lmod/modules/ROCm/rocprofiler-sdk"
-GITHUB_BRANCH="amd-staging"
+GITHUB_BRANCH="develop"
 BUILD_ROCPROFILER_SDK=0
 
 if [  -f /.singularity.d/Singularity ]; then
-   SUDO=""
+   SUDO_PACKAGE_INSTALL=""
    DEB_FRONTEND=""
 fi
 
@@ -108,50 +109,45 @@ else
    INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/rocprofiler-sdk"
 fi
 
-#LIBDW_FLAGS=""
-## don't use sudo if user has write access to install path
-#if [ -d "$INSTALL_PATH" ]; then
-#   # don't use sudo if user has write access to install path
-#   if [ -w ${INSTALL_PATH} ]; then
-#      SUDO=""
-#      if [ "${DISTRO}" == "ubuntu" ]; then
-#         export LIBDW_PATH=$INSTALL_PATH/libdw
-#         mkdir libdw_install
-#         cd libdw_install
-#         apt-get source libdw-dev
-#         cd elfutils-*
-#         ./configure --prefix=$LIBDW_PATH --disable-libdebuginfod --disable-debuginfod
-#         make -j
-#         make install
-#         export PATH=$PATH:$LIBDW_PATH:$LIBDW_PATH/bin
-#         cd ../../
-#         rm -rf libdw_install
-#         LIBDW_FLAGS="-I$LIBDW_PATH/include -L$LIBDW_PATH/lib -ldw"
-#      else
-#         echo " ------ WARNING: your distribution is not ubuntu ------ "
-#         echo " ------ WARNING: install will fail if libdw is not found ------ "
-#      fi
-#   else
-#      echo " ------ WARNING: using an install path that requires sudo ------ "
-#      if [ "${DISTRO}" == "ubuntu" ]; then
-#         sudo apt-get update
-#         sudo apt-get install -y libdw-dev
-#      else
-#         echo " ------ WARNING: your distribution is not ubuntu ------"
-#         echo " ------ WARNING: install will fail if libdw is not found ------ "
-#      fi
-#   fi
-#else
-#   # if install path does not exist yet, the check on write access will fail
-#   echo "WARNING: using sudo, make sure you have sudo privileges"
-   if [ "${DISTRO}" == "ubuntu" ]; then
-      sudo apt-get update
-      sudo apt-get install -y libdw-dev
-#   else
-#      echo " ------ WARNING: your distribution is not ubuntu ------"
-#      echo " ------ WARNING: install will fail if libdw is not found ------ "
+# check if install path exists, if it does and user has write access, do not use sudo
+if [ -d "$INSTALL_PATH" ]; then
+   if [ -w ${INSTALL_PATH} ]; then
+      # don't use sudo if user has write access to install path
+      SUDO_PACKAGE_INSTALL=""
    fi
-#fi
+fi
+
+# check if module path exists, if it does and user has write access, do not use sudo
+if [ -d "$MODULE_PATH" ]; then
+   if [ -w ${MODULE_PATH} ]; then
+      # don't use sudo if user has write access to module path
+      SUDO_MODULE_INSTALL=""
+   fi
+fi
+
+# install libdw if OS is ubuntu
+if [ "${DISTRO}" == "ubuntu" ]; then
+   if ["${SUDO_PACKAGE_INSTALL}" == ""]; then
+        export LIBDW_PATH=$INSTALL_PATH/libdw
+        mkdir libdw_install
+        cd libdw_install
+        apt-get source libdw-dev
+        cd elfutils-*
+        ./configure --prefix=$LIBDW_PATH --disable-libdebuginfod --disable-debuginfod
+       make -j
+        make install
+        export PATH=$PATH:$LIBDW_PATH:$LIBDW_PATH/bin
+        cd ../../
+        rm -rf libdw_install
+        LIBDW_FLAGS="-I$LIBDW_PATH/include -L$LIBDW_PATH/lib -ldw"
+   else
+         sudo apt-get update
+         sudo apt-get install -y libdw-dev
+   fi
+else
+    echo " ------ WARNING: your distribution is not ubuntu ------ "
+    echo " ------ WARNING: install will fail if libdw is not found ------ "
+fi
 
 echo ""
 echo "=================================="
@@ -169,91 +165,45 @@ source /etc/profile.d/lmod.sh
 module load rocm/${ROCM_VERSION}
 module load openmpi
 
-${SUDO} mkdir -p ${INSTALL_PATH}/lib/rocprofiler-sdk
+${SUDO_PACKAGE_INSTALL} mkdir -p ${INSTALL_PATH}/lib/rocprofiler-sdk
 
 wget https://github.com/ROCm/rocprof-trace-decoder/releases/download/0.1.2/rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux.tar.gz
 tar -xzvf rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux.tar.gz
-${SUDO} mv rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux/opt/rocm/lib/librocprof-trace-decoder.so $INSTALL_PATH/lib
+${SUDO_PACKAGE_INSTALL} mv rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux/opt/rocm/lib/librocprof-trace-decoder.so $INSTALL_PATH/lib
 
-#cmake                                         \
-#      -B rocprofiler-sdk-build                \
-#      -DCMAKE_INSTALL_PREFIX=${INSTALL_PATH}  \
-#      -DOPENMP_GPU_TARGETS="${AMDGPU_GFXMODEL}" \
-#      -DGPU_TARGETS="${AMDGPU_GFXMODEL}" \
-#      -DROCPROFILER_BUILD_TESTS=ON -DROCPROFILER_BUILD_SAMPLES=ON \
-#      -DCMAKE_PREFIX_PATH=${INSTALL_PATH}     \
-#       rocprofiler-sdk-source
+git clone --branch $GITHUB_BRANCH https://github.com/ROCm/rocm-systems.git rocm-systems-source
 
-git clone --branch $GITHUB_BRANCH https://github.com/ROCm/rocprofiler-sdk.git rocprofiler-sdk-source
-
+nproc=8
 cmake                                         \
       -B rocprofiler-sdk-build                \
       -DCMAKE_INSTALL_PREFIX=${INSTALL_PATH}  \
       -DGPU_TARGETS=\"${AMDGPU_GFXMODEL}\" \
       -DOPENMP_GPU_TARGETS=\"${AMDGPU_GFXMODEL}\" \
       -DCMAKE_PREFIX_PATH=/opt/rocm-${ROCM_VERSION} \
-       rocprofiler-sdk-source
+       rocm-systems-source/projects/rocprofiler-sdk
 
-nproc=8
 cmake --build rocprofiler-sdk-build --target all --parallel $(nproc)
+${SUDO_PACKAGE_INSTALL} cmake --build rocprofiler-sdk-build --target install
 
-${SUDO} cmake --build rocprofiler-sdk-build --target install
-
-rm -rf rocprofiler-sdk-source rocprofiler-sdk-build
+rm -rf rocprofiler-sdk-build
 rm -rf rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux
 
-git clone --branch $GITHUB_BRANCH https://github.com/ROCm/aqlprofile.git
+cmake                                        \
+       -B aqlprofile-build                   \
+       -DGPU_TARGETS="${AMDGPU_GFXMODEL}"    \
+       -DCMAKE_PREFIX_PATH=/opt/rocm-${ROCM_VERSION}/lib:/opt/rocm-${ROCM_VERSION}/include/hsa \
+       -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH  \
+       rocm-systems-source/projects/aqlprofile
 
-cd aqlprofile
+cmake --build aqlprofile-build --target all --parallel $(nproc)
+${SUDO_PACKAGE_INSTALL} cmake --build aqlprofile-build --target install
 
-mkdir build && cd build
+rm -rf rocm-systems-source aqlprofile-build
 
-cmake  -DGPU_TARGETS="${AMDGPU_GFXMODEL}" -DCMAKE_PREFIX_PATH=/opt/rocm-${ROCM_VERSION}/lib:/opt/rocm-${ROCM_VERSION}/include/hsa -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH ..
-make -j
-${SUDO} make install
+${SUDO_MODULE_INSTALL} mkdir -p ${MODULE_PATH}
 
-cd ../..
-rm -rf aqlprofile
-
-# Create a module file for rocprofiler-sdk
-#if [ -d "$MODULE_PATH" ]; then
-#   # use sudo if user does not have write access to module path
-#   if [ ! -w ${MODULE_PATH} ]; then
-#      SUDO="sudo"
-#    else
-#       echo "WARNING: not using sudo since user has write access to module path"
-#    fi
-#else
-#    # if module path dir does not exist yet, the check on write access will fail
-#    SUDO="sudo"
-#    echo "WARNING: using sudo, make sure you have sudo privileges"
-#fi
-
-${SUDO} mkdir -p ${MODULE_PATH}
-
-cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
+cat <<-EOF | ${SUDO_MODULE_INSTALL} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: Rocprofiler-sdk")
-	whatis("ROCm Version: ${ROCM_VERSION}")
-	whatis("Category: AMD")
-	whatis("Github Branch: ${GITHUB_BRANCH}")
-
-	local base = "${INSTALL_PATH}"
-
-	load("rocm/${ROCM_VERSION}")
-	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
-	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-	prepend_path("CPATH", pathJoin(base, "include"))
-	prepend_path("PATH", pathJoin(base, "bin"))
-	prepend_path("INCLUDE", pathJoin(base, "include"))
-EOF
-
-MODULE_PATH="/etc/lmod/modules/ROCm/rocprof-tracedecoder"
-
-${SUDO} mkdir -p ${MODULE_PATH}
-
-cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
-	whatis("Name: Rocprof-tracedecoder")
 	whatis("ROCm Version: ${ROCM_VERSION}")
 	whatis("Category: AMD")
 	whatis("Github Branch: ${GITHUB_BRANCH}")

@@ -4,24 +4,26 @@
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-SUDO="sudo"
+SUDO_PACKAGE_INSTALL="sudo"
+SUDO_MODULE_INSTALL="sudo"
 ROCM_VERSION=6.0
 PYTHON_VERSION=10
 TOOL_REPO="https://github.com/ROCm/omnitrace"
 TOOL_NAME="omnitrace"
 TOOL_CONFIG="OMNITRACE"
 TOOL_NAME_UC=$TOOL_CONFIG
+TOOL_CMAKE_DIR="tool-source"
 MPI_MODULE="openmpi"
 MODULE_PATH="/etc/lmod/modules/ROCmPlus-AMDResearchTools/${TOOL_NAME}"
 MODULE_PATH_INPUT=""
 INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/${TOOL_NAME}"
 INSTALL_PATH_INPUT=""
-GITHUB_BRANCH="amd-staging"
+GITHUB_BRANCH="develop"
 INSTALL_ROCPROF_SYS_FROM_SOURCE=0
 
 
 if [  -f /.singularity.d/Singularity ]; then
-   SUDO=""
+   SUDO_PACKAGE_INSTALL=""
 fi
 
 
@@ -115,9 +117,10 @@ done
 result=`echo ${ROCM_VERSION} | awk '$1>6.2.9'` && echo $result
 if [[ "${result}" ]]; then
    TOOL_NAME="rocprofiler-systems"
-   TOOL_REPO="https://github.com/ROCm/rocprofiler-systems.git"
+   TOOL_REPO="https://github.com/ROCm/rocm-systems.git"
    TOOL_CONFIG="ROCPROFSYS"
    TOOL_NAME_UC="ROCPROFILER_SYSTEMS"
+   TOOL_CMAKE_DIR="tool-source/projects/rocprofiler-systems"
 fi
 
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
@@ -137,7 +140,21 @@ fi
 # don't use sudo if user has write access to install path
 if [ -d "$INSTALL_PATH" ]; then
    if [ -w ${INSTALL_PATH} ]; then
-      SUDO=""
+      SUDO_PACKAGE_INSTALL=""
+   fi
+fi
+
+# don't use sudo if user has write access to module path
+if [ -d "$MODULE_PATH" ]; then
+   if [ -w ${MODULE_PATH} ]; then
+      SUDO_MODULE_INSTALL=""
+   fi
+fi
+
+
+# install dependencies
+if [ "${DISTRO}" == "ubuntu" ]; then
+   if ["${SUDO_PACKAGE_INSTALL}" == "" ]; then
       export TEXINFO_PATH=${INSTALL_PATH}/texinfo
       wget https://ftp.gnu.org/gnu/texinfo/texinfo-7.0.2.tar.gz
       tar -xzvf texinfo-7.0.2.tar.gz
@@ -147,21 +164,17 @@ if [ -d "$INSTALL_PATH" ]; then
       cd ../
       rm -rf texinfo-7.0.2*
    else
-      echo "WARNING: using an install path that requires sudo"
       if [ ! -x /usr/bin/gettext ]; then
-         ${SUDO} apt-get update
-         ${SUDO} apt-get install -y gettext autopoint liblzma-dev libzstd-dev
+         ${SUDO_PACKAGE_INSTALL} apt-get update
+         ${SUDO_PACKAGE_INSTALL} apt-get install -y gettext autopoint liblzma-dev libzstd-dev
       fi
    fi
-else
-   # if install path does not exist yet, the check on write access will fail
-   echo "WARNING: using sudo, make sure you have sudo privileges"
 fi
 
 # omnitrace (omnitrace-avail) will throw this message using default values, so change default to 2
 # [omnitrace][116] /proc/sys/kernel/perf_event_paranoid has a value of 3. Disabling PAPI (requires a value <= 2)...
 # [omnitrace][116] In order to enable PAPI support, run 'echo N | ${SUDO} tee /proc/sys/kernel/perf_event_paranoid' where                   N is <= 2
-if (( `cat /proc/sys/kernel/perf_event_paranoid` > 0 )); then echo "Please do:  echo 0  | ${SUDO} tee /proc/sys/kernel/perf_event_paranoid"; fi
+if (( `cat /proc/sys/kernel/perf_event_paranoid` > 0 )); then echo "Please do:  echo 0  | ${SUDO_PACKAGE_INSTALL} tee /proc/sys/kernel/perf_event_paranoid"; fi
 
 echo ""
 echo "============================"
@@ -196,7 +209,7 @@ if [ "${INSTALL_ROCPROF_SYS_FROM_SOURCE}" = "1" ] ; then
       tar -xzf ${CACHE_FILES}/${TOOL_NAME}.tgz
       chown -R root:root ${TOOL_NAME}
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm ${CACHE_FILES}/${TOOL_NAME}.tgz
+         ${SUDO_PACKAGE_INSTALL} rm ${CACHE_FILES}/${TOOL_NAME}.tgz
       fi
 
    else
@@ -205,7 +218,7 @@ if [ "${INSTALL_ROCPROF_SYS_FROM_SOURCE}" = "1" ] ; then
       source /etc/profile.d/z01_lmod.sh
       module load rocm/${ROCM_VERSION}
       module load ${MPI_MODULE}
-   
+
       CPU_TYPE=zen3
       if [ "${AMDGFX_GFXMODEL}" = "gfx1030" ]; then
          CPU_TYPE=zen2
@@ -216,10 +229,10 @@ if [ "${INSTALL_ROCPROF_SYS_FROM_SOURCE}" = "1" ] ; then
       if [ "${AMDGFX_GFXMODEL}" = "gfx942" ]; then
          CPU_TYPE=zen4
       fi
-   
-      ${SUDO} mkdir -p ${INSTALL_PATH}
-   
-      git clone --depth 1 --branch ${GITHUB_BRANCH} ${TOOL_REPO} tool-source --recurse-submodules && \
+
+      ${SUDO_PACKAGE_INSTALL} mkdir -p ${INSTALL_PATH}
+
+      git clone --depth 1 --branch ${GITHUB_BRANCH} ${TOOL_REPO} ${TOOL_CMAKE_DIR} --recurse-submodules && \
           cmake                                         \
              -B tool-build                      \
              -D CMAKE_INSTALL_PREFIX=${INSTALL_PATH}  \
@@ -242,33 +255,18 @@ if [ "${INSTALL_ROCPROF_SYS_FROM_SOURCE}" = "1" ] ; then
              -D CpuArch_TARGET=${CPU_TYPE} \
              -D ${TOOL_CONFIG}_DEFAULT_ROCM_PATH=${ROCM_PATH} \
              -D ${TOOL_CONFIG}_USE_COMPILE_TIMING=ON \
-             tool-source
-   
+             ${TOOL_CMAKE_DIR}
+
       cmake --build tool-build --target all --parallel 16
-      ${SUDO} cmake --build tool-build --target install
+      ${SUDO_PACKAGE_INSTALL} cmake --build tool-build --target install
       rm -rf tool-source tool-build
    fi
 fi
 
-# Create a module file for ${TOOL_NAME}
-if [ -d "$MODULE_PATH" ]; then
-   # use sudo if user does not have write access to module path
-   if [ ! -w ${MODULE_PATH} ]; then
-      SUDO="sudo"
-   else
-      echo "WARNING: not using sudo since user has write access to module path"
-   fi
-else
-   # if module path dir does not exist yet, the check on write access will fail
-   SUDO="sudo"
-   echo "WARNING: using sudo, make sure you have sudo privileges"
-fi
-
-
-${SUDO} mkdir -p ${MODULE_PATH}
+${SUDO_MODULE_INSTALL} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GITHUB_BRANCH}.lua
+cat <<-EOF | ${SUDO_MODULE_INSTALL} tee ${MODULE_PATH}/${GITHUB_BRANCH}.lua
 	whatis("Name: ${TOOL_NAME}")
 	whatis("Installed from Github branch: ${GITHUB_BRANCH}")
 	whatis("Category: AMD")

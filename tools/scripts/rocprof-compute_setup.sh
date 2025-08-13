@@ -5,7 +5,8 @@ ROCM_VERSION=6.0
 GITHUB_BRANCH="develop"
 REPLACE=0
 INSTALL_ROCPROF_COMPUTE_FROM_SOURCE=0
-SUDO="sudo"
+SUDO_PACKAGE_INSTALL="sudo"
+SUDO_MODULE_INSTALL="sudo"
 TOOL_NAME="rocprofiler-compute"
 TOOL_CONFIG="ROCPROF_COMPUTE"
 TOOL_REPO="https://github.com/ROCm/${TOOL_NAME}"
@@ -15,7 +16,7 @@ INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/${TOOL_NAME}-${GITHUB_BRANCH}"
 INSTALL_PATH_INPUT=""
 
 if [  -f /.singularity.d/Singularity ]; then
-   SUDO=""
+   SUDO_PACKAGE_INSTALL=""
 fi
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -115,8 +116,17 @@ if [ "${MODULE_PATH_INPUT}" != "" ]; then
 fi
 
 # don't use sudo if user has write access to install path
-if [ -w ${INSTALL_PATH} ]; then
-   SUDO=""
+if [ -d "$INSTALL_PATH" ]; then
+   if [ -w ${INSTALL_PATH} ]; then
+   SUDO_PACKAGE_INSTALL=""
+   fi
+fi
+
+# don't use sudo if user has write access to module path
+if [ -d "$MODULE_PATH" ]; then
+   if [ -w ${MODULE_PATH} ]; then
+   SUDO_MODULE_INSTALL=""
+   fi
 fi
 
 echo ""
@@ -151,28 +161,16 @@ if [ -f ${CACHE_FILES}/${TOOL_NAME}-${GITHUB_BRANCH}.tgz ]; then
       tar -xzf ${CACHE_FILES}/${TOOL_NAME}-${GITHUB_BRANCH}.tgz
       chown -R root:root ${TOOL_NAME}-${GITHUB_BRANCH}
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm ${CACHE_FILES}/${TOOL_NAME}-${GITHUB_BRANCH}.tgz
+         ${SUDO_PACKAGE_INSTALL} rm ${CACHE_FILES}/${TOOL_NAME}-${GITHUB_BRANCH}.tgz
       fi
 else
 
-   git clone -b ${GITHUB_BRANCH} https://github.com/ROCm/rocprofiler-compute
-   cd rocprofiler-compute
+   git clone -b ${GITHUB_BRANCH} https://github.com/ROCm/rocm-systems.git rocm-systems-source
+   cd rocm-systems-source/projects/rocprofiler-compute
 
-   if [ -d "$INSTALL_PATH" ]; then
-      # don't use sudo if user has write access to install path
-      if [ -w ${INSTALL_PATH} ]; then
-         SUDO=""
-      else
-         echo "WARNING: using an install path that requires sudo"
-      fi
-   else
-      # if install path does not exist yet, the check on write access will fail
-      echo "WARNING: using sudo, make sure you have sudo privileges"
-   fi
-
-   ${SUDO} mkdir -p ${INSTALL_PATH}
+   ${SUDO_PACKAGE_INSTALL} mkdir -p ${INSTALL_PATH}
    if [[ "${USER}" != "root" ]]; then
-      ${SUDO} chmod -R a+w ${INSTALL_PATH}
+      ${SUDO_PACKAGE_INSTALL} chmod -R a+w ${INSTALL_PATH}
    fi
 
    PYTHON=python3
@@ -189,30 +187,16 @@ else
          -DMOD_INSTALL_PATH=${INSTALL_PATH}/modulefiles ..
          make install
    cd ../..
-   rm -rf rocprofiler-compute
+   rm -rf rocm-systems-source
 
    if [[ "${USER}" != "root" ]]; then
-      ${SUDO} chmod go-w ${INSTALL_PATH}
+      ${SUDO_PACKAGE_INSTALL} chmod go-w ${INSTALL_PATH}
    fi
 fi
 
-# Create a module file for ${TOOL_NAME}
-if [ -d "$MODULE_PATH" ]; then
-   # use sudo if user does not have write access to module path
-   if [ ! -w ${MODULE_PATH} ]; then
-      SUDO="sudo"
-   else
-      echo "WARNING: not using sudo since user has write access to module path"
-   fi
-else
-   # if module path dir does not exist yet, the check on write access will fail
-   SUDO="sudo"
-   echo "WARNING: using sudo, make sure you have sudo privileges"
-fi
+${SUDO_MODULE_INSTALL} mkdir -p ${MODULE_PATH}
 
-${SUDO} mkdir -p ${MODULE_PATH}
-
-cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GITHUB_BRANCH}.lua
+cat <<-EOF | ${SUDO_MODULE_INSTALL} tee ${MODULE_PATH}/${GITHUB_BRANCH}.lua
 	local help_message = [[
 
 	${TOOL_NAME} is an open-source performance analysis tool for profiling
