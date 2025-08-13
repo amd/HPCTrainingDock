@@ -11,6 +11,7 @@ ROCM_VERSION="6.2.0"
 INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/rocprofiler-sdk"
 INSTALL_PATH_INPUT=""
 MODULE_PATH="/etc/lmod/modules/ROCm/rocprofiler-sdk"
+MPI_MODULE="openmpi"
 GITHUB_BRANCH="develop"
 BUILD_ROCPROFILER_SDK=0
 
@@ -25,7 +26,8 @@ usage()
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "  --install-path [INSTALL_PATH ] default $INSTALL_PATH"
+   echo "  --install-path [ INSTALL_PATH ] default $INSTALL_PATH"
+   echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --github-branch [ GITHUB_BRANCH ] default $GITHUB_BRANCH"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default is $AMDGPU_GFXMODEL "
@@ -71,6 +73,11 @@ do
       "--github-branch")
           shift
           GITHUB_BRANCH=${1}
+          reset-last
+          ;;
+      "--mpi-module")
+          shift
+          MPI_MODULE=${1}
           reset-last
           ;;
       "--module-path")
@@ -134,7 +141,7 @@ if [ "${DISTRO}" == "ubuntu" ]; then
         apt-get source libdw-dev
         cd elfutils-*
         ./configure --prefix=$LIBDW_PATH --disable-libdebuginfod --disable-debuginfod
-       make -j
+        make -j
         make install
         export PATH=$PATH:$LIBDW_PATH:$LIBDW_PATH/bin
         cd ../../
@@ -163,7 +170,7 @@ echo ""
 
 source /etc/profile.d/lmod.sh
 module load rocm/${ROCM_VERSION}
-module load openmpi
+module load ${MPI_MODULE}
 
 ${SUDO_PACKAGE_INSTALL} mkdir -p ${INSTALL_PATH}/lib/rocprofiler-sdk
 
