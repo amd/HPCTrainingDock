@@ -232,7 +232,7 @@ if [ "${INSTALL_ROCPROF_SYS_FROM_SOURCE}" = "1" ] ; then
 
       ${SUDO_PACKAGE_INSTALL} mkdir -p ${INSTALL_PATH}
 
-      git clone --depth 1 --branch ${GITHUB_BRANCH} ${TOOL_REPO} ${TOOL_CMAKE_DIR} --recurse-submodules && \
+      git clone --depth 1 --branch ${GITHUB_BRANCH} ${TOOL_REPO} tool-source --recurse-submodules && \
           cmake                                         \
              -B tool-build                      \
              -D CMAKE_INSTALL_PREFIX=${INSTALL_PATH}  \

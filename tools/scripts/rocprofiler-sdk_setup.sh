@@ -193,7 +193,7 @@ cmake --build rocprofiler-sdk-build --target all --parallel $(nproc)
 ${SUDO_PACKAGE_INSTALL} cmake --build rocprofiler-sdk-build --target install
 
 rm -rf rocprofiler-sdk-build
-rm -rf rocprof-trace-decoder-manylinux-2.28-0.1.2-Linux
+rm -rf rocprof-trace-decoder-*
 
 cmake                                        \
        -B aqlprofile-build                   \
