@@ -134,7 +134,7 @@ fi
 
 # install libdw if OS is ubuntu
 if [ "${DISTRO}" == "ubuntu" ]; then
-   if ["${SUDO_PACKAGE_INSTALL}" == ""]; then
+   if [ "${SUDO_PACKAGE_INSTALL}" == "" ]; then
         export LIBDW_PATH=$INSTALL_PATH/libdw
         mkdir libdw_install
         cd libdw_install
