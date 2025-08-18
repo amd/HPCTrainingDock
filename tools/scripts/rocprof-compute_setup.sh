@@ -187,6 +187,7 @@ else
          -DMOD_INSTALL_PATH=${INSTALL_PATH}/modulefiles ..
          make install
    cd ../..
+   cd ../../..
    rm -rf rocm-systems-source
 
    if [[ "${USER}" != "root" ]]; then
