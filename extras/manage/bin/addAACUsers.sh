@@ -180,6 +180,7 @@ do
             echo "Adding user to group $group_name and making it the primary group for the user"
             if (( "${VERBOSE}" > 0 )); then
                echo "  sudo usermod -a -G ${group_name}"
+               echo "  sudo usermod -a -G ${group_name}"
                echo "  sudo usermod -g ${group_name}"
             fi
             if [ "${DRYRUN}" != 1 ]; then
@@ -339,20 +340,22 @@ do
       VIDEO_GROUP=`id -nG "$user_name" | grep -w video | wc -l`
       AUDIO_GROUP=`id -nG "$user_name" | grep -w audio | wc -l`
       RENDER_GROUP=`id -nG "$user_name" | grep -w render | wc -l`
+      PERF_GROUP=`id -nG "$user_name" | grep -w perf | wc -l`
    else
       VIDEO_GROUP=0
       AUDIO_GROUP=0
       RENDER_GROUP=0
+      PERF_GROUP=0
    fi
 
-   if [[ $VIDEO_GROUP != 1 ]] || [[ $AUDIO_GROUP != 1 ]] || [[ $RENDER_GROUP != 1 ]] ; then
+   if [[ $VIDEO_GROUP != 1 ]] || [[ $AUDIO_GROUP != 1 ]] || [[ $RENDER_GROUP != 1 ]] || [[ $PERF_GROUP != ]] ; then
       if (( "${VERBOSE}" > 2 )); then
          echo "Add groups for access to the GPU (see /dev/dri /dev/kfd)"
-         #sudo usermod -a -G video,audio,render,renderalt ${user_name}
-         echo "  sudo usermod -a -G video,audio,render,renderalt ${user_name}"
+         #sudo usermod -a -G video,audio,render,renderalt,perf ${user_name}
+         echo "  sudo usermod -a -G video,audio,render,renderalt,perf ${user_name}"
       fi
       if [ "${DRYRUN}" != 1 ]; then
-         sudo usermod -a -G video,audio,render,renderalt ${user_name}
+         sudo usermod -a -G video,audio,render,renderalt,perf ${user_name}
       fi
    fi
    # add the ssh key to the users authorized_keys file
