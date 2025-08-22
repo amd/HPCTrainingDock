@@ -8,8 +8,8 @@ C_COMPILER=`which gcc`
 C_COMPILER_INPUT=""
 CXX_COMPILER=`which g++`
 CXX_COMPILER_INPUT=""
-FC_COMPILER=`which gfortran`
-FC_COMPILER_INPUT=""
+F_COMPILER=`which gfortran`
+F_COMPILER_INPUT=""
 ENABLE_PARALLEL_INPUT=""
 HDF5_VERSION=1.14.6
 MPI_MODULE="openmpi"
@@ -38,7 +38,7 @@ usage()
    echo "  --install-path [ HDF5_PATH ] default $HDF5_PATH"
    echo "  --c-compiler [ C_COMPILER ] default ${C_COMPILER}"
    echo "  --cxx-compiler [ CXX_COMPILER ] default ${CXX_COMPILER}"
-   echo "  --fc-compiler [ FC_COMPILER ] default ${FC_COMPILER}"
+   echo "  --f-compiler [ F_COMPILER ] default ${F_COMPILER}"
    echo "  --build-hdf5 [ BUILD_HDF5 ], set to 1 to build HDF5, default is 0"
    echo "  --help: print this usage information"
    exit 1
@@ -103,9 +103,9 @@ do
           CXX_COMPILER=${1}
           reset-last
           ;;
-      "--fc-compiler")
+      "--f-compiler")
           shift
-          FC_COMPILER=${1}
+          F_COMPILER=${1}
           reset-last
           ;;
       "--rocm-version")
@@ -229,7 +229,7 @@ else
          ENABLE_PARALLEL="ON"
 	 C_COMPILER=`which mpicc`
 	 CXX_COMPILER=`which mpicxx`
-	 FC_COMPILER=`which mpifort`
+	 F_COMPILER=`which mpifort`
       fi
 
       # override flags with user defined values if present
@@ -242,8 +242,8 @@ else
       if [ "${CXX_COMPILER_INPUT}" != "" ]; then
          CXX_COMPILER=${CXX_COMPILER_INPUT}
       fi
-      if [ "${FC_COMPILER_INPUT}" != "" ]; then
-         FC_COMPILER=${FC_COMPILER_INPUT}
+      if [ "${F_COMPILER_INPUT}" != "" ]; then
+         F_COMPILER=${F_COMPILER_INPUT}
       fi
 
       cd ..
@@ -255,7 +255,7 @@ else
 				-DHDF5_ENABLE_SZIP_SUPPORT:BOOL=OFF \
                                 -DCMAKE_CXX_COMPILER=${CXX_COMPILER} \
                                 -DCMAKE_C_COMPILER=${C_COMPILER} \
-				-DCMAKE_Fortran_COMPILER=${FC_COMPILER} \
+				-DCMAKE_Fortran_COMPILER=${F_COMPILER} \
 				-DBUILD_TESTING:BOOL=OFF \
 				-DHDF5_ENABLE_PARALLEL:BOOL=${ENABLE_PARALLEL} \
 				-DHDF5_BUILD_FORTRAN:BOOL=ON ..
@@ -306,7 +306,7 @@ else
 	setenv("HDF5_PATH", base)
 	setenv("HDF5_ROOT", base)
 	setenv("HDF5_C_COMPILER", "${C_COMPILER}")
-	setenv("HDF5_FC_COMPILER", "${FC_COMPILER}")
+	setenv("HDF5_F_COMPILER", "${F_COMPILER}")
 	setenv("HDF5_CXX_COMPILER", "${CXX_COMPILER}")
 	setenv("HDF5_ENABLE_PARALLEL", "${ENABLE_PARALLEL}")
 	setenv("HDF5_MPI_MODULE", "${MPI_MODULE}")

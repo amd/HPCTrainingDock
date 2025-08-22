@@ -2,17 +2,17 @@
 
 # Variables controlling setup process
 NETCDF_C_MODULE_PATH=/etc/lmod/modules/ROCmPlus/netcdf-c
-NETCDF_FC_MODULE_PATH=/etc/lmod/modules/ROCmPlus/netcdf-fortran
+NETCDF_F_MODULE_PATH=/etc/lmod/modules/ROCmPlus/netcdf-fortran
 BUILD_NETCDF=0
 ROCM_VERSION=6.0
 C_COMPILER=gcc
 C_COMPILER_INPUT=""
 CXX_COMPILER=g++
 CXX_COMPILER_INPUT=""
-FC_COMPILER=gfortran
-FC_COMPILER_INPUT=""
+F_COMPILER=gfortran
+F_COMPILER_INPUT=""
 NETCDF_C_VERSION="4.9.3"
-NETCDF_FC_VERSION="4.6.2"
+NETCDF_F_VERSION="4.6.2"
 HDF5_MODULE="hdf5"
 NETCDF_PATH=/opt/rocmplus-${ROCM_VERSION}/netcdf
 NETCDF_PATH_INPUT=""
@@ -37,18 +37,18 @@ fi
 usage()
 {
    echo "Usage:"
-   echo "  WARNING: when specifying --install-path, --netcdf-c-module-path,  and --netcdf-fc-module-path the directories have to already exist because the script checks for write permissions"
+   echo "  WARNING: when specifying --install-path, --netcdf-c-module-path,  and --netcdf-f-module-path the directories have to already exist because the script checks for write permissions"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --netcdf-c-version [ NETCDF_C_VERSION ] default $NETCDF_C_VERSION"
-   echo "  --netcdf-fc-version [ NETCDF_FC_VERSION ] default $NETCDF_FC_VERSION"
+   echo "  --netcdf-f-version [ NETCDF_F_VERSION ] default $NETCDF_F_VERSION"
    echo "  --netcdf-c-module-path [ NETCDF_C_MODULE_PATH ] default $NETCDF_C_MODULE_PATH"
-   echo "  --netcdf-fc-module-path [ NETCDF_FC_MODULE_PATH ] default $NETCDF_FC_MODULE_PATH"
+   echo "  --netcdf-f-module-path [ NETCDF_F_MODULE_PATH ] default $NETCDF_F_MODULE_PATH"
    echo "  --hdf5-module [ HDF5_MODULE ] default $HDF5_MODULE"
    echo "  --install-path [ NETCDF_PATH ] default $NETCDF_PATH"
    echo "  --c-compiler [ C_COMPILER ] default ${C_COMPILER}"
    echo "  --cxx-compiler [ CXX_COMPILER ] default ${CXX_COMPILER}"
-   echo "  --fc-compiler [ FC_COMPILER ] default ${FC_COMPILER}"
+   echo "  --f-compiler [ F_COMPILER ] default ${F_COMPILER}"
    echo "  --build-netcdf [ BUILD_NETCDF ], set to 1 to build netcdf-c and netcdf-fortran, default is 0"
    echo "  --help: print this usage information"
    exit 1
@@ -88,9 +88,9 @@ do
           NETCDF_C_MODULE_PATH=${1}
           reset-last
           ;;
-      "--netcdf-fc-module-path")
+      "--netcdf-f-module-path")
           shift
-          NETCDF_FC_MODULE_PATH=${1}
+          NETCDF_F_MODULE_PATH=${1}
           reset-last
           ;;
       "--install-path")
@@ -113,9 +113,9 @@ do
           CXX_COMPILER=${1}
           reset-last
           ;;
-      "--fc-compiler")
+      "--f-compiler")
           shift
-          FC_COMPILER=${1}
+          F_COMPILER=${1}
           reset-last
           ;;
       "--rocm-version")
@@ -128,9 +128,9 @@ do
           NETCDF_C_VERSION=${1}
           reset-last
           ;;
-      "--netcdf-fc-version")
+      "--netcdf-f-version")
           shift
-          NETCDF_FC_VERSION=${1}
+          NETCDF_F_VERSION=${1}
           reset-last
           ;;
       "--*")
@@ -165,16 +165,11 @@ else
    echo " Install directory: $NETCDF_PATH"
    echo " Netcdf-c Version: $NETCDF_C_VERSION"
    echo " Netcdf-c Module Directory: $NETCDF_C_MODULE_PATH"
-   echo " Netcdf-fortran Version: $NETCDF_FC_VERSION"
-   echo " Netcdf-fortran Module Directory: $NETCDF_FC_MODULE_PATH"
+   echo " Netcdf-fortran Version: $NETCDF_F_VERSION"
+   echo " Netcdf-fortran Module Directory: $NETCDF_F_MODULE_PATH"
    echo " ROCm Version: $ROCM_VERSION"
    echo "==============================================="
    echo ""
-
-   if [ ! -f /usr/bin/mpicc ]; then
-      ${SUDO} apt-get update
-      ${SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
-   fi
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
@@ -238,10 +233,10 @@ else
       fi
 
       NETCDF_C_PATH=${NETCDF_PATH}/netcdf-c-v${NETCDF_C_VERSION}
-      NETCDF_FC_PATH=${NETCDF_PATH}/netcdf-fortran-v${NETCDF_FC_VERSION}
+      NETCDF_F_PATH=${NETCDF_PATH}/netcdf-fortran-v${NETCDF_F_VERSION}
       ${SUDO} mkdir -p ${NETCDF_PATH}
       ${SUDO} mkdir -p ${NETCDF_C_PATH}
-      ${SUDO} mkdir -p ${NETCDF_FC_PATH}
+      ${SUDO} mkdir -p ${NETCDF_F_PATH}
       ${SUDO} mkdir -p ${NETCDF_PATH}/pnetcdf
 
       if [[ "${USER}" != "root" ]]; then
@@ -257,7 +252,7 @@ else
       else
          C_COMPILER=$HDF5_C_COMPILER
          CXX_COMPILER=$HDF5_CXX_COMPILER
-         FC_COMPILER=$HDF5_FC_COMPILER
+         F_COMPILER=$HDF5_F_COMPILER
       fi
 
       # override flags with user defined values if present
@@ -267,8 +262,8 @@ else
       if [ "${CXX_COMPILER_INPUT}" != "" ]; then
          CXX_COMPILER=${CXX_COMPILER_INPUT}
       fi
-      if [ "${FC_COMPILER_INPUT}" != "" ]; then
-         FC_COMPILER=${FC_COMPILER_INPUT}
+      if [ "${F_COMPILER_INPUT}" != "" ]; then
+         F_COMPILER=${F_COMPILER_INPUT}
       fi
 
       if [ "${HDF5_ENABLE_PARALLEL}" = "ON" ]; then
@@ -314,7 +309,7 @@ else
       export PATH=${NETCDF_C_PATH}:$PATH
       export HDF5_PLUGIN_PATH=${NETCDF_C_PATH}/hdf5/lib/plugin/
 
-      git clone --branch v${NETCDF_FC_VERSION} https://github.com/Unidata/netcdf-fortran.git
+      git clone --branch v${NETCDF_F_VERSION} https://github.com/Unidata/netcdf-fortran.git
       cd netcdf-fortran
 
       # netcdf-fortran is looking for nc_def_var_szip even if SZIP is OFF
@@ -323,9 +318,9 @@ else
       sed -i ''"${LINE}"'i set(HAVE_DEF_VAR_SZIP TRUE)' CMakeLists.txt
 
       mkdir build && cd build
-      cmake -DCMAKE_INSTALL_PREFIX=${NETCDF_FC_PATH} \
+      cmake -DCMAKE_INSTALL_PREFIX=${NETCDF_F_PATH} \
 	    -DENABLE_TESTS=OFF -DBUILD_EXAMPLES=OFF \
-	    -DCMAKE_Fortran_COMPILER=$FC_COMPILER ..
+	    -DCMAKE_Fortran_COMPILER=$F_COMPILER ..
 
       make install
 
@@ -378,12 +373,12 @@ else
 EOF
 
    # Create a module file for netcdf-fortran
-   if [ -d "$NETCDF_FC_MODULE_PATH" ]; then
+   if [ -d "$NETCDF_F_MODULE_PATH" ]; then
       # use sudo if user does not have write access to module path
-      if [ ! -w ${NETCDF_FC_MODULE_PATH} ]; then
+      if [ ! -w ${NETCDF_F_MODULE_PATH} ]; then
          SUDO="sudo"
       else
-         echo "WARNING: not using sudo since user has write access to netcdf-fc module path"
+         echo "WARNING: not using sudo since user has write access to netcdf-f module path"
       fi
    else
       # if module path dir does not exist yet, the check on write access will fail
@@ -391,14 +386,14 @@ EOF
       echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
 
-   ${SUDO} mkdir -p ${NETCDF_FC_MODULE_PATH}
+   ${SUDO} mkdir -p ${NETCDF_F_MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${NETCDF_FC_MODULE_PATH}/${NETCDF_FC_VERSION}.lua
+   cat <<-EOF | ${SUDO} tee ${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua
 	whatis("Netcdf-fortan Library")
 
 	load("hdf5")
-	local base = "${NETCDF_FC_PATH}"
+	local base = "${NETCDF_F_PATH}"
 	local base_pnetcdf = "${NETCDF_PATH}/pnetcdf"
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base_pnetcdf, "lib"))
@@ -407,7 +402,7 @@ EOF
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("PATH", base)
 	prepend_path("PATH", pathJoin(base_pnetcdf, "bin"))
-	setenv("NETCDF_FC_ROOT", base)
+	setenv("NETCDF_F_ROOT", base)
 	setenv("PNETCDF_ROOT", base_pnetcdf)
 EOF
 
