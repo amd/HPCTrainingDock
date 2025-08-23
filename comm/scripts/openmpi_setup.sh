@@ -18,6 +18,7 @@ REPLACE_OPENMPI=0
 DRY_RUN=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/openmpi
 INSTALL_PATH_INPUT=""
+INSTALL_PATH_BASE=/opt
 XPMEM_PATH_INPUT=""
 BUILD_XPMEM="1"
 UCX_PATH_INPUT=""
@@ -59,7 +60,7 @@ usage()
     echo "  --cxx-compiler [ CXX ] default $CXX_COMPILER"
     echo "  --dry-run default off"
     echo "  --fc-compiler [ FC ] default $FC_COMPILER"
-    echo "  --install-path [ INSTALL_PATH ] default /opt/rocmplus-$ROCM_VERSION/openmpi (ucx, and ucc)"
+    echo "  --install-path [ INSTALL_PATH ] default $INSTALL_PATH_BASE/rocmplus-$ROCM_VERSION/openmpi (ucx, and ucc)"
     echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
     echo "  --openmpi-path [OPENMPI_PATH] default $INSTALL_PATH/openmpi-$OPENMPI_VERSION-ucc-$UCC_VERSION-ucx-$UCX_VERSION-xpmem-$XPMEM_VERSION"
     echo "  --openmpi-version [VERSION] default $OPENMPI_VERSION"
@@ -284,7 +285,7 @@ fi
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH="${INSTALL_PATH_INPUT}"
 else
-   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}
+   INSTALL_PATH=$INSTALL_PATH_BASE/rocmplus-${ROCM_VERSION}
 fi
 
 if [ "${XPMEM_PATH_INPUT}" != "" ]; then

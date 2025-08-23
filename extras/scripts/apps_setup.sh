@@ -27,8 +27,9 @@ ${SUDO} apt-get install -y \
 
 # note that installing emacs will break hipcc unless libstdc++-14 is added 
 # modifying rocm module so that it forces use of the base libstdc++ version
-${SUDO} apt-get install --no-install-recommends -y \
-                       emacs \
-                       libstdc++-14-dev
+
+#${SUDO} apt-get install --no-install-recommends -y \
+#                       emacs \
+#                       libstdc++-14-dev
 	
 # adios2 is available in ubuntu 24.04

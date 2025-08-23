@@ -203,22 +203,24 @@ else
 	local help_message = [[
 	   PRE-PRODUCTION SOFTWARE:  The software accessible on this page may be a pre-production version, intended to provide advance access to features that may or may not eventually be included into production version of the software.  Accordingly, pre-production software may not be fully functional, may contain errors, and may have reduced or different security, privacy, accessibility, availability, and reliability standards relative to production versions of the software. Use of pre-production software may result in unexpected results, loss of data, project delays or other unpredictable damage or loss.  Pre-production software is not intended for use in production, and your use of pre-production software is at your own risk.
 	]]
+	local base = "${UNTAR_DIR}/${ARCHIVE_DIR}"
+
 	load("rocm/${ROCM_VERSION}")
-	setenv("AFAR_PATH","${UNTAR_DIR}/${ARCHIVE_DIR}")
-	setenv("CC","${UNTAR_DIR}/${ARCHIVE_DIR}/bin/amdclang")
-	setenv("CXX","${UNTAR_DIR}/${ARCHIVE_DIR}/bin/amdclang++")
-	setenv("FC","${UNTAR_DIR}/${ARCHIVE_DIR}/bin/amdflang")
-	setenv("OMPI_CC","${UNTAR_DIR}/${ARCHIVE_DIR}/bin/amdclang")
-	setenv("OMPI_CXX","${UNTAR_DIR}/${ARCHIVE_DIR}/bin/amdclang++")
-	setenv("OMPI_FC","${UNTAR_DIR}/${ARCHIVE_DIR}/bin/amdflang")
-	setenv("F77","${UNTAR_DIR}/${ARCHIVE_DIR}/bin/amdflang")
-	setenv("F90","${UNTAR_DIR}/${ARCHIVE_DIR}/bin/amdflang")
-	prepend_path("PATH","${UNTAR_DIR}/${ARCHIVE_DIR}/bin")
-	prepend_path("LD_LIBRARY_PATH","${UNTAR_DIR}/${ARCHIVE_DIR}/libexec")
-	prepend_path("LD_LIBRARY_PATH","${UNTAR_DIR}/${ARCHIVE_DIR}/lib")
-	prepend_path("MANPATH","${UNTAR_DIR}/${ARCHIVE_DIR}/share/man")
-	prepend_path("C_INCLUDE_PATH","${UNTAR_DIR}/${ARCHIVE_DIR}/include")
-	prepend_path("CPLUS_INCLUDE_PATH","${UNTAR_DIR}/${ARCHIVE_DIR}/include")
+	setenv("AFAR_PATH", base)
+	setenv("CC", pathJoin(base, "bin/amdclang"))
+	setenv("CXX", pathJoin(base, "/bin/amdclang++"))
+	setenv("FC", pathJoin(base, "bin/amdflang"))
+	setenv("OMPI_CC", pathJoin(base, "bin/amdclang"))
+	setenv("OMPI_CXX", pathJoin(base, "bin/amdclang++"))
+	setenv("OMPI_FC", pathJoin(base, "bin/amdflang"))
+	setenv("F77", pathJoin(base, "bin/amdflang"))
+	setenv("F90", pathJoin(base, "bin/amdflang"))
+	prepend_path("PATH", pathJoin(base, "bin"))
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "libexec"))
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("MANPATH", pathJoin(base, "share/man"))
+	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	family("compiler")
 EOF
 
