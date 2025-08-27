@@ -8,8 +8,8 @@ ROCM_VERSION=6.0
 TAU_PATH=/opt/rocmplus-${ROCM_VERSION}/tau
 PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
 TAU_PATH_INPUT=""
-C_COMPILER=gcc
-CXX_COMPILER=g++
+C_COMPILER=amdclang
+CXX_COMPILER=amdclang++
 F_COMPILER=gfortran
 PDT_PATH_INPUT=""
 GIT_COMMIT="23a56e2a1a728e99ff03341c30f9d24892c5952b"
@@ -187,6 +187,7 @@ else
 
       source /etc/profile.d/lmod.sh
       module load rocm/${ROCM_VERSION}
+      module load amdclang
 
      # don't use sudo if user has write access to both install paths
       if [ -d "$TAU_PATH" ]; then
@@ -258,7 +259,7 @@ else
       ROCM_FLAGS="-rocm=${ROCM_PATH} -hip=${ROCM_PATH} -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -rocprofiler=${ROCM_PATH}"
       result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
       if [[ "${result}" ]]; then # ROCM_VERSION >= 6.2
-         ROCM_FLAGS="-rocm=${ROCM_PATH} -hip=${ROCM_PATH} -rocmsmi=${ROCM_PATH} -rocprofsdk=${ROCM_PATH}"
+         ROCM_FLAGS="-rocm=${ROCM_PATH} -hip=${ROCM_PATH} -rocmsmi=${ROCM_PATH} -rocprofsdk=${ROCM_PATH} -llvm_src=${ROCM_PATH}/llvm/lib/cmake/llvm"
       fi
 
       # configure with: MPI OMPT OPENMP PDT ROCM
