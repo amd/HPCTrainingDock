@@ -443,19 +443,19 @@ do
       fi
    fi
 
-   if sudo test ! -f ${USERHOMEDIR}/.init_scripts/bashrc ; then
+   if sudo test ! -f ${USERHOMEDIR}/init_scripts/bashrc ; then
       if (( "${VERBOSE}" > 2 )); then
          echo "Missing .init_scripts/bashrc file for $user_name. Creating it"
-         echo "  sudo cp /home/amd/init_scripts/bashrc ${USERHOMEDIR}/.init_scripts/bashrc"
-         echo "  sudo chown ${user_name} ${USERHOMEDIR}/.init_scripts/bashrc"
-         echo "  sudo chgrp ${group_name} ${USERHOMEDIR}/.init_scripts/bashrc"
-         echo "  sudo chmod 600 ${USERHOMEDIR}/.init_scripts/bashrc"
+         echo "  sudo cp /home/amd/init_scripts/bashrc ${USERHOMEDIR}/init_scripts/bashrc"
+         echo "  sudo chown ${user_name} ${USERHOMEDIR}/init_scripts/bashrc"
+         echo "  sudo chgrp ${group_name} ${USERHOMEDIR}/init_scripts/bashrc"
+         echo "  sudo chmod 600 ${USERHOMEDIR}/init_scripts/bashrc"
       fi
       if [ "${DRYRUN}" != 1 ]; then
-         sudo cp /home/amd/init_scripts/bashrc ${USERHOMEDIR}/.init_scripts/bashrc
-         sudo chown ${user_name} ${USERHOMEDIR}/.init_scripts/bashrc
-         sudo chgrp ${group_name} ${USERHOMEDIR}/.init_scripts/bashrc
-         sudo chmod 600 ${USERHOMEDIR}/.init_scripts/bashrc
+         sudo cp /home/amd/init_scripts/bashrc ${USERHOMEDIR}/init_scripts/bashrc
+         sudo chown ${user_name} ${USERHOMEDIR}/init_scripts/bashrc
+         sudo chgrp ${group_name} ${USERHOMEDIR}/init_scripts/bashrc
+         sudo chmod 600 ${USERHOMEDIR}/init_scripts/bashrc
       fi
    fi 
 done
