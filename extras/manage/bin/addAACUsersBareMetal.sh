@@ -14,7 +14,7 @@ Help()
    echo
 }
 
-HOMEDIR_BASE=/shared/prerelease/home/
+HOMEDIR_BASE=/shared/prerelease/home
 #HOMEDIR_BASE=/users
 
 # note these uid/gids are only for Containers for Bob Robey.
@@ -24,6 +24,8 @@ HACKATHONBASEUSER=12050
 HACKATHONBASEGROUP=12000
 
 CLUSTER_NAME="prerelease01"
+
+PARTITION="1CN192C4G1H_MI300A_Ubuntu22"
 
 DRYRUN=0
 VERBOSE=1
@@ -106,26 +108,26 @@ echo ""
 #sudo groupadd -f -g ${HACKATHONGROUP} hackathon
 #sudo usermod -a -G  ${HACKATHONGROUP} teacher
 
-if [ ! -f /home/amd/aac6.termsOfUse.txt ]; then
-   if (( "${VERBOSE}" > 1 )); then
-      echo "sudo cp ${HOME}/aac6.termsOfUse.txt /home/amd"
-      echo "sudo chmod 666 /home/amd/aac6.termsOfUse.txt"
-   fi
-   if [ "${DRYRUN}" != 1 ]; then
-      sudo cp ${HOME}/aac6.termsOfUse.txt /home/amd
-      sudo chmod 666 /home/amd/aac6.termsOfUse.txt
-   fi
-fi
-if [ ! -f /home/amd/init_scripts/bashrc ]; then
-   if (( "${VERBOSE}" > 1 )); then
-      echo "sudo cp ${HOME}/init_scripts/bashrc /home/amd"
-      echo "sudo chmod 666 /home/amd/init_scripts/bashrc"
-   fi
-   if [ "${DRYRUN}" != 1 ]; then
-      sudo cp ${HOME}/init_scripts/bashrc /home/amd
-      sudo chmod 666 /home/amd/init_scripts/bashrc
-   fi
-fi
+#if [ ! -f /home/amd/aac6.termsOfUse.txt ]; then
+#   if (( "${VERBOSE}" > 1 )); then
+#      echo "sudo cp ${HOME}/aac6.termsOfUse.txt /home/amd"
+#      echo "sudo chmod 666 /home/amd/aac6.termsOfUse.txt"
+#   fi
+#   if [ "${DRYRUN}" != 1 ]; then
+#      sudo cp ${HOME}/aac6.termsOfUse.txt /home/amd
+#      sudo chmod 666 /home/amd/aac6.termsOfUse.txt
+#   fi
+#fi
+#if [ ! -f /home/amd/init_scripts/bashrc ]; then
+#   if (( "${VERBOSE}" > 1 )); then
+#      echo "sudo cp ${HOME}/init_scripts/bashrc /home/amd"
+#      echo "sudo chmod 666 /home/amd/init_scripts/bashrc"
+#   fi
+#   if [ "${DRYRUN}" != 1 ]; then
+#      sudo cp ${HOME}/init_scripts/bashrc /home/amd
+#      sudo chmod 666 /home/amd/init_scripts/bashrc
+#   fi
+#fi
 
 for u  in "${users[@]}"
 do
@@ -177,7 +179,7 @@ do
             fi
             if [ "${DRYRUN}" != 1 ]; then
                sudo groupadd -f -g ${gid} $group_name
-	       sudo sacctmgr add account name="$group_name" cluster="$CLUSTER_NAME"
+	       sudo sacctmgr -i add account name="$group_name" cluster="$CLUSTER_NAME"
             fi
          else
             echo "Adding user to group $group_name and making it the primary group for the user"
@@ -185,7 +187,7 @@ do
                echo "  sudo usermod -a -G ${group_name}"
                echo "  sudo usermod -a -G ${group_name}"
                echo "  sudo usermod -g ${group_name}"
-	       echo " sudo sacctmgr add account name="$org" cluster="$CLUSTER_NAME""
+	       echo " sudo sacctmgr -i add account name="$group_name" cluster="$CLUSTER_NAME""
             fi
             if [ "${DRYRUN}" != 1 ]; then
                sudo usermod -a -G ${group_name} ${user_name}
@@ -351,18 +353,18 @@ do
    fi
 
    if [ "${DRYRUN}" != 1 ]; then
-      sudo sacctmgr add user name=$USERNAME defaultaccount="$org" partition="$partition" cluster="$CLUSTER_NAME"
+      sudo sacctmgr -i add user name=$USERNAME defaultaccount="$group_name" partition="$PARTITION" cluster="$CLUSTER_NAME"
    else    
-      echo "sudo sacctmgr add user name=$USERNAME defaultaccount=$org partition=$partition cluster=$CLUSTER_NAME"
+      echo "sudo sacctmgr -i add user name=$USERNAME defaultaccount=$group_name partition=$PARTITION cluster=$CLUSTER_NAME"
    fi
    if [[ $VIDEO_GROUP != 1 ]] || [[ $AUDIO_GROUP != 1 ]] || [[ $RENDER_GROUP != 1 ]] ; then
       if (( "${VERBOSE}" > 2 )); then
          echo "Add groups for access to the GPU (see /dev/dri /dev/kfd)"
          #sudo usermod -a -G video,audio,render, slurmusers ${user_name}
-         echo "  sudo usermod -a -G video,audio,render, slurmusers ${user_name}"
+         echo "  sudo usermod -a -G video,audio,render,slurmusers ${user_name}"
       fi
       if [ "${DRYRUN}" != 1 ]; then
-         sudo usermod -a -G video,audio,render,renderalt ${user_name}
+         sudo usermod -a -G video,audio,render,slurmusers ${user_name}
       fi
    fi
    # add the ssh key to the users authorized_keys file
@@ -443,19 +445,34 @@ do
       fi
    fi
 
-   if sudo test ! -f ${USERHOMEDIR}/init_scripts/bashrc ; then
+   if sudo test ! -f ${USERHOMEDIR}/.bashrc ; then
       if (( "${VERBOSE}" > 2 )); then
-         echo "Missing .init_scripts/bashrc file for $user_name. Creating it"
-         echo "  sudo cp /home/amd/init_scripts/bashrc ${USERHOMEDIR}/init_scripts/bashrc"
-         echo "  sudo chown ${user_name} ${USERHOMEDIR}/init_scripts/bashrc"
-         echo "  sudo chgrp ${group_name} ${USERHOMEDIR}/init_scripts/bashrc"
-         echo "  sudo chmod 600 ${USERHOMEDIR}/init_scripts/bashrc"
+         echo "Missing bashrc file for $user_name. Creating it"
+         echo "  sudo cp /home/amd/init_scripts/bashrc ${USERHOMEDIR}/.bashrc"
+         echo "  sudo chown ${user_name} ${USERHOMEDIR}/.bashrc"
+         echo "  sudo chgrp ${group_name} ${USERHOMEDIR}/.bashrc"
+         echo "  sudo chmod 600 ${USERHOMEDIR}/.bashrc"
       fi
       if [ "${DRYRUN}" != 1 ]; then
-         sudo cp /home/amd/init_scripts/bashrc ${USERHOMEDIR}/init_scripts/bashrc
-         sudo chown ${user_name} ${USERHOMEDIR}/init_scripts/bashrc
-         sudo chgrp ${group_name} ${USERHOMEDIR}/init_scripts/bashrc
-         sudo chmod 600 ${USERHOMEDIR}/init_scripts/bashrc
+         sudo cp /home/amd/init_scripts/bashrc ${USERHOMEDIR}/.bashrc
+         sudo chown ${user_name} ${USERHOMEDIR}/.bashrc
+         sudo chgrp ${group_name} ${USERHOMEDIR}/.bashrc
+         sudo chmod 600 ${USERHOMEDIR}/.bashrc
+      fi
+   fi
+   if sudo test ! -f ${USERHOMEDIR}/.profile ; then
+      if (( "${VERBOSE}" > 2 )); then
+         echo "Missing profile file for $user_name. Creating it"
+         echo "  sudo cp /home/amd/init_scripts/profile ${USERHOMEDIR}/.profile"
+         echo "  sudo chown ${user_name} ${USERHOMEDIR}/.profile"
+         echo "  sudo chgrp ${group_name} ${USERHOMEDIR}/.profile"
+         echo "  sudo chmod 600 ${USERHOMEDIR}/.profile"
+      fi
+      if [ "${DRYRUN}" != 1 ]; then
+         sudo cp /home/amd/init_scripts/profile ${USERHOMEDIR}/.profile
+         sudo chown ${user_name} ${USERHOMEDIR}/.profile
+         sudo chgrp ${group_name} ${USERHOMEDIR}/.profile
+         sudo chmod 600 ${USERHOMEDIR}/.profile
       fi
    fi 
 done
