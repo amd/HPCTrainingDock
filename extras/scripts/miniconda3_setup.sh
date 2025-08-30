@@ -76,7 +76,7 @@ do
           ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
-	  ;;
+          ;;
       *)
          last ${1}
          ;;
