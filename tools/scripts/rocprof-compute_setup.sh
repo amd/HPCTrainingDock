@@ -15,7 +15,7 @@ MODULE_PATH_INPUT=""
 INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/${TOOL_NAME}-${GITHUB_BRANCH}"
 INSTALL_PATH_INPUT=""
 
-if [  -f /.singularity.d/Singularity ]; then
+if [ -f /.singularity.d/Singularity ]; then
    SUDO_PACKAGE_INSTALL=""
 fi
 

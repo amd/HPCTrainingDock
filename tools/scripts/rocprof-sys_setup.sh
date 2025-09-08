@@ -22,7 +22,7 @@ GITHUB_BRANCH="develop"
 INSTALL_ROCPROF_SYS_FROM_SOURCE=0
 
 
-if [  -f /.singularity.d/Singularity ]; then
+if [ -f /.singularity.d/Singularity ]; then
    SUDO_PACKAGE_INSTALL=""
 fi
 
@@ -154,7 +154,7 @@ fi
 
 # install dependencies
 if [ "${DISTRO}" == "ubuntu" ]; then
-   if ["${SUDO_PACKAGE_INSTALL}" == "" ]; then
+   if [ "${SUDO_PACKAGE_INSTALL}" == "" ]; then
       export TEXINFO_PATH=${INSTALL_PATH}/texinfo
       wget https://ftp.gnu.org/gnu/texinfo/texinfo-7.0.2.tar.gz
       tar -xzvf texinfo-7.0.2.tar.gz
