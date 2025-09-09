@@ -295,8 +295,12 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
 
          # The installation below makes use of an AMD provided install script
 
-         # Get the key for the ROCm software
-         wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | ${SUDO} tee /etc/apt/keyrings/rocm.gpg > /dev/null
+         result1=`echo $ROCM_VERSION | awk '$1>6.3.0'` && echo "result at line 300 is ",$result1
+         result2=`echo $ROCM_VERSION | awk '$1>6.3.5'` && echo "result at line 301 is ",$result2
+         if [[ "${result1}" != "$ROCM_VERSION" ]] && [[ "${result2}" ]]; then # ROCM_VERSION < 6.3.0 and > 6.3.5
+            # Get the key for the ROCm software
+            wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | ${SUDO} tee /etc/apt/keyrings/rocm.gpg > /dev/null
+         fi
 
          # Update package list
          ${SUDO} apt-get update

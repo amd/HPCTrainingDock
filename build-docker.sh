@@ -441,6 +441,10 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
 	    echo "Setting rocprof-compute install from source"
             INSTALL_ROCPROF_COMPUTE_FROM_SOURCE=1
 	    ;;
+         "rocprofiler-sdk")
+	    echo "Setting rocprofiler-sdk build"
+            BUILD_ROCPROFILER_SDK=1
+	    ;;
          "hdf5")
 	    echo "Setting hdf5 build"
             BUILD_HDF5=1
