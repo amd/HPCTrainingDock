@@ -211,7 +211,7 @@ else
       source spack/share/spack/setup-env.sh
 
       # find already installed libs for spack
-      spack external find
+      spack external find --all
 
       # change spack install dir for PDT
       sed -i 's|$spack/opt/spack|'"${PDT_PATH}"'|g' spack/etc/spack/defaults/config.yaml

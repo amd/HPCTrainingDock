@@ -216,7 +216,7 @@ else
       source spack/share/spack/setup-env.sh
 
       # find already installed libs for spack
-      spack external find
+      spack external find --all
 
       # change spack install dir for PDT
       ${SUDO} sed -i 's|$spack/opt/spack|'"${HPCVIEWER_PATH}"'|g' spack/etc/spack/defaults/config.yaml

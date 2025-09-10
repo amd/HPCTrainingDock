@@ -237,8 +237,12 @@ else
          # load spack environment
          source spack/share/spack/setup-env.sh
 
-         # find already installed libs for spack
-         spack external find
+         module load hdf5
+
+         # find already installed libs for spack: include --all otherwise ROCm libs will not be found
+         spack external find --all
+
+	 spack install rocm-core@${ROCM_VERSION} rocm-cmake@${ROCM_VERSION} hipblas-common@${ROCM_VERSION} rocthrust@${ROCM_VERSION} rocprim@${ROCM_VERSION}
 
          # change spack install dir for Hypre
          sed -i 's|$spack/opt/spack|'"${PETSC_PATH}"'|g' spack/etc/spack/defaults/config.yaml

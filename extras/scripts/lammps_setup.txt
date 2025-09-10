@@ -5,7 +5,7 @@ module load rocm amdclang
 git clone --branch=v0.23.1 https://github.com/spack/spack
 source spack/share/spack/setup-env.sh
 spack compiler find
-spack external find
+spack external find --all
 spack install lammps +rocm amdgpu_target=gfx90a
 
 rm -rf spack .spack

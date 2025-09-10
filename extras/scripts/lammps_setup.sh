@@ -158,7 +158,7 @@ else
          # change spack install dir for Hypre
          source spack/share/spack/setup-env.sh
          spack compiler find
-         spack external find
+         spack external find --all
          sed -i 's|$spack/opt/spack|'"${INSTALL_PATH}"'|g' spack/etc/spack/defaults/config.yaml
          spack install lammps +rocm amdgpu_target=${AMDGPU_GFXMODEL}
 
