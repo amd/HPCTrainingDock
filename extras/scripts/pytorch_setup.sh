@@ -4,7 +4,7 @@ ROCM_VERSION=6.0
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 BUILD_PYTORCH=0
 ZSTD_VERSION=1.5.6
-PYTORCH_VERSION=2.7.1
+PYTORCH_VERSION=2.8.0
 PYTHON_VERSION=10
 TORCHVISION_VERSION=0.22.1
 FLASHATTENTION_VERSION=2.8.0
@@ -146,7 +146,9 @@ if [ "${BUILD_PYTORCH}" = "0" ]; then
 else
 
    PYTORCH_SHORT_VERSION=`echo ${PYTORCH_VERSION} | cut -f1-2 -d'.'`
-   if [ "${PYTORCH_SHORT_VERSION}" == "2.7" ]; then
+   if [ "${PYTORCH_SHORT_VERSION}" == "2.8" ]; then
+      AOTRITON_VERSION="0.10b"
+   elif [ "${PYTORCH_SHORT_VERSION}" == "2.7" ]; then
       AOTRITON_VERSION="0.9.2b"
    elif [ "${PYTORCH_SHORT_VERSION}" == "2.6" ]; then
       AOTRITON_VERSION="0.8b"

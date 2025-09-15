@@ -1,18 +1,25 @@
-Last review of this README: **April 2, 2025**
+Last review of this README: **November 15, 2025**
 
 # 1. Synopsis
 
 Welcome to AMD's model installation repo!
 
 In this repo, we provide two options to test the installation of a variety of AMD GPU software and frameworks that support running on AMD GPUs:
-1. Container Installation (based on **Docker**)
+1. Container Installation (based on **Docker** or **Podman**. **Singularity** can also be used as explained below)
 2. Bare Metal Installation
 
-## 1.2 Podman
+## 1.2 Podman Detection
 
-If Podman is installed on your system instead of Docker, the scripts will detect it and automatically include the `--format docker` flag in the `docker build` commands present in our scripts.
+If Podman is installed on your system instead of Docker, the scripts should detect it and automatically include the `--format docker` flag in the `docker build` commands present in our scripts. The detection is done as follows, where `ADD_OPTIONS` will be added to the `docker build` command:
+```
+ADD_OPTIONS=""
+PODMAN_DETECT=$(docker info 2>&1 | grep -i "emulate docker cli using podman" | wc -l)
+if [[ "${PODMAN_DETECT}" -ge "1" ]]; then
+   ADD_OPTIONS="${ADD_OPTIONS} --format docker"
+fi
+```
 
-## 1.3 Singularity
+## 1.3 Using Singularity to Build an Image
 
 If Singularity is installed in your system, it is possible to create a Singularity image using the installation scripts in this repo. First, make a new directory from which the Singularity image will be built, and record the location of this directory:
 
@@ -55,9 +62,9 @@ singularity run -e ${SINGULARITY_DIR_PATH}/singularity_image.sif
 
 ## 1.4 Operating System Info
 
-Currently, we are mainly focused on Ubuntu, but limited support is also available for Red Hat, Suse and Debian. Work is underway to increase this support.
+Currently, we are mainly focused on Ubuntu, but some support is also available for Red Hat (RockyLinux), Suse and Debian. Work is underway to increase this support.
 
-## 1.1 Supported Hardware
+## 1.5 Supported Hardware
 
 Data Center GPUs, Workstation GPUs and Desktop GPUs are currently supported.
 
@@ -72,7 +79,7 @@ of AMD GPUs in LLVM docs may help identify compiler support.
 
 # 2. Model Installation Setup Instructions
 
-We currently provide two options for the setup of the software: a container (based on Docker), and a bare system install. The latter can be tested with a container before deployment.
+We currently provide two options for the setup of the software: a container (based on Docker or Podman), and a bare system install. The latter can be tested with a container before deployment.
 
 ## 2.1 Training Docker Container Build Steps
 
