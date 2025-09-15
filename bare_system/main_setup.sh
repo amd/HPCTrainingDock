@@ -1,6 +1,6 @@
 #!/bin/bash
 
-: ${ROCM_VERSION:="6.0"}
+: ${ROCM_VERSION:="6.2.0"}
 : ${ROCM_INSTALLPATH:="/opt/"}
 : ${BUILD_PYTORCH:="1"}
 : ${BUILD_CUPY:="1"}
@@ -22,8 +22,9 @@
 : ${BUILD_MPI4PY:="1"}
 : ${BUILD_TAU:="1"}
 : ${BUILD_X11VNC:="1"}
+: ${BUILD_FLANGNEW:="1"}
 : ${HIPIFLY_MODULE:="1"}
-: ${PYTHON_VERSION:="10"} # python3 minor release
+: ${PYTHON_VERSION:="12"} # python3 minor release
 : ${USE_MAKEFILE:="0"}
 
 INSTALL_ROCPROF_SYS_FROM_SOURCE=0
@@ -38,8 +39,8 @@ DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | t
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 if [[ "${DISTRO}" == "ubuntu" ]]; then
-   if [[ "${DISTRO_VERSION}" == "24.04" ]]; then
-      PYTHON_VERSION="12"
+   if [[ "${DISTRO_VERSION}" == "22.04" ]]; then
+      PYTHON_VERSION="10"
    fi
 fi
 
@@ -57,8 +58,6 @@ usage()
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: if not provided, rocminfo is used to assign a value"
    echo "  --install-rocprof-compute-from-source [0 or 1]:  default is $INSTALL_ROCPROF_COMPUTE_FROM_SOURCE (false)"
    echo "  --install-rocprof-sys-from-source [0 or 1]:  default is $INSTALL_ROCPROF_SYS_FROM_SOURCE (false)"
-   echo "  --distro [DISTRO: ubuntu|rockylinux|opensuse/leap]: autodetected by looking into /etc/os-release"
-   echo "  --distro-versions [DISTRO_VERSION]: autodetected by looking into /etc/os-release"
    echo "  --use-makefile [0 or 1]:  default is 0 (false)"
    echo "  --help: prints this message"
    exit 1
@@ -140,6 +139,8 @@ rocm/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION}
 rocm/scripts/rocm_rocprof-sys_setup.sh --rocm-version ${ROCM_VERSION}
 
 rocm/scripts/rocm_rocprof-compute_setup.sh --rocm-version ${ROCM_VERSION}
+
+rocm/flang-new_setup.sh --build-flang-new ${BUILD_FLANGNEW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} 
 
 comm/scripts/openmpi_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
 

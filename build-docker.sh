@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 : ${DOCKER_USER:=$(whoami)}
-: ${ROCM_VERSIONS:="6.0"}
-: ${PYTHON_VERSION:="10"}
+: ${ROCM_VERSIONS:="6.2.0"}
+: ${PYTHON_VERSION:="12"}
 : ${BUILD_CI:=""}
 : ${PUSH:=0}
 : ${PULL:=--pull}
@@ -147,11 +147,12 @@ usage()
     print_default_option install-grafana "[INSTALL_GRAFANA: 0 or 1]" "include this flag to install Grafana" "${INSTALL_GRAFANA} (don't build)"
     print_default_option build-all-latest "[BUILD_ALL_LATEST: 0 or 1]" "include this flag to build all the additional libraries that need a flag to be built except LLVM latest, GCC latest and CLACC latest" "${BUILD_ALL_LATEST} (don't build)"
     print_default_option use_cached-apps "[USE_CACHED_APPS: 0 or 1]" "use pre-built gcc and aomp located in CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} directory" "${USE_CACHED_APPS} (don't use)"
-    print_default_option install-rocprof-sys-from-source "[INSTALL_ROCPROF_SYS_FROM_SOURCE: 0 or 1]" "include this flag to build rocprof-sys from source, the default branch is amd-staging" "${INSTALL_ROCPROF_SYS_FROM_SOURCE} (don't install)"
-    print_default_option install-rocprof-compute-from-source "[INSTALL_ROCPROF_COMPUTE_FROM_SOURCE: 0 or 1]" "include this flag to build rocprof-compute from source, the default branch is amd-staging" "${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE} (don't install)"
+    print_default_option install-rocprof-sys-from-source "[INSTALL_ROCPROF_SYS_FROM_SOURCE: 0 or 1]" "include this flag (with no numerical value following) to build rocprof-sys from source, the default branch is amd-staging" "${INSTALL_ROCPROF_SYS_FROM_SOURCE} (don't install)"
+    print_default_option install-rocprof-compute-from-source "[INSTALL_ROCPROF_COMPUTE_FROM_SOURCE: 0 or 1]" "include this flag (with no numerical value following) to build rocprof-compute from source, the default branch is amd-staging" "${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE} (don't install)"
     print_default_option build-rocprofiler-sdk "[BUILD_ROCPROFILER_SDK: 0 or 1]" "include this flag to build rocprofiler-sdk from source, the default branch is amd-staging" "${BUILD_ROCPROFILER_SDK} (don't install)"
     print_default_option output-verbosity "[OUTPUT_VERBOSITY: not set or set to '--progress-plain']" "include this flag to show more docker build output" "not set"
     print_default_option distro "[DISTRO: ubuntu|rockylinux|opensuse/leap]" "OS distribution" "autodetected -> ${DISTRO}"
+    print_default_option distro-version "[DISTRO_VERSION] [VERSION...]" "Ubuntu, OpenSUSE, or RHEL release" "autodetected -> ${DISTRO_VERSION}"
     print_default_option distro-versions "[DISTRO_VERSION] [VERSION...]" "Ubuntu, OpenSUSE, or RHEL release" "autodetected -> ${DISTRO_VERSION}"
     print_default_option amdgpu-gfxmodel "[AMDGPU_GFXMODEL]" "Specify the AMD GPU target architecture" "autodetected -> ${AMDGPU_GFXMODEL}"
     print_default_option rocm-versions "[ROCM_VERSIONS] [VERSION...]" "ROCm versions" "${ROCM_VERSIONS}"
@@ -174,6 +175,11 @@ do
             shift
             DISTRO=${1}
             last() { DISTRO="${DISTRO} ${1}"; }
+            ;;
+        "--distro-version")
+            shift
+            DISTRO_VERSION=${1}
+            last() { DISTRO_VERSION="${DISTRO_VERSION} ${1}"; }
             ;;
         "--distro-versions")
             shift
@@ -405,8 +411,8 @@ do
 done
 
 if [[ "${PYTHON_VERSION_INPUT}" == "" ]]; then
-   if [[ "${DISTRO}" == "ubuntu" &&  "${DISTRO_VERSION}" == "24.04" ]]; then
-      PYTHON_VERSION="12"
+   if [[ "${DISTRO}" == "ubuntu" &&  "${DISTRO_VERSION}" == "22.04" ]]; then
+      PYTHON_VERSION="10"
    elif [[ "${DISTRO}" == "almalinux" &&  "${DISTRO_VERSION}" == "9.4" ]]; then
       PYTHON_VERSION="9"
    fi

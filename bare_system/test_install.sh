@@ -1,9 +1,9 @@
 #!/bin/bash
 
-: ${ROCM_VERSION:="6.0"}
+: ${ROCM_VERSION:="6.2.0"}
 : ${ROCM_INSTALLPATH:="/opt/"}
 : ${USE_MAKEFILE:="0"}
-: ${PYTHON_VERSION:="10"}
+: ${PYTHON_VERSION:="12"}
 : ${IMAGE_NAME:="bare"}
 
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
@@ -102,11 +102,11 @@ done
 
 if [[ "${PYTHON_VERSION_INPUT}" == "" ]]; then
    if [[ "${DISTRO}" == "ubuntu" ]]; then
-      if [[ "${DISTRO_VERSION}" == "24.04" ]]; then
-         PYTHON_VERSION="12"
+      if [[ "${DISTRO_VERSION}" == "22.04" ]]; then
+         PYTHON_VERSION="10"
       fi
-      if [[ "${DISTRO_VERSIONS}" == "24.04" ]]; then
-         PYTHON_VERSION="12"
+      if [[ "${DISTRO_VERSIONS}" == "22.04" ]]; then
+         PYTHON_VERSION="10"
       fi
    fi
 else
