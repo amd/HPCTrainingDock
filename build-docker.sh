@@ -48,9 +48,9 @@
 : ${INSTALL_ROCPROF_SYS_FROM_SOURCE:=0}
 : ${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE:=0}
 : ${BUILD_ROCPROFILER_SDK:=0}
+: ${DISTRO:="ubuntu"}
+: ${DISTRO_VERSION:="24.04"}
 
-DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 
 tolower()

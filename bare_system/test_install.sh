@@ -5,10 +5,10 @@
 : ${USE_MAKEFILE:="0"}
 : ${PYTHON_VERSION:="12"}
 : ${IMAGE_NAME:="bare"}
+: ${DISTRO:="ubuntu"}
+: ${DISTRO_VERSION:="24.04"}
 
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 send-error()
 {
