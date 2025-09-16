@@ -1,4 +1,4 @@
-# Example of How to Use the Scrips in the HPCTrainingDock
+# Example of How to Use the Scripts in the HPCTrainingDock
 
 Begin by cloning the repo and getting to the `rocm` directory:
 
