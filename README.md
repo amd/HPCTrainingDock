@@ -1,11 +1,11 @@
-Last review of this README: **November 15, 2025**
+Last review of this README: **September 16, 2025**
 
 # 1. Synopsis
 
 Welcome to AMD's model installation repo!
 
 In this repo, we provide two options to test the installation of a variety of AMD GPU software and frameworks that support running on AMD GPUs:
-1. Container Installation (based on **Docker** or **Podman**. **Singularity** can also be used as explained below)
+1. Container Installation (based on **Docker** or **Podman**. **Singularity** can also be used as explained in [Section 1.3](https://github.com/amd/HPCTrainingDock#13-using-singularity-to-build-an-image))
 2. Bare Metal Installation
 
 ## 1.2 Podman Detection
@@ -89,37 +89,28 @@ These instructions will setup a container on `localhost` and assume that:
 3. For Docker, you can issue Docker commands without `sudo`.
 
 ### 2.1.1 Building the Four Images of the Container
-The container is set up to pull an OS Docker image depending on the values of the `--distro` and `--distro-versions` input flags.
+The container is set up to pull an OS Docker image depending on the values of the `--distro` and `--distro-version` input flags.
 On top of this OS image, it will build four different images called `rocm`, `comm`,  `tools` and `extras`.
 Here is a flowchart of the container installation process:
 <p>
 <img src="figures/container_flowchart.png" \>
 </p>
 
-This documentation considers version 6.2.1 of ROCm as an example. The ROCm version can be specified at build time as an input flag. The latest version at the time of this README's last update is 6.2.2.
-
-**NOTE**: With the release of ROCm [6.2.0](https://github.com/ROCm/ROCm/releases), the AMD tools `Omnitrace` and `Omniperf` are packaged with the ROCm stack. In the container installation, if `--rocm-versions` includes 6.2.0 or higher, the Omnitrace and Omniperf versions installed are:
-
-1. The built-in versions included in the ROCm 6.2+ software stack. These can be used by loading: `module load omnitrace/<rocm_version>`, `module load omniperf/<rocm_version>`.
-
-2. The latest versions from AMD Research that would be used for ROCm releases < 6.2. These can be used by loading: `module load omnitrace/1.11.3`, `module load omniperf/2.0.0`.
+This documentation considers version 6.4.1 of ROCm as an example. The ROCm version can be specified at build time as an input flag. The latest version at the time of this README's last update is 6.4.3.
 
 Several compilers and other dependencies will be built as part of the images setup (more on this later). First, clone this repo and go into the folder where the Docker build script lives:
 
 ```bash
-git clone --recursive git@github.com:amd/HPCTrainingDock.git
+git clone https://github.com/amd/HPCTrainingDock.git 
 cd HPCTrainingDock
 ```
 
 To build the four images, run the following command (note that `<admin>` is set to `admin` by default but the password **must** be specified, otherwise you will get an error from the build script):
 
 ```
-   ./build-docker.sh --rocm-versions 6.1.0 --distro ubuntu --distro-versions 22.04 --admin-username <admin> --admin-password <password>
+   ./build-docker.sh --rocm-versions 6.4.1 --distro ubuntu --distro-version 24.04 --admin-username <admin> --admin-password <password>
 ```
-
-To visualize all the input flags that can be provided to the script, run: `./build-docker.sh --help`.
-
-**NOTE**: In some OS cases, when launching the installation scripts it may be necessary to explicitly include the  `--distro` option to avoid "7 arguments instead of 1" type of errors. The distribution is auto-detected and is the same as the one from which the script is launched. Hence, if a different one is needed, it is necessary to explicitly specify it with the appropriate input flag: `--distro <distro_name>`.
+Note that the default distribution is Ubuntu 24.04 so if you don't specify `--distro` and `--distro-version` that is what you will get. To visualize all the input flags that can be provided to the script, run: `./build-docker.sh --help`.
 
 To show more docker build output, add this option to the build command above:
 
@@ -134,13 +125,6 @@ To show more docker build output, add this option to the build command above:
 ```
 
 For the MI200 series, the value to specify is `gfx90a`, for the MI300 series, the value is `gfx942`. Note that you can also build the images on a machine that does not have any GPU hardware (such as your laptop) provided you specify a target hardware with the flag above.
-
-Omnitrace will by default download a pre-built version. You can also build from source,
-which is useful if the right version of omnitrace is not available as pre-built. To build omnitrace from source, append the following to the build command above:
-
-```
---omnitrace-build-from-source
-```
 
 Building extra compilers takes a long time, but a cached option can be used  to shorten subsequent build times, just append these options to the build command above:
 
@@ -177,9 +161,9 @@ which will have an output similar to this one:
 ```bash
  REPOSITORY           TAG                                    IMAGE ID       CREATED          SIZE
  training             latest                                 fe63d37c10f4   40 minutes ago   27GB
- <admin>/tools       release-base-ubuntu-22.04-rocm-6.2.1   4ecc6b7a80f2   44 minutes ago   18.7GB
- <admin>/comm        release-base-ubuntu-22.04-rocm-6.2.1   37a84bef709a   47 minutes ago   16.1GB
- <admin>/rocm        release-base-ubuntu-22.04-rocm-6.2.1   bd8ca598d8a0   48 minutes ago   16.1GB
+ <admin>/tools       release-base-ubuntu-24.04-rocm-6.4.1   4ecc6b7a80f2   44 minutes ago   18.7GB
+ <admin>/comm        release-base-ubuntu-24.04-rocm-6.4.1   37a84bef709a   47 minutes ago   16.1GB
+ <admin>/rocm        release-base-ubuntu-24.04-rocm-6.4.1   bd8ca598d8a0   48 minutes ago   16.1GB
 ```
 You can also display the operating system running on the container by doing:
 
@@ -362,11 +346,11 @@ In this section, we provide instructions on how to install AMD GPU software on a
 To test the bare system install, do:
 
 ```bash
-git clone --recursive git@github.com:amd/HPCTrainingDock.git && \
+git clone https://github.com/amd/HPCTrainingDock.git && \
 cd HPCTrainingDock && \
 ./bare_system/test_install.sh --rocm-version <rocm-version>
 ```
-In addition, the Linux distro version can be specified. Some of those tried are:
+In addition, the Linux distro version can be specified (default is Ubuntu 24.04). Some of those tried are:
 
 ```bash
 --distro ubuntu
@@ -392,94 +376,11 @@ cd HPCTrainingDock && \
 ```
 
 The above command will execute the `main_install.sh` script on your system that will proceed with the installation for you. Note that you need to be able to run `sudo` on your system for things to work.  To visualize all the input flags that can be provided to the script, run: `./bare_system/main_setup.sh --help`.
-The `main_install.sh` script calls a series of other scripts to install the software (these are given several runtime flags that are not reported here for simplicity):
+The `main_install.sh` script calls a series of other scripts to install the software (these are given several runtime flags that are not reported here for simplicity): packages are added routinely so the best way to see what will be installed is to open `main_setup.sh` and inspect it. Note that each of these single scripts can be run individually to install a single package. These are all listed in the `rocm`, `comm`, `tools` and `extras` directories. 
 
-```bash
- // install linux software such as cmake and system compilers
-rocm/scripts/baseospackages_setup.sh
+**NOTE**: As mentioned before, the scripts called from within `main_setup.sh`  are the same used by the Docker containers (either the actual training Docker container or the test Docker container run by `test_install.sh`). The reason why the script work for both installations (bare system and Docker) is because the commands are executed at the `sudo` level. Since Docker is already at the `sudo` level, the instructions in the scripts work in both contexts. 
 
-// install lmod and create the modulepath
-rocm/scripts/lmod_setup.sh
-
-// install ROCm and create ROCm module
-rocm/scripts/rocm_setup.sh
-
-// install ROCm Omniperf (if ROCm > 6.1.2) and create module
-rocm/scripts/rocm_omniperf_setup.sh
-
-// install ROCm Omnitrace (if ROCm > 6.1.2) and create module
-rocm/scripts/rocm_omnitrace_setup.sh
-
-// install OpenMPI and create OpenMPI module
-comm/scripts/openmpi_setup.sh
-
-// install MVAPICH and create MVAPICH module
-comm/scripts/mvapich_setup.sh
-
-// install MPI4PY and create MPI4PY module
-comm/scripts/mpi4py_setup.sh
-
-// install AMD Research Omnitrace and create module
-tools/scripts/omnitrace_setup.sh
-
-// install Grafana (needed for Omniperf)
-tools/scripts/grafana_setup.sh
-
-// install AMD Research Omniperf and create module
-tools/scripts/omniperf_setup.sh
-
-// install HPCToolkit and create HPCToolkit module
-tools/scripts/hpctoolkit_setup.sh
-
-// install TAU and create TAU module
-tools/scripts/tau_setup.sh
-
-// install Score-P and create Score-P module
-tools/scripts/scorep_setup.sh
-
-// install Miniconda3 and create Miniconda3 module
-extras/scripts/miniconda3_setup.sh
-
-// install Miniforge3 and create Miniforge3 module
-extras/scripts/miniforge3_setup.sh
-
-// install clang/14  clang/15  gcc/11  gcc/12  gcc/13 and create modules
-extras/scripts/compiler_setup.sh
-
-// install liblapack and libopenblas
-extras/scripts/apps_setup_basic.sh
-
-// install CuPy and create CuPy module
-extras/scripts/cupy_setup.sh
-
-// install JAX and create JAX module
-extras/scripts/jax_setup.sh
-
-// install PyTorch and create PyTorch module
-extras/scripts/pytorch_setup.sh
-
-// install additional libs and apps such as valgrind, boost, parmetis, openssl, etc.
-extras/scripts/apps_setup.sh
-
-// install Kokkos and create Kokkos module
-extras/scripts/kokkos_setup.sh
-
-// install flang-new and create flang-new module
-extras/scripts/flang-new_setup.sh
-
-// install julia and create julia module
-extras/scripts/julia_setup.sh
-
-// install ftorch and create ftorch module
-extras/scripts/ftorch_setup.sh
-
-// install X11 VNC support
-extras/scripts/x11vnc_setup.sh
-
-```
-
-**NOTE**: As mentioned before, those scripts are the same used by the Docker containers (either the actual training Docker container or the test Docker container run by `test_install.sh`). The reason why the script work for both installations (bare system and Docker) is because the commands are executed at the `sudo` level. Since Docker is already at the `sudo` level, the instructions in the scripts work in both contexts.
-
+**NOTE**: There is also the option to install a package in a directory where the user has write access. In that case, `sudo` will not be used. Just make sure that the install path and module file path exist and the user has write access to those. When launching a single script, provide the install path and module file path as input arguments to the script. The script will check whether the directories exist and if the user has write access. If both are true, then no `sudo` will be used.
 
 ### 2.2.1 Alternative installation directory for ROCm
 
@@ -541,27 +442,37 @@ Click on *Save and Connect*, then type the `<password>` noted from Step 8. This 
 
 # 3. Inspecting the Model Installation Environment
 
-The training environment comes with a variety of modules installed, with their necessary dependencies. To inspect the modules available, run `module avail`, which will show you this output (assuming the installation has been performed with ROCm 6.3.3):
+The training environment comes with a variety of modules installed, with their necessary dependencies. To inspect the modules available, run `module avail`, which will show you this output (assuming the installation has been performed with ROCm 6.4.1):
 
 ```bash
------------------------------------------------------------------- /etc/lmod/modules/Linux -------------------------------------------------------------------
-   clang/base    clang/14 (D)    clang/15    gcc/base    gcc/11 (D)    gcc/12    gcc/13    miniconda3/24.9.2    miniforge3/24.9.0
+--------------------------------------------------------------------- /etc/lmod/modules/Linux ----------------------------------------------------------------------
+   clang/base    gcc/base
 
-------------------------------------------------------------------- /etc/lmod/modules/ROCm -------------------------------------------------------------------
-   amdclang/19.0.0-6.4.1    hipfort/6.4.1 (D)    opencl/6.4.1    rocm/6.4.1    rocprofiler-compute/6.4.1    rocprofiler-systems/6.4.1
+------------------------------------------------------------------- /etc/lmod/modules/LinuxPlus --------------------------------------------------------------------
+   miniconda3/25.3.1    miniforge3/24.9.0
 
---------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-MPI ---------------------------------------------------------------
-   mpi4py/4.0.1    openmpi/5.0.7-ucc1.3.0-ucx1.18.0
+---------------------------------------------------------------------- /etc/lmod/modules/ROCm ----------------------------------------------------------------------
+   amdclang/19.0.0-6.4.1           hipfort/6.4.1    rocm/6.4.1                       rocprofiler-sdk/6.4.1
+   amdflang-new/rocm-afar-7.0.5    opencl/6.4.1     rocprofiler-compute/6.4.1 (D)    rocprofiler-systems/6.4.1 (D)
 
---------------------------------------------------------- /etc/lmod/modules/ROCmPlus-LatestCompilers ---------------------------------------------------------
-   amdflang-new/rocm-afar-7110-drop-5.3.0    aomp/amdclang-19.0    hipfort/6.4.1
+-------------------------------------------------------------------- /etc/lmod/modules/ROCmPlus --------------------------------------------------------------------
+   adios2/2.10.1    hdf5/1.14.6                   hypre/2.33.0     netcdf-c/4.9.3          petsc/3.23.1    tau/dev
+   fftw/3.3.10      hpctoolkit/2024.01.99-next    kokkos/4.6.01    netcdf-fortran/4.6.2    scorep/9.0
 
---------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-AI ----------------------------------------------------------------
-   cupy/14.0.0a1    jax/0.6.0    pytorch/2.7.1   ftorch/dev
+------------------------------------------------------------------ /etc/lmod/modules/ROCmPlus-MPI ------------------------------------------------------------------
+   mpi4py/4.0.3    openmpi/5.0.7-ucc1.4.4-ucx1.18.1
 
-------------------------------------------------------------------- /etc/lmod/modules/misc -------------------------------------------------------------------
-   fftw/3.3.10    hipifly/dev                 kokkos/4.5.01         netcdf-fortran/4.6.2    tau/dev
-   hdf5/1.14.5    hpctoolkit/2024.11.27dev    netcdf-c/4.9.3    scorep/9.0
+----------------------------------------------------------- /etc/lmod/modules/ROCmPlus-AMDResearchTools ------------------------------------------------------------
+   rocprofiler-compute/develop    rocprofiler-systems/develop
+
+------------------------------------------------------------ /etc/lmod/modules/ROCmPlus-LatestCompilers ------------------------------------------------------------
+   hipfort_from_source/6.4.1
+
+------------------------------------------------------------------ /etc/lmod/modules/ROCmPlus-AI -------------------------------------------------------------------
+   cupy/14.0.0a1    ftorch/dev    jax/0.6.0    pytorch/2.7.1_tunableop_enabled    pytorch/2.7.1 (D)    tensorflow/merge-250318
+
+---------------------------------------------------------------------- /etc/lmod/modules/misc ----------------------------------------------------------------------
+   hipifly/dev
 
   Where:
    D:  Default Module
@@ -575,8 +486,8 @@ where `<module>` is the module you want to inspect. For example, `module show cu
 
 ```bash
 whatis("HIP version of CuPy")
-load("rocm/6.2.1")
-prepend_path("PYTHONPATH","/opt/rocmplus-6.2.1/cupy")
+load("rocm/6.4.1")
+prepend_path("PYTHONPATH","/opt/rocmplus-6.4.1/cupy")
 ```
 
 # 4. Adding Your Own Modules
@@ -704,15 +615,15 @@ For instance, for CuPy: `make cupy`, followed by `make cupy_tests`.
 
 # 6. Create a Pre-built Binary Distribution of ROCm
 
-It is possible to create a binary distribution of ROCm by taring up the `rocm-<rocm-version>` directory. Then, the next build will restore from the tar file. This can reduce the build time for the subsequent test installs. For example, considering the 6.2.1 version of ROCm and Ubuntu as distro as an example, do:
+It is possible to create a binary distribution of ROCm by taring up the `rocm-<rocm-version>` directory. Then, the next build will restore from the tar file. This can reduce the build time for the subsequent test installs. For example, considering the 6.4.1 version of ROCm and Ubuntu as distro as an example, do:
 
 ```bash
 git clone https://github.com/AMD/HPCTrainingDock
 cd HPCTrainingDock
-bare_system/test_install.sh --distro ubuntu --distro-versions 22.04 --rocm-version 6.2.1 --use-makefile 1
+bare_system/test_install.sh --distro ubuntu --distro-versions 24.04 --rocm-version 6.4.1 --use-makefile 1
 make rocm_package
 ```
-This make command tars up the `rocm-6.2.1` directory and then the next build it will restore from the tar file.
+This make command tars up the `rocm-6.4.1` directory and then the next build it will restore from the tar file.
 
 # 7. Installing HIP Software on an Nvidia Machine
 
