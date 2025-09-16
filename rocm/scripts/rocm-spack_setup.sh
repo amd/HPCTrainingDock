@@ -1,6 +1,8 @@
 #!/bin/bash
 #rm -rf  /home/sysadmin/.spack/*
 
+sudo apt-get install unzip liblzma-dev
+
 cd /tmp
 rm -rf spack
 git clone https://github.com/spack/spack.git
