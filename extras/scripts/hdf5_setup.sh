@@ -3,7 +3,7 @@
 # Variables controlling setup process
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/hdf5
 BUILD_HDF5=0
-ROCM_VERSION=6.0
+ROCM_VERSION=6.2.0
 C_COMPILER=`which gcc`
 C_COMPILER_INPUT=""
 CXX_COMPILER=`which g++`

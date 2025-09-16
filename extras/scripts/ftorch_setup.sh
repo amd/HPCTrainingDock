@@ -1,7 +1,7 @@
 #/bin/bash
 
 # Variables controlling setup process
-ROCM_VERSION=6.0
+ROCM_VERSION=6.2.0
 BUILD_FTORCH=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/ftorch
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`

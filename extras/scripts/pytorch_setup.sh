@@ -1,6 +1,6 @@
 #!/bin/bash
 
-ROCM_VERSION=6.0
+ROCM_VERSION=6.2.0
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 BUILD_PYTORCH=0
 ZSTD_VERSION=1.5.6
@@ -145,15 +145,24 @@ if [ "${BUILD_PYTORCH}" = "0" ]; then
 
 else
 
-   CMAKE_VERSION_FLAG=""
-   CMAKE_TARGET_GPUS="-DTARGET_GPUS="
-   CMAKE_TARGET_ARCH=""
+   if [[ "${AMDGPU_GFXMODEL}" == "gfx90a" ]]; then
+      TARGET_GPUS="MI200"
+   elif [[ "${AMDGPU_GFXMODEL}" == "gfx942" ]]; then
+      TARGET_GPUS="MI300X"
+   elif [[ "${AMDGPU_GFXMODEL}" == "gfx942;gfx90a" ]]; then
+      TARGET_GPUS="MI300X;MI200"
+   elif [[ "${AMDGPU_GFXMODEL}" == "gfx90a;gfx942" ]]; then
+      TARGET_GPUS="MI200;MI300X"
+   else
+      echo "Please select gfx90a, gfx942, or both separated with a ; as AMDGPU_GFXMODEL"
+      exit 1
+   fi
+  
+   CMAKE_TARGET_GPUS="-DTARGET_GPUS=${TARGET_GPUS}"
    PYTORCH_SHORT_VERSION=`echo ${PYTORCH_VERSION} | cut -f1-2 -d'.'`
    if [ "${PYTORCH_SHORT_VERSION}" == "2.8" ]; then
       AOTRITON_VERSION="0.10b"
-      CMAKE_VERSION_FLAG="-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
-      CMAKE_TARGET_GPUS="-DAOTRITON_OVERRIDE_TARGET_GPUS="
-      CMAKE_TARGET_ARCH="-DAOTRITON_TARGET_ARCH=${AMDGPU_GFXMODEL}"
+      CMAKE_TARGET_GPUS=""
    elif [ "${PYTORCH_SHORT_VERSION}" == "2.7" ]; then
       AOTRITON_VERSION="0.9.2b"
    elif [ "${PYTORCH_SHORT_VERSION}" == "2.6" ]; then
@@ -345,7 +354,7 @@ else
 	 exit 1
       fi
 
-      cmake -DAOTRITON_HIPCC_PATH=${ROCM_PATH}/bin ${CMAKE_TARGET_GPUS}${TARGET_GPUS} ${CMAKE_TARGET_ARCH} -DCMAKE_INSTALL_PREFIX=${AOTRITON_PATH} -DCMAKE_BUILD_TYPE=Release -DAOTRITON_GPU_BUILD_TIMEOUT=0 ${CMAKE_VERSION_FLAG} -G Ninja ..
+      cmake -DAOTRITON_HIPCC_PATH=${ROCM_PATH}/bin ${CMAKE_TARGET_GPUS} -DCMAKE_INSTALL_PREFIX=${AOTRITON_PATH} -DCMAKE_BUILD_TYPE=Release -DAOTRITON_GPU_BUILD_TIMEOUT=0  -G Ninja ..
 
       ninja install
 

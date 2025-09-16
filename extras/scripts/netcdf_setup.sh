@@ -4,7 +4,7 @@
 NETCDF_C_MODULE_PATH=/etc/lmod/modules/ROCmPlus/netcdf-c
 NETCDF_F_MODULE_PATH=/etc/lmod/modules/ROCmPlus/netcdf-fortran
 BUILD_NETCDF=0
-ROCM_VERSION=6.0
+ROCM_VERSION=6.2.0
 C_COMPILER=gcc
 C_COMPILER_INPUT=""
 CXX_COMPILER=g++

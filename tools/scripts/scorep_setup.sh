@@ -4,7 +4,7 @@
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/scorep
 BUILD_SCOREP=0
-ROCM_VERSION=6.0
+ROCM_VERSION=6.2.0
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 MPI_MODULE="openmpi"

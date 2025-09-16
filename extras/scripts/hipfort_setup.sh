@@ -4,7 +4,7 @@
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/hipfort_from_source
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 BUILD_HIPFORT=0
-ROCM_VERSION=6.0.0
+ROCM_VERSION=6.2.0
 HIPFORT_PATH="/opt/rocmplus-${ROCM_VERSION}/hipfort"
 HIPFORT_PATH_INPUT=""
 FC_COMPILER=gfortran

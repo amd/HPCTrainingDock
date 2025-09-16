@@ -6,7 +6,7 @@ DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | t
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 SUDO_PACKAGE_INSTALL="sudo"
 SUDO_MODULE_INSTALL="sudo"
-ROCM_VERSION=6.0
+ROCM_VERSION=6.2.0
 PYTHON_VERSION=10
 TOOL_REPO="https://github.com/ROCm/omnitrace"
 TOOL_NAME="omnitrace"

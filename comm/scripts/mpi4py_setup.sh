@@ -1,7 +1,7 @@
 #/bin/bash
 
 # Variables controlling setup process
-ROCM_VERSION=6.0
+ROCM_VERSION=6.2.0
 AMDGPU_GFXMODEL_INPUT=""
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/mpi4py
 BUILD_MPI4PY=0

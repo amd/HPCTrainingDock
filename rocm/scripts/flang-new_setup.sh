@@ -4,7 +4,7 @@
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 MODULE_PATH=/etc/lmod/modules/ROCm/amdflang-new
 BUILD_FLANGNEW=0
-ROCM_VERSION=6.0
+ROCM_VERSION=6.2.0
 UNTAR_DIR=/opt/rocmplus-${ROCM_VERSION}
 UNTAR_DIR_INPUT=""
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `

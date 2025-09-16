@@ -4,7 +4,7 @@
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/petsc
 BUILD_PETSC=0
-ROCM_VERSION=6.0
+ROCM_VERSION=6.2.0
 INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/petsc
 INSTALL_PATH_INPUT=""
 PETSC_VERSION="3.23.1"

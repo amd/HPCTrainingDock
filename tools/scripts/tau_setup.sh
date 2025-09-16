@@ -4,7 +4,7 @@
 AMDGPU_GFXMODEL_INPUT=""
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/tau
 BUILD_TAU=0
-ROCM_VERSION=6.0
+ROCM_VERSION=6.2.0
 TAU_PATH=/opt/rocmplus-${ROCM_VERSION}/tau
 PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
 TAU_PATH_INPUT=""

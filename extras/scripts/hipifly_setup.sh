@@ -4,7 +4,7 @@
 MODULE_PATH=/etc/lmod/modules/misc/hipifly
 HIPIFLY_MODULE=0
 HIPIFLY_HEADER_PATH=`pwd`
-ROCM_VERSION=6.0
+ROCM_VERSION=6.2.0
 HIPIFLY_PATH=/opt/rocmplus-${ROCM_VERSION}/hipifly
 HIPIFLY_PATH_INPUT=""
 

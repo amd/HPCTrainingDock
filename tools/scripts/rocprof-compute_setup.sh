@@ -1,7 +1,7 @@
 #!/bin/bash
 
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-ROCM_VERSION=6.0
+ROCM_VERSION=6.2.0
 GITHUB_BRANCH="develop"
 REPLACE=0
 INSTALL_ROCPROF_COMPUTE_FROM_SOURCE=0

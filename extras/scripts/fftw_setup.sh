@@ -3,7 +3,7 @@
 # Variables controlling setup process
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/fftw
 BUILD_FFTW=0
-ROCM_VERSION=6.0
+ROCM_VERSION=6.2.0
 C_COMPILER=`which gcc`
 C_COMPILER_INPUT=""
 CXX_COMPILER=`which g++`
