@@ -485,7 +485,7 @@ else
       fi
 
       pip3 install --target=${TRANSFORMERS_PATH} transformers --no-build-isolation
-      if [[ "${ROCM_VERSION}" == "6.4.2" ]]; then
+      if [[ "${ROCM_VERSION}" == "6.4.2" || "${ROCM_VERSION}" == "6.4.3" ]]; then
          TRITON_VERSION=3.2.0
       fi
       pip3 install pytorch_triton_rocm==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
