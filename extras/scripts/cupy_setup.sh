@@ -177,7 +177,7 @@ else
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod a+w $CUPY_PATH
       fi
-      # Get source from the ROCm repository of CuPy.
+      # Get source from the upstream repository of CuPy.
       git clone -q --depth 1 -b v$CUPY_VERSION --recursive https://github.com/cupy/cupy.git
       cd cupy
       python3 -m venv cupy_build
