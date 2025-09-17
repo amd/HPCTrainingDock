@@ -7,7 +7,7 @@ MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/cupy
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 CUPY_PATH=/opt/rocmplus-${ROCM_VERSION}/cupy
 CUPY_PATH_INPUT=""
-GIT_COMMIT="9cdff1737eaa44aba657cb17f7e0cc421d7cca34"
+CUPY_VERSION="13.6.0"
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -28,7 +28,7 @@ usage()
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --install-path [ CUPY_PATH ] default $CUPY_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "  --git-commit [ GIT_COMMIT ] specify what commit hash you want to build from, default is $GIT_COMMIT"
+   echo "  --cupy-version [ CUPY_VERSION ] specify the version of CuPy, default is $CUPY_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --help: print this usage information"
    exit 1
@@ -60,9 +60,9 @@ do
           BUILD_CUPY=${1}
 	  reset-last
           ;;
-      "--git-commit")
+      "--cupy-version")
           shift
-          GIT_COMMIT=${1}
+          CUPY_VERSION=${1}
 	  reset-last
           ;;
       "--help")
@@ -114,7 +114,7 @@ echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL"
 echo "BUILD_CUPY: $BUILD_CUPY"
 echo "CUPY_PATH: $CUPY_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
-echo "Building from source off of this commit: $GIT_COMMIT"
+echo "CUPY_VERSION: $CUPY_VERSION"
 echo "==================================="
 echo ""
 
@@ -173,27 +173,24 @@ else
          echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
-      # Get source from the ROCm repository of CuPy.
-      git clone -q --depth 1 --recursive https://github.com/ROCm/cupy.git
-      cd cupy
-      git reset --hard $GIT_COMMIT
-
-      python3 -m pip install argcomplete==1.9.4
-      # use version 1.25 of numpy – need to test with later numpy version
-      sed -i -e '/numpy/s/1.27/1.25/' setup.py
-      # set python path to installation directory
-      PYTHONPATH=$CUPY_PATH
-      # build basic cupy package
-      python3 setup.py -q bdist_wheel
-
-      # install necessary packages in installation directory
       ${SUDO} mkdir -p $CUPY_PATH
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod a+w $CUPY_PATH
       fi
-      pip3 install -v --target=$CUPY_PATH pytest mock xarray[complete] dask
+      # Get source from the ROCm repository of CuPy.
+      git clone -q --depth 1 -b v$CUPY_VERSION --recursive https://github.com/cupy/cupy.git
+      cd cupy
+      python3 -m venv cupy_build
+      source cupy_build/bin/activate
+      pip3 install -v --target=$CUPY_PATH pytest mock xarray[complete] dask build argcomplete==1.9.4
+      export PYTHONPATH=$PYTHONPATH:$CUPY_PATH
+      python3 -m build --wheel
       pip3 install -v --upgrade --target=$CUPY_PATH dist/*.whl
       pip3 install -v --target=$CUPY_PATH cupy-xarray --no-deps
+      deactivate
+      cd ../
+      # clean-up
+      rm -rf cupy cupy_build
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find $CUPY_PATH -type f -execdir chown root:root "{}" +
          ${SUDO} find $CUPY_PATH -type d -execdir chown root:root "{}" +
@@ -201,9 +198,6 @@ else
          ${SUDO} chmod go-w $CUPY_PATH
       fi
 
-      # cleanup
-      cd ..
-      rm -rf cupy
       module unload rocm/${ROCM_VERSION}
    fi
 
@@ -223,7 +217,6 @@ else
 
    ${SUDO} mkdir -p ${MODULE_PATH}
 
-   CUPY_VERSION=`cat "$CUPY_PATH/cupy/_version.py"  | cut -f3 -d' ' |  tr -d "'"`
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${CUPY_VERSION}.lua
 	whatis("CuPy with ROCm support")

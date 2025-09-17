@@ -492,7 +492,7 @@ prepend_path("PYTHONPATH","/opt/rocmplus-6.4.1/cupy")
 
 # 4. Adding Your Own Modules
 
-As a simple example, below we show how to install `Julia` as a module in your home directory within the container.
+As a simple example, below we show how to install `Julia` as a module in your home directory within the container. Note that we are using Julia as an example here due to the simplicity of its installation. However, because it stores data in the user's home directory, there is discussion on the best way to supply Julia to users and the argument is to have users install it in their home directory rather than have sys admins provide a module for them (more details on this approach at [this](https://juliahpc.github.io/sysadmin_julia/) link).
 First, install the Julia installation manager Juliaup:
 
 ```bash
