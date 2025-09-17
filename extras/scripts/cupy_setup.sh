@@ -177,13 +177,13 @@ else
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod a+w $CUPY_PATH
       fi
-      # Get source from the upstream repository of CuPy.
-      git clone -q --depth 1 -b v$CUPY_VERSION --recursive https://github.com/cupy/cupy.git
-      cd cupy
       python3 -m venv cupy_build
       source cupy_build/bin/activate
       pip3 install -v --target=$CUPY_PATH pytest mock xarray[complete] dask build argcomplete==1.9.4
       export PYTHONPATH=$PYTHONPATH:$CUPY_PATH
+      # Get source from the upstream repository of CuPy.
+      git clone -q --depth 1 -b v$CUPY_VERSION --recursive https://github.com/cupy/cupy.git
+      cd cupy
       python3 -m build --wheel
       pip3 install -v --upgrade --target=$CUPY_PATH dist/*.whl
       pip3 install -v --target=$CUPY_PATH cupy-xarray --no-deps
