@@ -178,7 +178,7 @@ else
       fi
       python3 -m venv cupy_build
       source cupy_build/bin/activate
-      pip3 install -v --target=$CUPY_PATH pytest mock xarray[complete] dask build argcomplete==1.9.4 numpy==2.2.6 --no-cache
+      pip3 install -v --target=$CUPY_PATH pytest mock xarray[complete] dask build --no-cache
       export PYTHONPATH=$PYTHONPATH:$CUPY_PATH
       # Get source from the upstream repository of CuPy.
       git clone -q --depth 1 -b v$CUPY_VERSION --recursive https://github.com/cupy/cupy.git
