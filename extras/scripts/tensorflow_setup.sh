@@ -210,8 +210,9 @@ else
          sed -i '$a build:rocm --copt=-Wno-error=c23-extensions' .bazelrc
       fi
 
+      export TF_ROCM_AMDGPU_TARGETS=${AMDGPU_GFXMODEL}
       # configure tensorflow
-      yes "" | TF_NEED_CLANG=1 ROCM_PATH=$ROCM_PATH TF_NEED_ROCM=1 PYTHON_BIN_PATH=/usr/bin/python3 ./configure
+      yes "" | TF_NEED_CLANG=1 ROCM_PATH=$ROCM_PATH TF_NEED_ROCM=1 PYTHON_BIN_PATH=/usr/bin/python3 TF_ROCM_AMDGPU_TARGETS=${AMDGPU_GFXMODEL} ./configure
 
       # build and install tensorflow
       bazel build --config=opt --config=rocm --repo_env=WHEEL_NAME=tensorflow_rocm \
