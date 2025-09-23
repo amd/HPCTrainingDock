@@ -256,6 +256,7 @@ else
 
 	load("rocm/${ROCM_VERSION}")
 	prepend_path("PYTHONPATH","$TF_PATH")
+        setenv("TF_CPP_MIN_LOG_LEVEL","2")
 EOF
 
 fi
