@@ -118,6 +118,10 @@ COPY extras/scripts/cupy_setup.sh /tmp/extras/cupy_setup.sh
 RUN  /tmp/extras/cupy_setup.sh --build-cupy ${BUILD_CUPY} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
      rm -f /tmp/extras/cupy_setup.sh
 
+COPY extras/scripts/hip-python_setup.sh /tmp/extras/hip-python_setup.sh
+RUN  /tmp/extras/hip-python_setup.sh --build-hip-python ${BUILD_CUPY} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+     rm -f /tmp/extras/hip-python_setup.sh
+
 COPY extras/scripts/tensorflow_setup.sh /tmp/extras/tensorflow_setup.sh
 RUN  /tmp/extras/tensorflow_setup.sh --build-tensorflow ${BUILD_TENSORFLOW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
      rm -f /tmp/extras/tensorflow_setup.sh

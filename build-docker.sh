@@ -15,6 +15,7 @@
 : ${BUILD_CLACC_LATEST:="0"}
 : ${BUILD_PYTORCH:="0"}
 : ${BUILD_CUPY:="0"}
+: ${BUILD_HIP_PYTHON:="0"}
 : ${BUILD_TENSORFLOW:="0"}
 : ${BUILD_JAX:="0"}
 : ${BUILD_KOKKOS:="0"}
@@ -132,6 +133,7 @@ usage()
     print_default_option build-julia "[BUILD_JULIA: 0 or 1]" "include this flag to build version 1.12" "${BUILD_JULIA} (don't build)"
     print_default_option build-hipfort "[BUILD_HIPFORT: 0 or 1]" "include this flag to build the same version as ROCm" "${BUILD_HIPFORT} (don't build)"
     print_default_option build-cupy "[BUILD_CUPY: 0 or 1]" "include this flag to build version 14.0.0a1" "${BUILD_CUPY} (don't build)"
+    print_default_option build-hip-python "[BUILD_HIP_PYTHON: 0 or 1]" "include this flag to build version 14.0.0a1" "${BUILD_HIP_PYTHON} (don't build)"
     print_default_option build-tensorflow "[BUILD_TENSORFLOW: 0 or 1]" "include this flag to build branch merge-250318" "${BUILD_TENSORFLOW} (don't build)"
     print_default_option build-jax "[BUILD_JAX: 0 or 1]" "include this flag to build version 0.6.0" "${BUILD_JAX} (don't build)"
     print_default_option build-kokkos "[BUILD_KOKKOS: 0 or 1]"  "include this flag to build version 4.5.01" "${BUILD_KOKKOS} (don't build)"
@@ -286,6 +288,10 @@ do
             BUILD_CUPY="1"
             reset-last
             ;;
+        "--build-hip-python")
+            BUILD_HIP_PYTHON="1"
+            reset-last
+            ;;
         "--build-tensorflow")
             BUILD_TENSORFLOW="1"
             reset-last
@@ -370,6 +376,7 @@ do
             #BUILD_CLACC_LATEST="1"
             BUILD_PYTORCH="1"
             BUILD_CUPY="1"
+            BUILD_HIP_PYTHON="1"
             BUILD_TENSORFLOW="1"
             BUILD_PETSC="1"
             BUILD_HYPRE="1"
@@ -517,6 +524,10 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
 	    echo "Setting CUPY build"
             BUILD_CUPY=1
 	    ;;
+         "hip-python")
+	    echo "Setting HIP-Python build"
+            BUILD_HIP_PYTHON=1
+	    ;;
          "tensorflow")
 	    echo "Setting TENSORFLOW build"
             BUILD_TENSORFLOW=1
@@ -563,6 +574,7 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             #BUILD_CLACC_LATEST="1"
             BUILD_PYTORCH="1"
             BUILD_CUPY="1"
+            BUILD_HIP_PYTHON="1"
             BUILD_TENSORFLOW="1"
             BUILD_PETSC="1"
             BUILD_HYPRE="1"
@@ -609,6 +621,7 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             echo "   llvm_latest"
 	    echo " # optional AI packages"
             echo "   cupy"
+            echo "   hip-python"
             echo "   jax"
             echo "   pytorch"
 	    echo " # optional languages/frameworks"
@@ -699,6 +712,7 @@ do
        --build-arg BUILD_CLACC_LATEST=${BUILD_CLACC_LATEST} \
        --build-arg BUILD_PYTORCH=${BUILD_PYTORCH} \
        --build-arg BUILD_CUPY=${BUILD_CUPY} \
+       --build-arg BUILD_HIP_PYTHON=${BUILD_HIP_PYTHON} \
        --build-arg BUILD_TENSORFLOW=${BUILD_TENSORFLOW} \
        --build-arg BUILD_JAX=${BUILD_JAX} \
        --build-arg BUILD_PETSC=${BUILD_PETSC} \
