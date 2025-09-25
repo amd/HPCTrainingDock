@@ -222,6 +222,8 @@ else
 	append_path("LD_LIBRARY_PATH","${HIPFORT_PATH}/lib")
 	setenv("LIBS","-L${HIPFORT_PATH}/lib -lhipfort-amdgcn.a")
 	setenv("HIPFORT_PATH","${HIPFORT_PATH}")
+	setenv("HIPFORT_LIB","${HIPFORT_PATH}/lib")
+	setenv("HIPFORT_INC","${HIPFORT_PATH}/include/hipfort")
 	prepend_path("PATH","${HIPFORT_PATH}/bin")
 EOF
 
