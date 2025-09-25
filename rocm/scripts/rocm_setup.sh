@@ -419,7 +419,7 @@ MODULE_PATH=${MODULE_PATH}/rocm
 ${SUDO} mkdir -p ${MODULE_PATH}
 
 # autodetecting default version for distro and getting available gcc version list
-GCC_BASE_VERSION=`ls /usr/bin/gcc-* | cut -f2 -d'-' | grep '^[[:digit:]]'`
+GCC_BASE_VERSION=`ls /usr/bin/gcc-* | cut -f2 -d'-' | grep '^[[:digit:]]' | head -1`
 
 # The - option suppresses tabs
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
