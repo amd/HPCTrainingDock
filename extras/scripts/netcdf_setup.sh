@@ -392,7 +392,7 @@ EOF
    cat <<-EOF | ${SUDO} tee ${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua
 	whatis("Netcdf-fortan Library")
 
-	load("hdf5")
+	load("netcdf-c")
 	local base = "${NETCDF_F_PATH}"
 	local base_pnetcdf = "${NETCDF_PATH}/pnetcdf"
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
