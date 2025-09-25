@@ -170,6 +170,10 @@ else
       tar -xjf ${FULL_ARCHIVE_NAME}.tar.bz2
       rm -f ${FULL_ARCHIVE_NAME}.tar.bz2
 
+      if [ "$ARCHIVE_NAME" == "rocm-afar-8473-drop-7.1.1" ]; then
+        ARCHIVE_NAME="rocm-afar-8473-drop-7.1.0"
+      fi
+
       ${SUDO} mv ${ARCHIVE_NAME} ${ARCHIVE_DIR}
 
       if [[ "${USER}" != "root" ]]; then
