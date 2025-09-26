@@ -629,7 +629,7 @@ This make command tars up the `rocm-6.4.1` directory and then the next build it 
 
 The HIP portability layer works across different GPU vendors, and one often wants to test their HIP codes on machines without AMD GPUs. In such scenarios, installing the whole ROCm software stack might be too heavyweight a solution.
 
-Therefore, we provide example scripts [`extras/scripts/build_hip-6.1.0`](https://github.com/amd/HPCTrainingDock/blob/main/extras/scripts/build_hip-6.1.0.sh) and [`extras/scripts/build_hip-6.3.0`](https://github.com/amd/HPCTrainingDock/blob/main/extras/scripts/build_hip-6.3.0.sh) for installing specific HIP packages from source. Note that these scripts worked for users on a cluster with Intel Xeon Platinum 8360Y CPUs + Nvidia A100 GPUs with SLES 15.6 OS. These scripts have not been thoroughly tested on different systems, but can serve as a good starting point for any similar installations.
+Therefore, we provide example scripts [`extras/scripts/build_hip-6.1.0`](https://github.com/amd/HPCTrainingDock/blob/main/extras/scripts/build_hip-6.1.0.sh), [`extras/scripts/build_hip-6.3.0`](https://github.com/amd/HPCTrainingDock/blob/main/extras/scripts/build_hip-6.3.0.sh) and [`extras/scripts/build_hip-7.0.1`](https://github.com/amd/HPCTrainingDock/blob/main/extras/scripts/build_hip-7.0.1.sh) for installing specific HIP packages from source. Note that these scripts worked for users on a cluster with Intel Xeon Platinum 8360Y CPUs + Nvidia A100 GPUs with SLES 15.6 OS. These scripts have not been thoroughly tested on different systems, but can serve as a good starting point for any similar installations.
 
 # 8. Additional Resources
 
