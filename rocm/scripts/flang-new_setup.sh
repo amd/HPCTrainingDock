@@ -166,7 +166,7 @@ else
          ${SUDO} chmod a+w ${UNTAR_DIR}
       fi
 
-      wget -q https://repo.radeon.com/rocm/misc/flang/${FULL_ARCHIVE_NAME}.tar.bz2
+      wget https://repo.radeon.com/rocm/misc/flang/${FULL_ARCHIVE_NAME}.tar.bz2
       tar -xjf ${FULL_ARCHIVE_NAME}.tar.bz2
       rm -f ${FULL_ARCHIVE_NAME}.tar.bz2
 
