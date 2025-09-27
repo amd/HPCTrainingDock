@@ -173,7 +173,7 @@ else
       fi
       # remove the last digit from the version and replace with 0
       ROCM_VERSION_MODIFIED="${ROCM_VERSION::-1}0"
-      echo "pip3 install -v --target=$HIP_PYTHON_PATH https://test.pypi.org/simple hip-python~=${ROCM_VERSION_MODIFIED}"
+      echo "pip3 install -v --target=$HIP_PYTHON_PATH -i https://test.pypi.org/simple hip-python~=${ROCM_VERSION_MODIFIED}"
       python3 -m pip install --target=$HIP_PYTHON_PATH -i https://test.pypi.org/simple hip-python~=${ROCM_VERSION_MODIFIED}
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find $HIP_PYTHON_PATH -type f -execdir chown root:root "{}" +

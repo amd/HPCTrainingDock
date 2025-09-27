@@ -25,7 +25,8 @@ HACKATHONBASEGROUP=12000
 
 CLUSTER_NAME="prerelease01"
 
-PARTITION="1CN192C4G1H_MI300A_Ubuntu22"
+PARTITION1="1CN192C4G1H_MI300A_Ubuntu22"
+PARTITION2="1CN48C1G1H_MI300A_Ubuntu22"
 
 DRYRUN=0
 VERBOSE=1
@@ -176,15 +177,18 @@ do
             echo "group $group_name is missing from /etc/group -- creating it"
             if (( "${VERBOSE}" > 0 )); then
                echo "  sudo groupadd -f -g ${gid} $group_name"
+	       echo "  sudo sacctmgr -i add account name=$group_name cluster=$CLUSTER_NAME"
             fi
             if [ "${DRYRUN}" != 1 ]; then
                sudo groupadd -f -g ${gid} $group_name
 	       sudo sacctmgr -i add account name="$group_name" cluster="$CLUSTER_NAME"
+            else
+               echo "  sudo groupadd -f -g ${gid} $group_name"
+	       echo "  sudo sacctmgr -i add account name=$group_name cluster=$CLUSTER_NAME"
             fi
          else
             echo "Adding user to group $group_name and making it the primary group for the user"
             if (( "${VERBOSE}" > 0 )); then
-               echo "  sudo usermod -a -G ${group_name}"
                echo "  sudo usermod -a -G ${group_name}"
                echo "  sudo usermod -g ${group_name}"
 	       echo " sudo sacctmgr -i add account name="$group_name" cluster="$CLUSTER_NAME""
@@ -192,6 +196,7 @@ do
             if [ "${DRYRUN}" != 1 ]; then
                sudo usermod -a -G ${group_name} ${user_name}
                sudo usermod -g ${group_name} ${user_name}
+	       sudo sacctmgr -i add account name="$group_name" cluster="$CLUSTER_NAME"
             fi
          fi
       fi
@@ -317,16 +322,25 @@ do
          gid=`getent group $group_name | cut -d: -f3`
          echo "User does not exist -- creating user account"
          if (( "${VERBOSE}" > 0 )); then
-            echo "  sudo useradd --create-home --skel $HOME/init_scripts --shell /bin/bash --home ${USERHOMEDIR} --uid $id --gid ${gid} ${user_name}"
+		 # Insert check if gid or group already exists
+            echo "  sudo groupadd -f -g $id $user_name"
+	    if [ "$gid" == "" ]; then
+	       echo "  sudo useradd --create-home --skel $HOME/init_scripts --shell /bin/bash --home ${USERHOMEDIR} --uid $id --gid (gid=gent $group_name) ${user_name}"
+            else
+	       echo "  sudo useradd --create-home --skel $HOME/init_scripts --shell /bin/bash --home ${USERHOMEDIR} --uid $id --gid ${gid} ${user_name}"
+	    fi
+	    echo "  sudo usermod -G ${user_name} $user_name"
 	 fi
          if (( "${VERBOSE}" > 1 )); then
             echo "  sudo chmod -R go-rwx  ${USERHOMEDIR}"
             echo "  sudo chgrp -R ${group_name}  ${USERHOMEDIR}"
          fi
          if [ "${DRYRUN}" != 1 ]; then
+            sudo groupadd -f -g $id $user_name
             sudo useradd --create-home --skel $HOME/init_scripts --shell /bin/bash --home ${USERHOMEDIR} --uid $id --gid ${gid} ${user_name}
+	    sudo usermod -G ${user_name} $user_name
             sudo chmod -R go-rwx  ${USERHOMEDIR}
-            sudo chgrp -R ${group_name}  ${USERHOMEDIR}
+            sudo chgrp -R ${user_name}  ${USERHOMEDIR}
          fi
          # set password
          if [ ! -z "${pw}" ]; then
@@ -352,10 +366,16 @@ do
       RENDER_GROUP=0
    fi
 
+   if [ "${VERBOSE}" > 0 ]; then
+      echo "sudo sacctmgr -i add user name=$user_name partition=$PARTITION1 cluster=$CLUSTER_NAME defaultaccount=$group_name"
+      echo "sudo sacctmgr -i add user name=$user_name partition=$PARTITION2 cluster=$CLUSTER_NAME"
+   fi
    if [ "${DRYRUN}" != 1 ]; then
-      sudo sacctmgr -i add user name=$USERNAME defaultaccount="$group_name" partition="$PARTITION" cluster="$CLUSTER_NAME"
+      sudo sacctmgr -i add user name=$user_name defaultaccount="$group_name" partition="$PARTITION1" cluster="$CLUSTER_NAME"
+      sudo sacctmgr -i add user name=$user_name partition="$PARTITION2" cluster="$CLUSTER_NAME"
    else    
-      echo "sudo sacctmgr -i add user name=$USERNAME defaultaccount=$group_name partition=$PARTITION cluster=$CLUSTER_NAME"
+      echo "sudo sacctmgr -i add user name=$user_name partition=$PARTITION1 cluster=$CLUSTER_NAME defaultaccount=$group_name"
+      echo "sudo sacctmgr -i add user name=$user_name partition=$PARTITION2 cluster=$CLUSTER_NAME account=$group_name"
    fi
    if [[ $VIDEO_GROUP != 1 ]] || [[ $AUDIO_GROUP != 1 ]] || [[ $RENDER_GROUP != 1 ]] ; then
       if (( "${VERBOSE}" > 2 )); then
