@@ -171,10 +171,17 @@ else
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod a+w $HIP_PYTHON_PATH
       fi
+      python3 -m venv hip-python-build
+      source hip-python-build/bin/activate
+      python3 -m pip install pip
       # remove the last digit from the version and replace with 0
       ROCM_VERSION_MODIFIED="${ROCM_VERSION::-1}0"
-      echo "pip3 install -v --target=$HIP_PYTHON_PATH -i https://test.pypi.org/simple hip-python~=${ROCM_VERSION_MODIFIED}"
+      echo "pip3 install -v --target=$HIP_PYTHON_PATH https://test.pypi.org/simple hip-python~=${ROCM_VERSION_MODIFIED}"
       python3 -m pip install --target=$HIP_PYTHON_PATH -i https://test.pypi.org/simple hip-python~=${ROCM_VERSION_MODIFIED}
+      python3 -m pip config set global.extra-index-url https://test.pypi.org/simple
+      python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python "numba-hip[rocm-6-4-0] @ git+https://github.com/ROCm/numba-hip.git"
+      deactivate
+      rm -rf hip-python-build
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find $HIP_PYTHON_PATH -type f -execdir chown root:root "{}" +
          ${SUDO} find $HIP_PYTHON_PATH -type d -execdir chown root:root "{}" +
