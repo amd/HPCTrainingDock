@@ -368,12 +368,12 @@ do
 
    if [ "${VERBOSE}" > 0 ]; then
       echo "sudo sacctmgr -i add user name=$user_name partition=$PARTITION1 cluster=$CLUSTER_NAME defaultaccount=$group_name"
-      echo "sudo sacctmgr -i add user name=$user_name partition=$PARTITION2 cluster=$CLUSTER_NAME"
+      echo "sudo sacctmgr -i add user name=$user_name partition=$PARTITION2 cluster=$CLUSTER_NAME account=${group_name}"
    fi
    if [ "${DRYRUN}" != 1 ]; then
       sudo sacctmgr -i add user name=$user_name defaultaccount="$group_name" partition="$PARTITION1" cluster="$CLUSTER_NAME"
-      sudo sacctmgr -i add user name=$user_name partition="$PARTITION2" cluster="$CLUSTER_NAME"
-   else    
+      sudo sacctmgr -i add user name=$user_name partition="$PARTITION2" cluster="$CLUSTER_NAME" account="${group_name}"
+   else
       echo "sudo sacctmgr -i add user name=$user_name partition=$PARTITION1 cluster=$CLUSTER_NAME defaultaccount=$group_name"
       echo "sudo sacctmgr -i add user name=$user_name partition=$PARTITION2 cluster=$CLUSTER_NAME account=$group_name"
    fi
