@@ -146,6 +146,7 @@ else
       echo "============================"
       echo " Building HIP-Python"
       echo "============================"
+      echo " HIP_PYTHON_PATH is $HIP_PYTHON_PATH"
       echo ""
 
 
@@ -176,8 +177,8 @@ else
       python3 -m pip install pip
       # remove the last digit from the version and replace with 0
       ROCM_VERSION_MODIFIED="${ROCM_VERSION::-1}0"
-      echo "pip3 install -v --target=$HIP_PYTHON_PATH https://test.pypi.org/simple hip-python~=${ROCM_VERSION_MODIFIED}"
-      python3 -m pip install --target=$HIP_PYTHON_PATH -i https://test.pypi.org/simple hip-python~=${ROCM_VERSION_MODIFIED}
+      # will be installed as a dependency of numba-hip and avoid an extra subdirectory
+      #python3 -m pip install --target=$HIP_PYTHON_PATH -i https://test.pypi.org/simple hip-python~=${ROCM_VERSION_MODIFIED}
       python3 -m pip config set global.extra-index-url https://test.pypi.org/simple
       python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python "numba-hip[rocm-6-4-0] @ git+https://github.com/ROCm/numba-hip.git"
       deactivate
@@ -211,7 +212,7 @@ else
         whatis("HIP-Python with ROCm support")
 
         load("rocm/${ROCM_VERSION}")
-        prepend_path("PYTHONPATH","$HIP_PYTHON_PATH")
+        prepend_path("PYTHONPATH","$HIP_PYTHON_PATH/hip-python")
 EOF
 
 fi
