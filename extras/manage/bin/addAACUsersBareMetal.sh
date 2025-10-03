@@ -44,7 +44,7 @@ fi
 
 # First see what user ids and group ids are used by files in 
 # the Home directory tree and set the max to 
-echo "Starting scan for last used uid and gid in our range (12050, 12000) respectively"
+echo "Starting scan for last used uid and gid in our range ($HACKATHONLASTUSER, $HACKATHONLASTGROUP) respectively"
 while read -r -d '' file
 do
    uid=`sudo stat -c %u $file`
@@ -134,7 +134,7 @@ for u  in "${users[@]}"
 do
    IFS=",", read -r -a arr <<< "${u}"
 
-   ((i=i+1))
+   #((i=i+1)) # moved to the end of the loop
    first="${arr[0]}"
    last="${arr[1]}"
    user_name="${arr[2]}"
@@ -399,12 +399,12 @@ do
       if [ ! -d ${USERHOMEDIR}/.ssh ]; then
          if (( "${VERBOSE}" > 1 )); then
             echo "  sudo mkdir -p  ${USERHOMEDIR}/.ssh"
-            echo "  sudo chgrp teacher ${USERHOMEDIR}/.ssh"
+            echo "  sudo chgrp ${user_name} ${USERHOMEDIR}/.ssh"
             echo "  sudo chmod g+rwx ${USERHOMEDIR}/.ssh"
 	 fi
          if [ "${DRYRUN}" != 1 ]; then
             sudo mkdir -p  ${USERHOMEDIR}/.ssh
-            sudo chgrp teacher ${USERHOMEDIR}/.ssh
+            sudo chgrp ${user_name} ${USERHOMEDIR}/.ssh
             sudo chmod g+rwx ${USERHOMEDIR}/.ssh
 	 fi
       fi
@@ -495,4 +495,5 @@ do
          sudo chmod 600 ${USERHOMEDIR}/.profile
       fi
    fi 
+   ((i=i+1))
 done
