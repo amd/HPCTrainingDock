@@ -2,12 +2,12 @@
 
 # Variables controlling setup process
 ROCM_VERSION=6.4.3
-BUILD_ROCFFT=0
-MODULE_PATH=/etc/lmod/modules/ROCmPlus/rocfft
+BUILD_HIPFFT=0
+MODULE_PATH=/etc/lmod/modules/ROCmPlus/hipfft
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-ROCFFT_PATH=/opt/rocmplus-${ROCM_VERSION}/rocfft
-ROCFFT_PATH_INPUT=""
-ROCFFT_VERSION="1.0.32"
+HIPFFT_PATH=/opt/rocmplus-${ROCM_VERSION}/hipfft
+HIPFFT_PATH_INPUT=""
+HIPFFT_VERSION="1.0.32"
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -24,11 +24,11 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
-   echo "  --build-rocfft [ BUILD_ROCFFT ] default $BUILD_ROCFFT "
+   echo "  --build-hipfft [ BUILD_HIPFFT ] default $BUILD_HIPFFT "
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
-   echo "  --install-path [ ROCFFT_PATH ] default $ROCFFT_PATH"
+   echo "  --install-path [ HIPFFT_PATH ] default $HIPFFT_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "  --rocfft-version [ ROCFFT_VERSION ] specify the version of HIP-Python, default is $ROCFFT_VERSION"
+   echo "  --hipfft-version [ HIPFFT_VERSION ] specify the version of HIP-Python, default is $HIPFFT_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --help: print this usage information"
    exit 1
@@ -55,14 +55,14 @@ do
           AMDGPU_GFXMODEL=${1}
           reset-last
           ;;
-      "--build-rocfft")
+      "--build-hipfft")
           shift
-          BUILD_ROCFFT=${1}
+          BUILD_HIPFFT=${1}
           reset-last
           ;;
-      "--rocfft-version")
+      "--hipfft-version")
           shift
-          ROCFFT_VERSION=${1}
+          HIPFFT_VERSION=${1}
           reset-last
           ;;
       "--help")
@@ -75,7 +75,7 @@ do
           ;;
       "--install-path")
           shift
-          ROCFFT_PATH_INPUT=${1}
+          HIPFFT_PATH_INPUT=${1}
           reset-last
           ;;
       "--rocm-version")
@@ -94,29 +94,29 @@ do
    shift
 done
 
-if [ "${ROCFFT_PATH_INPUT}" != "" ]; then
-   ROCFFT_PATH=${ROCFFT_PATH_INPUT}
+if [ "${HIPFFT_PATH_INPUT}" != "" ]; then
+   HIPFFT_PATH=${HIPFFT_PATH_INPUT}
 else
    # override path in case ROCM_VERSION has been supplied as input
-   ROCFFT_PATH=/opt/rocmplus-${ROCM_VERSION}/rocfft
+   HIPFFT_PATH=/opt/rocmplus-${ROCM_VERSION}/hipfft
 fi
 
 echo ""
 echo "==================================="
-echo "Starting rocFFT Install with"
+echo "Starting hipFFT Install with"
 echo "ROCM_VERSION: $ROCM_VERSION"
 echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL"
-echo "BUILD_ROCFFT: $BUILD_ROCFFT"
-echo "ROCFFT_PATH: $ROCFFT_PATH"
+echo "BUILD_HIPFFT: $BUILD_HIPFFT"
+echo "HIPFFT_PATH: $HIPFFT_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
-echo "ROCFFT_VERSION: $ROCFFT_VERSION"
+echo "HIPFFT_VERSION: $HIPFFT_VERSION"
 echo "==================================="
 echo ""
 
-if [ "${BUILD_ROCFFT}" = "0" ]; then
+if [ "${BUILD_HIPFFT}" = "0" ]; then
 
-   echo "rocFFT will not be built, according to the specified value of BUILD_ROCFFT"
-   echo "BUILD_ROCFFT: $BUILD_ROCFFT"
+   echo "hipFFT will not be built, according to the specified value of BUILD_HIPFFT"
+   echo "BUILD_HIPFFT: $BUILD_HIPFFT"
    exit
 
 else
@@ -124,29 +124,29 @@ else
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   if [ -f ${CACHE_FILES}/rocfft.tgz ]; then
+   if [ -f ${CACHE_FILES}/hipfft.tgz ]; then
       echo ""
       echo "============================"
-      echo " Installing Cached rocFFT"
+      echo " Installing Cached hipFFT"
       echo "============================"
       echo ""
 
       #install the cached version
-      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/rocfft
+      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/hipfft
       cd /opt/rocmplus-${ROCM_VERSION}
       #${SUDO} chmod a+w /opt/rocmplus-${ROCM_VERSION}
-      ${SUDO} tar -xzpf ${CACHE_FILES}/rocfft.tgz
-      #chown -R root:root /opt/rocmplus-${ROCM_VERSION}/rocfft
+      ${SUDO} tar -xzpf ${CACHE_FILES}/hipfft.tgz
+      #chown -R root:root /opt/rocmplus-${ROCM_VERSION}/hipfft
       #${SUDO} chmod og-w /opt/rocmplus-${ROCM_VERSION}
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm ${CACHE_FILES}/rocfft.tgz
+         ${SUDO} rm ${CACHE_FILES}/hipfft.tgz
       fi
    else
       echo ""
       echo "============================"
       echo " Building HIP-Python"
       echo "============================"
-      echo " ROCFFT_PATH is $ROCFFT_PATH"
+      echo " HIPFFT_PATH is $HIPFFT_PATH"
       echo ""
 
 
@@ -155,9 +155,9 @@ else
       source /etc/profile.d/z01_lmod.sh
       module load rocm/${ROCM_VERSION}
 
-      if [ -d "$ROCFFT_PATH" ]; then
+      if [ -d "$HIPFFT_PATH" ]; then
          # don't use sudo if user has write access to install path
-         if [ -w ${ROCFFT_PATH} ]; then
+         if [ -w ${HIPFFT_PATH} ]; then
             SUDO=""
          else
             echo "WARNING: using an install path that requires sudo"
@@ -167,34 +167,34 @@ else
          echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
-      ${SUDO} mkdir -p $ROCFFT_PATH
+      ${SUDO} mkdir -p $HIPFFT_PATH
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} chmod a+w $ROCFFT_PATH
+         ${SUDO} chmod a+w $HIPFFT_PATH
       fi
 
       git clone --no-checkout https://github.com/rocm/rocm-libraries
       cd rocm-libraries
       git sparse-checkout init
-      git sparse-checkout set projects/rocfft
+      git sparse-checkout set projects/hipfft
       git checkout
       module load rocm amdclang
-      cd projects/rocfft
+      cd projects/hipfft
       mkdir build && cd build
-      cmake -DGPU_TARGETS="${AMDGPU_GFXMODEL}" -DCMAKE_INSTALL_PREFIX=${ROCFFT_PATH} ..
+      cmake -DGPU_TARGETS="${AMDGPU_GFXMODEL}" -DCMAKE_INSTALL_PREFIX=${HIPFFT_PATH} ..
       make
       make install
       cd ../..
       rm -rf rocm-libraries
 
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} find $ROCFFT_PATH -type f -execdir chown root:root "{}" +
-         ${SUDO} find $ROCFFT_PATH -type d -execdir chown root:root "{}" +
+         ${SUDO} find $HIPFFT_PATH -type f -execdir chown root:root "{}" +
+         ${SUDO} find $HIPFFT_PATH -type d -execdir chown root:root "{}" +
 
-         ${SUDO} chmod go-w $ROCFFT_PATH
+         ${SUDO} chmod go-w $HIPFFT_PATH
       fi
    fi
 
-   # Create a module file for rocfft
+   # Create a module file for hipfft
    if [ -d "$MODULE_PATH" ]; then
       # use sudo if user does not have write access to module path
       if [ ! -w ${MODULE_PATH} ]; then
@@ -211,8 +211,8 @@ else
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCFFT_VERSION}.lua
-        whatis("rocFFT with ROCm support")
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${HIPFFT_VERSION}.lua
+        whatis("hipFFT with ROCm support")
 
         requires("rocm/${ROCM_VERSION}")
 EOF
