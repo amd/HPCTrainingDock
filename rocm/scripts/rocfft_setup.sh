@@ -153,7 +153,7 @@ else
       # Load the ROCm version for this HIP-Python build -- use hip compiler, path to ROCm and the GPU model
       source /etc/profile.d/lmod.sh
       source /etc/profile.d/z01_lmod.sh
-      module load rocm/${ROCM_VERSION}
+      module load rocm/${ROCM_VERSION} amdclang
 
       if [ -d "$ROCFFT_PATH" ]; then
          # don't use sudo if user has write access to install path
@@ -177,7 +177,6 @@ else
       git sparse-checkout init
       git sparse-checkout set projects/rocfft
       git checkout
-      module load rocm amdclang
       cd projects/rocfft
       mkdir build && cd build
       cmake -DGPU_TARGETS="${AMDGPU_GFXMODEL}" -DCMAKE_INSTALL_PREFIX=${ROCFFT_PATH} ..
