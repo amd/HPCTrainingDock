@@ -312,7 +312,7 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
          wget -q https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/${DISTRO}/${ROCM_REPO_DIST}/amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
 
          # Run the amdgpu-install script. We have already installed the kernel driver, so use we use --no-dkms
-         ${SUDO} ${DEB_FRONTEND} apt-get install -q -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb --allow-downgrades
+         ${SUDO} ${DEB_FRONTEND} apt-get install -q -y ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
       elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
 	 ${SUDO} dnf config-manager --set-enabled crb
          ${SUDO} dnf install -y python3-setuptools python3-wheel
@@ -333,7 +333,7 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
 EOF
          cat /etc/yum.repos.d/rocm.repo
 
-	 ${SUDO} dnf install -y https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/rhel/${DISTRO_VERSION}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm --allow-downgrades
+	 ${SUDO} dnf install -y https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/rhel/${DISTRO_VERSION}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
       fi
 # if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
 # if ROCM_VERSION is less than or equal to 6.1.2, the awk command result will be blank
@@ -342,21 +342,21 @@ EOF
          result=`echo $DISTRO_VERSION | awk '$1>24.00'` && echo $result
          if [[ "${result}" ]]; then
             # rocm-asan not available in Ubuntu 24.04
-            amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,rocmdevtools,lrt,openclsdk,openmpsdk,mlsdk --no-dkms --allow-downgrades --rocmrelease=${ROCM_VERSION}
+            amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,rocmdevtools,lrt,openclsdk,openmpsdk,mlsdk --no-dkms
 	 else
             # removing asan to reduce image size
             #amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk,asan --no-dkms
-            amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,rocmdevtools,lrt,openclsdk,openmpsdk,mlsdk --no-dkms --allow-downgrades --rocmrelease=${ROCM_VERSION}
+            amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,rocmdevtools,lrt,openclsdk,openmpsdk,mlsdk --no-dkms
             #${SUDO} apt-get install rocm_bandwidth_test
 	 fi
          if [ "${DISTRO}" == "ubuntu" ]; then
-            ${SUDO} apt-get install -y rocm-llvm-dev --allow-downgrades
+            ${SUDO} apt-get install -y rocm-llvm-dev
          #elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
             # error message that rocm-llvm-dev does not exist
             #${SUDO} dnf install -y rocm-llvm-dev
 	 fi
       else # ROCM_VERSION < 6.2
-         amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms --allow-downgrades --rocmrelease=${ROCM_VERSION}
+         amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms
       fi
 
 #      if [[ ! -f /opt/rocm-${ROCM_VERSION}/.info/version-dev ]]; then
@@ -367,7 +367,7 @@ EOF
 
       rm -rf amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
    fi
-   amdgpu-install -q -y --usecase=rocm,hip,hiplibsdk --no-dkms --allow-downgrades --rocmrelease=${ROCM_VERSION}
+   amdgpu-install -q -y --usecase=rocm,hip,hiplibsdk --no-dkms --rocmrelease=${ROCM_VERSION}
 #else
 #   echo "DISTRO version ${DISTRO} not recognized or supported"
 #   exit
