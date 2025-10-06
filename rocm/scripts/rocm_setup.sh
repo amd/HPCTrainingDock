@@ -359,11 +359,11 @@ EOF
          amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms --allow-downgrades --rocmrelease=${ROCM_VERSION}
       fi
 
-      if [[ ! -f /opt/rocm-${ROCM_VERSION}/.info/version-dev ]]; then
-         # Required by DeepSpeed
-	 # Exists in Ubuntu 24.04 and not 22.04
+#      if [[ ! -f /opt/rocm-${ROCM_VERSION}/.info/version-dev ]]; then
+#         # Required by DeepSpeed
+#	 # Exists in Ubuntu 24.04 and not 22.04
 #         ${SUDO} ln -s /opt/rocm-${ROCM_VERSION}/.info/version /opt/rocm-${ROCM_VERSION}/.info/version-dev
-      fi
+#      fi
 
       rm -rf amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
    fi
