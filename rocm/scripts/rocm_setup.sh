@@ -350,7 +350,7 @@ EOF
             #${SUDO} apt-get install rocm_bandwidth_test
 	 fi
          if [ "${DISTRO}" == "ubuntu" ]; then
-            ${SUDO} apt-get install rocm-llvm-dev --allow-downgrades
+            ${SUDO} apt-get install -y rocm-llvm-dev --allow-downgrades
          #elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
             # error message that rocm-llvm-dev does not exist
             #${SUDO} dnf install -y rocm-llvm-dev
