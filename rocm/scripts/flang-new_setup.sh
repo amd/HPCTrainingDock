@@ -31,7 +31,7 @@ usage()
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected "
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
-   echo "  --module-type [ MODULE_TYPE ] default $MODULE_TYPE "
+   echo "  --module-type [ MODULE_TYPE ] default $MODULE_TYPE, valid types are lmod and tcl "
    echo "  --install-path [ UNTAR_DIR_INPUT ] default $UNTAR_DIR "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
    echo "  --build-flang-new [ BUILD_FLANGNEW ] default $BUILD_FLANGNEW "
@@ -242,7 +242,8 @@ else
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	family("compiler")
 EOF
-else
+
+      elif [[ $MODULE_TYPE == "tcl" ]]; then
            # - on next line suppresses tab in the following lines
            cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ARCHIVE_DIR}
 
