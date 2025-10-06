@@ -1,6 +1,6 @@
 #!/bin/bash
 
-: ${ROCM_VERSION:="6.2.0"}
+: ${ROCM_VERSION:="6.4.1"}
 : ${ROCM_INSTALLPATH:="/opt/"}
 : ${USE_MAKEFILE:="0"}
 : ${PYTHON_VERSION:="12"}
@@ -102,8 +102,8 @@ done
 
 if [[ "${PYTHON_VERSION_INPUT}" == "" ]]; then
    if [[ "${DISTRO}" == "ubuntu" ]]; then
-      if [[ "${DISTRO_VERSION}" == "22.04" ]]; then
-         PYTHON_VERSION="10"
+      if [[ "${DISTRO_VERSION}" == "24.04" ]]; then
+         PYTHON_VERSION="12"
       fi
       if [[ "${DISTRO_VERSIONS}" == "22.04" ]]; then
          PYTHON_VERSION="10"

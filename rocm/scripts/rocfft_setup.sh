@@ -7,7 +7,7 @@ MODULE_PATH=/etc/lmod/modules/ROCmPlus/rocfft
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 ROCFFT_PATH=/opt/rocmplus-${ROCM_VERSION}/rocfft
 ROCFFT_PATH_INPUT=""
-ROCFFT_VERSION="1.0.32"
+ROCFFT_VERSION="develop"
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -211,9 +211,17 @@ else
 
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCFFT_VERSION}.lua
-        whatis("rocFFT with ROCm support")
+	whatis("rocFFT with ROCm support")
 
-        requires("rocm/${ROCM_VERSION}")
+	local base = "${ROCFFT_PATH}"
+
+        prereq("rocm/${ROCM_VERSION}")
+
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPATH", pathJoin(base, "include"))
+	prepend_path("INCLUDE", pathJoin(base, "include"))
 EOF
 
 fi

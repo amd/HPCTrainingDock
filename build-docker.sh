@@ -397,9 +397,9 @@ do
 	    BUILD_HIPFORT="1"
 	    BUILD_FTORCH="1"
 	    #BUILD_JULIA="1"
-	    INSTALL_ROCPROF_SYS_FROM_SOURCE="1"
-            INSTALL_ROCPROF_COMPUTE_FROM_SOURCE="1"
-	    BUILD_ROCPROFILER_SDK="1"
+	    INSTALL_ROCPROF_SYS_FROM_SOURCE="0"
+            INSTALL_ROCPROF_COMPUTE_FROM_SOURCE="0"
+	    BUILD_ROCPROFILER_SDK="0"
             reset-last
             ;;
         "--use-cached-apps")
@@ -595,9 +595,9 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             BUILD_HIPFORT="1"
             BUILD_FTORCH="1"
             #BUILD_JULIA="1"
-	    INSTALL_ROCPROF_SYS_FROM_SOURCE="1"
-            INSTALL_ROCPROF_COMPUTE_FROM_SOURCE="1"
-	    BUILD_ROCPROFILER_SDK="1"
+	    INSTALL_ROCPROF_SYS_FROM_SOURCE="0"
+            INSTALL_ROCPROF_COMPUTE_FROM_SOURCE="0"
+	    BUILD_ROCPROFILER_SDK="0"
 	    ;;
          *)
             echo "Unsupported build option request \"$i\""

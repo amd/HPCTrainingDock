@@ -7,7 +7,7 @@ MODULE_PATH=/etc/lmod/modules/ROCmPlus/hipfft
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 HIPFFT_PATH=/opt/rocmplus-${ROCM_VERSION}/hipfft
 HIPFFT_PATH_INPUT=""
-HIPFFT_VERSION="1.0.32"
+HIPFFT_VERSION="develop"
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -212,6 +212,17 @@ else
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${HIPFFT_VERSION}.lua
         whatis("hipFFT with ROCm support")
+
+        local base = "${HIPFFT_PATH}"
+
+        prereq("rocm/${ROCM_VERSION}")
+	load("rocfft/develop")
+
+        prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+        prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
+        prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+        prepend_path("CPATH", pathJoin(base, "include"))
+        prepend_path("INCLUDE", pathJoin(base, "include"))
 
         requires("rocm/${ROCM_VERSION}")
 EOF
