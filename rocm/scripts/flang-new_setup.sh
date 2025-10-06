@@ -10,8 +10,8 @@ UNTAR_DIR_INPUT=""
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_SHORT=$DISTRO
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-AFAR_NUMBER="8473"
-FLANG_RELEASE_NUMBER="7.1.1"
+AFAR_NUMBER="8705"
+FLANG_RELEASE_NUMBER="22.1.0"
 
 SUDO="sudo"
 
