@@ -12,6 +12,12 @@ DISTRO_SHORT=$DISTRO
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 AFAR_NUMBER="8705"
 FLANG_RELEASE_NUMBER="22.1.0"
+MODULE_TYPE="lmod"
+
+RHEL_COMPATIBLE=0
+if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
+   RHEL_COMPATIBLE=1
+fi
 
 SUDO="sudo"
 
@@ -25,6 +31,7 @@ usage()
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected "
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
+   echo "  --module-type [ MODULE_TYPE ] default $MODULE_TYPE "
    echo "  --install-path [ UNTAR_DIR_INPUT ] default $UNTAR_DIR "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
    echo "  --build-flang-new [ BUILD_FLANGNEW ] default $BUILD_FLANGNEW "
@@ -83,6 +90,11 @@ do
           MODULE_PATH=${1}
           reset-last
           ;;
+      "--module-type")
+          shift
+          MODULE_TYPE=${1}
+          reset-last
+          ;;
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
@@ -120,6 +132,8 @@ if [[ ${DISTRO} == "ubuntu" ]]; then
       DISTRO_SHORT="ubu"
       FULL_ARCHIVE_NAME="$ARCHIVE_NAME-$DISTRO_SHORT"
    fi
+elif [[ ${RHEL_COMPATIBLE} == "1" ]]; then
+   FULL_ARCHIVE_NAME="$ARCHIVE_NAME-rhel"
 fi
 
 
@@ -201,15 +215,16 @@ else
 
       ${SUDO} mkdir -p ${MODULE_PATH}
 
-      # - on next line suppresses tab in the following lines
-      cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ARCHIVE_DIR}.lua
+      if [[ $MODULE_TYPE == "lmod" ]]; then
+           # - on next line suppresses tab in the following lines
+           cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ARCHIVE_DIR}.lua
+
 	whatis("AMD AFAR drop #4.0 Beta Fortran OpenMP Compiler based on LLVM")
 	local help_message = [[
 	   PRE-PRODUCTION SOFTWARE:  The software accessible on this page may be a pre-production version, intended to provide advance access to features that may or may not eventually be included into production version of the software.  Accordingly, pre-production software may not be fully functional, may contain errors, and may have reduced or different security, privacy, accessibility, availability, and reliability standards relative to production versions of the software. Use of pre-production software may result in unexpected results, loss of data, project delays or other unpredictable damage or loss.  Pre-production software is not intended for use in production, and your use of pre-production software is at your own risk.
 	]]
 	local base = "${UNTAR_DIR}/${ARCHIVE_DIR}"
 
-	load("rocm/${ROCM_VERSION}")
 	setenv("AFAR_PATH", base)
 	setenv("CC", pathJoin(base, "bin/amdclang"))
 	setenv("CXX", pathJoin(base, "/bin/amdclang++"))
@@ -226,6 +241,40 @@ else
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	family("compiler")
+EOF
+else
+           # - on next line suppresses tab in the following lines
+           cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ARCHIVE_DIR}
+
+	#%Module
+
+	proc ModulesHelp { } {
+    	puts stderr "PRE-PRODUCTION SOFTWARE:  The software accessible on this page may be a pre-production version, intended to provide advance access to features that may or may not eventually be included into production version of the software.  Accordingly, pre-production software may not be fully functional, may contain errors, and may have reduced or different security, privacy, accessibility, availability, and reliability standards relative to production versions of the software. Use of pre-production software may result in unexpected results, loss of data, project delays or other unpredictable damage or loss.  Pre-production software is not intended for use in production, and your use of pre-production software is at your own risk."
+}
+
+	module-whatis "AMD AFAR drop #4.0 Beta Fortran OpenMP Compiler based on LLVM"
+
+	# Base install path
+	set base /shared/apps/rhel9/rocm-6.3.0/rocm-afar-22.1.0
+
+	# Environment variables
+	setenv AFAR_PATH $base
+	setenv CC        $base/bin/amdclang
+	setenv CXX       $base/bin/amdclang++
+	setenv FC        $base/bin/amdflang
+	setenv OMPI_CC   $base/bin/amdclang
+	setenv OMPI_CXX  $base/bin/amdclang++
+	setenv OMPI_FC   $base/bin/amdflang
+	setenv F77       $base/bin/amdflang
+	setenv F90       $base/bin/amdflang
+
+	# Paths
+	prepend-path PATH            $base/bin
+	prepend-path LD_LIBRARY_PATH $base/libexec
+	prepend-path LD_LIBRARY_PATH $base/lib
+	prepend-path MANPATH         $base/share/man
+	prepend-path C_INCLUDE_PATH  $base/include
+	prepend-path CPLUS_INCLUDE_PATH $base/include
 EOF
 
 fi
