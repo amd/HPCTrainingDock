@@ -13,6 +13,7 @@ TORCHVISION_HASH="59a3e1f"
 TORCHAUDIO_VERSION=2.7.1
 TORCHAUDIO_HASH="95c61b4"
 PILLOW_VERSION=11.3.0
+DEEPSPEED_VERSION="latest"
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/pytorch
 INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch
 INSTALL_PATH_INPUT=""
@@ -136,6 +137,7 @@ AOTRITON_PATH=$INSTALL_PATH/aotriton
 PYTORCH_PATH=$INSTALL_PATH/pytorch
 TORCHVISION_PATH=$INSTALL_PATH/vision
 TORCHAUDIO_PATH=$INSTALL_PATH/audio
+DEEPSPEED_PATH=$INSTALL_PATH/deepspeed
 
 if [ "${BUILD_PYTORCH}" = "0" ]; then
 
@@ -188,6 +190,7 @@ else
    echo "Torchvision Install Directory: $TORCHVISION_PATH"
    echo "Torchaudio Version: $TORCHAUDIO_VERSION"
    echo "Torchaudio Install Directory: $TORCHAUDIO_PATH"
+   echo "DeepSpeed Install Directory: $DEEPSPEED_PATH"
    echo "AOTriton Version: $AOTRITON_VERSION"
    echo "AOTriton Install Directory: $AOTRITON_PATH"
    echo "ROCm Version: $ROCM_VERSION"
@@ -231,6 +234,7 @@ else
       ${SUDO} mkdir -p ${INSTALL_PATH}
       ${SUDO} mkdir -p ${TRANSFORMERS_PATH}
       ${SUDO} mkdir -p ${TRITON_PATH}
+      ${SUDO} mkdir -p ${DEEPSPEED_PATH}
       ${SUDO} mkdir -p ${SAGEATTENTION_PATH}
       ${SUDO} mkdir -p ${FLASHATTENTION_PATH}
       ${SUDO} mkdir -p ${PYTORCH_PATH}
@@ -308,6 +312,7 @@ else
       ${SUDO} mkdir -p ${INSTALL_PATH}
       ${SUDO} mkdir -p ${TRANSFORMERS_PATH}
       ${SUDO} mkdir -p ${TRITON_PATH}
+      ${SUDO} mkdir -p ${DEEPSPEED_PATH}
       ${SUDO} mkdir -p ${SAGEATTENTION_PATH}
       ${SUDO} mkdir -p ${FLASHATTENTION_PATH}
       ${SUDO} mkdir -p ${ZSTD_PATH}
@@ -456,6 +461,8 @@ else
          echo "Finished testing import torch"
       fi
 
+      # Building Torchvision
+
       git clone --recursive --depth 1 --branch v${TORCHVISION_VERSION} https://github.com/pytorch/vision
       cd vision
       python3 setup.py install --prefix=${TORCHVISION_PATH}
@@ -468,6 +475,8 @@ else
          echo "Finished testing import torchvision"
       fi
 
+      # Building Torchaudio
+
       git clone --recursive --depth 1 --branch v${TORCHAUDIO_VERSION} https://github.com/pytorch/audio
       cd audio
       python3 setup.py install --prefix=${TORCHAUDIO_PATH}
@@ -479,6 +488,8 @@ else
       fi
       cd ..
 
+      # Building Triton
+
       ROCM_VERSION_WHEEL=${ROCM_VERSION}
       if [[ `echo ${ROCM_VERSION} | cut -f3-3 -d'.'` == 0 ]]; then
          ROCM_VERSION_WHEEL=`echo ${ROCM_VERSION} | cut -f1-2 -d'.'`
@@ -489,7 +500,13 @@ else
          TRITON_VERSION=3.2.0
       fi
       pip3 install pytorch_triton_rocm==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
+
+      # Building Sage Attention
+
       pip3 install --target=${SAGEATTENTION_PATH} sageattention --no-build-isolation
+
+      # Building Flash Attention
+
       pip3 install --target=${FLASHATTENTION_PATH} packaging
       export PYTHONPATH=$PYTHONPATH:${FLASHATTENTION_PATH}
       export PYTHONPATH=$PYTHONPATH:${FLASHATTENTION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages
@@ -497,6 +514,30 @@ else
       cd flash-attention
       #FLASH_ATTENTION_SKIP_CUDA_BUILD="FALSE" FLASH_ATTENTION_TRITON_AMD_ENABLE="TRUE" python3 setup.py install --prefix=${FLASHATTENTION_PATH}
       BUILD_TARGET="rocm" GPU_ARCHS="$AMDGPU_GFXMODEL" FLASH_ATTENTION_SKIP_CUDA_BUILD="FALSE" python3 setup.py install --prefix=${FLASHATTENTION_PATH}
+
+      # Building Deep Speed
+
+      DS_BUILD_AIO=1 \
+      DS_BUILD_CCL_COMM=0 \
+      DS_BUILD_CPU_ADAM=1 \
+      DS_BUILD_CPU_LION=1 \
+      DS_BUILD_EVOFORMER_ATTN=0 \
+      DS_BUILD_FUSED_ADAM=1 \
+      DS_BUILD_FUSED_LION=1 \
+      DS_BUILD_FUSED_LAMB=1 \
+      DS_BUILD_QUANTIZER=1 \
+      DS_BUILD_RANDOM_LTD=1 \
+      DS_BUILD_TRANSFORMER=1 \
+      DS_BUILD_STOCHASTIC_TRANSFORMER=1 \
+      DS_BUILD_SPARSE_ATTN=0 \
+      DS_BUILD_TRANSFORMER_INFERENCE=0 \
+      DS_BUILD_INFERENCE_CORE_OPS=0 \
+      DS_BUILD_SPATIAL_INFERENCE=0 \
+      DS_BUILD_CUTLASS_OPS=0 \
+      DS_BUILD_RAGGED_OPS=0 \
+      DS_BUILD_RAGGED_DEVICE_OPS=0 \
+      DS_BUILD_OPS=0 \
+      pip3 install --upgrade deepspeed einops  pydantic==2.11.9 hjson pydantic-core==2.33.2 msgpack typing_inspection annotated_types py-cpuinfo --no-cache-dir --target=$DEEPSPEED_PATH --no-build-isolation --no-deps
 
       deactivate
       cd ..
@@ -554,6 +595,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	prepend_path("PYTHONPATH","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages")
 	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}")
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}")
+	prepend_path("PYTHONPATH","${DEEPSPEED_PATH}")
 	prepend_path("PYTHONPATH","${PYTORCH_PATH}")
 	prepend_path("PYTHONPATH","${INSTALL_PATH}/pypackages")
 	prepend_path("PYTHONPATH","${TRITON_PATH}")
