@@ -244,6 +244,10 @@ else
          ${SUDO} chmod -R a+w ${INSTALL_PATH}
       fi
 
+      python3 -m venv pytorch_build
+      source pytorch_build/bin/activate
+      cd pytorch_build
+
       # install of pre-built pytorch using a wheel
       echo "Installing PyTorch, Torchaudio and Torchvision with wheel"
       if [[ `echo ${ROCM_VERSION} | cut -f3-3 -d'.'` == 0 ]]; then
@@ -252,15 +256,69 @@ else
       echo "ROCM_VERSION_WHEEL is ${ROCM_VERSION_WHEEL}"
       pip3 install torch==${PYTORCH_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${PYTORCH_PATH}
       export PYTHONPATH=$PYTHONPATH:$PYTORCH_PATH
+
+      # Installing Torchaudio
+
       pip3 install torchaudio==${TORCHAUDIO_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHAUDIO_PATH} --no-build-isolation
+
+      # Installing Torchvision
+
       pip3 install torchvision==${TORCHVISION_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHVISION_PATH} --no-build-isolation
+
+      # Installing Transformers
+
       pip3 install --target=${TRANSFORMERS_PATH} transformers --no-build-isolation
+
+      # Installing Sage Attention
+
       pip3 install --target=${SAGEATTENTION_PATH} sageattention --no-build-isolation
+
+      # Installing Flash Attention
+
       pip3 install --target=${FLASHATTENTION_PATH} packaging
       export PYTHONPATH=$PYTHONPATH:${FLASHATTENTION_PATH}
       git clone --branch v${FLASHATTENTION_VERSION} https://github.com/Dao-AILab/flash-attention.git
       cd flash-attention
       python3 setup.py install --prefix=${FLASHATTENTION_PATH}
+
+      # Installing Triton
+
+      ROCM_VERSION_WHEEL=${ROCM_VERSION}
+      if [[ `echo ${ROCM_VERSION} | cut -f3-3 -d'.'` == 0 ]]; then
+         ROCM_VERSION_WHEEL=`echo ${ROCM_VERSION} | cut -f1-2 -d'.'`
+      fi
+
+      pip3 install --target=${TRANSFORMERS_PATH} transformers --no-build-isolation
+      if [[ "${ROCM_VERSION}" == "6.4.2" || "${ROCM_VERSION}" == "6.4.3" ]]; then
+         TRITON_VERSION=3.2.0
+      fi
+      pip3 install pytorch_triton_rocm==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
+
+      # Buidling Deep Speed
+
+      DS_BUILD_AIO=1 \
+      DS_BUILD_CCL_COMM=0 \
+      DS_BUILD_CPU_ADAM=1 \
+      DS_BUILD_CPU_LION=1 \
+      DS_BUILD_EVOFORMER_ATTN=0 \
+      DS_BUILD_FUSED_ADAM=1 \
+      DS_BUILD_FUSED_LION=1 \
+      DS_BUILD_FUSED_LAMB=1 \
+      DS_BUILD_QUANTIZER=1 \
+      DS_BUILD_RANDOM_LTD=1 \
+      DS_BUILD_TRANSFORMER=1 \
+      DS_BUILD_STOCHASTIC_TRANSFORMER=1 \
+      DS_BUILD_SPARSE_ATTN=0 \
+      DS_BUILD_TRANSFORMER_INFERENCE=0 \
+      DS_BUILD_INFERENCE_CORE_OPS=0 \
+      DS_BUILD_SPATIAL_INFERENCE=0 \
+      DS_BUILD_CUTLASS_OPS=0 \
+      DS_BUILD_RAGGED_OPS=0 \
+      DS_BUILD_RAGGED_DEVICE_OPS=0 \
+      DS_BUILD_OPS=0 \
+      pip3 install --upgrade deepspeed einops psutil pydantic==2.11.9 hjson pydantic-core==2.33.2 msgpack typing_inspection annotated_types py-cpuinfo --no-cache-dir --target=$DEEPSPEED_PATH --no-build-isolation --no-deps
+
+      deactivate
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
@@ -461,7 +519,7 @@ else
          echo "Finished testing import torch"
       fi
 
-      # Building Torchvision
+      # Installing Torchvision
 
       git clone --recursive --depth 1 --branch v${TORCHVISION_VERSION} https://github.com/pytorch/vision
       cd vision
@@ -475,7 +533,7 @@ else
          echo "Finished testing import torchvision"
       fi
 
-      # Building Torchaudio
+      # Installing Torchaudio
 
       git clone --recursive --depth 1 --branch v${TORCHAUDIO_VERSION} https://github.com/pytorch/audio
       cd audio
@@ -488,20 +546,23 @@ else
       fi
       cd ..
 
-      # Building Triton
+      # Installing Transformers
+
+      pip3 install --target=${TRANSFORMERS_PATH} transformers --no-build-isolation
+
+      # Installing Triton
 
       ROCM_VERSION_WHEEL=${ROCM_VERSION}
       if [[ `echo ${ROCM_VERSION} | cut -f3-3 -d'.'` == 0 ]]; then
          ROCM_VERSION_WHEEL=`echo ${ROCM_VERSION} | cut -f1-2 -d'.'`
       fi
 
-      pip3 install --target=${TRANSFORMERS_PATH} transformers --no-build-isolation
       if [[ "${ROCM_VERSION}" == "6.4.2" || "${ROCM_VERSION}" == "6.4.3" ]]; then
          TRITON_VERSION=3.2.0
       fi
       pip3 install pytorch_triton_rocm==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
 
-      # Building Sage Attention
+      # Installing Sage Attention
 
       pip3 install --target=${SAGEATTENTION_PATH} sageattention --no-build-isolation
 
@@ -537,7 +598,7 @@ else
       DS_BUILD_RAGGED_OPS=0 \
       DS_BUILD_RAGGED_DEVICE_OPS=0 \
       DS_BUILD_OPS=0 \
-      pip3 install --upgrade deepspeed einops  pydantic==2.11.9 hjson pydantic-core==2.33.2 msgpack typing_inspection annotated_types py-cpuinfo --no-cache-dir --target=$DEEPSPEED_PATH --no-build-isolation --no-deps
+      pip3 install --upgrade deepspeed einops psutil pydantic==2.11.9 hjson pydantic-core==2.33.2 msgpack typing_inspection annotated_types py-cpuinfo --no-cache-dir --target=$DEEPSPEED_PATH --no-build-isolation --no-deps
 
       deactivate
       cd ..
