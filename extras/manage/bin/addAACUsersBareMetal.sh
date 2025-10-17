@@ -20,8 +20,8 @@ HOMEDIR_BASE=/shared/prerelease/home
 # note these uid/gids are only for Containers for Bob Robey.
 # you MUST use other number for other Containers !
 
-HACKATHONBASEUSER=12050
-HACKATHONBASEGROUP=12000
+HACKATHONBASEUSER=12109
+HACKATHONBASEGROUP=12002
 
 CLUSTER_NAME="prerelease01"
 
@@ -29,7 +29,7 @@ PARTITION1="1CN192C4G1H_MI300A_Ubuntu22"
 PARTITION2="1CN48C1G1H_MI300A_Ubuntu22"
 
 DRYRUN=0
-VERBOSE=1
+VERBOSE=2
 
 source userlist.sh
 
@@ -189,14 +189,18 @@ do
          else
             echo "Adding user to group $group_name and making it the primary group for the user"
             if (( "${VERBOSE}" > 0 )); then
+	       echo " sudo sacctmgr -i add account name="$group_name" cluster="$CLUSTER_NAME""
                echo "  sudo usermod -a -G ${group_name}"
                echo "  sudo usermod -g ${group_name}"
-	       echo " sudo sacctmgr -i add account name="$group_name" cluster="$CLUSTER_NAME""
             fi
             if [ "${DRYRUN}" != 1 ]; then
+	       sudo sacctmgr -i add account name="${group_name}" cluster="$CLUSTER_NAME"
                sudo usermod -a -G ${group_name} ${user_name}
                sudo usermod -g ${group_name} ${user_name}
-	       sudo sacctmgr -i add account name="$group_name" cluster="$CLUSTER_NAME"
+	    else
+               echo "sudo sacctmgr -i add account name=${group_name} cluster=$CLUSTER_NAME"
+               echo "sudo usermod -a -G ${group_name} ${user_name}"
+               echo "sudo usermod -g ${group_name} ${user_name}"
             fi
          fi
       fi
@@ -323,7 +327,7 @@ do
          echo "User does not exist -- creating user account"
          if (( "${VERBOSE}" > 0 )); then
 		 # Insert check if gid or group already exists
-            echo "  sudo groupadd -f -g $id $user_name"
+            echo "  sudo groupadd -f -g $gid $user_name"
 	    if [ "$gid" == "" ]; then
 	       echo "  sudo useradd --create-home --skel $HOME/init_scripts --shell /bin/bash --home ${USERHOMEDIR} --uid $id --gid (gid=gent $group_name) ${user_name}"
             else
@@ -336,7 +340,7 @@ do
             echo "  sudo chgrp -R ${group_name}  ${USERHOMEDIR}"
          fi
          if [ "${DRYRUN}" != 1 ]; then
-            sudo groupadd -f -g $id $user_name
+            sudo groupadd -f -g ${gid} $user_name
             sudo useradd --create-home --skel $HOME/init_scripts --shell /bin/bash --home ${USERHOMEDIR} --uid $id --gid ${gid} ${user_name}
 	    sudo usermod -G ${user_name} $user_name
             sudo chmod -R go-rwx  ${USERHOMEDIR}
@@ -378,13 +382,15 @@ do
       echo "sudo sacctmgr -i add user name=$user_name partition=$PARTITION2 cluster=$CLUSTER_NAME account=$group_name"
    fi
    if [[ $VIDEO_GROUP != 1 ]] || [[ $AUDIO_GROUP != 1 ]] || [[ $RENDER_GROUP != 1 ]] ; then
-      if (( "${VERBOSE}" > 2 )); then
+      if (( "${VERBOSE}" > 0 )); then
          echo "Add groups for access to the GPU (see /dev/dri /dev/kfd)"
          #sudo usermod -a -G video,audio,render, slurmusers ${user_name}
          echo "  sudo usermod -a -G video,audio,render,slurmusers ${user_name}"
       fi
       if [ "${DRYRUN}" != 1 ]; then
          sudo usermod -a -G video,audio,render,slurmusers ${user_name}
+      else
+         echo "sudo usermod -a -G video,audio,render,slurmusers ${user_name}"
       fi
    fi
    # add the ssh key to the users authorized_keys file
@@ -497,3 +503,4 @@ do
    fi 
    ((i=i+1))
 done
+
