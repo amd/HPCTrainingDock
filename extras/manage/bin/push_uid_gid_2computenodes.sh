@@ -80,12 +80,12 @@ do
           if [ -d "$f6" ]; then
              if [ "$VERBOSE" = "1" ]; then
                 echo "need to add user but home directory already exists"
-                echo ssh $host "sudo useradd -u $f3 -g $group_name -G video,render,slurmusers -s /bin/bash $f1"
+                echo ssh $host "sudo useradd -u $f3 -g $group_name -G video,render,slurmusers -s /bin/bash $f1 -d $f6"
              fi
              if [ "$DRY_RUN" = "1" ]; then
-                echo ssh $host "sudo useradd -u $f3 -g $group_name -G video,render,slurmusers -s /bin/bash $f1"
+                echo ssh $host "sudo useradd -u $f3 -g $group_name -G video,render,slurmusers -s /bin/bash $f1 -d $f6"
              else
-                ssh $host "sudo useradd -u $f3 -g $group_name -G video,render,slurmusers -s /bin/bash $f1" </dev/null || echo "useradd failed for group $f4 and user $f1 with uid $f3 on $host"
+                ssh $host "sudo useradd -u $f3 -g $group_name -G video,render,slurmusers -s /bin/bash $f1 -d $f6" </dev/null || echo "useradd failed for group $f4 and user $f1 with uid $f3 on $host"
              fi
           else
              if [ "$VERBOSE" = "1" ]; then
@@ -141,12 +141,12 @@ do
           if [ "`echo $current_group_list | tr ' ' '\n' | grep -w $group_name`" == "" ];then
              if [ "$VERBOSE" = "1" ]; then
                 echo user $f1 needs to be addd to group $group_name with gid $f4
-                echo ssh $host "sudo usermod -a -G $f4 $f1"
+                echo ssh $host "sudo usermod -a -G $group_name $f1"
              fi
              if [ "$DRY_RUN" = "1" ]; then
-                echo ssh $host "sudo usermod -a -G $f4 $f1"
+                echo ssh $host "sudo usermod -a -G $group_name $f1"
              else
-                ssh $host "sudo usermod -a -G $f4 $f1" </dev/null
+                ssh $host "sudo usermod -a -G $group_name $f1" </dev/null
              fi
           fi
        done
