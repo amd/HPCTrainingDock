@@ -138,17 +138,17 @@ do
              fi
           fi
           # Add user to their groups that are missing on compute node
-          if [ "`echo $current_group_list | tr ' ' '\n' | grep -w $group_name`" == "" ];then
-             if [ "$VERBOSE" = "1" ]; then
-                echo user $f1 needs to be addd to group $group_name with gid $f4
-                echo ssh $host "sudo usermod -a -G $group_name $f1"
-             fi
-             if [ "$DRY_RUN" = "1" ]; then
-                echo ssh $host "sudo usermod -a -G $group_name $f1"
-             else
-                ssh $host "sudo usermod -a -G $group_name $f1" </dev/null
-             fi
+       #   if [ "`echo $current_group_list | tr ' ' '\n' | grep -w $group_name`" == "" ];then
+          if [ "$VERBOSE" = "1" ]; then
+             echo user $f1 needs to be addd to group $group_name with gid $f4
+             echo ssh $host "sudo usermod -a -G $group_name $f1"
           fi
+          if [ "$DRY_RUN" = "1" ]; then
+             echo ssh $host "sudo usermod -a -G $group_name $f1"
+          else
+             ssh $host "sudo usermod -a -G $group_name $f1" </dev/null
+          fi
+       #   fi
        done
 
        # We should not need this since sacctmgr visible on all nodes?
