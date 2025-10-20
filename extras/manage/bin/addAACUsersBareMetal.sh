@@ -32,7 +32,7 @@ DRYRUN=0
 VERBOSE=2
 SCAN=1
 
-source userlist.sh
+source userlist.sh 
 
 i=0
 
@@ -331,26 +331,18 @@ do
          id=$((HACKATHONBASEUSER+i))
          gid=`getent group $group_name | cut -d: -f3`
          echo "User does not exist -- creating user account"
-         if (( "${VERBOSE}" > 0 )); then
-		 # Insert check if gid or group already exists
-            echo "  sudo groupadd -f -g $id $user_name"
-	    if [ "$gid" == "" ]; then
-	       echo "  sudo useradd --create-home --skel $HOME/init_scripts --shell /bin/bash --home ${USERHOMEDIR} --uid $id --gid (gid=gent $group_name) ${user_name}"
-            else
-	       echo "  sudo useradd --create-home --skel $HOME/init_scripts --shell /bin/bash --home ${USERHOMEDIR} --uid $id --gid ${gid} ${user_name}"
-	    fi
-	    echo "  sudo usermod -G ${user_name} $user_name"
-	 fi
          if (( "${VERBOSE}" > 1 )); then
+            echo "sudo useradd --create-home --skel $HOME/init_scripts --shell /bin/bash --home ${USERHOMEDIR} --uid $id --gid ${gid} ${user_name}"
+	    echo "sudo usermod -g ${group_name} $user_name"
             echo "  sudo chmod -R go-rwx  ${USERHOMEDIR}"
             echo "  sudo chgrp -R ${group_name}  ${USERHOMEDIR}"
          fi
          if [ "${DRYRUN}" != 1 ]; then
-            sudo groupadd -f -g $id $user_name
             sudo useradd --create-home --skel $HOME/init_scripts --shell /bin/bash --home ${USERHOMEDIR} --uid $id --gid ${gid} ${user_name}
-	    sudo usermod -g ${group_name} $user_name
+	    sudo usermod -g ${group_name} ${user_name}
+	    sudo usermod -a -G ${group_name} ${user_name} 
             sudo chmod -R go-rwx  ${USERHOMEDIR}
-            sudo chgrp -R ${user_name}  ${USERHOMEDIR}
+            sudo chown -R ${user_name} ${USERHOMEDIR}
          fi
          # set password
          if [ ! -z "${pw}" ]; then
@@ -409,12 +401,12 @@ do
       if [ ! -d ${USERHOMEDIR}/.ssh ]; then
          if (( "${VERBOSE}" > 1 )); then
             echo "  sudo mkdir -p  ${USERHOMEDIR}/.ssh"
-            echo "  sudo chgrp ${user_name} ${USERHOMEDIR}/.ssh"
+            echo "  sudo chown ${user_name} ${USERHOMEDIR}/.ssh"
             echo "  sudo chmod g+rwx ${USERHOMEDIR}/.ssh"
 	 fi
          if [ "${DRYRUN}" != 1 ]; then
             sudo mkdir -p  ${USERHOMEDIR}/.ssh
-            sudo chgrp ${user_name} ${USERHOMEDIR}/.ssh
+            sudo chown ${user_name} ${USERHOMEDIR}/.ssh
             sudo chmod g+rwx ${USERHOMEDIR}/.ssh
 	 fi
       fi
