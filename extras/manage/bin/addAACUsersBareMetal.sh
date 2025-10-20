@@ -251,9 +251,12 @@ do
          fi
          echo "home directory exists, but user does not. Adding user"
          if (( "${VERBOSE}" > 0 )); then
+            echo "sudo sacctmgr -i add account name=$group_name cluster=$CLUSTER_NAME"		 
             echo "  sudo useradd --shell /bin/bash --home ${USERHOMEDIR} --uid $uid --gid ${gid} ${user_name}"
+	    echo "sudo usermod -g ${group_name} $user_name"
          fi
          if [ "${DRYRUN}" != 1 ]; then
+            sudo sacctmgr -i add account name=$group_name cluster=$CLUSTER_NAME
             sudo useradd --shell /bin/bash --home ${USERHOMEDIR} --uid $uid --gid ${gid} ${user_name}
 	    sudo usermod -g ${group_name} $user_name
          fi
@@ -307,9 +310,11 @@ do
                # should add a check that the subdirectory matches the group name?
                echo "Group does not exist -- creating group"
                if (( "${VERBOSE}" > 0 )); then
+                  echo "sudo sacctmgr -i add account name=$group_name cluster=$CLUSTER_NAME"
                   echo "  sudo groupadd -f -g ${HACKATHONBASEGROUP} $group_name"
                fi
                if [ "${DRYRUN}" != 1 ]; then
+                  sudo sacctmgr -i add account name=$group_name cluster=$CLUSTER_NAME
                   sudo groupadd -f -g ${HACKATHONBASEGROUP} $group_name
                fi
                #echo "HACKATHONBASEGROUP=$((HACKATHONBASEGROUP+1))"
