@@ -30,8 +30,9 @@ PARTITION2="1CN48C1G1H_MI300A_Ubuntu22"
 
 DRYRUN=0
 VERBOSE=2
+SCAN=1
 
-source userlist_mix.sh
+source userlist.sh
 
 i=0
 
@@ -42,64 +43,67 @@ if [ ! -d "$HOMEDIR_BASE" ]; then
    sudo mkdir -p $HOMEDIR_BASE
 fi
 
-# First see what user ids and group ids are used by files in 
-# the Home directory tree and set the max to 
-echo "Starting scan for last used uid and gid in our range ($HACKATHONLASTUSER, $HACKATHONLASTGROUP) respectively"
-while read -r -d '' file
-do
-   uid=`sudo stat -c %u $file`
-   if [[ ! -z "$uid" ]]; then
-      if (( $uid > ${HACKATHONLASTUSER} )); then
-         HACKATHONLASTUSER=$uid
-      fi
-   fi
-   gid=`sudo stat -c %g $file`
-   if [[ ! -z "$gid" ]]; then
-      if (( $gid > ${HACKATHONLASTGROUP} )); then
-         HACKATHONLASTGROUP=$gid
-      fi
-   fi
-   #echo "User id is $uid Group id is $gid for file $file"
-done < <(sudo find ${HOMEDIR_BASE} -maxdepth 2 -print0)
-echo ""
-echo "After home directory scan last User id is $HACKATHONLASTUSER Group id is $HACKATHONLASTGROUP"
-echo ""
 
-echo "Starting scan of /etc/group and /etc/passwd for used gids and uids"
-while IFS='' read -r line; do
-   gid=`echo $line | cut -d':' -f 3`
-   #echo "Group id is $ggid"
-   if [[ ! -z "$gid" ]]; then
-      if (( $gid > 15000 )); then
-         continue
-      fi
-      if (( $gid > ${HACKATHONLASTGROUP} )); then
-         HACKATHONLASTGROUP=$gid
-      fi
-   fi
-done < /etc/group
-while IFS='' read -r line; do
-   uid=`echo $line | cut -d':' -f 3`
-   gid=`echo $line | cut -d':' -f 4`
-   #echo "User id is $uuid Group id is $gid"
-   if [[ ! -z "$gid" ]]; then
-      if (( $gid > ${HACKATHONLASTGROUP} )); then
-         if (( $gid < 15000 )); then
-            HACKATHONLASTGROUP=$gid
-         fi
-      fi
-   fi
-   if [[ ! -z "$uid" ]]; then
-      if (( $uid > ${HACKATHONLASTUSER} )); then
-         if (( $uid < 15000 )); then
+if [ "${DO_SCAN}" == "1" ]; then
+   # First see what user ids and group ids are used by files in 
+   # the Home directory tree and set the max to 
+   echo "Starting scan for last used uid and gid in our range ($HACKATHONLASTUSER, $HACKATHONLASTGROUP) respectively"
+   while read -r -d '' file
+   do
+      uid=`sudo stat -c %u $file`
+      if [[ ! -z "$uid" ]]; then
+         if (( $uid > ${HACKATHONLASTUSER} )); then
             HACKATHONLASTUSER=$uid
          fi
       fi
-   fi
-done < /etc/passwd
+      gid=`sudo stat -c %g $file`
+      if [[ ! -z "$gid" ]]; then
+         if (( $gid > ${HACKATHONLASTGROUP} )); then
+            HACKATHONLASTGROUP=$gid
+         fi
+      fi
+      #echo "User id is $uid Group id is $gid for file $file"
+   done < <(sudo find ${HOMEDIR_BASE} -maxdepth 2 -print0)
+   echo ""
+   echo "After home directory scan last User id is $HACKATHONLASTUSER Group id is $HACKATHONLASTGROUP"
+   echo ""
 
-HACKATHONBASEUSER=$((HACKATHONLASTUSER+1))
-HACKATHONBASEGROUP=$((HACKATHONLASTGROUP+1))
+   echo "Starting scan of /etc/group and /etc/passwd for used gids and uids"
+   while IFS='' read -r line; do
+      gid=`echo $line | cut -d':' -f 3`
+      #echo "Group id is $ggid"
+      if [[ ! -z "$gid" ]]; then
+         if (( $gid > 15000 )); then
+            continue
+         fi
+         if (( $gid > ${HACKATHONLASTGROUP} )); then
+            HACKATHONLASTGROUP=$gid
+         fi
+      fi
+   done < /etc/group
+   while IFS='' read -r line; do
+      uid=`echo $line | cut -d':' -f 3`
+      gid=`echo $line | cut -d':' -f 4`
+      #echo "User id is $uuid Group id is $gid"
+      if [[ ! -z "$gid" ]]; then
+         if (( $gid > ${HACKATHONLASTGROUP} )); then
+            if (( $gid < 15000 )); then
+               HACKATHONLASTGROUP=$gid
+            fi
+         fi
+      fi
+      if [[ ! -z "$uid" ]]; then
+         if (( $uid > ${HACKATHONLASTUSER} )); then
+            if (( $uid < 15000 )); then
+               HACKATHONLASTUSER=$uid
+            fi
+         fi
+      fi
+   done < /etc/passwd
+
+   HACKATHONBASEUSER=$((HACKATHONLASTUSER+1))
+   HACKATHONBASEGROUP=$((HACKATHONLASTGROUP+1))
+fi   
 
 echo ""
 echo "Base User id is $HACKATHONBASEUSER Group id is $HACKATHONBASEGROUP"
@@ -219,7 +223,7 @@ do
          fi
          echo "Adding group of home directory ${GROUP_NAME_HOMEDIR} to user"
          if (( "${VERBOSE}" > 0 )); then
-            echo "  sudo usermod -a -G ${GROUP_NAME_HOMEDIR}"
+            echo "  sudo usermod -a -G ${GROUP_NAME_HOMEDIR} ${user_name}"
          fi
          if [ "${DRYRUN}" != 1 ]; then
             sudo usermod -a -G ${GROUP_NAME_HOMEDIR} ${user_name}
@@ -251,6 +255,7 @@ do
          fi
          if [ "${DRYRUN}" != 1 ]; then
             sudo useradd --shell /bin/bash --home ${USERHOMEDIR} --uid $uid --gid ${gid} ${user_name}
+	    sudo usermod -g ${group_name} $user_name
          fi
 
          # Need to add a group for the home directory if it doesn't match the user's group id
@@ -272,10 +277,10 @@ do
             fi
             echo "Adding group of home directory ${GROUP_NAME_HOMEDIR} to user"
             if (( "${VERBOSE}" > 0 )); then
-               echo "  sudo usermod -a -G ${GROUP_NAME_HOMEDIR}"
+               echo "  sudo usermod -a -G ${GROUP_NAME_HOMEDIR} ${user_name}"
             fi
             if [ "${DRYRUN}" != 1 ]; then
-               sudo usermod -a -G ${GROUP_NAME_HOMEDIR}
+               sudo usermod -a -G ${GROUP_NAME_HOMEDIR} ${user_name}
             fi
          fi
          # set password
@@ -338,7 +343,7 @@ do
          if [ "${DRYRUN}" != 1 ]; then
             sudo groupadd -f -g $id $user_name
             sudo useradd --create-home --skel $HOME/init_scripts --shell /bin/bash --home ${USERHOMEDIR} --uid $id --gid ${gid} ${user_name}
-	    sudo usermod -G ${user_name} $user_name
+	    sudo usermod -g ${group_name} $user_name
             sudo chmod -R go-rwx  ${USERHOMEDIR}
             sudo chgrp -R ${user_name}  ${USERHOMEDIR}
          fi
