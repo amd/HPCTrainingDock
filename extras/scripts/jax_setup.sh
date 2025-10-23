@@ -207,6 +207,9 @@ else
          echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
+      ROCM_VERSION_BAZEL=`echo "$ROCM_VERSION" | awk -F. '{print $1}'`
+      ROCM_VERSION_BAZEL="${ROCM_VERSION_BAZEL}0"
+
       if [[ `which python | wc -l` -eq 0 ]]; then
          if [[ ${SUDO} != "" ]]; then
             echo "============================"
@@ -258,7 +261,7 @@ else
             python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
                                    --bazel_options=--override_repository=xla=$XLA_PATH \
                                    --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
-                                   --build_gpu_plugin --gpu_plugin_rocm_version=60 --build_gpu_kernel_plugin=rocm \
+                                   --build_gpu_plugin --gpu_plugin_rocm_version=$ROCM_VERSION_BAZEL --build_gpu_kernel_plugin=rocm \
                                    --bazel_options=--jobs=128 \
                                    --bazel_startup_options=--host_jvm_args=-Xmx512m
          elif [[ $JAX_VERSION == "5.0" || $JAX_VERSION == "6.0" ]]; then
@@ -280,11 +283,11 @@ else
                                          --bazel_options=--override_repository=xla=$XLA_PATH \
                                          --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
                                          --clang_path=$ROCM_PATH/llvm/bin/clang \
-                                         --rocm_version=60 \
+                                         --rocm_version=$ROCM_VERSION_BAZEL \
                                          --use_clang=true \
                                          --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
                                          --bazel_options=--jobs=128 \
-                                         --bazel_startup_options=--host_jvm_args=-Xmx512m
+                                         --bazel_startup_options=--host_jvm_args=-Xmx4g
          else
             echo " JAX version $JAX_VERSION not compatible with ROCm 6.4.0 "
             compat_info
@@ -309,7 +312,7 @@ else
                                          --bazel_options=--override_repository=xla=$XLA_PATH \
                                          --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
                                          --clang_path=$ROCM_PATH/llvm/bin/clang \
-                                         --rocm_version=60 \
+                                         --rocm_version=$ROCM_VERSION_BAZEL \
                                          --use_clang=true \
                                          --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
                                          --bazel_options=--jobs=128 \
@@ -320,7 +323,7 @@ else
                                    --bazel_options=--override_repository=xla=$XLA_PATH \
                                    --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
                                    --bazel_options=--action_env=CC=/usr/bin/gcc --nouse_clang \
-                                   --build_gpu_plugin --gpu_plugin_rocm_version=60 --build_gpu_kernel_plugin=rocm \
+                                   --build_gpu_plugin --gpu_plugin_rocm_version=$ROCM_VERSION_BAZEL --build_gpu_kernel_plugin=rocm \
                                    --bazel_options=--jobs=128 \
                                    --bazel_startup_options=--host_jvm_args=-Xmx512m
          fi
