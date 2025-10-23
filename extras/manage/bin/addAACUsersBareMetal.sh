@@ -20,7 +20,7 @@ HOMEDIR_BASE=/shared/prerelease/home
 # note these uid/gids are only for Containers for Bob Robey.
 # you MUST use other number for other Containers !
 
-HACKATHONBASEUSER=12109
+HACKATHONBASEUSER=12318
 HACKATHONBASEGROUP=12002
 
 CLUSTER_NAME="prerelease01"
@@ -30,9 +30,9 @@ PARTITION2="1CN48C1G1H_MI300A_Ubuntu22"
 
 DRYRUN=0
 VERBOSE=2
-SCAN=1
+DO_SCAN=1
 
-source userlist.sh 
+source userlist.sh
 
 i=0
 
@@ -45,28 +45,28 @@ fi
 
 
 if [ "${DO_SCAN}" == "1" ]; then
-   # First see what user ids and group ids are used by files in 
-   # the Home directory tree and set the max to 
-   echo "Starting scan for last used uid and gid in our range ($HACKATHONLASTUSER, $HACKATHONLASTGROUP) respectively"
-   while read -r -d '' file
-   do
-      uid=`sudo stat -c %u $file`
-      if [[ ! -z "$uid" ]]; then
-         if (( $uid > ${HACKATHONLASTUSER} )); then
-            HACKATHONLASTUSER=$uid
-         fi
-      fi
-      gid=`sudo stat -c %g $file`
-      if [[ ! -z "$gid" ]]; then
-         if (( $gid > ${HACKATHONLASTGROUP} )); then
-            HACKATHONLASTGROUP=$gid
-         fi
-      fi
-      #echo "User id is $uid Group id is $gid for file $file"
-   done < <(sudo find ${HOMEDIR_BASE} -maxdepth 2 -print0)
-   echo ""
-   echo "After home directory scan last User id is $HACKATHONLASTUSER Group id is $HACKATHONLASTGROUP"
-   echo ""
+#   # First see what user ids and group ids are used by files in 
+#   # the Home directory tree and set the max to 
+#   echo "Starting scan for last used uid and gid in our range ($HACKATHONLASTUSER, $HACKATHONLASTGROUP) respectively"
+#   while read -r -d '' file
+#   do
+#      uid=`sudo stat -c %u $file`
+#      if [[ ! -z "$uid" ]]; then
+#         if (( $uid > ${HACKATHONLASTUSER} )); then
+#            HACKATHONLASTUSER=$uid
+#         fi
+#      fi
+#      gid=`sudo stat -c %g $file`
+#      if [[ ! -z "$gid" ]]; then
+#         if (( $gid > ${HACKATHONLASTGROUP} )); then
+#            HACKATHONLASTGROUP=$gid
+#         fi
+#      fi
+#      #echo "User id is $uid Group id is $gid for file $file"
+#   done < <(sudo find ${HOMEDIR_BASE} -maxdepth 2 -print0)
+#   echo ""
+#   echo "After home directory scan last User id is $HACKATHONLASTUSER Group id is $HACKATHONLASTGROUP"
+#   echo ""
 
    echo "Starting scan of /etc/group and /etc/passwd for used gids and uids"
    while IFS='' read -r line; do
@@ -328,7 +328,7 @@ do
             USERHOMEDIR=${HOMEDIR_BASE}/${user_name}
          fi
 
-         id=$((HACKATHONBASEUSER+i))
+         id=$HACKATHONBASEUSER
          gid=`getent group $group_name | cut -d: -f3`
          echo "User does not exist -- creating user account"
          if (( "${VERBOSE}" > 1 )); then
@@ -355,6 +355,8 @@ do
                echo "No password requested for ${user_name}"
             fi
          fi
+	 # increment uid by 1 since we are using a uid for creating a user account
+         HACKATHONBASEUSER=$((HACKATHONBASEUSER+1))
       fi
    fi
 
