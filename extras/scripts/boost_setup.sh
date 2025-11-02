@@ -81,11 +81,11 @@ do
    shift
 done
 
+BOOST_VERSION_DOTS=`echo "${BOOST_VERSION}" | sed 's/_/./g'`
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
    # override path in case BOOST_VERSION has been supplied as input
-   BOOST_VERSION_DOTS=`echo "${BOOST_VERSION}" | sed 's/_/./g'`
    INSTALL_PATH=/opt/boost-v${BOOST_VERSION_DOTS}
 fi
 
