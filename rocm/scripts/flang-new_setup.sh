@@ -10,8 +10,8 @@ UNTAR_DIR_INPUT=""
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_SHORT=$DISTRO
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-AFAR_NUMBER="8705"
-FLANG_RELEASE_NUMBER="22.1.0"
+AFAR_NUMBER="8873"
+FLANG_RELEASE_NUMBER="22.2.0"
 MODULE_TYPE="lmod"
 
 RHEL_COMPATIBLE=0
@@ -277,5 +277,7 @@ EOF
 	prepend-path C_INCLUDE_PATH  $base/include
 	prepend-path CPLUS_INCLUDE_PATH $base/include
 EOF
+      fi
 
 fi
+
