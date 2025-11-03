@@ -41,7 +41,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    ${SUDO} ${DEB_FRONTEND} apt-get install -q -y build-essential cmake libnuma1 wget gnupg2 m4 bash-completion git-core autoconf libtool autotools-dev \
       lsb-release libpapi-dev libpfm4-dev libudev1 rpm librpm-dev curl apt-utils vim tmux rsync ${SUDO} \
       bison flex texinfo libnuma-dev pkg-config libibverbs-dev rdmacm-utils ssh locales gpg ca-certificates \
-      gcc g++ gfortran ninja-build libtbb-dev
+      gcc g++ gfortran ninja-build libtbb-dev nano
 
 # Install python packages
    ${SUDO} ${DEB_FRONTEND} apt-get install -q -y python3-pip python3-dev python3-venv
