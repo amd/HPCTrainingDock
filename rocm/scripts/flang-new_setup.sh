@@ -256,7 +256,7 @@ EOF
 	module-whatis "AMD AFAR drop #4.0 Beta Fortran OpenMP Compiler based on LLVM"
 
 	# Base install path
-	set base /shared/apps/rhel9/rocm-6.3.0/rocm-afar-22.1.0
+	set base /shared/apps/rhel9/rocm-${ROCM_VERSION}/rocm-afar-${FLANG_RELEASE_NUMBER}
 
 	# Environment variables
 	setenv AFAR_PATH $base
