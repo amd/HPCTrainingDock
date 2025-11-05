@@ -127,7 +127,7 @@ version-set()
       AMDGPU_INSTALL_VERSION=${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_MAJOR}0${ROCM_MINOR}0${ROCM_PATCH}-1
       AMDGPU_ROCM_VERSION=${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_PATCH}
    fi
-   if [ "${ROCM_MAJOR}" == "7" ]; then
+   if [ "${ROCM_MAJOR}" == "7" ] && [ "${ROCM_MINOR}" == "0" ]; then
       AMDGPU_INSTALL_VERSION=${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_PATCH}.${ROCM_MAJOR}0${ROCM_MINOR}0${ROCM_PATCH}-1
    fi
 }
@@ -350,7 +350,10 @@ EOF
             #${SUDO} apt-get install rocm_bandwidth_test
 	 fi
          if [ "${DISTRO}" == "ubuntu" ]; then
-            ${SUDO} apt-get install -y rocm-llvm-dev
+            result=`echo $ROCM_MAJOR.$ROCM_MINOR | awk '$1>7.0'` && echo "result at line 354 is :$result:"
+	    if [[ "$result" != "$ROCM_MAJOR.$ROCM_MINOR" ]]; then
+               ${SUDO} apt-get install -y rocm-llvm-dev
+	    fi
          #elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
             # error message that rocm-llvm-dev does not exist
             #${SUDO} dnf install -y rocm-llvm-dev
