@@ -494,9 +494,11 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ROCm HIPFort")
 	whatis("Version: ${ROCM_VERSION}")
 
-	setenv("HIPFORT_HOME", "/opt/rocm-${ROCM_VERSION}")
-	append_path("LD_LIBRARY_PATH", "/opt/rocm-${ROCM_VERSION}/lib")
-	setenv("LIBS", "-L/opt/rocm-${ROCM_VERSION}/lib -lhipfort-amdgcn.a")
+        local base = "/opt/rocm-${ROCM_VERSION}"
+        append_path("LD_LIBRARY_PATH", pathJoin(base, "/lib"))
+        setenv("LIBS", "-L" .. pathJoin(base, "/lib") .. " -lhipfort-amdgcn.a")
+        setenv("HIPFORT_LIB", pathJoin(base, "/lib"))
+        setenv("HIPFORT_INC", pathJoin(base, "/include/hipfort"))
 	load("rocm/${ROCM_VERSION}")
 EOF
 
