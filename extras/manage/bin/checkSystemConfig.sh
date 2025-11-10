@@ -127,3 +127,22 @@ else
    echo "(MI210, MI250X, MI300A, MI300X)"
    echo "==============================="
 fi
+
+# Need to add for memory check
+#Check and correct amdgpu driver memory size
+#
+#Check the memory pool size
+#cat /sys/module/amdttm/parameters/page_pool_size
+#
+#Make sure that you get 134217728. If this is not the case, configure the amd driver to use all available GPU memory by creating or updating the file /etc/modprobe.d/amdttm.conf with the following settings:
+#options amdttm pages_limit=134217728
+#options amdttm page_pool_size=134217728
+#
+#Restart the driver and check the pool size again.
+#Reboot the node if the size is still 96GBs.
+#
+#If this does not help update grub again and reboot the node (use the correct kernel version bellow):
+#$ sudo grubby --default-kernel
+#/boot/vmlinuz-5.14.0-427.24.1.el9_4.x86_64
+#$ sudo grubby --update-kernel=/boot/vmlinuz-5.14.0-427.24.1.el9_4.x86_64 --arg="amdttm.pages_limit=134217728 amdttm.page_pool_size=134217728"
+#$ sudo reboot
