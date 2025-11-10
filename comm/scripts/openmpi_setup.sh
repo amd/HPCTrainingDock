@@ -843,7 +843,30 @@ if [[ "${DRY_RUN}" == "0" ]]; then
    ${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}.lua
+   if [[ "${ROCM_VERSION}" == "7.1.0" ]]; then
+     # Need the legacy mode enabled as a workaround for a bcast bug
+
+     cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}.lua
+	whatis("Name: GPU-aware openmpi")
+	whatis("Version: openmpi-${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}")
+	whatis("Description: An open source Message Passing Interface implementation")
+	whatis(" This is a GPU-Aware version of OpenMPI")
+	whatis("URL: https://github.com/open-mpi/ompi.git")
+	
+	local base = "${OPENMPI_PATH}"
+	
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("PATH", pathJoin(base, "bin"))
+	setenv("MPI_PATH","${OPENMPI_PATH}")
+	setenv("HSA_ENABLE_IPC_MODE_LEGACY","1")
+	load("rocm/${ROCM_VERSION}")
+	family("MPI")
+EOF
+   else
+
+     cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}.lua
 	whatis("Name: GPU-aware openmpi")
 	whatis("Version: openmpi-${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}")
 	whatis("Description: An open source Message Passing Interface implementation")
@@ -860,6 +883,8 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 	load("rocm/${ROCM_VERSION}")
 	family("MPI")
 EOF
+
+   fi
 
 fi
 
