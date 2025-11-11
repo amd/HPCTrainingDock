@@ -49,7 +49,6 @@ RUN /tmp/adduser_os.sh && rm /tmp/adduser_os.sh
 
 USER sysadmin
 
-RUN sudo groupadd sudo
 RUN sudo usermod -aG sudo sysadmin
 
 RUN echo 'sysadmin ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/sysadmin

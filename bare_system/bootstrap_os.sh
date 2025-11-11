@@ -23,6 +23,7 @@ elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    groupadd render -g 109
    groupadd renderalt -g 110
    dnf install -y cmake
+   groupadd sudo
 elif [ "${DISTRO}" = "opensuse leap" ]; then
    zypper update -y
    zypper dist-upgrade -y
