@@ -424,6 +424,7 @@ ${SUDO} mkdir -p ${MODULE_PATH}
 # autodetecting default version for distro and getting available gcc version list
 GCC_BASE_VERSION=`ls /usr/bin/gcc-* | cut -f2 -d'-' | grep '^[[:digit:]]' | head -1`
 
+if [ "${DISTRO}" == "ubuntu" ]; then
 # The - option suppresses tabs
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ROCm")
@@ -446,6 +447,28 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	setenv("ROCM_PATH", base)
 	family("GPUSDK")
 EOF
+elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
+# The - option suppresses tabs
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
+	whatis("Name: ROCm")
+	whatis("Version: ${ROCM_VERSION}")
+	whatis("Category: AMD")
+	whatis("ROCm")
+	whatis("Set HIPCC_VERBOSE=7 to see what hipcc is doing for the compilation and link")
+
+	local base = "/opt/rocm-${ROCM_VERSION}"
+	local mbase = " /etc/lmod/modules/ROCm/rocm"
+
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPATH", pathJoin(base, "include"))
+	prepend_path("PATH", pathJoin(base, "bin"))
+	prepend_path("INCLUDE", pathJoin(base, "include"))
+	setenv("ROCM_PATH", base)
+	family("GPUSDK")
+EOF
+fi
 
 # Create a module file for amdclang compiler
 export MODULE_PATH=/etc/lmod/modules/ROCm/amdclang
