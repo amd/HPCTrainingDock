@@ -290,6 +290,8 @@ else
 
 	    # install the wheel for jaxlib
             pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
+            # next we need to install the jax python module
+            pip3 install --target=${JAX_PATH} .
 
             cd ..
 	    # then we are using the ROCm/rocm-jax repo to build the other wheels
