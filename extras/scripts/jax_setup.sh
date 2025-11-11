@@ -209,7 +209,9 @@ else
       fi
 
       ROCM_VERSION_BAZEL=`echo "$ROCM_VERSION" | awk -F. '{print $1}'`
-      ROCM_VERSION_BAZEL="${ROCM_VERSION_BAZEL}0"
+      if [[ "${ROCM_VERSION_BAZEL}" == "6" ]]; then
+         ROCM_VERSION_BAZEL="${ROCM_VERSION_BAZEL}0"
+      fi
 
       if [[ `which python | wc -l` -eq 0 ]]; then
          if [[ ${SUDO} != "" ]]; then
