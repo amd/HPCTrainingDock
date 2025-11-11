@@ -252,10 +252,10 @@ else
 
       # this here is to take into account that the ROCm/jax repo has been deprecated
       # after the release of ROCm 7.1.0 and now it is all located at ROCm/rocm-jax
-      result=`echo ${ROCM_VERSION} | awk '$1>7.0'` && echo $result
-      # check if ROCm version is greater than or equal to 7.0
-      if [[ "${result}" ]]; then
-         if [[ $JAX_VERSION == "7.1" ]]; then
+      if [[ $JAX_VERSION == "7.1" ]]; then
+         result=`echo ${ROCM_VERSION} | awk '$1>7.0'` && echo $result
+         # check if ROCm version is greater than or equal to 7.0
+         if [[ "${result}" ]]; then
 
             PYTHON_VERSION=$(python3 -V 2>&1 | awk '{print $2}')
             if [[ "$PYTHON_VERSION" == 3.10.* ]]; then
@@ -312,7 +312,7 @@ else
             pip3 install -v --target=${JAX_PATH} dist/jax*.whl --force-reinstall
 
          else
-	    echo "For JAX version 7.1 you need ROCm 7.1.0"
+	    echo "For JAX version 7.1 you need at least ROCm 7.1.0"
             compat_info	    
          fi		 
       else 	      
