@@ -296,18 +296,18 @@ else
             cd ..
 	    # then we are using the ROCm/rocm-jax repo to build the other wheels
    	    git clone  --depth 1 --branch rocm-jax-v0.${JAX_VERSION} https://github.com/ROCm/rocm-jax.git
-	    cd rocm-jax
+	    cd rocm-jax/jax_rocm_plugin
             sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
             sed -i "s|gfx906,gfx908,gfx90a,gfx942,gfx1030,gfx1100,gfx1101,gfx1200,gfx1201|$AMDGPU_GFXMODEL|" .bazelrc
-	    python3 .jax_rocm_plugin/build/build.py build --rocm_path=$ROCM_PATH \
-                                                          --bazel_options=--override_repository=xla=$XLA_PATH \
-                                                          --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
-                                                          --clang_path=$ROCM_PATH/llvm/bin/clang \
-                                                          --rocm_version=$ROCM_VERSION_BAZEL \
-                                                          --use_clang=true \
-                                                          --wheels=jax-rocm-plugin,jax-rocm-pjrt \
-                                                          --bazel_options=--jobs=128 \
-                                                          --bazel_startup_options=--host_jvm_args=-Xmx4g
+	    python3 build/build.py build --rocm_path=$ROCM_PATH \
+                                         --bazel_options=--override_repository=xla=$XLA_PATH \
+                                         --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
+                                         --clang_path=$ROCM_PATH/llvm/bin/clang \
+                                         --rocm_version=$ROCM_VERSION_BAZEL \
+                                         --use_clang=true \
+                                         --wheels=jax-rocm-plugin,jax-rocm-pjrt \
+                                         --bazel_options=--jobs=128 \
+                                         --bazel_startup_options=--host_jvm_args=-Xmx4g
             # next we need to install the wheels that we built
             pip3 install -v --target=${JAX_PATH} dist/jax*.whl --force-reinstall
 
