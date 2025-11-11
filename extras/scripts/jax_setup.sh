@@ -309,7 +309,7 @@ else
                                          --bazel_options=--jobs=128 \
                                          --bazel_startup_options=--host_jvm_args=-Xmx4g
             # next we need to install the wheels that we built
-            pip3 install -v --target=${JAX_PATH} dist/jax*.whl --force-reinstall
+            pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
 
          else
 	    echo "For JAX version 7.1 you need at least ROCm 7.1.0"
