@@ -41,6 +41,7 @@ usage()
 compat_info()
 {
    echo " List of compatible versions according to https://github.com/ROCm/jax/releases: "
+   echo " JAX version 7.1 --> ROCm version 7.1.0 and Python higher than 3.10 "
    echo " JAX version 5.0 --> ROCm versions 6.0.3, 6.2.4 and 6.3.1 "
    echo " JAX version 4.35 --> ROCm versions 6.0.3, 6.1.3 and 6.2.4 "
    echo " JAX version 4.34 --> ROCm versions 6.0.3, 6.1.3 and 6.2.3 "
@@ -249,22 +250,20 @@ else
          ${SUDO} chmod a+w ${JAXLIB_PATH}
       fi
 
-      result=`echo ${ROCM_VERSION} | awk '$1>6.3.9'` && echo $result
-      # check if ROCm version is greater than or equal to 6.4.0
+      # this here is to take into account that the ROCm/jax repo has been deprecated
+      # after the release of ROCm 7.1.0 and now it is all located at ROCm/rocm-jax
+      result=`echo ${ROCM_VERSION} | awk '$1>7.0'` && echo $result
+      # check if ROCm version is greater than or equal to 7.0
       if [[ "${result}" ]]; then
-         if [[ $JAX_VERSION == "4.35" ]]; then
-            sed -i '$a build:rocm --copt=-Wno-error=c23-extensions' .bazelrc
-            module load amdclang
-            export CLANG_COMPILER=`which clang`
-            sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
-            # build the wheel for jaxlib using clang (which is the default)
-            python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
-                                   --bazel_options=--override_repository=xla=$XLA_PATH \
-                                   --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
-                                   --build_gpu_plugin --gpu_plugin_rocm_version=$ROCM_VERSION_BAZEL --build_gpu_kernel_plugin=rocm \
-                                   --bazel_options=--jobs=128 \
-                                   --bazel_startup_options=--host_jvm_args=-Xmx512m
-         elif [[ $JAX_VERSION == "5.0" || $JAX_VERSION == "6.0" ]]; then
+         if [[ $JAX_VERSION == "7.1" ]]; then
+
+            PYTHON_VERSION=$(python3 -V 2>&1 | awk '{print $2}')
+            if [[ "$PYTHON_VERSION" == 3.10.* ]]; then
+               echo "Python 3.10 is not supported by JAX 7.1: https://docs.jax.dev/en/latest/deprecation.html"
+               compat_info
+            fi
+
+            # we are building jaxlib with the ROCm/jax repo
             PATCHELF_PATH=${JAX_PATH}/patchelf
             ${SUDO} mkdir -p ${PATCHELF_PATH}
             git clone -b ${PATCHELF_VERSION} https://github.com/NixOS/patchelf.git
@@ -285,59 +284,149 @@ else
                                          --clang_path=$ROCM_PATH/llvm/bin/clang \
                                          --rocm_version=$ROCM_VERSION_BAZEL \
                                          --use_clang=true \
-                                         --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
+                                         --wheels=jaxlib \
                                          --bazel_options=--jobs=128 \
                                          --bazel_startup_options=--host_jvm_args=-Xmx4g
-         else
-            echo " JAX version $JAX_VERSION not compatible with ROCm 6.4.0 "
-            compat_info
-         fi
-      else
-         if [[ $JAX_VERSION == "5.0" || $JAX_VERSION == "6.0" ]]; then
-            PATCHELF_PATH=${JAX_PATH}/patchelf
-            ${SUDO} mkdir -p ${PATCHELF_PATH}
-            git clone -b ${PATCHELF_VERSION} https://github.com/NixOS/patchelf.git
-            cd patchelf
-            ./bootstrap.sh
-            ./configure --prefix=$PATCHELF_PATH
-            make -j
-            ${SUDO} make install
-            export PATH=$PATH:$PATCHELF_PATH/bin
-            cd ../
-            rm -rf patchelf
-            module load amdclang
-            export CLANG_COMPILER=`which clang`
+
+	    # install the wheel for jaxlib
+            pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
+
+            cd ..
+	    # then we are using the ROCm/rocm-jax repo to build the other wheels
+   	    git clone  --depth 1 --branch rocm-jax-v0.${JAX_VERSION} https://github.com/ROCm/rocm-jax.git
+	    cd rocm-jax
             sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
-            python3 build/build.py build --rocm_path=$ROCM_PATH \
-                                         --bazel_options=--override_repository=xla=$XLA_PATH \
-                                         --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
-                                         --clang_path=$ROCM_PATH/llvm/bin/clang \
-                                         --rocm_version=$ROCM_VERSION_BAZEL \
-                                         --use_clang=true \
-                                         --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
-                                         --bazel_options=--jobs=128 \
-                                         --bazel_startup_options=--host_jvm_args=-Xmx512m
+            sed -i "s|gfx906,gfx908,gfx90a,gfx942,gfx1030,gfx1100,gfx1101,gfx1200,gfx1201|$AMDGPU_GFXMODEL|" .bazelrc
+	    python3 .jax_rocm_plugin/build/build.py build --rocm_path=$ROCM_PATH \
+                                                          --bazel_options=--override_repository=xla=$XLA_PATH \
+                                                          --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
+                                                          --clang_path=$ROCM_PATH/llvm/bin/clang \
+                                                          --rocm_version=$ROCM_VERSION_BAZEL \
+                                                          --use_clang=true \
+                                                          --wheels=jax-rocm-plugin,jax-rocm-pjrt \
+                                                          --bazel_options=--jobs=128 \
+                                                          --bazel_startup_options=--host_jvm_args=-Xmx4g
+            # next we need to install the wheels that we built
+            pip3 install -v --target=${JAX_PATH} dist/jax*.whl --force-reinstall
+
          else
-            # build the wheel for jaxlib using gcc
-            python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
-                                   --bazel_options=--override_repository=xla=$XLA_PATH \
-                                   --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
-                                   --bazel_options=--action_env=CC=/usr/bin/gcc --nouse_clang \
-                                   --build_gpu_plugin --gpu_plugin_rocm_version=$ROCM_VERSION_BAZEL --build_gpu_kernel_plugin=rocm \
-                                   --bazel_options=--jobs=128 \
-                                   --bazel_startup_options=--host_jvm_args=-Xmx512m
+	    echo "For JAX version 7.1 you need ROCm 7.1.0"
+            compat_info	    
+         fi		 
+      else 	      
+         result=`echo ${ROCM_VERSION} | awk '$1>6.3.9'` && echo $result
+         # check if ROCm version is greater than or equal to 6.4.0
+         if [[ "${result}" ]]; then
+            if [[ $JAX_VERSION == "4.35" ]]; then
+               sed -i '$a build:rocm --copt=-Wno-error=c23-extensions' .bazelrc
+               module load amdclang
+               export CLANG_COMPILER=`which clang`
+               sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
+               # build the wheel for jaxlib using clang (which is the default)
+               python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
+                                      --bazel_options=--override_repository=xla=$XLA_PATH \
+                                      --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
+                                      --build_gpu_plugin --gpu_plugin_rocm_version=$ROCM_VERSION_BAZEL --build_gpu_kernel_plugin=rocm \
+                                      --bazel_options=--jobs=128 \
+                                      --bazel_startup_options=--host_jvm_args=-Xmx512m
+
+               # install the wheel for jaxlib
+               pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
+
+               # next we need to install the jax python module
+               pip3 install --target=${JAX_PATH} .
+
+            elif [[ $JAX_VERSION == "5.0" || $JAX_VERSION == "6.0" ]]; then
+               PATCHELF_PATH=${JAX_PATH}/patchelf
+               ${SUDO} mkdir -p ${PATCHELF_PATH}
+               git clone -b ${PATCHELF_VERSION} https://github.com/NixOS/patchelf.git
+               cd patchelf
+               ./bootstrap.sh
+               ./configure --prefix=$PATCHELF_PATH
+               make -j
+               ${SUDO} make install
+               export PATH=$PATH:$PATCHELF_PATH/bin
+               cd ../
+               rm -rf patchelf
+               module load amdclang
+               export CLANG_COMPILER=`which clang`
+               sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
+               python3 build/build.py build --rocm_path=$ROCM_PATH \
+                                            --bazel_options=--override_repository=xla=$XLA_PATH \
+                                            --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
+                                            --clang_path=$ROCM_PATH/llvm/bin/clang \
+                                            --rocm_version=$ROCM_VERSION_BAZEL \
+                                            --use_clang=true \
+                                            --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
+                                            --bazel_options=--jobs=128 \
+                                            --bazel_startup_options=--host_jvm_args=-Xmx4g
+ 
+               # install the wheel for jaxlib
+               pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
+
+               # next we need to install the jax python module
+               pip3 install --target=${JAX_PATH} .
+
+            else
+               echo " JAX version $JAX_VERSION not compatible with ROCm 6.4.0 "
+               compat_info
+            fi
+         else
+            if [[ $JAX_VERSION == "5.0" || $JAX_VERSION == "6.0" ]]; then
+               PATCHELF_PATH=${JAX_PATH}/patchelf
+               ${SUDO} mkdir -p ${PATCHELF_PATH}
+               git clone -b ${PATCHELF_VERSION} https://github.com/NixOS/patchelf.git
+               cd patchelf
+               ./bootstrap.sh
+               ./configure --prefix=$PATCHELF_PATH
+               make -j
+               ${SUDO} make install
+               export PATH=$PATH:$PATCHELF_PATH/bin
+               cd ../
+               rm -rf patchelf
+               module load amdclang
+               export CLANG_COMPILER=`which clang`
+               sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
+               python3 build/build.py build --rocm_path=$ROCM_PATH \
+                                            --bazel_options=--override_repository=xla=$XLA_PATH \
+                                            --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
+                                            --clang_path=$ROCM_PATH/llvm/bin/clang \
+                                            --rocm_version=$ROCM_VERSION_BAZEL \
+                                            --use_clang=true \
+                                            --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
+                                            --bazel_options=--jobs=128 \
+                                            --bazel_startup_options=--host_jvm_args=-Xmx512m
+
+               # install the wheel for jaxlib
+               pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
+
+               # next we need to install the jax python module
+               pip3 install --target=${JAX_PATH} .
+
+            else
+               # build the wheel for jaxlib using gcc
+               python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
+                                      --bazel_options=--override_repository=xla=$XLA_PATH \
+                                      --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
+                                      --bazel_options=--action_env=CC=/usr/bin/gcc --nouse_clang \
+                                      --build_gpu_plugin --gpu_plugin_rocm_version=$ROCM_VERSION_BAZEL --build_gpu_kernel_plugin=rocm \
+                                      --bazel_options=--jobs=128 \
+                                      --bazel_startup_options=--host_jvm_args=-Xmx512m
+
+               # install the wheel for jaxlib
+               pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
+
+               # next we need to install the jax python module
+               pip3 install --target=${JAX_PATH} .
+
+            fi
          fi
-      fi
-
-      # install the wheel for jaxlib
-      pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
-
-      # next we need to install the jax python module
-      pip3 install --target=${JAX_PATH} .
+      fi	 
 
       # cleanup
       cd ..
       rm -rf /tmp/jax
+      rm -rf /tmp/rocm-jax
       rm -rf /tmp/xla
 
       if [[ "${USER}" != "root" ]]; then
