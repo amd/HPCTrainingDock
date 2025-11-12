@@ -5,7 +5,7 @@ ROCM_VERSION=6.2.0
 BUILD_JAX=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/jax
 AMDGPU_GFXMODEL_INPUT=""
-JAX_VERSION=6.0
+JAX_VERSION=7.1
 JAX_PATH=/opt/rocmplus-${ROCM_VERSION}/jax
 JAX_PATH_INPUT=""
 JAXLIB_PATH=/opt/rocmplus-${ROCM_VERSION}/jaxlib
@@ -41,7 +41,7 @@ usage()
 compat_info()
 {
    echo " List of compatible versions according to https://github.com/ROCm/jax/releases: "
-   echo " JAX version 7.1 --> ROCm version 7.1.0 and Python higher than 3.10 "
+   echo " JAX version 7.1 --> ROCm version 7.0.0 or higher and Python higher than 3.10 "
    echo " JAX version 5.0 --> ROCm versions 6.0.3, 6.2.4 and 6.3.1 "
    echo " JAX version 4.35 --> ROCm versions 6.0.3, 6.1.3 and 6.2.4 "
    echo " JAX version 4.34 --> ROCm versions 6.0.3, 6.1.3 and 6.2.3 "
@@ -314,7 +314,7 @@ else
             pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
 
          else
-	    echo "For JAX version 7.1 you need at least ROCm 7.1.0"
+	    echo "For JAX version 7.1 you need at least ROCm 7.0.0"
             compat_info	    
          fi		 
       else 	      
