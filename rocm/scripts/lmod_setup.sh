@@ -3,6 +3,12 @@
 # Autodetect defaults
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+
+RHEL_COMPATIBLE=0
+if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
+   RHEL_COMPATIBLE=1
+fi
+
 SUDO="sudo"
 export DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
@@ -25,7 +31,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
 fi
 echo "DISTRO is ${DISTRO}"
 
-if [ "${DISTRO}" = "rocky linux" ]; then
+if [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    ${SUDO} yum -y install epel-release
    ${SUDO} yum repolist
    ${SUDO} yum update -y
