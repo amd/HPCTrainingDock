@@ -29,7 +29,7 @@ UCX_MD5CHECKSUM=32c295d04994e305fb9db7331597bd05
 UCC_VERSION=1.4.4
 UCC_MD5CHECKSUM=1e45e0dac6765cdabd4fbcf55fc48563
 XPMEM_VERSION=2.7.4
-#XPMEM_MD5CHECKSUM=a161703b2f4740edbf6b9049a16ccb94
+XPMEM_MD5CHECKSUM=fba34a0af58ab0c722d3b28fc08c2800
 OPENMPI_VERSION=5.0.7
 OPENMPI_MD5CHECKSUM=0529027472015810e5f0d749136ca0a3
 C_COMPILER=gcc
@@ -272,8 +272,8 @@ echo "============================"
 echo ""
 
 IS_DOCKER=0
-if [ -f "/run/systemd/container" ]; then
-  IS_DOCKER=`grep -E '^docker$' /run/systemd/container |wc -l`
+if [ -f "/.dockerenv" ]; then
+  IS_DOCKER=1
 fi
 if [ "${IS_DOCKER}" == "1" ]; then
    BUILD_XPMEM=0
