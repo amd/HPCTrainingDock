@@ -124,13 +124,8 @@ version-set()
       AMDGPU_INSTALL_VERSION=${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_MAJOR}0${ROCM_MINOR}0${ROCM_PATCH}-1
       AMDGPU_ROCM_VERSION=${ROCM_MAJOR}.${ROCM_MINOR}
    else
-      AMDGPU_INSTALL_VERSION=${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_MAJOR}0${ROCM_MINOR}0${ROCM_PATCH}-1
+      AMDGPU_INSTALL_VERSION=${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_PATCH}.${ROCM_MAJOR}0${ROCM_MINOR}0${ROCM_PATCH}-1
       AMDGPU_ROCM_VERSION=${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_PATCH}
-   fi
-   if [ "${DISTRO}" = "ubuntu" ]; then
-      if [ "${ROCM_MAJOR}" == "7" ] && [ "${ROCM_MINOR}" == "0" ]; then
-         AMDGPU_INSTALL_VERSION=${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_PATCH}.${ROCM_MAJOR}0${ROCM_MINOR}0${ROCM_PATCH}-1
-      fi
    fi
 }
 
@@ -335,15 +330,8 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
 EOF
          cat /etc/yum.repos.d/rocm.repo
 
-	 ROCM_VERSION_AMDGPU_INSTALL=${ROCM_VERSION}
-	 if [[ "${ROCM_VERSION}" == "7.0.0" ]]; then
-	    ROCM_VERSION_AMDGPU_INSTALL=7.0
-	 fi
-	 if [[ "${ROCM_VERSION}" == "7.1.0" ]]; then
-	    ROCM_VERSION_AMDGPU_INSTALL=7.1
-	    ${AMDGPU_INSTALL_VERSION}
-	 fi
-	 ${SUDO} dnf install -y https://repo.radeon.com/amdgpu-install/${ROCM_VERSION_AMDGPU_INSTALL}/rhel/${DISTRO_VERSION}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
+	 echo "${SUDO} dnf install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${DISTRO_VERSION}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm"
+	 ${SUDO} dnf install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${DISTRO_VERSION}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
       fi
 # if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
 # if ROCM_VERSION is less than or equal to 6.1.2, the awk command result will be blank
