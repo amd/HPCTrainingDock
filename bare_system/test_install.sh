@@ -127,6 +127,10 @@ if [[ "${PODMAN_DETECT}" -ge "1" ]]; then
    ADD_OPTIONS="${ADD_OPTIONS} --format docker"
 fi
 
+if [[ "${DISTRO}" == *"rocky"* ]]; then
+   DISTRO="rockylinux/rockylinux"
+fi
+
 docker build --no-cache ${ADD_OPTIONS} \
              --build-arg DISTRO=${DISTRO}  \
              --build-arg DISTRO_VERSION=${DISTRO_VERSION} \
@@ -144,7 +148,7 @@ if [ $? -ne 0 ]; then
 fi
 
 RHEL_COMPATIBLE=0
-if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
+if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" == *"rocky"* || "${DISTRO}" == "almalinux" ]]; then
    RHEL_COMPATIBLE=1
 fi
 

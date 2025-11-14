@@ -18,6 +18,7 @@ RHEL_COMPATIBLE=0
 if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
    RHEL_COMPATIBLE=1
 fi
+exit
 
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
