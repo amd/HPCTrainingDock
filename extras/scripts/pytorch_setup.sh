@@ -26,6 +26,12 @@ DEBUG=0
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
+RHEL_COMPATIBLE=0
+if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" == *"rocky"* || "${DISTRO}" == "almalinux" ]]; then
+   RHEL_COMPATIBLE=1
+fi
+
+
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
    DEB_FRONTEND=""
@@ -289,9 +295,14 @@ else
       fi
 
       pip3 install --target=${TRANSFORMERS_PATH} transformers --no-build-isolation
+      TRITON_PACKAGE_NAME=pytorch_triton_rocm
       if [[ "${ROCM_VERSION}" == "6.4.2" || "${ROCM_VERSION}" == "6.4.3" ]]; then
          TRITON_VERSION=3.2.0
       fi
+      if [[ "${ROCM_VERSION}" == "7.0.2" || "${ROCM_VERSION}" == *"7.1."* ]]; then
+	 TRITON_PACKAGE_NAME=triton
+      fi
+      echo "pip3 install ${TRITON_PACKAGE_NAME}==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation"
       pip3 install pytorch_triton_rocm==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
 
       # Buidling Deep Speed
@@ -348,24 +359,37 @@ else
          echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
-      if [[ ${SUDO} != "" ]]; then
-         ${SUDO} apt-get update
-         ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3 liblzma-dev libzstd-dev git-lfs
-         module load ${MPI_MODULE}
-         if [[ `which mpicc | wc -l` -eq 0 ]]; then
-            ${SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
+      if [[ "${DISTRO}" == "ubuntu" ]]; then
+         if [[ ${SUDO} != "" ]]; then
+            ${SUDO} apt-get update
+            ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3 liblzma-dev libzstd-dev git-lfs
+            module load ${MPI_MODULE}
+            if [[ `which mpicc | wc -l` -eq 0 ]]; then
+               ${SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
+            fi
+            wget -q https://registrationcenter-download.intel.com/akdlm/IRC_NAS/79153e0f-74d7-45af-b8c2-258941adf58a/intel-onemkl-2025.0.0.940.sh
+            ${SUDO} sh ./intel-onemkl-2025.0.0.940.sh -a -s --eula accept
+            export PATH=/opt/intel/oneapi:$PATH
+         else
+            ln -s $(which python3) ~/bin/python
+            export PATH="$HOME/bin:$PATH"
+            source $HOME/.bashrc
+            mkdir -p ${INSTALL_PATH}/mkl
+            pip3 install mkl --target=${INSTALL_PATH}/mkl
+            export PYTHONPATH=$PYTHONPATH:${INSTALL_PATH}/mkl
          fi
-         wget -q https://registrationcenter-download.intel.com/akdlm/IRC_NAS/79153e0f-74d7-45af-b8c2-258941adf58a/intel-onemkl-2025.0.0.940.sh
-         ${SUDO} sh ./intel-onemkl-2025.0.0.940.sh -a -s --eula accept
-         export PATH=/opt/intel/oneapi:$PATH
-      else
-         ln -s $(which python3) ~/bin/python
-         export PATH="$HOME/bin:$PATH"
-         source $HOME/.bashrc
-         mkdir -p ${INSTALL_PATH}/mkl
-         pip3 install mkl --target=${INSTALL_PATH}/mkl
-         export PYTHONPATH=$PYTHONPATH:${INSTALL_PATH}/mkl
+      elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
+         if [[ ${SUDO} != "" ]]; then
+            ${SUDO} dnf install -y ninja-build
+            module load ${MPI_MODULE}
+            wget -q https://registrationcenter-download.intel.com/akdlm/IRC_NAS/79153e0f-74d7-45af-b8c2-258941adf58a/intel-onemkl-2025.0.0.940.sh
+            ${SUDO} sh ./intel-onemkl-2025.0.0.940.sh -a -s --eula accept
+            export PATH=/opt/intel/oneapi:$PATH
+         else
+            dnf install -y ninja-build
+	 fi
       fi
+
 
       ${SUDO} mkdir -p ${INSTALL_PATH}
       ${SUDO} mkdir -p ${TRANSFORMERS_PATH}
