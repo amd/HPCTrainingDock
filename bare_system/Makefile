@@ -119,7 +119,7 @@ slurm.timestamp:
 openmpi.timestamp: rocm.timestamp
 	comm/scripts/openmpi_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}'
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' --build-xpmem 0
 	touch openmpi.timestamp
 
 mvapich.timestamp: rocm.timestamp
