@@ -7,7 +7,7 @@ MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/tensorflow
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 TF_PATH=/opt/rocmplus-${ROCM_VERSION}/tensorflow
 TF_PATH_INPUT=""
-GIT_BRANCH="merge-250318"
+GIT_BRANCH="merge-20251021"
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
