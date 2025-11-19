@@ -205,7 +205,7 @@ else
       s|build_file = "@local_xla//third_party:net_zstd.BUILD"|build_file = "@local_xla//third_party:net_zstd.BUILD"|
       s|sha256 = ".*"|sha256 = "b6c537b53356a3af3ca3e621457751fa9a6ba96daf3aebb3526ae0f610863532"|
       s|strip_prefix = ".*"|strip_prefix = "zstd-1.4.5/lib"|
-      s|urls = tf_mirror_urls("https://github.com/facebook/zstd/archive/.*"|urls = tf_mirror_urls("https://github.com/facebook/zstd/archive/v1.4.5.zip"), |
+      s|urls = tf_mirror_urls("https://github.com/facebook/zstd/archive/.*"|urls = tf_mirror_urls("https://github.com/facebook/zstd/archive/v1.4.5.zip" |
 }' tensorflow//workspace2.bzl
 
       export CLANG_COMPILER=`which clang`
