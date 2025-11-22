@@ -7,7 +7,7 @@ MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/tensorflow
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 TF_PATH=/opt/rocmplus-${ROCM_VERSION}/tensorflow
 TF_PATH_INPUT=""
-GIT_BRANCH="merge-20251021"
+GIT_BRANCH="r2.20-rocm-enhanced"
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -201,12 +201,16 @@ else
 
       cd tensorflow-upstream
 
-      sed -i '/name = "net_zstd"/,/tf_mirror_urls/{
-      s|build_file = "@local_xla//third_party:net_zstd.BUILD"|build_file = "@local_xla//third_party:net_zstd.BUILD"|
-      s|sha256 = ".*"|sha256 = "b6c537b53356a3af3ca3e621457751fa9a6ba96daf3aebb3526ae0f610863532"|
-      s|strip_prefix = ".*"|strip_prefix = "zstd-1.4.5/lib"|
-      s|urls = tf_mirror_urls("https://github.com/facebook/zstd/archive/.*"|urls = tf_mirror_urls("https://github.com/facebook/zstd/archive/v1.4.5.zip" |
+      if [[ "${GITHUB_BRANCH}" != "r2.20-rocm-enhanced" ]]; then
+
+         sed -i '/name = "net_zstd"/,/tf_mirror_urls/{
+         s|build_file = "@local_xla//third_party:net_zstd.BUILD"|build_file = "@local_xla//third_party:net_zstd.BUILD"|
+         s|sha256 = ".*"|sha256 = "b6c537b53356a3af3ca3e621457751fa9a6ba96daf3aebb3526ae0f610863532"|
+         s|strip_prefix = ".*"|strip_prefix = "zstd-1.4.5/lib"|
+         s|urls = tf_mirror_urls("https://github.com/facebook/zstd/archive/.*"|urls = tf_mirror_urls("https://github.com/facebook/zstd/archive/v1.4.5.zip" |
 }' tensorflow//workspace2.bzl
+
+      fi
 
       export CLANG_COMPILER=`which clang`
       sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
