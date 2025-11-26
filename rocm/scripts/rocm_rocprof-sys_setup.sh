@@ -55,6 +55,14 @@ do
    shift
 done
 
+# if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
+# if ROCM_VERSION is less than or equal to 6.1.2, the awk command result will be blank
+result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
+if [[ "${result}" == "${ROCM_VERSION}" ]]; then
+   echo "ROCm built-in profiling tools should already be installed on ROCm versions after 6.2.0"
+   exit
+fi
+
 TOOL_NAME=omnitrace
 TOOL_EXEC_NAME=omnitrace
 TOOL_NAME_MC=Omnitrace
