@@ -677,10 +677,18 @@ if [ "${INCLUDE_TOOLS}" = "1" ]; then
       pip install pyinstaller
       pip install -r /opt/rocm-${ROCM_VERSION}/libexec/rocprofiler-compute/requirements.txt
 
-      pyinstaller --onefile /opt/rocm-${ROCM_VERSION}/libexec/rocprofiler-compute/rocprof-compute \
+      if [[ -f /opt/rocm-${ROCM_VERSION}/libexec/rocprofiler-compute/VERSION.sha ]]; then
+         pyinstaller --onefile /opt/rocm-${ROCM_VERSION}/libexec/rocprofiler-compute/rocprof-compute \
+           --add-data "/opt/rocm-${ROCM_VERSION}/libexec/rocprofiler-compute/utils:utils" \
+           --add-data "/opt/rocm-${ROCM_VERSION}/libexec/rocprofiler-compute/VERSION:." \
+           --add-data "/opt/rocm-${ROCM_VERSION}/libexec/rocprofiler-compute/VERSION.sha:." \
+           --distpath rocprof-compute-exec/dist
+      else
+         pyinstaller --onefile /opt/rocm-${ROCM_VERSION}/libexec/rocprofiler-compute/rocprof-compute \
            --add-data "/opt/rocm-${ROCM_VERSION}/libexec/rocprofiler-compute/utils:utils" \
            --add-data "/opt/rocm-${ROCM_VERSION}/libexec/rocprofiler-compute/VERSION:." \
            --distpath rocprof-compute-exec/dist
+      fi
 
       ls -RC rocprof-compute-exec/dist/
       rocprof-compute-exec/dist/rocprof-compute --version
