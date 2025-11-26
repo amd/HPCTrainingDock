@@ -686,7 +686,7 @@ if [ "${INCLUDE_TOOLS}" = "1" ]; then
       rocprof-compute-exec/dist/rocprof-compute --version
       ${SUDO} cp rocprof-compute-exec/dist/rocprof-compute /opt/rocm-${ROCM_VERSION}/bin/rocprof-compute.exe
       ${SUDO} rm -f /opt/rocm-${ROCM_VERSION}/bin/rocprof-compute
-      ${SUDO} ln -s /opt/rocm-${ROCM_VERSION}/bin/rocprof-compute.exe /opt/rocm-${ROCM_VERSION}/bin/rocprof-compute
+      cd /opt/rocm-${ROCM_VERSION}/bin && ${SUDO} ln -s rocprof-compute.exe rocprof-compute && cd
       rocprof-compute --version
       deactivate
       rm -rf rocprof-compute-exec
