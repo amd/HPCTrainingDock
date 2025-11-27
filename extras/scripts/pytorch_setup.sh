@@ -4,7 +4,7 @@ ROCM_VERSION=6.2.0
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 BUILD_PYTORCH=0
 ZSTD_VERSION=1.5.6
-PYTORCH_VERSION=2.8.0
+PYTORCH_VERSION=2.9.1
 PYTHON_VERSION=10
 TORCHVISION_VERSION=0.22.1
 FLASHATTENTION_VERSION=2.8.0
@@ -166,11 +166,14 @@ else
       exit 1
    fi
   
-   CMAKE_TARGET_GPUS="-DTARGET_GPUS=${TARGET_GPUS}"
+   AOTRITON_EXTRA_CMAKE_FLAGS="-DTARGET_GPUS=${TARGET_GPUS}"
    PYTORCH_SHORT_VERSION=`echo ${PYTORCH_VERSION} | cut -f1-2 -d'.'`
-   if [ "${PYTORCH_SHORT_VERSION}" == "2.8" ]; then
+   if [ "${PYTORCH_SHORT_VERSION}" == "2.9" ]; then
+      AOTRITON_VERSION="0.11b"
+      AOTRITON_EXTRA_CMAKE_FLAGS="-DAOTRITON_TARGET_ARCH=${AMDGPU_GFXMODEL} -DAOTRITON_OVERRIDE_TARGET_GPUS=${AMDGPU_GFXMODEL}_mod0 -DAOTRITON_USE_TORCH=0"
+   elif [ "${PYTORCH_SHORT_VERSION}" == "2.8" ]; then
       AOTRITON_VERSION="0.10b"
-      CMAKE_TARGET_GPUS="-DAOTRITON_TARGET_ARCH=${AMDGPU_GFXMODEL} -DAOTRITON_OVERRIDE_TARGET_GPUS=${AMDGPU_GFXMODEL}_mod0"
+      AOTRITON_EXTRA_CMAKE_FLAGS="-DAOTRITON_TARGET_ARCH=${AMDGPU_GFXMODEL} -DAOTRITON_OVERRIDE_TARGET_GPUS=${AMDGPU_GFXMODEL}_mod0"
    elif [ "${PYTORCH_SHORT_VERSION}" == "2.7" ]; then
       AOTRITON_VERSION="0.9.2b"
    elif [ "${PYTORCH_SHORT_VERSION}" == "2.6" ]; then
@@ -441,7 +444,7 @@ else
 	 exit 1
       fi
 
-      cmake -DAOTRITON_HIPCC_PATH=${ROCM_PATH}/bin ${CMAKE_TARGET_GPUS} -DCMAKE_INSTALL_PREFIX=${AOTRITON_PATH} -DCMAKE_BUILD_TYPE=Release -DAOTRITON_GPU_BUILD_TIMEOUT=0  -G Ninja ..
+      cmake -DAOTRITON_HIPCC_PATH=${ROCM_PATH}/bin ${AOTRITON_EXTRA_CMAKE_FLAGS} -DCMAKE_INSTALL_PREFIX=${AOTRITON_PATH} -DCMAKE_BUILD_TYPE=Release -DAOTRITON_GPU_BUILD_TIMEOUT=0  -G Ninja ..
 
       ninja install
 
@@ -510,6 +513,12 @@ else
          sed -i '/FILES_MATCHING PATTERN \"\*\.py")/s/^/#/g' caffe2/CMakeLists.txt
       fi
 
+      if [ "${PYTORCH_SHORT_VERSION}" == "2.9" ]; then
+         cd third_party
+	 find . -type f -exec sed -i 's/^CMAKE_MINIMUM_REQUIRED(VERSION .*/CMAKE_MINIMUM_REQUIRED(VERSION 3.5)/' {} +
+	 cd ..
+      fi
+
       python3 -m pip install -r requirements.txt
       pip3 install -r requirements.txt --target=${INSTALL_PATH}/pypackages
       python3 tools/amd_build/build_amd.py >& /dev/null
@@ -520,6 +529,13 @@ else
       echo "===================="
       echo ""
       python3 setup.py install --prefix=${PYTORCH_PATH}
+      # With PyTorch 2.9.1:
+      # WARNING: Redirecting 'python setup.py install' to 'pip install . -v --no-build-isolation', for more info see https://github.com/pytorch/pytorch/issues/152276
+      if [ "${PYTORCH_SHORT_VERSION}" == "2.9" ]; then
+        ${SUDO} cp -a lib/python*/site-packages/* ${PYTORCH_PATH}
+	${SUDO} mkdir -p ${PYTORCH_PATH}/bin
+	${SUDO} cp -a bin/* ${PYTORCH_PATH}/bin
+      fi
       echo ""
       echo "===================="
       echo "Finished setup.py install"
