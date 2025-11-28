@@ -645,6 +645,9 @@ else
 #   for a multiple gfx models, the following should work
 #	--with-rocm-arch="--offload-arch=gfx90a --offload-arch=gfx942" \
 
+      if [[ "${ROCM_VERSION}" == 7* ]]; then
+         sed -i -e '7,7a#include <stdbool.h>' src/components/ec/rocm/ec_rocm_executor_interruptible.c
+      fi
       UCC_CONFIGURE_COMMAND="./configure \
         --prefix=${UCC_PATH} \
         --with-rocm=${ROCM_PATH} \
