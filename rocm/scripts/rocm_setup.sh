@@ -34,7 +34,7 @@ usage()
    echo "  --replace default off"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
-   #echo "  --python-version [ PYTHON_VERSION ] Python3 minor version, default not set"
+   echo "  --python-version [ PYTHON_VERSION ] Python3 minor version, default not set"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
    echo "  --include-tools [INCLUDE_TOOLS] default $INCLUDE_TOOLS "
    echo "  --help: this usage information"
@@ -79,11 +79,11 @@ do
           ROCM_VERSION=${1}
           reset-last
           ;;
-#      "--python-version")
-#          shift
-#          PYTHON_VERSION=${1}
-#          reset-last
-#          ;;
+      "--python-version")
+          shift
+          PYTHON_VERSION=${1}
+          reset-last
+          ;;
       "--include-tools")
           shift
           INCLUDE_TOOLS=${1}
@@ -593,34 +593,34 @@ if [ "${INCLUDE_TOOLS}" = "1" ]; then
       fi
    fi
 
-#   if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
-#      export MODULE_PATH=/etc/lmod/modules/ROCm/${TOOL_NAME}
-#      ${SUDO} mkdir -p ${MODULE_PATH}
-#      # The - option suppresses tabs
-#   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
-#	whatis("Name: ${TOOL_NAME}")
-#	whatis("Version: ${ROCM_VERSION}")
-#	whatis("Category: AMD")
-#	whatis("${TOOL_NAME}")
-#
-#        -- Export environmental variables
-#        local topDir="/opt/rocm-${ROCM_VERSION}"
-#        local binDir="/opt/rocm-${ROCM_VERSION}/bin"
-#        local shareDir="/opt/rocm-${ROCM_VERSION}/share/${TOOL_NAME}"
-#
-#        setenv("${TOOL_NAME_UC}_DIR",topDir)
-#        setenv("${TOOL_NAME_UC}_BIN",binDir)
-#        setenv("${TOOL_NAME_UC}_SHARE",shareDir)
-#        prepend_path("PATH", pathJoin(shareDir, "bin"))
-#
-#	load("rocm/${ROCM_VERSION}")
-#	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
-#        set_shell_function("omnitrace-avail",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-avail "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-avail $*")
-#        set_shell_function("omnitrace-instrument",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-instrument "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-instrument $*")
-#        set_shell_function("omnitrace-run",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-run "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-run $*")
-#EOF
-#
-#   fi
+   if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
+      export MODULE_PATH=/etc/lmod/modules/ROCm/${TOOL_NAME}
+      ${SUDO} mkdir -p ${MODULE_PATH}
+      # The - option suppresses tabs
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
+	whatis("Name: ${TOOL_NAME}")
+	whatis("Version: ${ROCM_VERSION}")
+	whatis("Category: AMD")
+	whatis("${TOOL_NAME}")
+
+        -- Export environmental variables
+        local topDir="/opt/rocm-${ROCM_VERSION}"
+        local binDir="/opt/rocm-${ROCM_VERSION}/bin"
+        local shareDir="/opt/rocm-${ROCM_VERSION}/share/${TOOL_NAME}"
+
+        setenv("${TOOL_NAME_UC}_DIR",topDir)
+        setenv("${TOOL_NAME_UC}_BIN",binDir)
+        setenv("${TOOL_NAME_UC}_SHARE",shareDir)
+        prepend_path("PATH", pathJoin(shareDir, "bin"))
+
+	load("rocm/${ROCM_VERSION}")
+	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
+        set_shell_function("omnitrace-avail",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-avail "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-avail $*")
+        set_shell_function("omnitrace-instrument",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-instrument "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-instrument $*")
+        set_shell_function("omnitrace-run",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-run "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-run $*")
+EOF
+
+   fi
 
    TOOL_NAME=omniperf
    TOOL_EXEC_NAME=omniperf
@@ -663,12 +663,12 @@ if [ "${INCLUDE_TOOLS}" = "1" ]; then
       ${SUDO} chmod -R a+w /opt/rocm-${ROCM_VERSION}
    fi
 
-   #PYTHON=python3
-   #if [ "${PYTHON_VERSION}" != "" ]; then
-   #   PYTHON=python3.${PYTHON_VERSION}
-   #fi
+   PYTHON=python3
+   if [ "${PYTHON_VERSION}" != "" ]; then
+      PYTHON=python3.${PYTHON_VERSION}
+   fi
 
-   #${PYTHON} -m pip install -t /opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/python-libs -r /opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/requirements.txt
+   ${PYTHON} -m pip install -t /opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/python-libs -r /opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/requirements.txt
 
    if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
 
@@ -685,16 +685,17 @@ if [ "${INCLUDE_TOOLS}" = "1" ]; then
            --distpath rocprof-compute-exec/dist
       else
          pyinstaller --onefile /opt/rocm-${ROCM_VERSION}/libexec/rocprofiler-compute/rocprof-compute \
-           --add-data "/opt/rocm-${ROCM_VERSION}/libexec/rocprofiler-compute/utils:utils" \
-           --add-data "/opt/rocm-${ROCM_VERSION}/libexec/rocprofiler-compute/VERSION:." \
+           --add-data "/opt/rocm-${ROCM_VERSION}/libexec/rocprofiler-compute:." \
            --distpath rocprof-compute-exec/dist
+           #--add-data "/opt/rocm-${ROCM_VERSION}/libexec/rocprofiler-compute/utils:utils" \
+           #--add-data "/opt/rocm-${ROCM_VERSION}/libexec/rocprofiler-compute/rocprof_compute_soc:rocprof_compute_soc" \
       fi
 
       ls -RC rocprof-compute-exec/dist/
       rocprof-compute-exec/dist/rocprof-compute --version
       ${SUDO} cp rocprof-compute-exec/dist/rocprof-compute /opt/rocm-${ROCM_VERSION}/bin/rocprof-compute.exe
-      ${SUDO} rm -f /opt/rocm-${ROCM_VERSION}/bin/rocprof-compute
-      cd /opt/rocm-${ROCM_VERSION}/bin && ${SUDO} ln -s rocprof-compute.exe rocprof-compute && cd -
+      #${SUDO} rm -f /opt/rocm-${ROCM_VERSION}/bin/rocprof-compute
+      #cd /opt/rocm-${ROCM_VERSION}/bin && ${SUDO} ln -s rocprof-compute.exe rocprof-compute && cd -
       rocprof-compute --version
       deactivate
       rm -rf rocprof-compute-exec
@@ -708,55 +709,55 @@ if [ "${INCLUDE_TOOLS}" = "1" ]; then
       ${SUDO} chmod go-w /opt/rocm-${ROCM_VERSION}
    fi
 
-#   if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
-#      export MODULE_PATH=/etc/lmod/modules/ROCm/${TOOL_NAME}
-#      ${SUDO} mkdir -p ${MODULE_PATH}
-#      # The - option suppresses tabs
-#   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
-#	local help_message = [[
-#
-#	${TOOL_NAME_MC} is an open-source performance analysis tool for profiling
-#	machine learning/HPC workloads running on AMD MI GPUs.
-#
-#	Version ${ROCM_VERSION}
-#	]]
-#
-#	help(help_message,"\n")
-#
-#	whatis("Name: ${TOOL_NAME}")
-#	whatis("Version: ${ROCM_VERSION}")
-#	whatis("Keywords: Profiling, Performance, GPU")
-#	whatis("Description: tool for GPU performance profiling")
-#	whatis("URL: https://github.com/ROCm/${TOOL_NAME}")
-#
-#	-- Export environmental variables
-#	local topDir="/opt/rocm-${ROCM_VERSION}"
-#	local binDir="/opt/rocm-${ROCM_VERSION}/bin"
-#	local shareDir="/opt/rocm-${ROCM_VERSION}/share/${TOOL_NAME}"
-#	local pythonDeps="/opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/python-libs"
-#	-- no need to set: local roofline="${ROOFLINE_BIN}"
-#
-#	setenv("${TOOL_NAME_UC}_DIR",topDir)
-#	setenv("${TOOL_NAME_UC}_BIN",binDir)
-#	setenv("${TOOL_NAME_UC}_SHARE",shareDir)
-#	-- no need to set: setenv("ROOFLINE_BIN",roofline)
-#
-#	-- Update relevant PATH variables
-#	prepend_path("PATH",binDir)
-#	if ( pythonDeps  ~= "" ) then
-#	prepend_path("PYTHONPATH",pythonDeps)
-#	end
-#
-#	-- Site-specific additions
-#	-- depends_on "python"
-#	-- depends_on "rocm"
-#	prereq(atleast("rocm","${ROCM_VERSION}"))
-#	--  prereq("mongodb-tools")
-#	local home = os.getenv("HOME")
-#	setenv("MPLCONFIGDIR",pathJoin(home,".matplotlib"))
-#	set_shell_function("omniperf",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-compute "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-compute $*")
-#
-#EOF
-#
-#   fi
+   if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
+      export MODULE_PATH=/etc/lmod/modules/ROCm/${TOOL_NAME}
+      ${SUDO} mkdir -p ${MODULE_PATH}
+      # The - option suppresses tabs
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
+	local help_message = [[
+
+	${TOOL_NAME_MC} is an open-source performance analysis tool for profiling
+	machine learning/HPC workloads running on AMD MI GPUs.
+
+	Version ${ROCM_VERSION}
+	]]
+
+	help(help_message,"\n")
+
+	whatis("Name: ${TOOL_NAME}")
+	whatis("Version: ${ROCM_VERSION}")
+	whatis("Keywords: Profiling, Performance, GPU")
+	whatis("Description: tool for GPU performance profiling")
+	whatis("URL: https://github.com/ROCm/${TOOL_NAME}")
+
+	-- Export environmental variables
+	local topDir="/opt/rocm-${ROCM_VERSION}"
+	local binDir="/opt/rocm-${ROCM_VERSION}/bin"
+	local shareDir="/opt/rocm-${ROCM_VERSION}/share/${TOOL_NAME}"
+	local pythonDeps="/opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/python-libs"
+	-- no need to set: local roofline="${ROOFLINE_BIN}"
+
+	setenv("${TOOL_NAME_UC}_DIR",topDir)
+	setenv("${TOOL_NAME_UC}_BIN",binDir)
+	setenv("${TOOL_NAME_UC}_SHARE",shareDir)
+	-- no need to set: setenv("ROOFLINE_BIN",roofline)
+
+	-- Update relevant PATH variables
+	prepend_path("PATH",binDir)
+	if ( pythonDeps  ~= "" ) then
+	prepend_path("PYTHONPATH",pythonDeps)
+	end
+
+	-- Site-specific additions
+	-- depends_on "python"
+	-- depends_on "rocm"
+	prereq(atleast("rocm","${ROCM_VERSION}"))
+	--  prereq("mongodb-tools")
+	local home = os.getenv("HOME")
+	setenv("MPLCONFIGDIR",pathJoin(home,".matplotlib"))
+	set_shell_function("omniperf",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-compute "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-compute $*")
+
+EOF
+
+   fi
 fi

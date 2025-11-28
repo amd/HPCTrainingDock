@@ -175,10 +175,8 @@ else
                  -DKokkos_ENABLE_SERIAL=ON \
                  -DKokkos_ENABLE_HIP=ON \
 		 -DKokkos_ENABLE_OPENMP=ON \
-                 -DKokkos_ARCH_AMD_GFX942=${KOKKOS_ARCH_AMD_GFX942} \
-                 -DKokkos_ARCH_AMD_GFX90A=${KOKKOS_ARCH_AMD_GFX90A} \
-                 -DKokkos_ARCH_VEGA90A=${KOKKOS_ARCH_VEGA90A} \
-                 -DKokkos_ARCH_ZEN=ON \
+                 -DKokkos_ARCH_AMD_GFX942_APU=${KOKKOS_ARCH_AMD_GFX942} \
+                 -DKokkos_ARCH_ZEN4=ON \
                  -DCMAKE_CXX_COMPILER=hipcc ..
 
       ${SUDO} make -j
@@ -214,6 +212,7 @@ else
 	load("rocm/${ROCM_VERSION}")
 	prepend_path("PATH","${KOKKOS_PATH}")
 	setenv("Kokkos_DIR","${KOKKOS_PATH}")
+	setenv("HSA_XNACK","1")
 EOF
 
 fi
