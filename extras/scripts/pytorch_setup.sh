@@ -529,6 +529,8 @@ else
       echo "===================="
       echo ""
       python3 setup.py install --prefix=${PYTORCH_PATH}
+      cd ..
+      rm -rf pytorch
       # With PyTorch 2.9.1:
       # WARNING: Redirecting 'python setup.py install' to 'pip install . -v --no-build-isolation', for more info see https://github.com/pytorch/pytorch/issues/152276
       if [ "${PYTORCH_SHORT_VERSION}" == "2.9" ]; then
@@ -542,8 +544,6 @@ else
       echo "===================="
       echo ""
 
-      cd ..
-      rm -rf pytorch
       if [[ "${DEBUG}" != 0 ]]; then
          echo "Testing import torch"
          python3 -c 'import torch'
