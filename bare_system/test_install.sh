@@ -105,7 +105,7 @@ if [[ "${PYTHON_VERSION_INPUT}" == "" ]]; then
       if [[ "${DISTRO_VERSION}" == "24.04" ]]; then
          PYTHON_VERSION="12"
       fi
-      if [[ "${DISTRO_VERSIONS}" == "22.04" ]]; then
+      if [[ "${DISTRO_VERSION}" == "22.04" ]]; then
          PYTHON_VERSION="10"
       fi
    fi

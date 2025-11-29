@@ -473,6 +473,9 @@ else
       export PYTORCH_ROCM_ARCH=${AMDGPU_GFXMODEL}
       export PYTORCH_INSTALL_DIR=${PYTORCH_PATH}
       export AOTRITON_INSTALLED_PREFIX=${AOTRITON_PATH}
+      if [ "${PYTORCH_SHORT_VERSION}" == "2.9" && "${AMDGPU_GFXMODEL}" == "gfx942" ]; then
+         export USE_FBGEMM_GENAI=0
+      fi
 
       # this block of code is to retry if git clone fails.
       RETRIES=6
