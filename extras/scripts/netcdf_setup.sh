@@ -1,4 +1,4 @@
-#/bin/bash
+#!/bin/bash
 
 # Variables controlling setup process
 NETCDF_C_MODULE_PATH=/etc/lmod/modules/ROCmPlus/netcdf-c

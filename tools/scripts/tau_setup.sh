@@ -1,4 +1,4 @@
-#/bin/bash
+#!/bin/bash
 
 # Variables controlling setup process
 AMDGPU_GFXMODEL_INPUT=""

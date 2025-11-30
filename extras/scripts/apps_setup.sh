@@ -1,4 +1,4 @@
-
+#!/bin/bash
 echo "########## Install additional libs and apps #############"
 
 SUDO="sudo"

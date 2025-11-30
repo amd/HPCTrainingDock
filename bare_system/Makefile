@@ -499,5 +499,9 @@ cupy_package.timestamp: cupy.timestamp
 	bare_system/deploy_package.sh --selection-string cupy
 	touch cupy_package.timestamp
 
-all_packages.timestamp: rocm_package.timestamp openmpi_package.timestamp rocprof-sys_source_package.timestamp cupy_package.timestamp
+kokkos_package.timestamp: kokkos.timestamp
+	bare_system/deploy_package.sh --selection-string kokkos
+	touch kokkos_package.timestamp
+
+all_packages.timestamp: rocm_package.timestamp openmpi_package.timestamp rocprof-sys_source_package.timestamp cupy_package.timestamp kokkos_package.timestamp
 	touch all_packages.timestamp

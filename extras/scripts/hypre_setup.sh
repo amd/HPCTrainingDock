@@ -1,4 +1,4 @@
-#/bin/bash
+#!/bin/bash
 
 # Variables controlling setup process
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
@@ -109,8 +109,8 @@ do
    shift
 done
 
-if [ "${HYPRE_PATH_INPUT}" != "" ]; then
-   HYPRE_PATH=${HYPRE_PATH_INPUT}
+if [ "${INSTALL_PATH_INPUT}" != "" ]; then
+   HYPRE_PATH=${INSTALL_PATH_INPUT}
 else
    # override path in case ROCM_VERSION has been supplied as input
    HYPRE_PATH=/opt/rocmplus-${ROCM_VERSION}/hypre

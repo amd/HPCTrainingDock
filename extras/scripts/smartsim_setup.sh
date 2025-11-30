@@ -1,4 +1,4 @@
-#/bin/bash
+#!/bin/bash
 
 # Variables controlling setup process
 ROCM_VERSION=6.2.0

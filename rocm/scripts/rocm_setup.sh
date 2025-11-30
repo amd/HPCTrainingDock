@@ -702,7 +702,7 @@ EOF
 
       # Restore original version
       #${SUDO} rm -f /opt/rocm-${ROCM_VERSION}/bin/rocprof-compute
-      #${SUDO} ln -s /opt/rocm-${ROCM_VERSION}/libexec/rocprof-compute /opt/rocm-${ROCM_VERSION}/bin/rocprof-compute
+      #cd /opt/rocm-${ROCM_VERSION}/bin && ${SUDO} ln -s ../libexec/rocprofiler-compute rocprof-compute && cd -
    fi
 
    if [[ "${USER}" != "root" ]]; then

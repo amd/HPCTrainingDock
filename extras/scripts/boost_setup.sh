@@ -1,4 +1,4 @@
-#/bin/bash
+#!/bin/bash
 
 # Variables controlling setup process
 MODULE_PATH=/etc/lmod/modules/LinuxPlus/boost
