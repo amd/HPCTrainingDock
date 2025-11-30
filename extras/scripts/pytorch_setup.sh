@@ -12,7 +12,7 @@ TRITON_VERSION=3.3.1
 TORCHVISION_HASH="59a3e1f"
 TORCHAUDIO_VERSION=2.7.1
 TORCHAUDIO_HASH="95c61b4"
-PILLOW_VERSION=11.3.0
+PILLOW_VERSION=12.0.0
 DEEPSPEED_VERSION="latest"
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/pytorch
 INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch
@@ -693,8 +693,8 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/flash_attn-${FLASHATTENTION_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","${SAGEATTENTION_PATH}")
 	prepend_path("PYTHONPATH","${TRANSFORMERS_PATH}")
-	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
-	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchvision-${TORCHVISION_VERSION}+${TORCHVISION_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
+	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg/torchaudio")
+	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchvision-${TORCHVISION_VERSION}+${TORCHVISION_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg/torchvision")
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/pillow-${PILLOW_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages")
 	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}")
