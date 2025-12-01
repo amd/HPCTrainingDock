@@ -300,8 +300,15 @@ else
          cd eigen_to_install
          mkdir build && cd build
 
+	 # removing -DEIGEN_TEST_HIP=ON because it has a hard-coded path to /opt/rocm
+         #-- Could NOT find GoogleHash (missing: GOOGLEHASH_INCLUDES GOOGLEHASH_COMPILE)
+         #-- Could NOT find Adolc (missing: ADOLC_INCLUDES ADOLC_LIBRARIES)
+         #-- Could NOT find MPFR (missing: MPFR_INCLUDES MPFR_LIBRARIES MPFR_VERSION_OK) (Required is at least version "1.0.0")
+         #-- Found PkgConfig: /usr/bin/pkg-config (found version "0.29.2")
+         #-- Could NOT find FFTW (missing: FFTW_INCLUDES FFTW_LIBRARIES)
          cmake -DCMAKE_INSTALL_PREFIX=$EIGEN_PATH -DCHOLMOD_LIBRARIES=$PETSC_PATH/lib -DCHOLMOD_INCLUDES=$PETSC_PATH/include \
-               -DKLU_LIBRARIES=$PETSC_PATH/lib -DKLU_INCLUDES=$PETSC_PATH/include -DEIGEN_TEST_HIP=ON ..
+               -DKLU_LIBRARIES=$PETSC_PATH/lib -DKLU_INCLUDES=$PETSC_PATH/include \
+               -DCMAKE_PREFIX_PATH=${ROCM_PATH} -DCMAKE_MODULE_PATH=${ROCM_PATH}/hip/cmake ..
          ${SUDO} make install
 
          cd ../..
@@ -356,7 +363,7 @@ else
 
 	local base = "${PETSC_PATH}"
 
-	load("$ROCM_MODULE_LOAD")
+	prereq("$ROCM_MODULE_LOAD")
 	load("$MPI_MODULE")
 	setenv("PETSC_PATH", base)
 	setenv("PETSC", base)
