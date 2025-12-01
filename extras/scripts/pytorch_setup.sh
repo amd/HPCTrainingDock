@@ -464,7 +464,7 @@ else
       python3 -m venv pytorch_build
       source pytorch_build/bin/activate
       cd pytorch_build
-      export BUILD_DIR=`pwd`
+      export PYTORCH_BUILD_DIR=`pwd`
 
       export _GLIBCXX_USE_CXX11_ABI=1
       export ROCM_HOME=${ROCM_PATH}
@@ -541,11 +541,11 @@ else
       # WARNING: Redirecting 'python setup.py install' to 'pip install . -v --no-build-isolation', for more info see https://github.com/pytorch/pytorch/issues/152276
       if [ "${PYTORCH_SHORT_VERSION}" == "2.9" ]; then
         PYTORCH_PATH_SITE_PACKAGES=${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages
-	${SUDO} mkdir -p ${PYTORCH_PATH_COPY}
+	${SUDO} mkdir -p ${PYTORCH_PATH_SITE_PACKAGES}
         ${SUDO} cp -a lib/python*/site-packages/* ${PYTORCH_PATH_SITE_PACKAGES}
 	${SUDO} mkdir -p ${PYTORCH_PATH}/bin
 	export PYTHON3_PATH=`which python3`
-	${SUDO} sed -i "s#${BUILD_DIR}/bin/python3#${PYTHON3_PATH}#g" bin/*
+	${SUDO} sed -i "s#${PYTORCH_BUILD_DIR}/bin/python3#${PYTHON3_PATH}#g" bin/*
 	${SUDO} cp -a bin/* ${PYTORCH_PATH}/bin
       fi
       echo ""
