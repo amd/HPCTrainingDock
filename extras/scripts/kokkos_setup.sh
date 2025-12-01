@@ -155,7 +155,7 @@ else
       if [ "${AMDGPU_GFXMODEL}" = "gfx90a" ]; then
          KOKKOS_ARCH_AMD_GFX90A="ON"
       elif [ "${AMDGPU_GFXMODEL}" = "gfx942" ]; then
-         KOKKOS_ARCH_AMD_GFX942="ON"
+	 KOKKOS_ARCH_AMD_GFX942_APU="ON"
       elif [ "${AMDGPU_GFXMODEL}" = "gfx900" ]; then
          KOKKOS_ARCH_VEGA90A="ON"
       fi
@@ -171,13 +171,13 @@ else
       cd build
 
       ${SUDO} cmake -DCMAKE_INSTALL_PREFIX=${KOKKOS_PATH} \
-                 -DCMAKE_PREFIX_PATH=/opt/rocm-${ROCM_VERSION} \
+	         -DCMAKE_PREFIX_PATH=${ROCM_PATH} \
                  -DKokkos_ENABLE_SERIAL=ON \
                  -DKokkos_ENABLE_HIP=ON \
 		 -DKokkos_ENABLE_OPENMP=ON \
-                 -DKokkos_ARCH_AMD_GFX942_APU=${KOKKOS_ARCH_AMD_GFX942} \
+                 -DKokkos_ARCH_AMD_GFX942_APU=${KOKKOS_ARCH_AMD_GFX942_APU} \
                  -DKokkos_ARCH_ZEN4=ON \
-                 -DCMAKE_CXX_COMPILER=hipcc ..
+                 -DCMAKE_CXX_COMPILER=${ROCM_PATH}/bin/hipcc ..
 
       ${SUDO} make -j
       ${SUDO} make install
@@ -209,7 +209,7 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${KOKKOS_VERSION}.lua
 	whatis("Kokkos version ${KOKKOS_VERSION} - Performance Portability Language")
 
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	prepend_path("PATH","${KOKKOS_PATH}")
 	setenv("Kokkos_DIR","${KOKKOS_PATH}")
 	setenv("HSA_XNACK","1")
