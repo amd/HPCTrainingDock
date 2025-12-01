@@ -8,11 +8,13 @@ PYTORCH_VERSION=2.9.1
 PYTHON_VERSION=10
 TORCHVISION_VERSION=0.22.1
 FLASHATTENTION_VERSION=2.8.3
-TRITON_VERSION=3.3.1
+TRITON_VERSION=3.4.0
+TRITON_WHEEL_NAME="triton"
 TORCHVISION_HASH="59a3e1f"
 TORCHAUDIO_VERSION=2.7.1
 TORCHAUDIO_HASH="95c61b4"
 PILLOW_VERSION=12.0.0
+SAGEATTENTION_VERSION="1.0.6" #SageAttention 2 does not support ROCm
 DEEPSPEED_VERSION="latest"
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/pytorch
 INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch
@@ -280,7 +282,7 @@ else
 
       # Installing Sage Attention
 
-      pip3 install --target=${SAGEATTENTION_PATH} sageattention --no-build-isolation
+      pip3 install --target=${SAGEATTENTION_PATH} sageattention==${SAGEATTENTION_VERSION} --no-build-isolation
 
       # Installing Flash Attention
 
@@ -297,16 +299,16 @@ else
          ROCM_VERSION_WHEEL=`echo ${ROCM_VERSION} | cut -f1-2 -d'.'`
       fi
 
-      pip3 install --target=${TRANSFORMERS_PATH} transformers --no-build-isolation
-      TRITON_PACKAGE_NAME=pytorch_triton_rocm
       if [[ "${ROCM_VERSION}" == "6.4.2" || "${ROCM_VERSION}" == "6.4.3" ]]; then
          TRITON_VERSION=3.2.0
       fi
-      if [[ "${ROCM_VERSION}" == "7.0.2" || "${ROCM_VERSION}" == *"7.1."* ]]; then
-	 TRITON_PACKAGE_NAME=triton
+
+      if [ "$(printf '%s\n' "$ROCM_VERSION" "7.0" | sort -V | head -n1)" = "$ROCM_VERSION" ]; then
+        TRITON_WHEEL_NAME="pytorch_triton_rocm"
       fi
-      echo "pip3 install ${TRITON_PACKAGE_NAME}==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation"
-      pip3 install pytorch_triton_rocm==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
+
+      echo "pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation"
+      pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
 
       # Buidling Deep Speed
 
@@ -462,6 +464,7 @@ else
       python3 -m venv pytorch_build
       source pytorch_build/bin/activate
       cd pytorch_build
+      export BUILD_DIR=`pwd`
 
       export _GLIBCXX_USE_CXX11_ABI=1
       export ROCM_HOME=${ROCM_PATH}
@@ -537,8 +540,12 @@ else
       # With PyTorch 2.9.1:
       # WARNING: Redirecting 'python setup.py install' to 'pip install . -v --no-build-isolation', for more info see https://github.com/pytorch/pytorch/issues/152276
       if [ "${PYTORCH_SHORT_VERSION}" == "2.9" ]; then
-        ${SUDO} cp -a lib/python*/site-packages/* ${PYTORCH_PATH}
+        PYTORCH_PATH_SITE_PACKAGES=${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages
+	${SUDO} mkdir -p ${PYTORCH_PATH_COPY}
+        ${SUDO} cp -a lib/python*/site-packages/* ${PYTORCH_PATH_SITE_PACKAGES}
 	${SUDO} mkdir -p ${PYTORCH_PATH}/bin
+	export PYTHON3_PATH=`which python3`
+	${SUDO} sed -i "s#${BUILD_DIR}/bin/python3#${PYTHON3_PATH}#g" bin/*
 	${SUDO} cp -a bin/* ${PYTORCH_PATH}/bin
       fi
       echo ""
@@ -603,11 +610,16 @@ else
       if [[ "${ROCM_VERSION}" == "6.4.2" || "${ROCM_VERSION}" == "6.4.3" ]]; then
          TRITON_VERSION=3.2.0
       fi
-      pip3 install pytorch_triton_rocm==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
+
+      if [ "$(printf '%s\n' "$ROCM_VERSION" "7.0" | sort -V | head -n1)" = "$ROCM_VERSION" ]; then
+        TRITON_WHEEL_NAME="pytorch_triton_rocm"
+      fi
+
+      pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
 
       # Installing Sage Attention
 
-      pip3 install --target=${SAGEATTENTION_PATH} sageattention --no-build-isolation
+      pip3 install --target=${SAGEATTENTION_PATH} sageattention==${SAGEATTENTION_VERSION} --no-build-isolation
 
       # Building Flash Attention
 
