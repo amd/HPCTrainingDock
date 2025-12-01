@@ -227,18 +227,31 @@ else
 
       else
 
-         git clone --branch v$HYPRE_VERSION https://github.com/hypre-space/hypre.git
-         cd hypre/src
+         wget -q https://github.com/hypre-space/hypre/archive/refs/tags/v3.0.0.tar.gz
+         tar -xzf v3.0.0.tar.gz
+         cd hypre-3.0.0/src
+         sed -i -e '1481,1484s!^!//!' utilities/_hypre_utilities.hpp
+         sed -i -e 's/HYPRE_THRUST_IDENTITY(char)/thrust::identity<char>()/' seq_mv/csr_spgemm_device_symbl.c
+         sed -i -e 's/HYPRE_THRUST_IDENTITY(char)/thrust::identity<char>()/' IJ_mv/IJMatrix_parcsr_device.c
+         sed -i -e 's/HYPRE_THRUST_IDENTITY(char)/thrust::identity<char>()/' IJ_mv/IJVector_parcsr_device.c
+         sed -i -e 's/HYPRE_THRUST_IDENTITY(HYPRE_Int)/thrust::identity<HYPRE_Int>()/' parcsr_mv/par_csr_fffc_device.c
+         sed -i -e 's/HYPRE_THRUST_IDENTITY(HYPRE_Int)/thrust::identity<HYPRE_Int>()/' parcsr_ls/ame.c
+         sed -i -e 's/HYPRE_THRUST_IDENTITY(HYPRE_Int)/thrust::identity<HYPRE_Int>()/' parcsr_ls/par_coarsen_device.c
+         sed -i -e 's/HYPRE_THRUST_IDENTITY(HYPRE_Int)/thrust::identity<HYPRE_Int>()/' parcsr_ls/par_mod_multi_interp_device.c
+         sed -i -e 's/HYPRE_THRUST_IDENTITY(HYPRE_Complex)/thrust::identity<HYPRE_Complex>()/' IJ_mv/IJMatrix_parcsr_device.c
+         sed -i -e 's/HYPRE_THRUST_IDENTITY(HYPRE_Complex)/thrust::identity<HYPRE_Complex>()/' IJ_mv/IJVector_parcsr_device.c
+         sed -i -e 's/HYPRE_THRUST_IDENTITY(HYPRE_Complex)/thrust::identity<HYPRE_Complex>()/' parcsr_ls/ams.c
+
          mkdir build && cd build
 
-         cmake -DCMAKE_INSTALL_PREFIX=$HYPRE_PATH -DHYPRE_ENABLE_MIXEDINT=ON -DHYPRE_ENABLE_MPI=ON \
-               -DHYPRE_ENABLE_OPENMP=ON -DHYPRE_BUILD_TESTS=ON -DHYPRE_ENABLE_HIP=ON -DCMAKE_HIP_ARCHITECTURES=$AMDGPU_GFXMODEL \
+	 cmake -DCMAKE_INSTALL_PREFIX=$HYPRE_PATH -DHYPRE_ENABLE_MIXEDINT=ON -DHYPRE_ENABLE_MPI=ON -DHYPRE_ENABLE_OPENMP=ON \
+                -DHYPRE_BUILD_TESTS=ON -DHYPRE_ENABLE_HIP=ON -DCMAKE_HIP_ARCHITECTURES="$AMDGPU_GFXMODEL" -DHYPRE_ENABLE_UMPIRE=OFF \
                 -DHYPRE_ENABLE_GPU_PROFILING=ON -DHYPRE_ENABLE_GPU_AWARE_MPI=ON -DBUILD_SHARED_LIBS=ON -DHYPRE_ENABLE_UNIFIED_MEMORY=ON ..
 
          make -j
          ${SUDO} make install
          cd ../../..
-         rm -rf hypre
+         rm -rf hypre-3.0.0 v3.0.0.tar.gz
 
       fi
 
@@ -276,7 +289,7 @@ else
 
 	local base = "${HYPRE_PATH}"
 
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	load("${MPI_MODULE}")
 	setenv("HYPRE_PATH", base)
 	prepend_path("PATH",pathJoin(base, "bin"))
