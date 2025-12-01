@@ -219,14 +219,14 @@ else
          else
             echo "...installing libcurl using sudo..."
             ${SUDO} apt-get update
-            ${SUDO} apt-get install libcurl4-gnutls-dev
+            ${SUDO} apt-get install -y libcurl4-gnutls-dev
          fi
       elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
          if [[ ${SUDO} == "" ]]; then
             echo " WARNING: not installing libcurl since we are not using sudo"
          else
             echo "...installing libcurl using sudo..."
-            ${SUDO} yum install libcurl-devel
+            ${SUDO} yum install -y libcurl-devel
          fi
       elif [ "${DISTRO}" = "opensuse" ]; then
 	 echo "opensuse is not tested yet, not installing libcurl"
