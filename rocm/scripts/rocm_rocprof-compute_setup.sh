@@ -94,10 +94,6 @@ echo ""
 # if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
 # if ROCM_VERSION is less than or equal to 6.1.2, the awk command result will be blank
 result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
-if [[ "${result}" == "" ]]; then
-   echo "ROCm built-in ${TOOL_NAME_MC} version cannot be installed on ROCm versions before 6.2.0"
-   exit
-fi
 if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
    echo "ROCm built-in ${TOOL_NAME_MC} already installed"
 else
