@@ -265,7 +265,7 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GIT_BRANCH}.lua
 	whatis("Tensorflow with ROCm support")
 
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	prepend_path("PYTHONPATH","$TF_PATH")
         setenv("TF_CPP_MIN_LOG_LEVEL","2")
 EOF

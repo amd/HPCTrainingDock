@@ -214,7 +214,7 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${HIP_PYTHON_VERSION}.lua
         whatis("HIP-Python with ROCm support")
 
-        load("rocm/${ROCM_VERSION}")
+        prereq("rocm/${ROCM_VERSION}")
         prepend_path("PYTHONPATH","$HIP_PYTHON_PATH/hip-python")
 EOF
 
