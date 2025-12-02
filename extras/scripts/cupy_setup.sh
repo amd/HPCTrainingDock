@@ -180,9 +180,15 @@ else
       source cupy_build/bin/gctivate
       pip3 install -v --target=$CUPY_PATH pytest mock xarray[complete] build numpy-allocator --no-cache
       export PYTHONPATH=$PYTHONPATH:$CUPY_PATH
-      # Get source from the upstream repository of CuPy.
-      git clone -q --depth 1 -b v$CUPY_VERSION --recursive https://github.com/cupy/cupy.git
-      cd cupy
+      if [ "$(printf '%s\n' "$ROCM_VERSION" "6.4.4" | sort -V | head -n1)" = "$ROCM_VERSION" ]; then
+         # Get source from the upstream repository of CuPy.
+         git clone -q --depth 1 -b v$CUPY_VERSION --recursive https://github.com/cupy/cupy.git
+         cd cupy
+      else
+	 git clone -q --depth 1 -b release/rocmds-25.10 https://github.com/ROCm/cupy.git     
+         cd cupy
+	 git submodule update --init --recursive
+      fi	      
       python3 -m build --wheel
       pip3 install -v --upgrade --target=$CUPY_PATH dist/*.whl
       pip3 install -v --target=$CUPY_PATH cupy-xarray --no-deps
