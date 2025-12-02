@@ -331,7 +331,10 @@ else
 
       module unload rocm/${ROCM_VERSION}
       module unload $MPI_MODULE
-      module unload hdf5 amdflang-new
+      module unload hdf5
+      if [[ ${USE_AMDFLANG} == "1" ]]; then
+         module unload amdflang-new
+      fi
 
    fi
 
