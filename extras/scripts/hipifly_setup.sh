@@ -136,7 +136,7 @@ else
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/dev.lua
 	whatis(" Hipifly header file ")
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	setenv("HIPIFLY_PATH","${HIPIFLY_PATH}")
 EOF
 

@@ -220,7 +220,7 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${CUPY_VERSION}.lua
 	whatis("CuPy with ROCm support")
 
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	prepend_path("PYTHONPATH","$CUPY_PATH")
 EOF
 
