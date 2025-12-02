@@ -105,6 +105,7 @@ fi
 source /etc/profile.d/lmod.sh
 source /etc/profile.d/z01_lmod.sh
 module load rocm/${ROCM_VERSION}
+ROCM_HOME=${ROCM_PATH}
 
 echo ""
 echo "==================================="
@@ -228,7 +229,7 @@ else
 
 	prereq("rocm/${ROCM_VERSION}")
 	prepend_path("PYTHONPATH","$CUPY_PATH")
-        setenv("ROCM_HOME","$ROCM_PATH")
+        setenv("ROCM_HOME","$ROCM_HOME")
 EOF
 
 fi
