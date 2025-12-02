@@ -228,6 +228,7 @@ else
 
 	prereq("rocm/${ROCM_VERSION}")
 	prepend_path("PYTHONPATH","$CUPY_PATH")
+        setenv("ROCM_HOME","$ROCM_PATH")
 EOF
 
 fi
