@@ -867,7 +867,7 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 	setenv("MPICXX","${OPENMPI_PATH}/bin/mpicxx")
 	setenv("MPIFORT","${OPENMPI_PATH}/bin/mpifort")
 	setenv("HSA_ENABLE_IPC_MODE_LEGACY","1")
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	family("MPI")
 EOF
    else
@@ -889,7 +889,7 @@ EOF
 	setenv("MPICC","${OPENMPI_PATH}/bin/mpicc")
 	setenv("MPICXX","${OPENMPI_PATH}/bin/mpicxx")
 	setenv("MPIFORT","${OPENMPI_PATH}/bin/mpifort")
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	family("MPI")
 EOF
 
