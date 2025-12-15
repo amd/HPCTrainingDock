@@ -451,6 +451,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	prepend_path("CPATH", pathJoin(base, "include"))
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("INCLUDE", pathJoin(base, "include"))
+	setenv("HSA_NO_SCRATCH_RECLAIM","1")
 	setenv("HIPCC_COMPILE_FLAGS_APPEND","--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_BASE_VERSION}")
 	setenv("HIPCC_LINK_FLAGS_APPEND","--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_BASE_VERSION}")
 	setenv("ROCM_PATH", base)
