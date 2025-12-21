@@ -177,9 +177,9 @@ else
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod a+w $CUPY_PATH
       fi
-      python3 -m venv cupy_build
-      source cupy_build/bin/gctivate
-      pip3 install -v --target=$CUPY_PATH pytest mock xarray[complete] build numpy-allocator --no-cache
+      uv venv cupy_build
+      source cupy_build/bin/activate
+      uv pip install -v --target=$CUPY_PATH pytest mock xarray[complete] build numpy-allocator --no-cache
       export PYTHONPATH=$PYTHONPATH:$CUPY_PATH
       if [ "$(printf '%s\n' "$ROCM_VERSION" "6.4.4" | sort -V | head -n1)" = "$ROCM_VERSION" ]; then
          # Get source from the upstream repository of CuPy.
@@ -190,9 +190,9 @@ else
          cd cupy
 	 git submodule update --init --recursive
       fi	      
-      python3 -m build --wheel
-      pip3 install -v --upgrade --target=$CUPY_PATH dist/*.whl
-      pip3 install -v --target=$CUPY_PATH cupy-xarray --no-deps
+      uv build --wheel
+      uv pip install -v --upgrade --target=$CUPY_PATH dist/*.whl
+      uv pip install -v --target=$CUPY_PATH cupy-xarray --no-deps
       deactivate
       cd ../
       # clean-up
