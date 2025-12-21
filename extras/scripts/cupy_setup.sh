@@ -177,7 +177,11 @@ else
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod a+w $CUPY_PATH
       fi
-      uv venv cupy_build
+      if [[ "${DISTRO_VERSION}" == "22.04" ]]; then
+         uv venv cupy_build --python 3.10
+      else
+         uv venv cupy_build
+      fi
       source cupy_build/bin/activate
       uv pip install -v --target=$CUPY_PATH pytest mock xarray[complete] build numpy-allocator --no-cache
       export PYTHONPATH=$PYTHONPATH:$CUPY_PATH
