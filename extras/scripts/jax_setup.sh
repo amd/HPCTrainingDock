@@ -22,6 +22,10 @@ fi
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+if [[ "${DISTRO_VERSION}" == "22.04" ]]; then
+   # JAX VERSION 7.1 does not support python 3.10. Have not tried 7.0, 6.2, or 6.1
+   JAX_VERSION=6.0
+fi
 
 usage()
 {
