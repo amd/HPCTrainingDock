@@ -158,7 +158,7 @@ else
       echo ""
 
       source /etc/profile.d/lmod.sh
-      source /etc/profile.d/z01_lmod.sh
+      source /etc/profile.d/z00_lmod.sh
       #module load amdflang-new
       module load gcc
       module load $MPI_MODULE

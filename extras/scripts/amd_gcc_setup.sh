@@ -82,7 +82,7 @@ if [ "${BUILD_GCC_LATEST}" = "1" ] ; then
 
       # modules
       source /etc/profile.d/lmod.sh
-      source /etc/profile.d/z01_lmod.sh
+      source /etc/profile.d/z00_lmod.sh
       module load rocm/${ROCM_VERSION}
 
       wget -q https://github.com/llvm/llvm-project/archive/refs/tags/${LLVM_DIR_SHORT}.tar.gz

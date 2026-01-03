@@ -161,7 +161,7 @@ else
       fi
 
       source /etc/profile.d/lmod.sh
-      source /etc/profile.d/z01_lmod.sh
+      source /etc/profile.d/z00_lmod.sh
       module load rocm/${ROCM_VERSION}
 
       git clone --branch ${KOKKOS_VERSION} https://github.com/kokkos/kokkos

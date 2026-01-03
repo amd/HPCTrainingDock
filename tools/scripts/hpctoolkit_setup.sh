@@ -149,7 +149,7 @@ else
       echo ""
 
       source /etc/profile.d/lmod.sh
-      source /etc/profile.d/z01_lmod.sh
+      source /etc/profile.d/z00_lmod.sh
       module load rocm/${ROCM_VERSION}
 
       # don't use sudo if user has write access to both install paths

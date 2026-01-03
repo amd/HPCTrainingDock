@@ -150,7 +150,7 @@ else
       fi
 
       source /etc/profile.d/lmod.sh
-      source /etc/profile.d/z01_lmod.sh
+      source /etc/profile.d/z00_lmod.sh
       module load amdclang
 
       rm -rf rcm

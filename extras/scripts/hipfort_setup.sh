@@ -150,7 +150,7 @@ else
       if  [ "${BUILD_HIPFORT}" = "1" ]; then
 
          source /etc/profile.d/lmod.sh
-         source /etc/profile.d/z01_lmod.sh
+         source /etc/profile.d/z00_lmod.sh
          module load rocm/${ROCM_VERSION}
 
          if [ -d "$HIPFORT_PATH" ]; then

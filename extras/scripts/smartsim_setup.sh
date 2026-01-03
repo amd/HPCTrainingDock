@@ -96,7 +96,7 @@ fi
 
 # Load the ROCm version for this SmartSim build
 source /etc/profile.d/lmod.sh
-source /etc/profile.d/z01_lmod.sh
+source /etc/profile.d/z00_lmod.sh
 module load rocm/${ROCM_VERSION}
 module load amdflang-new
 module load pytorch

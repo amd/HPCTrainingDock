@@ -259,7 +259,7 @@ done
 # Load the ROCm version for this build
 if [ -f "/etc/profile.d/lmod.sh" ]; then
    source /etc/profile.d/lmod.sh
-   source /etc/profile.d/z01_lmod.sh
+   source /etc/profile.d/z00_lmod.sh
 fi
 module load rocm/${ROCM_VERSION}
 

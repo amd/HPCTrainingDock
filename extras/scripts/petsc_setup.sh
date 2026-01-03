@@ -181,7 +181,7 @@ else
       echo ""
 
       source /etc/profile.d/lmod.sh
-      source /etc/profile.d/z01_lmod.sh
+      source /etc/profile.d/z00_lmod.sh
       module load rocm/${ROCM_VERSION}
       if [[ ${USE_AMDFLANG} == "1" ]]; then
          # this module will set the openmpi wrappers to use the compilers from the ROCm AFAR release
