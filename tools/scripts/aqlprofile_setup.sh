@@ -126,7 +126,12 @@ ${SUDO} apt-get -y install libdw-dev
 ${SUDO} mkdir -p $INSTALL_PATH
 
 source /etc/profile.d/lmod.sh
-module load rocm/${ROCM_VERSION}
+if [[ "${ROCM_VERSION}" == *"afar"* ]]; then
+   ROCM_AFAR_VERSION=`echo rocm${ROCM_VERSION} | sed -e 's!afar-!afar/!'`
+   module load $ROCM_AFAR_VERSION
+else
+   module load rocm/${ROCM_VERSION}
+fi
 
 #cmake -DGPU_TARGETS="${AMDGPU_GFXMODEL}" -DCMAKE_PREFIX_PATH=/opt/${ROCM_VERSION}/lib:/opt/${ROCM_VERSION}/include/hsa -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH ..
 
