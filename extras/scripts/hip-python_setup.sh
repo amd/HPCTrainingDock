@@ -154,7 +154,7 @@ else
       source /etc/profile.d/lmod.sh
       source /etc/profile.d/z00_lmod.sh
       if [[ "${ROCM_VERSION}" == *"afar"* ]]; then
-         ROCM_AFAR_VERSION=`echo rocm${ROCM_VERSION} | sed -e 's!afar-!afar/!'`
+         ROCM_AFAR_VERSION=`echo rocm${ROCM_VERSION} | sed -e 's!afar!afar/!'`
          module load $ROCM_AFAR_VERSION
       else
          module load rocm/${ROCM_VERSION}
