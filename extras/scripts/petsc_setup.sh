@@ -182,12 +182,7 @@ else
 
       source /etc/profile.d/lmod.sh
       source /etc/profile.d/z00_lmod.sh
-      if [[ "${ROCM_VERSION}" == *"afar"* ]]; then
-         ROCM_AFAR_VERSION=`echo rocm${ROCM_VERSION} | sed -e 's!afar!afar/!'`
-         module load $ROCM_AFAR_VERSION
-      else
-         module load rocm/${ROCM_VERSION}
-      fi
+      module load rocm/${ROCM_VERSION}
       if [[ ${USE_AMDFLANG} == "1" ]]; then
          # this module will set the openmpi wrappers to use the compilers from the ROCm AFAR release
          # the AFAR releases can be found at: https://repo.radeon.com/rocm/misc/flang/
