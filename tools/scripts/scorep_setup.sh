@@ -175,12 +175,7 @@ else
       CUR_DIR=`pwd`
 
       source /etc/profile.d/lmod.sh
-      if [[ "${ROCM_VERSION}" == *"afar"* ]]; then
-         ROCM_AFAR_VERSION=`echo rocm${ROCM_VERSION} | sed -e 's!afar-!afar/!'`
-         module load $ROCM_AFAR_VERSION
-      else
-         module load rocm/${ROCM_VERSION}
-      fi
+      module load rocm/${ROCM_VERSION}
       module load amdflang-new
       if [[ `which amdflang-new | wc -l` -eq 0 ]]; then
          # if amdflang-new is not found in the path
