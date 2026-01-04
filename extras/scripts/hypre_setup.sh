@@ -227,6 +227,7 @@ else
 
       else
 
+         ${SUDO} rm -rf v3.0.0.tar.gz hypre-3.0.0
          wget -q https://github.com/hypre-space/hypre/archive/refs/tags/v3.0.0.tar.gz
          tar -xzf v3.0.0.tar.gz
          cd hypre-3.0.0/src

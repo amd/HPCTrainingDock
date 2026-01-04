@@ -160,6 +160,11 @@ else
       export ROCM_HOME=${ROCM_PATH}
       export HIPCC=${ROCM_HOME}/bin/hipcc
       export HCC_AMDGPU_ARCH=${AMDGPU_GFXMODEL}
+      UV_LOC=`which uv`
+      if [ "x$UV_LOC" == "x" ]; then
+         pip3 install uv
+         PATH="${PATH}:~/.local/bin"
+      fi
 
       if [ -d "$CUPY_PATH" ]; then
          # don't use sudo if user has write access to install path
