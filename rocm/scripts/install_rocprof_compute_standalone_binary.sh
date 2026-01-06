@@ -22,16 +22,14 @@ git checkout rocm-${ROCM_VERSION}
 #git checkout develop
 cd projects/rocprofiler-compute
 python3 -m pip install -r requirements.txt
-python3 -m pip install nuitka patchelf
-cmake -B build -DCMAKE_INSTALL_PREFIX=install -S .
-cmake --build build --target install --parallel 8
-make -C build standalonebinary
-cmake --build build --target standalonebinary
+python3 -m pip install nuitka==2.6 patchelf
+cmake -B build -S .
+cmake --build build --target standalonebinary --parallel 8
 
 echo ""
 find . -name rocprof-compute.bin -print
 
-sudo mv $ROCM_PATH/bin/rocprof-compute $ROCM_PATH/bin/rocprof-compute.back
+sudo mv $ROCM_PATH/bin/rocprof-compute $ROCM_PATH/bin/rocprof-compute.py
 sudo cp src/rocprof-compute.dist/rocprof-compute.bin $ROCM_PATH/bin/rocprof-compute.bin
 pushd $ROCM_PATH/bin && sudo ln -s rocprof-compute.bin rocprof-compute && popd
 
