@@ -87,7 +87,7 @@ zipp==3.23.0
 zstandard==0.25.0
 EOF
 
-python3 -m pip install -r ../../../requirements.txt
+python3 -m pip install -r requirements.txt
 #python3 -m pip install nuitka==2.6 patchelf
 
 # Using CMakeLists.txt
@@ -109,7 +109,7 @@ export PROJECT_SOURCE_DIR=`pwd`/..
      --include-package=dash_svg --include-package-data=dash_svg \
      --include-package=dash_bootstrap_components \
      --include-package-data=dash_bootstrap_components --include-package=plotly \
-     --include-package-data=plotly --include-package=kaleido \
+     --include-package-data=plotly --noinclude-data-files=plotly/datasets/* --include-package=kaleido \
      --include-package-data=kaleido --include-package=rocprof_compute_analyze \
      --include-package-data=rocprof_compute_analyze \
      --include-package=rocprof_compute_profile \
@@ -135,3 +135,9 @@ fi
 if [[ ! -L $ROCM_PATH/bin/rocprof-compute ]]; then
    pushd $ROCM_PATH/bin && sudo ln -s rocprof-compute.bin rocprof-compute && popd
 fi
+
+du -skh `which rocprof-compute`.bin
+
+deactivate
+cd ../../../..
+rm -rf standalonebinary
