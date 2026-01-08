@@ -7,7 +7,7 @@ else
    echo "ROCM_VERSION is $ROCM_VERSION"
 fi
 REQUIREMENTS_TXT="astunparse==1.6.2 colorlover dash-bootstrap-components dash-svg dash>=3.0.0"
-REQUIREMENTS_TXT="${REQUIREMENTS_TXT} numpy>=1.17.5 pandas>=1.4.3"
+REQUIREMENTS_TXT="${REQUIREMENTS_TXT} kaleido==0.2.1 matplotlib numpy>=1.17.5 pandas>=1.4.3"
 REQUIREMENTS_TXT="${REQUIREMENTS_TXT} plotext plotille pymongo pyyaml setuptools sqlalchemy>=2.0.42"
 REQUIREMENTS_TXT="${REQUIREMENTS_TXT} tabulate textual textual_plotext textual-fspicker>=0.4.3 tqdm"
 
@@ -45,7 +45,8 @@ export PROJECT_SOURCE_DIR=`pwd`/..
      --include-package=dash_svg --include-package-data=dash_svg \
      --include-package=dash_bootstrap_components \
      --include-package-data=dash_bootstrap_components --include-package=plotly \
-     --include-package-data=plotly --include-package=rocprof_compute_analyze \
+     --include-package-data=plotly --include-package=kaleido \
+     --include-package-data=kaleido --include-package=rocprof_compute_analyze \
      --include-package-data=rocprof_compute_analyze \
      --include-package=rocprof_compute_profile \
      --include-package-data=rocprof_compute_profile \
