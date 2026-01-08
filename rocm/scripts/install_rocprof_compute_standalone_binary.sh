@@ -6,10 +6,6 @@ if [[ "$ROCM_VERSION" == "" ]]; then
 else
    echo "ROCM_VERSION is $ROCM_VERSION"
 fi
-REQUIREMENTS_TXT="astunparse==1.6.2 colorlover dash-bootstrap-components dash-svg dash>=3.0.0"
-REQUIREMENTS_TXT="${REQUIREMENTS_TXT} kaleido==0.2.1 matplotlib numpy>=1.17.5 pandas>=1.4.3"
-REQUIREMENTS_TXT="${REQUIREMENTS_TXT} plotext plotille pymongo pyyaml setuptools sqlalchemy>=2.0.42"
-REQUIREMENTS_TXT="${REQUIREMENTS_TXT} tabulate textual textual_plotext textual-fspicker>=0.4.3 tqdm"
 
 rm -rf standalonebinary
 python3 -m venv standalonebinary
@@ -23,8 +19,76 @@ git branch --list
 git checkout rocm-${ROCM_VERSION}
 #git checkout develop
 cd projects/rocprofiler-compute
-python3 -m pip install $REQUIREMENTS_TXT
-python3 -m pip install nuitka==2.6 patchelf
+mv requirements.txt requirements.txt.back
+
+cat << EOF > requirements.txt
+astunparse==1.6.2
+blinker==1.9.0
+certifi==2026.1.4
+charset-normalizer==3.4.4
+click==8.3.1
+colorlover==0.3.0
+contourpy==1.3.2
+cycler==0.12.1
+dash==3.3.0
+dash-bootstrap-components==2.0.4
+dash-svg==0.0.12
+dnspython==2.8.0
+Flask==3.1.2
+fonttools==4.61.1
+greenlet==3.3.0
+idna==3.11
+importlib_metadata==8.7.1
+itsdangerous==2.2.0
+Jinja2==3.1.6
+kaleido==0.2.1
+kiwisolver==1.4.9
+linkify-it-py==2.0.3
+markdown-it-py==4.0.0
+MarkupSafe==3.0.3
+matplotlib==3.10.8
+mdit-py-plugins==0.5.0
+mdurl==0.1.2
+narwhals==2.15.0
+nest-asyncio==1.6.0
+Nuitka==2.6
+numpy==2.2.6
+ordered-set==4.1.0
+packaging==25.0
+pandas==2.3.3
+patchelf==0.17.2.4
+pillow==12.1.0
+platformdirs==4.5.1
+plotext==5.3.2
+plotille==5.0.0
+plotly==6.5.1
+Pygments==2.19.2
+pymongo==10.10.10.10
+pyparsing==3.3.1
+python-dateutil==3.9.0
+pytz==2025.2
+PyYAML==6.0.3
+requests==2.32.5
+retrying==1.4.2
+rich==14.2.0
+six==1.17.0
+SQLAlchemy==2.0.45
+tabulate==0.9.0
+textual==7.0.1
+textual-fspicker==0.6.0
+textual-plotext==1.0.1
+tqdm==4.67.1
+typing_extensions==4.15.0
+tzdata==2025.3
+uc-micro-py==1.0.3
+urllib3==2.6.3
+Werkzeug==3.1.5
+zipp==3.23.0
+zstandard==0.25.0
+EOF
+
+python3 -m pip install -r ../../../requirements.txt
+#python3 -m pip install nuitka==2.6 patchelf
 
 # Using CMakeLists.txt
 #cmake -B build -DCMAKE_INSTALL_PREFIX=$ROCM_PATH/bin -S .
