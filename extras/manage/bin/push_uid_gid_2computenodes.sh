@@ -11,7 +11,7 @@ VERBOSE=1
 
 # Save users from /etc/passwd to users.txt
 #awk -F: '$3 >= 8000 && $3 < 9000 {print $0}' /etc/passwd > users.txt
-awk -F: '$3 >= 12241 && $3 < 14000 {print $0}' /etc/passwd > users.txt
+awk -F: '$3 >= 12538 && $3 < 14000 {print $0}' /etc/passwd > users.txt
 #awk -F: '$3 >= 8243 && $3 < 8244 {print $0}' /etc/passwd > users.txt
 
 file="users.txt"

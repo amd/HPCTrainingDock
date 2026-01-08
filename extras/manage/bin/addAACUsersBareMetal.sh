@@ -20,15 +20,25 @@ HOMEDIR_BASE=/shared/prerelease/home
 # note these uid/gids are only for Containers for Bob Robey.
 # you MUST use other number for other Containers !
 
-HACKATHONBASEUSER=12318
+HACKATHONBASEUSER=12537
 HACKATHONBASEGROUP=12002
 
 CLUSTER_NAME="prerelease01"
+#SYSTEM_LIST=ppac-pl1-s24-16,ppac-pl1-s24-26,ppac-pl1-s24-30,ppac-pl1-s24-35,ppac-pl1-s25-40,sh5-pl1-s12-12,sh5-pl1-s12-33
+SYSTEM_LIST=`paste -s -d, short_hostlist`
+echo "Will operate on the following system list $SYSTEM_LIST"
+
+echo "Checking connectivity to system list."
+pdsh -R ssh -w $SYSTEM_LIST hostname
+echo "Connectivity check complete."
+read -p "Press [Enter] key to continue..."
+echo "Starting user addition."
+exit
 
 PARTITION1="1CN192C4G1H_MI300A_Ubuntu22"
 PARTITION2="1CN48C1G1H_MI300A_Ubuntu22"
 
-DRYRUN=0
+DRYRUN=1
 VERBOSE=2
 DO_SCAN=1
 
@@ -180,26 +190,26 @@ do
             # create the group using the gid listed in the /etc/passwd file
             echo "group $group_name is missing from /etc/group -- creating it"
             if (( "${VERBOSE}" > 0 )); then
-               echo "  sudo groupadd -f -g ${gid} $group_name"
+               echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo groupadd -f -g ${gid} $group_name"
 	       echo "  sudo sacctmgr -i add account name=$group_name cluster=$CLUSTER_NAME"
             fi
             if [ "${DRYRUN}" != 1 ]; then
-               sudo groupadd -f -g ${gid} $group_name
+               pdsh -R ssh -w $SYSTEM_LIST sudo groupadd -f -g ${gid} $group_name
 	       sudo sacctmgr -i add account name=$group_name cluster=$CLUSTER_NAME
             else
-               echo "  sudo groupadd -f -g ${gid} $group_name"
+               echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo groupadd -f -g ${gid} $group_name"
 	       echo "  sudo sacctmgr -i add account name=$group_name cluster=$CLUSTER_NAME"
             fi
          else
             echo "Adding user to group $group_name and making it the primary group for the user"
             if (( "${VERBOSE}" > 0 )); then
-               echo "  sudo usermod -a -G ${group_name}"
-               echo "  sudo usermod -g ${group_name}"
+               echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo usermod -a -G ${group_name}"
+               echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo usermod -g ${group_name}"
 	       echo " sudo sacctmgr -i add account name="$group_name" cluster="$CLUSTER_NAME""
             fi
             if [ "${DRYRUN}" != 1 ]; then
-               sudo usermod -a -G ${group_name} ${user_name}
-               sudo usermod -g ${group_name} ${user_name}
+               pdsh -R ssh -w $SYSTEM_LIST sudo usermod -a -G ${group_name} ${user_name}
+               pdsh -R ssh -w $SYSTEM_LIST sudo usermod -g ${group_name} ${user_name}
 	       sudo sacctmgr -i add account name=$group_name cluster=$CLUSTER_NAME
             fi
          fi
@@ -213,20 +223,20 @@ do
             GROUP_NAME_HOMEDIR=${group_homedir}
             echo "Adding missing group for home directory ${GROUP_NAME_HOMEDIR}"
             if (( "${VERBOSE}" > 0 )); then
-               echo "  sudo groupadd -f -g $group_homedir ${GROUP_NAME_HOMEDIR}"
+               echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo groupadd -f -g $group_homedir ${GROUP_NAME_HOMEDIR}"
             fi
             if [ "${DRYRUN}" != 1 ]; then
-               sudo groupadd -f -g $group_homedir ${GROUP_NAME_HOMEDIR}
+               pdsh -R ssh -w $SYSTEM_LIST sudo groupadd -f -g $group_homedir ${GROUP_NAME_HOMEDIR}
             fi
          else
             GROUP_NAME_HOMEDIR=`getent group $gid_homedir | cut -d: -f1`
          fi
          echo "Adding group of home directory ${GROUP_NAME_HOMEDIR} to user"
          if (( "${VERBOSE}" > 0 )); then
-            echo "  sudo usermod -a -G ${GROUP_NAME_HOMEDIR} ${user_name}"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo usermod -a -G ${GROUP_NAME_HOMEDIR} ${user_name}"
          fi
          if [ "${DRYRUN}" != 1 ]; then
-            sudo usermod -a -G ${GROUP_NAME_HOMEDIR} ${user_name}
+            pdsh -R ssh -w $SYSTEM_LIST sudo usermod -a -G ${GROUP_NAME_HOMEDIR} ${user_name}
          fi
       fi
    else 
@@ -243,22 +253,22 @@ do
             # should add a check that the subdirectory matches the group name?
             echo "home directory exists, but group for it does not. Adding group"
             if (( "${VERBOSE}" > 0 )); then
-               echo "  sudo groupadd -f -g ${gid} $group_name"
+               echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo groupadd -f -g ${gid} $group_name"
             fi
             if [ "${DRYRUN}" != 1 ]; then
-               sudo groupadd -f -g ${gid} $group_name
+               pdsh -R ssh -w $SYSTEM_LIST sudo groupadd -f -g ${gid} $group_name
             fi
          fi
          echo "home directory exists, but user does not. Adding user"
          if (( "${VERBOSE}" > 0 )); then
-            echo "sudo sacctmgr -i add account name=$group_name cluster=$CLUSTER_NAME"		 
-            echo "  sudo useradd --shell /bin/bash --home ${USERHOMEDIR} --uid $uid --gid ${gid} ${user_name}"
-	    echo "sudo usermod -g ${group_name} $user_name"
+            echo "  sudo sacctmgr -i add account name=$group_name cluster=$CLUSTER_NAME"		 
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo useradd --shell /bin/bash --home ${USERHOMEDIR} --uid $uid --gid ${gid} ${user_name}"
+	    echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo usermod -g ${group_name} $user_name"
          fi
          if [ "${DRYRUN}" != 1 ]; then
             sudo sacctmgr -i add account name=$group_name cluster=$CLUSTER_NAME
-            sudo useradd --shell /bin/bash --home ${USERHOMEDIR} --uid $uid --gid ${gid} ${user_name}
-	    sudo usermod -g ${group_name} $user_name
+            pdsh -R ssh -w $SYSTEM_LIST sudo useradd --shell /bin/bash --home ${USERHOMEDIR} --uid $uid --gid ${gid} ${user_name}
+	    pdsh -R ssh -w $SYSTEM_LIST sudo usermod -g ${group_name} $user_name
          fi
 
          # Need to add a group for the home directory if it doesn't match the user's group id
@@ -270,27 +280,27 @@ do
                GROUP_NAME_HOMEDIR=`getent group $gid_homedir | cut -d: -f1`
                echo "Adding missing group for home directory ${GROUP_NAME_HOMEDIR}"
                if (( "${VERBOSE}" > 0 )); then
-                  echo "  sudo groupadd -f -g $group_homedir ${GROUP_NAME_HOMEDIR}"
+                  echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo groupadd -f -g $group_homedir ${GROUP_NAME_HOMEDIR}"
                fi
                if [ "${DRYRUN}" != 1 ]; then
-                  sudo groupadd -f -g $group_homedir ${GROUP_NAME_HOMEDIR}
+                  pdsh -R ssh -w $SYSTEM_LIST sudo groupadd -f -g $group_homedir ${GROUP_NAME_HOMEDIR}
                fi
             else
                GROUP_NAME_HOMEDIR=`getent group $gid_homedir | cut -d: -f1`
             fi
             echo "Adding group of home directory ${GROUP_NAME_HOMEDIR} to user"
             if (( "${VERBOSE}" > 0 )); then
-               echo "  sudo usermod -a -G ${GROUP_NAME_HOMEDIR} ${user_name}"
+               echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo usermod -a -G ${GROUP_NAME_HOMEDIR} ${user_name}"
             fi
             if [ "${DRYRUN}" != 1 ]; then
-               sudo usermod -a -G ${GROUP_NAME_HOMEDIR} ${user_name}
+               pdsh -R ssh -w $SYSTEM_LIST sudo usermod -a -G ${GROUP_NAME_HOMEDIR} ${user_name}
             fi
          fi
          # set password
          if [ ! -z "${pw}" ]; then
             echo "Password requested for ${user_name}:${pw}"
             if [ "${DRYRUN}" != 1 ]; then
-               echo ${user_name}:${pw} | sudo chpasswd
+               echo ${user_name}:${pw} | pdsh -R ssh -w $SYSTEM_LIST sudo chpasswd
             fi
          else
             if (( "${VERBOSE}" > 0 )); then
@@ -310,19 +320,19 @@ do
                # should add a check that the subdirectory matches the group name?
                echo "Group does not exist -- creating group"
                if (( "${VERBOSE}" > 0 )); then
-                  echo "sudo sacctmgr -i add account name=$group_name cluster=$CLUSTER_NAME"
-                  echo "  sudo groupadd -f -g ${HACKATHONBASEGROUP} $group_name"
+                  echo "  sudo sacctmgr -i add account name=$group_name cluster=$CLUSTER_NAME"
+                  echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo groupadd -f -g ${HACKATHONBASEGROUP} $group_name"
                fi
                if [ "${DRYRUN}" != 1 ]; then
                   sudo sacctmgr -i add account name=$group_name cluster=$CLUSTER_NAME
-                  sudo groupadd -f -g ${HACKATHONBASEGROUP} $group_name
+                  pdsh -R ssh -w $SYSTEM_LIST sudo groupadd -f -g ${HACKATHONBASEGROUP} $group_name
                fi
                #echo "HACKATHONBASEGROUP=$((HACKATHONBASEGROUP+1))"
             fi
             USERHOMEDIR=${HOMEDIR_BASE}/${group_name}/${user_name}
             if [ ! -d ${HOMEDIR_BASE}/${group_name} ]; then
-               sudo mkdir -p ${HOMEDIR_BASE}/${group_name}
-               sudo chgrp ${group_name}  ${HOMEDIR_BASE}/${group_name}
+               pdsh -R ssh -w $SYSTEM_LIST sudo mkdir -p ${HOMEDIR_BASE}/${group_name}
+               pdsh -R ssh -w $SYSTEM_LIST sudo chgrp ${group_name}  ${HOMEDIR_BASE}/${group_name}
             fi
          else
             USERHOMEDIR=${HOMEDIR_BASE}/${user_name}
@@ -332,23 +342,23 @@ do
          gid=`getent group $group_name | cut -d: -f3`
          echo "User does not exist -- creating user account"
          if (( "${VERBOSE}" > 1 )); then
-            echo "sudo useradd --create-home --skel $HOME/init_scripts --shell /bin/bash --home ${USERHOMEDIR} --uid $id --gid ${gid} ${user_name}"
-	    echo "sudo usermod -g ${group_name} $user_name"
-            echo "  sudo chmod -R go-rwx  ${USERHOMEDIR}"
-            echo "  sudo chgrp -R ${group_name}  ${USERHOMEDIR}"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo useradd --create-home --skel $HOME/init_scripts --shell /bin/bash --home ${USERHOMEDIR} --uid $id --gid ${gid} ${user_name}"
+	    echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo usermod -g ${group_name} $user_name"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chmod -R go-rwx  ${USERHOMEDIR}"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chgrp -R ${group_name}  ${USERHOMEDIR}"
          fi
          if [ "${DRYRUN}" != 1 ]; then
-            sudo useradd --create-home --skel $HOME/init_scripts --shell /bin/bash --home ${USERHOMEDIR} --uid $id --gid ${gid} ${user_name}
-	    sudo usermod -g ${group_name} ${user_name}
-	    sudo usermod -a -G ${group_name} ${user_name} 
-            sudo chmod -R go-rwx  ${USERHOMEDIR}
-            sudo chown -R ${user_name} ${USERHOMEDIR}
+            pdsh -R ssh -w $SYSTEM_LIST sudo useradd --create-home --skel $HOME/init_scripts --shell /bin/bash --home ${USERHOMEDIR} --uid $id --gid ${gid} ${user_name}
+	    pdsh -R ssh -w $SYSTEM_LIST sudo usermod -g ${group_name} ${user_name}
+	    pdsh -R ssh -w $SYSTEM_LIST sudo usermod -a -G ${group_name} ${user_name} 
+            pdsh -R ssh -w $SYSTEM_LIST sudo chmod -R go-rwx  ${USERHOMEDIR}
+            pdsh -R ssh -w $SYSTEM_LIST sudo chown -R ${user_name} ${USERHOMEDIR}
          fi
          # set password
          if [ ! -z "${pw}" ]; then
             echo "Password requested for ${user_name}:${pw}"
             if [ "${DRYRUN}" != 1 ]; then
-               echo ${user_name}:${pw} | sudo chpasswd
+               echo ${user_name}:${pw} | pdsh -R ssh -w \$SYSTEM_LIST sudo chpasswd
             fi
          else
             if (( "${VERBOSE}" > 1 )); then
@@ -385,39 +395,39 @@ do
       if (( "${VERBOSE}" > 2 )); then
          echo "Add groups for access to the GPU (see /dev/dri /dev/kfd)"
          #sudo usermod -a -G video,audio,render, slurmusers ${user_name}
-         echo "  sudo usermod -a -G video,audio,render,slurmusers ${user_name}"
+         echo "  pdsh -R ssh -w $SYSTEM_LIST sudo usermod -a -G video,audio,render,slurmusers ${user_name}"
       fi
       if [ "${DRYRUN}" != 1 ]; then
-         sudo usermod -a -G video,audio,render,slurmusers ${user_name}
+         pdsh -R ssh -w $SYSTEM_LIST sudo usermod -a -G video,audio,render,slurmusers ${user_name}
       fi
    fi
    # add the ssh key to the users authorized_keys file
    #sudo chmod a+rwx  ${USERHOMEDIR}
    if [ ! -z "${sshkey}" ]; then
       if (( "${VERBOSE}" > 1 )); then
-         echo "  sudo chmod a+rwx ${USERHOMEDIR}"
+         echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chmod a+rwx ${USERHOMEDIR}"
       fi
       if [ "${DRYRUN}" != 1 ]; then
-         sudo chmod a+rwx ${USERHOMEDIR}
+         pdsh -R ssh -w $SYSTEM_LIST sudo chmod a+rwx ${USERHOMEDIR}
       fi
       if [ ! -d ${USERHOMEDIR}/.ssh ]; then
          if (( "${VERBOSE}" > 1 )); then
-            echo "  sudo mkdir -p  ${USERHOMEDIR}/.ssh"
-            echo "  sudo chown ${user_name} ${USERHOMEDIR}/.ssh"
-            echo "  sudo chmod g+rwx ${USERHOMEDIR}/.ssh"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo mkdir -p  ${USERHOMEDIR}/.ssh"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chown ${user_name} ${USERHOMEDIR}/.ssh"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chmod g+rwx ${USERHOMEDIR}/.ssh"
 	 fi
          if [ "${DRYRUN}" != 1 ]; then
-            sudo mkdir -p  ${USERHOMEDIR}/.ssh
-            sudo chown ${user_name} ${USERHOMEDIR}/.ssh
-            sudo chmod g+rwx ${USERHOMEDIR}/.ssh
+            pdsh -R ssh -w $SYSTEM_LIST sudo mkdir -p  ${USERHOMEDIR}/.ssh
+            pdsh -R ssh -w $SYSTEM_LIST sudo chown ${user_name} ${USERHOMEDIR}/.ssh
+            pdsh -R ssh -w $SYSTEM_LIST sudo chmod g+rwx ${USERHOMEDIR}/.ssh
 	 fi
       fi
       if [ ! -f ${USERHOMEDIR}/.ssh/authorized_keys ]; then
          if (( "${VERBOSE}" > 1 )); then
-            echo "  sudo touch  ${USERHOMEDIR}/.ssh/authorized_keys"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo touch  ${USERHOMEDIR}/.ssh/authorized_keys"
 	 fi
          if [ "${DRYRUN}" != 1 ]; then
-            sudo touch  ${USERHOMEDIR}/.ssh/authorized_keys
+            pdsh -R ssh -w $SYSTEM_LIST sudo touch  ${USERHOMEDIR}/.ssh/authorized_keys
 	 fi
       fi
       KEY_EXIST=0
@@ -426,77 +436,77 @@ do
       fi
       if [ "${KEY_EXIST}" == 0 ]; then
          if (( "${VERBOSE}" > 1 )); then
-            echo "  sudo chmod a+rwx ${USERHOMEDIR}/.ssh/authorized_keys"
-            echo "  sudo cat ${USERHOMEDIR}/.ssh/authorized_keys > key.txt"
-            echo "  sudo echo "${sshkey}" >> key.txt"
-            echo "  sudo scp -p key.txt ${USERHOMEDIR}/.ssh/authorized_keys"
-            echo "  sudo chmod 600 ${USERHOMEDIR}/.ssh/authorized_keys"
-            echo "  sudo chown $user_name ${USERHOMEDIR}/.ssh"
-            echo "  sudo chown $user_name ${USERHOMEDIR}/.ssh/authorized_keys"
-            echo "  sudo chgrp $group_name ${USERHOMEDIR}/.ssh"
-            echo "  sudo chgrp $group_name ${USERHOMEDIR}/.ssh/authorized_keys"
-            echo "  sudo rm key.txt"
-            echo "  sudo chmod a-rwx ${USERHOMEDIR}/.ssh/authorized_keys"
-            echo "  sudo chmod u+rw  ${USERHOMEDIR}/.ssh/authorized_keys"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chmod a+rwx ${USERHOMEDIR}/.ssh/authorized_keys"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo cat ${USERHOMEDIR}/.ssh/authorized_keys > key.txt"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo echo "${sshkey}" >> key.txt"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo scp -p key.txt ${USERHOMEDIR}/.ssh/authorized_keys"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chmod 600 ${USERHOMEDIR}/.ssh/authorized_keys"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chown $user_name ${USERHOMEDIR}/.ssh"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chown $user_name ${USERHOMEDIR}/.ssh/authorized_keys"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chgrp $group_name ${USERHOMEDIR}/.ssh"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chgrp $group_name ${USERHOMEDIR}/.ssh/authorized_keys"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo rm key.txt"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chmod a-rwx ${USERHOMEDIR}/.ssh/authorized_keys"
+            echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chmod u+rw  ${USERHOMEDIR}/.ssh/authorized_keys"
 	 fi
          if [ "${DRYRUN}" != 1 ]; then
-            sudo chmod a+rwx ${USERHOMEDIR}/.ssh/authorized_keys
-            sudo cat ${USERHOMEDIR}/.ssh/authorized_keys > key.txt
-            sudo echo "${sshkey}" >> key.txt
-            sudo scp -p key.txt ${USERHOMEDIR}/.ssh/authorized_keys
-            sudo chmod 600 ${USERHOMEDIR}/.ssh/authorized_keys
-            sudo chown $user_name ${USERHOMEDIR}/.ssh
-            sudo chown $user_name ${USERHOMEDIR}/.ssh/authorized_keys
-            sudo chgrp $group_name ${USERHOMEDIR}/.ssh
-            sudo chgrp $group_name ${USERHOMEDIR}/.ssh/authorized_keys
-            sudo rm key.txt
-            sudo chmod a-rwx ${USERHOMEDIR}/.ssh/authorized_keys
-            sudo chmod u+rw  ${USERHOMEDIR}/.ssh/authorized_keys
+            pdsh -R ssh -w $SYSTEM_LIST sudo chmod a+rwx ${USERHOMEDIR}/.ssh/authorized_keys
+            pdsh -R ssh -w $SYSTEM_LIST sudo cat ${USERHOMEDIR}/.ssh/authorized_keys > key.txt
+            pdsh -R ssh -w $SYSTEM_LIST sudo echo "${sshkey}" >> key.txt
+            pdsh -R ssh -w $SYSTEM_LIST sudo scp -p key.txt ${USERHOMEDIR}/.ssh/authorized_keys
+            pdsh -R ssh -w $SYSTEM_LIST sudo chmod 600 ${USERHOMEDIR}/.ssh/authorized_keys
+            pdsh -R ssh -w $SYSTEM_LIST sudo chown $user_name ${USERHOMEDIR}/.ssh
+            pdsh -R ssh -w $SYSTEM_LIST sudo chown $user_name ${USERHOMEDIR}/.ssh/authorized_keys
+            pdsh -R ssh -w $SYSTEM_LIST sudo chgrp $group_name ${USERHOMEDIR}/.ssh
+            pdsh -R ssh -w $SYSTEM_LIST sudo chgrp $group_name ${USERHOMEDIR}/.ssh/authorized_keys
+            pdsh -R ssh -w $SYSTEM_LIST sudo rm key.txt
+            pdsh -R ssh -w $SYSTEM_LIST sudo chmod a-rwx ${USERHOMEDIR}/.ssh/authorized_keys
+            pdsh -R ssh -w $SYSTEM_LIST sudo chmod u+rw  ${USERHOMEDIR}/.ssh/authorized_keys
 	 fi
       fi
 
       if (( "${VERBOSE}" > 1 )); then
-         echo "  sudo chmod a-rwx ${USERHOMEDIR}/.ssh"
-         echo "  sudo chmod u+rwx ${USERHOMEDIR}/.ssh"
-         echo "  sudo chmod a-rwx ${USERHOMEDIR}"
-         echo "  sudo chmod u+rwx ${USERHOMEDIR}"
+         echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chmod a-rwx ${USERHOMEDIR}/.ssh"
+         echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chmod u+rwx ${USERHOMEDIR}/.ssh"
+         echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chmod a-rwx ${USERHOMEDIR}"
+         echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chmod u+rwx ${USERHOMEDIR}"
       fi
       if [ "${DRYRUN}" != 1 ]; then
-         sudo chmod a-rwx ${USERHOMEDIR}/.ssh
-         sudo chmod u+rwx ${USERHOMEDIR}/.ssh
-         sudo chmod a-rwx ${USERHOMEDIR}
-         sudo chmod u+rwx ${USERHOMEDIR}
+         pdsh -R ssh -w $SYSTEM_LIST sudo chmod a-rwx ${USERHOMEDIR}/.ssh
+         pdsh -R ssh -w $SYSTEM_LIST sudo chmod u+rwx ${USERHOMEDIR}/.ssh
+         pdsh -R ssh -w $SYSTEM_LIST sudo chmod a-rwx ${USERHOMEDIR}
+         pdsh -R ssh -w $SYSTEM_LIST sudo chmod u+rwx ${USERHOMEDIR}
       fi
    fi
 
    if sudo test ! -f ${USERHOMEDIR}/.bashrc ; then
       if (( "${VERBOSE}" > 2 )); then
          echo "Missing bashrc file for $user_name. Creating it"
-         echo "  sudo cp /home/amd/init_scripts/bashrc ${USERHOMEDIR}/.bashrc"
-         echo "  sudo chown ${user_name} ${USERHOMEDIR}/.bashrc"
-         echo "  sudo chgrp ${group_name} ${USERHOMEDIR}/.bashrc"
-         echo "  sudo chmod 600 ${USERHOMEDIR}/.bashrc"
+         echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo cp /home/amd/init_scripts/bashrc ${USERHOMEDIR}/.bashrc"
+         echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chown ${user_name} ${USERHOMEDIR}/.bashrc"
+         echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chgrp ${group_name} ${USERHOMEDIR}/.bashrc"
+         echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chmod 600 ${USERHOMEDIR}/.bashrc"
       fi
       if [ "${DRYRUN}" != 1 ]; then
-         sudo cp /home/amd/init_scripts/bashrc ${USERHOMEDIR}/.bashrc
-         sudo chown ${user_name} ${USERHOMEDIR}/.bashrc
-         sudo chgrp ${group_name} ${USERHOMEDIR}/.bashrc
-         sudo chmod 600 ${USERHOMEDIR}/.bashrc
+         pdsh -R ssh -w $SYSTEM_LIST sudo cp /home/amd/init_scripts/bashrc ${USERHOMEDIR}/.bashrc
+         pdsh -R ssh -w $SYSTEM_LIST sudo chown ${user_name} ${USERHOMEDIR}/.bashrc
+         pdsh -R ssh -w $SYSTEM_LIST sudo chgrp ${group_name} ${USERHOMEDIR}/.bashrc
+         pdsh -R ssh -w $SYSTEM_LIST sudo chmod 600 ${USERHOMEDIR}/.bashrc
       fi
    fi
    if sudo test ! -f ${USERHOMEDIR}/.profile ; then
       if (( "${VERBOSE}" > 2 )); then
          echo "Missing profile file for $user_name. Creating it"
-         echo "  sudo cp /home/amd/init_scripts/profile ${USERHOMEDIR}/.profile"
-         echo "  sudo chown ${user_name} ${USERHOMEDIR}/.profile"
-         echo "  sudo chgrp ${group_name} ${USERHOMEDIR}/.profile"
-         echo "  sudo chmod 600 ${USERHOMEDIR}/.profile"
+         echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo cp /home/amd/init_scripts/profile ${USERHOMEDIR}/.profile"
+         echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chown ${user_name} ${USERHOMEDIR}/.profile"
+         echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chgrp ${group_name} ${USERHOMEDIR}/.profile"
+         echo "  pdsh -R ssh -w \$SYSTEM_LIST sudo chmod 600 ${USERHOMEDIR}/.profile"
       fi
       if [ "${DRYRUN}" != 1 ]; then
-         sudo cp /home/amd/init_scripts/profile ${USERHOMEDIR}/.profile
-         sudo chown ${user_name} ${USERHOMEDIR}/.profile
-         sudo chgrp ${group_name} ${USERHOMEDIR}/.profile
-         sudo chmod 600 ${USERHOMEDIR}/.profile
+         pdsh -R ssh -w $SYSTEM_LIST sudo cp /home/amd/init_scripts/profile ${USERHOMEDIR}/.profile
+         pdsh -R ssh -w $SYSTEM_LIST sudo chown ${user_name} ${USERHOMEDIR}/.profile
+         pdsh -R ssh -w $SYSTEM_LIST sudo chgrp ${group_name} ${USERHOMEDIR}/.profile
+         pdsh -R ssh -w $SYSTEM_LIST sudo chmod 600 ${USERHOMEDIR}/.profile
       fi
    fi 
    ((i=i+1))
