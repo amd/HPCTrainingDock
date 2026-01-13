@@ -5,7 +5,7 @@ ROCM_VERSION=6.2.0
 BUILD_JAX=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/jax
 AMDGPU_GFXMODEL_INPUT=""
-JAX_VERSION=7.1
+JAX_VERSION=8.0
 JAX_PATH=/opt/rocmplus-${ROCM_VERSION}/jax
 JAX_PATH_INPUT=""
 JAXLIB_PATH=/opt/rocmplus-${ROCM_VERSION}/jaxlib
@@ -23,7 +23,7 @@ fi
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 if [[ "${DISTRO_VERSION}" == "22.04" ]]; then
-   # JAX VERSION 7.1 and 7.0 do not support python 3.10. Have not tried 6.2 or 6.1
+   # JAX VERSION 8.0, 7.1 and 7.0 do not support python 3.10. Have not tried 6.2 or 6.1
    JAX_VERSION=6.0
 fi
 
@@ -45,6 +45,7 @@ usage()
 compat_info()
 {
    echo " List of compatible versions according to https://github.com/ROCm/jax/releases: "
+   echo " JAX version 8.0 --> ROCm version 7.0.0 or higher and Python higher than 3.10 "
    echo " JAX version 7.1 --> ROCm version 7.0.0 or higher and Python higher than 3.10 "
    echo " JAX version 5.0 --> ROCm versions 6.0.3, 6.2.4 and 6.3.1 "
    echo " JAX version 4.35 --> ROCm versions 6.0.3, 6.1.3 and 6.2.4 "
@@ -259,14 +260,14 @@ else
 
       # this here is to take into account that the ROCm/jax repo has been deprecated
       # after the release of ROCm 7.1.0 and now it is all located at ROCm/rocm-jax
-      if [[ $JAX_VERSION == "7.1" ]]; then
+      if [[ $JAX_VERSION == "7.1" || $JAX_VERSION == "8.0" ]]; then
          result=`echo ${ROCM_VERSION} | awk '$1>7.0'` && echo $result
          # check if ROCm version is greater than or equal to 7.0
          if [[ "${result}" ]]; then
 
             PYTHON_VERSION=$(python3 -V 2>&1 | awk '{print $2}')
             if [[ "$PYTHON_VERSION" == 3.10.* ]]; then
-               echo "Python 3.10 is not supported by JAX 7.1: https://docs.jax.dev/en/latest/deprecation.html"
+               echo "Python 3.10 is not supported from JAX 7.1 : https://docs.jax.dev/en/latest/deprecation.html"
                compat_info
             fi
 
