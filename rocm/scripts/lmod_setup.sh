@@ -37,6 +37,19 @@ if [ "${DISTRO}" = "ubuntu" ]; then
 	/etc/lmod/modules/ROCmPlus-AI
 	/etc/lmod/modules/misc
 EOF
+
+   cat <<-EOF | ${SUDO} tee -a /etc/lmod/.modulespath >> /dev/null
+	/etc/lmod/modules/Linux
+	/etc/lmod/modules/LinuxPlus
+	/etc/lmod/modules/ROCm
+	/etc/lmod/modules/ROCmPlus
+	/etc/lmod/modules/ROCmPlus-MPI
+	/etc/lmod/modules/ROCmPlus-AMDResearchTools
+	/etc/lmod/modules/ROCmPlus-LatestCompilers
+	/etc/lmod/modules/ROCmPlus-AI
+	/etc/lmod/modules/misc
+EOF
+
    
    export BASH_INIT_FILE=/etc/bash.bashrc
 fi
@@ -81,6 +94,9 @@ else
   echo "File /etc/profile.d/z00_lmod.sh does not exist"
   echo "Creating /etc/profile.d/z00_lmod.sh file"
   ${SUDO} ln -s /usr/share/lmod/lmod/init/profile /etc/profile.d/z00_lmod.sh
+fi
+if ! test -f /etc/profile.d/modules.sh; then
+   echo "MODULEPATH=/etc/lmod/modules/Linux:/etc/lmod/modules/LinuxPlus:/etc/lmod/modules/ROCm:/etc/lmod/modules/ROCmPlus:/etc/lmod/modules/ROCmPlus-MPI:/etc/lmod/modules/ROCmPlus-AMDResearchTools:/etc/lmod/modules/ROCmPlus-LatestCompilers:/etc/lmod/modules/ROCmPlus-AI:/etc/lmod/modules/misc" > /etc/profile.d/modules.sh
 fi
 
 if test -L /etc/profile.d/z00_lmod.csh; then
