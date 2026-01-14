@@ -181,8 +181,8 @@ else
       echo "==============================="
       echo ""
 
-      source /etc/profile.d/lmod.sh
-      source /etc/profile.d/z00_lmod.sh
+      #source /etc/profile.d/lmod.sh
+      #source /etc/profile.d/z00_lmod.sh
 
       if [ -d "$FFTW_PATH" ]; then
          # don't use sudo if user has write access to install path

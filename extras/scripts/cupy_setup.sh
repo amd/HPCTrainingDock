@@ -102,8 +102,8 @@ else
 fi
 
 # Load the ROCm version for this CuPy build
-source /etc/profile.d/lmod.sh
-source /etc/profile.d/z00_lmod.sh
+#source /etc/profile.d/lmod.sh
+#source /etc/profile.d/z00_lmod.sh
 module load rocm/${ROCM_VERSION}
 ROCM_HOME=${ROCM_PATH}
 

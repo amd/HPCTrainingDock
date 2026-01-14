@@ -150,9 +150,9 @@ COPY extras/scripts/ftorch_setup.sh /tmp/extras/ftorch_setup.sh
 RUN  /tmp/extras/ftorch_setup.sh --build-ftorch ${BUILD_FTORCH} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
      rm -f /tmp/extras/ftorch_setup.sh
 
-COPY extras/scripts/ollama_setup.sh /tmp/extras/ollama_setup.sh
-RUN  /tmp/extras/ollama_setup.sh --build-ollama ${BUILD_OLLAMA} && \
-     rm -f /tmp/extras/ollama_setup.sh
+#COPY extras/scripts/ollama_setup.sh /tmp/extras/ollama_setup.sh
+#RUN  /tmp/extras/ollama_setup.sh --build-ollama ${BUILD_OLLAMA} && \
+     #rm -f /tmp/extras/ollama_setup.sh
 
 COPY extras/scripts/apps_setup.sh /tmp/extras/apps_setup.sh
 RUN  /tmp/extras/apps_setup.sh && \

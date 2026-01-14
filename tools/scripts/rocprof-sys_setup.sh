@@ -214,8 +214,8 @@ if [ "${INSTALL_ROCPROF_SYS_FROM_SOURCE}" = "1" ] ; then
 
    else
       # Load the ROCm version for this build
-      source /etc/profile.d/lmod.sh
-      source /etc/profile.d/z00_lmod.sh
+      #source /etc/profile.d/lmod.sh
+      #source /etc/profile.d/z00_lmod.sh
       module load rocm/${ROCM_VERSION}
       module load ${MPI_MODULE}
 

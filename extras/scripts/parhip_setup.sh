@@ -148,8 +148,8 @@ else
          ${SUDO} chmod -R a+w ${INSTALL_PATH}
       fi
 
-      source /etc/profile.d/lmod.sh
-      source /etc/profile.d/z00_lmod.sh
+      #source /etc/profile.d/lmod.sh
+      #source /etc/profile.d/z00_lmod.sh
       module load amdclang
 
       rm -rf parhip

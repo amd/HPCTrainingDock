@@ -179,8 +179,8 @@ else
       echo "==============================="
       echo ""
 
-      source /etc/profile.d/lmod.sh
-      source /etc/profile.d/z00_lmod.sh
+      #source /etc/profile.d/lmod.sh
+      #source /etc/profile.d/z00_lmod.sh
 
       # don't use sudo if user has write access to install path
       if [ -d "$HDF5_PATH" ]; then

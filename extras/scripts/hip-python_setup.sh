@@ -151,8 +151,8 @@ else
 
 
       # Load the ROCm version for this HIP-Python build -- use hip compiler, path to ROCm and the GPU model
-      source /etc/profile.d/lmod.sh
-      source /etc/profile.d/z00_lmod.sh
+      #source /etc/profile.d/lmod.sh
+      #source /etc/profile.d/z00_lmod.sh
       module load rocm/${ROCM_VERSION}
       export HIP_PYTHON_INSTALL_USE_HIP=1
       export ROCM_HOME=${ROCM_PATH}

@@ -144,8 +144,8 @@ else
       ${SUDO} mkdir -p ${INSTALL_PATH}
       ${SUDO} chmod -R a+w ${INSTALL_PATH}
 
-      source /etc/profile.d/lmod.sh
-      source /etc/profile.d/z00_lmod.sh
+      #source /etc/profile.d/lmod.sh
+      #source /etc/profile.d/z00_lmod.sh
       module load rocm/${ROCM_VERSION}
       module load amdclang
       module load openmpi

@@ -165,8 +165,8 @@ else
       echo "============================"
       echo ""
 
-      source /etc/profile.d/lmod.sh
-      source /etc/profile.d/z00_lmod.sh
+      #source /etc/profile.d/lmod.sh
+      #source /etc/profile.d/z00_lmod.sh
       module load rocm/${ROCM_VERSION}
       module load ${MPI_MODULE}
 
