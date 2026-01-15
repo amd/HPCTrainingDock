@@ -63,9 +63,9 @@ plotext==5.3.2
 plotille==5.0.0
 plotly==6.5.1
 Pygments==2.19.2
-pymongo==10.10.10.10
+pymongo==4.16.0
 pyparsing==3.3.1
-python-dateutil==3.9.0
+python-dateutil==2.9.0
 pytz==2025.2
 PyYAML==6.0.3
 requests==2.32.5
