@@ -101,6 +101,10 @@ do
    shift
 done
 
+if [ $BUILD_ROCPROFILER_SDK" == 0 ]]; then
+   echo "Rocprofiler SDK build flag is turned off"
+fi
+
 result=`echo $ROCM_VERSION | awk '$1>6.2.0'` && echo $result
 if [[ "${result}" == "" ]]; then # ROCM_VERSION < 6.2.0
    echo "The rocprofiler-sdk library can be installed only for ROCm versions greater than or equal to 6.2.0"
