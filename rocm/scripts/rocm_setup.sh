@@ -650,7 +650,7 @@ EOF
    echo ""
 
    # if ROCM_VERSION is greater than or equal to 7.0.0, the sort by version will give the smaller ROCM_VERSION number
-   if [ "$(printf '%s\n' "6.4.3" "$ROCM_VERSION" | sort -V | head -n1)" = "6.4.3" ]; then
+   if [ "$(printf '%s\n' "7.1.0" "$ROCM_VERSION" | sort -V | head -n1)" = "7.1.0" ]; then
       echo "This is where we put the nuitka installation"
       ROCM_PATH=$INSTALL_PATH
       PATH="${ROCM_PATH}:${PATH}"
@@ -669,15 +669,83 @@ EOF
          git checkout rocm-${ROCM_VERSION}
          #git checkout develop
          cd projects/rocprofiler-compute
+	 mv requirements.txt requirements.txt.back
+
+	 # Locking down the python package versions
+         cat <<-EOF > requirements.txt
+	astunparse==1.6.2
+	blinker==1.9.0
+	certifi==2026.1.4
+	charset-normalizer==3.4.4
+	click==8.3.1
+	colorlover==0.3.0
+	contourpy==1.3.2
+	cycler==0.12.1
+	dash==3.3.0
+	dash-bootstrap-components==2.0.4
+	dash-svg==0.0.12
+	dnspython==2.8.0
+	Flask==3.1.2
+	fonttools==4.61.1
+	greenlet==3.3.0
+	idna==3.11
+	importlib_metadata==8.7.1
+	itsdangerous==2.2.0
+	Jinja2==3.1.6
+	kaleido==0.2.1
+	kiwisolver==1.4.9
+	linkify-it-py==2.0.3
+	markdown-it-py==4.0.0
+	MarkupSafe==3.0.3
+	matplotlib==3.10.8
+	mdit-py-plugins==0.5.0
+	mdurl==0.1.2
+	narwhals==2.15.0
+	nest-asyncio==1.6.0
+	Nuitka==2.6
+	numpy==2.2.6
+	ordered-set==4.1.0
+	packaging==25.0
+	pandas==2.3.3
+	patchelf==0.17.2.4
+	pillow==12.1.0
+	platformdirs==4.5.1
+	plotext==5.3.2
+	plotille==5.0.0
+	plotly==6.5.1
+	Pygments==2.19.2
+	pymongo==4.16.0
+	pyparsing==3.3.1
+	python-dateutil==2.9.0
+	pytz==2025.2
+	PyYAML==6.0.3
+	requests==2.32.5
+	retrying==1.4.2
+	rich==14.2.0
+	six==1.17.0
+	SQLAlchemy==2.0.45
+	tabulate==0.9.0
+	textual==7.0.1
+	textual-fspicker==0.6.0
+	textual-plotext==1.0.1
+	tqdm==4.67.1
+	typing_extensions==4.15.0
+	tzdata==2025.3
+	uc-micro-py==1.0.3
+	urllib3==2.6.3
+	Werkzeug==3.1.5
+	zipp==3.23.0
+	zstandard==0.25.0
+EOF
       else
+         # versions 7.0.2 and earlier get a UCC_Bubble counter error, so not enabling for earlier
+         python3 -m pip install nuitka==2.6 patchelf
          git clone https://github.com/ROCm/rocprofiler-compute.git
          git checkout rocm-${ROCM_VERSION}
 	 cd rocprofiler-compute
       fi
-      python3 -m pip install nuitka==2.6 patchelf
 
       python3 -m pip install -r requirements.txt
-      #python3 -m pip install nuitka==2.6 patchelf
 
       # Using CMakeLists.txt
       #cmake -B build -DCMAKE_INSTALL_PREFIX=$ROCM_PATH/bin -S .
