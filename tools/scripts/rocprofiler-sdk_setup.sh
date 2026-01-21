@@ -101,8 +101,9 @@ do
    shift
 done
 
-if [ $BUILD_ROCPROFILER_SDK" == 0 ]]; then
+if [ "$BUILD_ROCPROFILER_SDK" == "0" ]; then
    echo "Rocprofiler SDK build flag is turned off"
+   exit 1
 fi
 
 result=`echo $ROCM_VERSION | awk '$1>6.2.0'` && echo $result
