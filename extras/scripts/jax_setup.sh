@@ -248,7 +248,8 @@ else
       cd ..
       git clone --depth 1 --branch rocm-jaxlib-v0.${JAX_VERSION} https://github.com/ROCm/jax.git
       cd jax
-      sed -i "s|gfx906,gfx908,gfx90a,gfx942,gfx1030,gfx1100,gfx1101,gfx1200,gfx1201|$AMDGPU_GFXMODEL|" .bazelrc
+      sed -i "s|gfx900,gfx906,gfx908,gfx90a,gfx940,gfx941,gfx942,gfx1030,gfx1100,gfx1200,gfx1201|$AMDGPU_GFXMODEL|g" .bazelrc
+      sed -i "s|gfx906,gfx908,gfx90a,gfx942,gfx1030,gfx1100,gfx1101,gfx1200,gfx1201|$AMDGPU_GFXMODEL|g" .bazelrc
 
       # install necessary packages in installation directory
       ${SUDO} mkdir -p ${JAXLIB_PATH}
@@ -285,7 +286,7 @@ else
             rm -rf patchelf
             module load amdclang
             export CLANG_COMPILER=`which clang`
-            sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
+            sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|g" .bazelrc
             python3 build/build.py build --rocm_path=$ROCM_PATH \
                                          --bazel_options=--override_repository=xla=$XLA_PATH \
                                          --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
@@ -305,8 +306,8 @@ else
 	    # then we are using the ROCm/rocm-jax repo to build the other wheels
    	    git clone  --depth 1 --branch rocm-jax-v0.${JAX_VERSION} https://github.com/ROCm/rocm-jax.git
 	    cd rocm-jax/jax_rocm_plugin
-            sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
-            sed -i "s|gfx906,gfx908,gfx90a,gfx942,gfx1030,gfx1100,gfx1101,gfx1200,gfx1201|$AMDGPU_GFXMODEL|" .bazelrc
+            sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|g" .bazelrc
+            sed -i "s|gfx906,gfx908,gfx90a,gfx942,gfx1030,gfx1100,gfx1101,gfx1200,gfx1201|$AMDGPU_GFXMODEL|g" .bazelrc
 	    python3 build/build.py build --rocm_path=$ROCM_PATH \
                                          --bazel_options=--override_repository=xla=$XLA_PATH \
                                          --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
@@ -331,7 +332,7 @@ else
                sed -i '$a build:rocm --copt=-Wno-error=c23-extensions' .bazelrc
                module load amdclang
                export CLANG_COMPILER=`which clang`
-               sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
+               sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|g" .bazelrc
                # build the wheel for jaxlib using clang (which is the default)
                python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
                                       --bazel_options=--override_repository=xla=$XLA_PATH \
@@ -360,7 +361,7 @@ else
                rm -rf patchelf
                module load amdclang
                export CLANG_COMPILER=`which clang`
-               sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
+               sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|g" .bazelrc
                python3 build/build.py build --rocm_path=$ROCM_PATH \
                                             --bazel_options=--override_repository=xla=$XLA_PATH \
                                             --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
@@ -396,7 +397,7 @@ else
                rm -rf patchelf
                module load amdclang
                export CLANG_COMPILER=`which clang`
-               sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
+               sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|g" .bazelrc
                python3 build/build.py build --rocm_path=$ROCM_PATH \
                                             --bazel_options=--override_repository=xla=$XLA_PATH \
                                             --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
