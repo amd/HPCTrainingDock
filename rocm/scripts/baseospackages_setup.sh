@@ -46,9 +46,9 @@ if [ "${DISTRO}" = "ubuntu" ]; then
 # Install python packages
    ${SUDO} ${DEB_FRONTEND} apt-get install -q -y python3-pip python3-dev
    if [ "${DISTRO_VERSION}" = "24.04" ]; then
-      ${SUDO} ${DEB_FRONTEND} apt-get install python3.12-venv
+      ${SUDO} ${DEB_FRONTEND} apt-get install -q -y python3.12-venv
    else
-      ${SUDO} ${DEB_FRONTEND} apt-get install python3-venv
+      ${SUDO} ${DEB_FRONTEND} apt-get install -q -y python3-venv
    fi
 
    ${SUDO} localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8

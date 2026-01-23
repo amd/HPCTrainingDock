@@ -288,7 +288,7 @@ mv random_weights.bin.zst af_models/random_weights.bin.zst
 
 Before we run, we have to apply several patches:
 
-1. comment line 854-855 and 856 of `run_alphafold3.py` and replace with (as also noted [here](https://www.linkedin.com/pulse/getting-alphafold-3-run-amd-gpus-owain-kenway-egite/) ):
+1. comment line 854, 855 and 856 of `run_alphafold.py` and replace with (as also noted [here](https://www.linkedin.com/pulse/getting-alphafold-3-run-amd-gpus-owain-kenway-egite/) ):
 ```
 compute_capability=642
 ```
