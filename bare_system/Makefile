@@ -210,7 +210,7 @@ miniforge3.timestamp:
 	   --build-miniforge3 1
 	touch miniforge3.timestamp
 
-hdf5.timestamp:
+hdf5.timestamp: openmpi.timestamp
 	extras/scripts/hdf5_setup.sh \
            --rocm-version ${ROCM_VERSION} \
 	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
