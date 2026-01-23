@@ -45,7 +45,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
 
 # Install python packages
    ${SUDO} ${DEB_FRONTEND} apt-get install -q -y python3-pip python3-dev
-   if [ "${DISTRO_VERSION}" = "24.04" ]; then
+   if [ "${DISTRO_VERSION}" == "24.04" ]; then
       ${SUDO} ${DEB_FRONTEND} apt-get install -q -y python3.12-venv
    else
       ${SUDO} ${DEB_FRONTEND} apt-get install -q -y python3-venv
