@@ -1,0 +1,13 @@
+{
+  "name": "104-P55854",
+  "modelSeeds": [1, 2],
+  "sequences": [
+    { "protein": {
+      "id": "A",
+      "sequence": "MSEEKPKEGVKTENDHINLKVAGQDGSVVQFKIKRHTPLSKLMKAYCERQGLSMRQIRFRFDGQPINETDTPAQLEMEDEDTIDVFQQQTGGVPESSLAGHSF"
+       }
+    }
+  ],
+  "dialect": "alphafold3",
+  "version": 2
+}
