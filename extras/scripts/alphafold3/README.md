@@ -332,7 +332,7 @@ export XLA_PYTHON_CLIENT_PREALLOCATE=true
 export XLA_CLIENT_MEM_FRACTION=0.95
 cd /root/alphafold3
 
-python3 ./run_alphafold.py    --model_dir=/root/af_models    --db_dir=/root/public_databases    --output_dir=/root/af_output --json_path=/root/af_input/input.json --run_data_pipeline=False --run_inference=True --num_recycles=3 --num_diffusion_samples=1
+python3 ./run_alphafold.py    --model_dir=/root/af_models    --db_dir=/root/public_databases    --output_dir=/root/af_output --json_path=/root/af_input/input.json --num_recycles=3 --num_diffusion_samples=1
 ```
 
 If you get errors during the inference but the data pipeline step was successful, you can run bypassing the data pipeline and just do inference with:
