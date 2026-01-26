@@ -300,7 +300,7 @@ compute_capability=642
 with this (and comment the very last line):
 ```
 cc = device.compute_capability
-if isinstance(cc, str):  # ROCm case like "gfx942"
+if isinstance(cc, str):
     return False
 return float(cc) >= 8.0
 ```
