@@ -270,20 +270,23 @@ you should see:
 
 Now we need to make the dummy parameters:
 ```
-python3 generate_dummy_params.py
+cd
+git clone https://github.com/amd/HPCTrainingDock.git
+mkdir af_models
+cd af_models
+cp ~/HPCTrainingDock/extras/scripts/alphafold3/schema.txt .
+python3 ~/HPCTrainingDock/extras/scripts/alphafold3/generate_dummy_params.py
+rm schema.txt
 ```
 
-if it is working you will see this message:
+if this is working you will see the message:
 ```
 Parsing 405 parameters
 ```
-and it will output a file called `random_weights.bin.zst`
+and it will output a file called `random_weights.bin.zst`. Make sure the file is there:
 
-Then do:
 ```
-cd
-mkdir af_models
-mv random_weights.bin.zst af_models/random_weights.bin.zst
+ls ~/af_models
 ```
 
 Before we run, we have to apply several patches:
