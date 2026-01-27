@@ -24,6 +24,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 #RUN groupadd render -g 109
 #RUN groupadd renderalt -g 110
 
+#RUN echo 'Acquire::http::Proxy "http://172.23.0.12:3128";'  > /etc/apt/apt.conf.d/99proxy && \
+#    echo 'Acquire::https::Proxy "http://172.23.0.12:3128";' >> /etc/apt/apt.conf.d/99proxy
+
 WORKDIR /tmp
 
 COPY bare_system/bootstrap_os.sh /tmp/bootstrap_os.sh

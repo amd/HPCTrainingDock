@@ -666,7 +666,11 @@ EOF
          git sparse-checkout init --cone
          git sparse-checkout set projects/rocprofiler-compute
          git branch --list
-         git checkout rocm-${ROCM_VERSION}
+	 ROCM_VERSION_CHECKOUT=$ROCM_VERSION
+	 if [ "$ROCM_VERSION" = "7.2" ]; then
+            ROCM_VERSION_CHECKOUT="7.2.0"
+         fi
+         git checkout rocm-${ROCM_VERSION_CHECKOUT}
          #git checkout develop
          cd projects/rocprofiler-compute
 	 mv requirements.txt requirements.txt.back
