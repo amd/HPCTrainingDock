@@ -5,7 +5,7 @@ Last review of this README: **September 16, 2025**
 Welcome to AMD's model installation repo!
 
 In this repo, we provide two options to test the installation of a variety of AMD GPU software and frameworks that support running on AMD GPUs:
-1. Container Installation (based on **Docker** or **Podman**. **Singularity** can also be used as explained in [Section 1.3](https://github.com/amd/HPCTrainingDock#13-using-singularity-to-build-an-image))
+1. Container Installation (based on **Docker** or **Podman**. **Singularity** can also be used as explained in [Section 1.3](https://github.com/amd/HPCTrainingDock#13-using-singularity-to-build-an-image)). Jupyter-ready images can be built using the instructions in [Section 1.4](https://github.com/amd/HPCTrainingDock#14-jupyer-ready-containers-with-rocm).
 2. Bare Metal Installation
 
 ## 1.2 Podman Detection
@@ -59,6 +59,64 @@ singularity run -e ${SINGULARITY_DIR_PATH}/singularity_image.sif
 ```
 
 **NOTE**: Once again, note that changes made while on the image to the directories from the host that are mirrored to the image will reflect once you exit the image.
+
+## 1.4 Jupyter-ready Containers with ROCm
+
+It is possible to use the scripts in this repo to build Jupyter-ready containers with ROCm installations. The Dockerfile to use is [this](https://github.com/amd/HPCTrainingDock/blob/main/rocm/Dockerfile.jupyter) one and it should be used as follows to build and run an image. Note that we are assuming you are running the container from a compute node on a system where `podman` is installed and to which system you have to ssh to from your local machine, and then use slurm for instance to get on the compute node.
+
+Log in to your system and allocate a compute node. Then make note of the compute node name by running:
+```
+hostname
+```
+
+Execute the following instructions from the compute node after you cloned the present repo:
+```
+cd HPCTrainingDock/rocm
+
+podman build --format docker -t jupyter_rocm -f Dockerfile.jupyter --progress=plain
+```
+
+This will build an image on the compute node, get the image ID by running:
+
+```
+podman images
+```
+
+whose output should be similar to:
+
+```
+REPOSITORY                      TAG         IMAGE ID      CREATED            SIZE
+localhost/jupyter_rocm          latest      78de89459679  About an hour ago  30.8 GB
+```
+
+Make note of the `IMAGE ID` and use it the command below to run the image and start a container:
+
+```
+podman run -p 10000:8888  --device=/dev/kfd --device=/dev/dri   --group-add=keep-groups --name jupyter_rocm  --security-opt seccomp=unconfined IMAGE_ID
+```
+
+Make note of the token that is outputted by the command below, which will look something like this:
+
+```
+   To access the server, open this file in a browser:
+        file:///home/jovyan/.local/share/jupyter/runtime/jpserver-2-open.html
+    Or copy and paste one of these URLs:
+        http://localhost:8888/lab?token=5e2969809d46430439856d13c4c10e526ace832024024aac
+        http://127.0.0.1:8888/lab?token=5e2969809d46430439856d13c4c10e526ace832024024aac
+```
+
+Then, from your local system, run the command below to create the ssh tunnel (`compute_node_name` is what you obtained above when you ran `hostname` from the compute node):
+```
+ssh -L 10000:compute_node_name:10000 $USER@your.system.login.node
+```
+
+Finally, open this on your browser, where the token number is what you took note of above:
+
+```
+http://localhost:10000/lab?token=token_number
+```
+
+The Dockerfile used here can be customized to use more of the scripts we have in this repo, and create images with a richer software stack than just ROCm.
 
 ## 1.4 Operating System Info
 

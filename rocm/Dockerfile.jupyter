@@ -1,0 +1,39 @@
+# Copyright (c) Jupyter Development Team.
+# Distributed under the terms of the Modified BSD License.
+# Dockerfile based off of: https://github.com/jupyter/docker-stacks/blob/main/images/pytorch-notebook/Dockerfile
+ARG REGISTRY=quay.io
+ARG OWNER=jupyter
+ARG BASE_IMAGE=$REGISTRY/$OWNER/scipy-notebook
+FROM $BASE_IMAGE
+
+LABEL maintainer="Jupyter Project <jupyter@googlegroups.com>"
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+RUN mkdir -p /tmp/rocm
+# Change below for your desired ROCm version
+ARG ROCM_VERSION="7.1.1"
+# Change below for your desired gfx model (gfx942 is for the MI300 series)
+ARG AMDGPU_GFXMODEL=gfx942
+ENV PATH ${HOME}/.local/bin:${PATH}
+
+USER root
+
+#RUN echo 'Acquire::http::Proxy "http://172.23.0.12:3128";'  > /etc/apt/apt.conf.d/99proxy && \
+#    echo 'Acquire::https::Proxy "http://172.23.0.12:3128";' >> /etc/apt/apt.conf.d/99proxy
+
+COPY . /tmp/rocm/
+RUN /tmp/rocm/scripts/baseospackages_setup.sh && \
+    /tmp/rocm/scripts/lmod_setup.sh && \
+    cat /tmp/rocm/sources/lua/bash.bashrc >> /etc/bash.bashrc && \
+    /tmp/rocm/scripts/rocm_setup.sh \
+        --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
+        --rocm-version ${ROCM_VERSION} \
+        --include-tools 1 \
+        --python-version $(python3 --version | awk '{print $2}') && \
+    rm -rf /tmp/rocm
+
+RUN fix-permissions "${CONDA_DIR}" && \
+    fix-permissions "/home/${NB_USER}"
+
+USER ${NB_UID}
