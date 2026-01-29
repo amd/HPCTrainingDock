@@ -13,9 +13,18 @@ In this repo, we provide two options to test the installation of a variety of AM
 If Podman is installed on your system instead of Docker, the scripts should detect it and automatically include the `--format docker` flag in the `docker build` commands present in our scripts. The detection is done as follows, where `ADD_OPTIONS` will be added to the `docker build` command:
 ```
 ADD_OPTIONS=""
-PODMAN_DETECT=$(docker info 2>&1 | grep -i "emulate docker cli using podman" | wc -l)
-if [[ "${PODMAN_DETECT}" -ge "1" ]]; then
-   ADD_OPTIONS="${ADD_OPTIONS} --format docker"
+echo "Using Docker as default, falling back to Podman if Docker is not installed"
+if command -v docker >/dev/null 2>&1; then
+    BUILDER=docker
+elif command -v podman >/dev/null 2>&1; then
+    BUILDER=podman
+else
+    echo "ERROR: neither Podman nor Docker found"
+    exit 1
+fi
+
+if [[ "$BUILDER" == "podman" ]]; then
+    ADD_OPTIONS="${ADD_OPTIONS} --format docker"
 fi
 ```
 
