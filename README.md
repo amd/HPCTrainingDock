@@ -118,11 +118,11 @@ http://localhost:10000/lab?token=token_number
 
 The Dockerfile used here can be customized to use more of the scripts we have in this repo, and create images with a richer software stack than just ROCm.
 
-## 1.4 Operating System Info
+## 1.5 Operating System Info
 
 Currently, we are mainly focused on Ubuntu, but some support is also available for Red Hat (RockyLinux), Suse and Debian. Work is underway to increase this support.
 
-## 1.5 Supported Hardware
+## 1.6 Supported Hardware
 
 Data Center GPUs, Workstation GPUs and Desktop GPUs are currently supported.
 
