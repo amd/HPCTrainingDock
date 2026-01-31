@@ -123,9 +123,9 @@ set -v
 
 ADD_OPTIONS=""
 echo "Using Docker as default, falling back to Podman if Docker is not installed"
-if command -v docker >/dev/null 2>&1; then
+if command docker -v >/dev/null 2>&1; then
     BUILDER=docker
-elif command -v podman >/dev/null 2>&1; then
+elif command podman -v >/dev/null 2>&1; then
     BUILDER=podman
 else
     echo "ERROR: neither Podman nor Docker found"
@@ -140,7 +140,7 @@ if [[ "${DISTRO}" == *"rocky"* ]]; then
    DISTRO="rockylinux/rockylinux"
 fi
 
-docker build --no-cache ${ADD_OPTIONS} \
+${BUILDER} build --no-cache ${ADD_OPTIONS} \
              --build-arg DISTRO=${DISTRO}  \
              --build-arg DISTRO_VERSION=${DISTRO_VERSION} \
              --build-arg ROCM_VERSION=${ROCM_VERSION} \
@@ -173,19 +173,19 @@ fi
 NAMEBASE=Bare
 NAME=$NAMEBASE
 NUMBER=0
-while [ `docker inspect --format='{{.Name}}' $NAME |& grep /$NAME | wc -l` != "0" ]; do
+while [ `${BUILDER} inspect --format='{{.Name}}' $NAME |& grep /$NAME | wc -l` != "0" ]; do
    NUMBER=$((NUMBER+1))
    NAME=$NAMEBASE$NUMBER
 done
 PORT_NUMBER=2222
-while [ `docker ps | grep -w "${PORT_NUMBER}" | wc -l` != "0" ]; do
+while [ `${BUILDER} ps | grep -w "${PORT_NUMBER}" | wc -l` != "0" ]; do
    PORT_NUMBER=$((PORT_NUMBER+1))
 done
 
 echo "NAME is ${NAME}"
 echo "PORT_NUMBER is ${PORT_NUMBER}"
 
-docker run -it --device=/dev/kfd --device=/dev/dri \
+${BUILDER} run -it --device=/dev/kfd --device=/dev/dri \
     --group-add video --group-add render ${ADD_OPTIONS} \
     -p ${PORT_NUMBER}:22 --name ${NAME}  --security-opt seccomp=unconfined \
     --rm -v $PWD/CacheFiles:/CacheFiles ${IMAGE_NAME}

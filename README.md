@@ -14,9 +14,9 @@ If Podman is installed on your system instead of Docker, the scripts should dete
 ```
 ADD_OPTIONS=""
 echo "Using Docker as default, falling back to Podman if Docker is not installed"
-if command -v docker >/dev/null 2>&1; then
+if command docker -v >/dev/null 2>&1; then
     BUILDER=docker
-elif command -v podman >/dev/null 2>&1; then
+elif command podman -v >/dev/null 2>&1; then
     BUILDER=podman
 else
     echo "ERROR: neither Podman nor Docker found"
