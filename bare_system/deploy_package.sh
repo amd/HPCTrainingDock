@@ -70,10 +70,12 @@ fi
 
 cd ${PACKAGE_BASEDIR}
 
+AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
+
 for package in `find . -maxdepth 1 -type d `; do
    package=`basename $package`
    if [[ "${package}" =~ "$SELECTION_STRING" ]]; then
-      CACHE_DIR=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}
+      CACHE_DIR=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
       if [ ! -f "${CACHE_DIR}/${package}.tgz" ]; then
          echo "Packing up $package"
          ${SUDO} tar -czvpf ${CACHE_DIR}/${package}.tgz ${package}

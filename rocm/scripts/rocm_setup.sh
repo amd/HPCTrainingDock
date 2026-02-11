@@ -323,7 +323,7 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
          ${SUDO} ${DEB_FRONTEND} apt-get install -q -y --allow-downgrades ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
       elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
 	 ${SUDO} dnf config-manager --set-enabled crb
-         ${SUDO} dnf install -y python3-setuptools python3-wheel
+         ${SUDO} dnf install -y python3-setuptools python3-wheel python3-devel
 #	 ${SUDO} dnf --enablerepo=crb install python3-wheel -y
 #	 ${SUDO} dnf install python3-setuptools python3-wheel -y
 
@@ -659,6 +659,7 @@ EOF
       python3 -m venv standalonebinary
       source standalonebinary/bin/activate
       cd standalonebinary
+      python3 -m pip install --upgrade pip
       # if ROCM_VERSION is greater than or equal to 7.1.0, the sort by version will give the smaller ROCM_VERSION number
       if [ "$(printf '%s\n' "7.1.0" "$ROCM_VERSION" | sort -V | head -n1)" = "7.1.0" ]; then
          git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
