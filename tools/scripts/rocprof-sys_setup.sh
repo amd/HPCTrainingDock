@@ -197,7 +197,7 @@ fi
 if [ "${INSTALL_ROCPROF_SYS_FROM_SOURCE}" = "1" ] ; then
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   if [ -f ${CACHE_FILES}/${TOOL_NAME}.tgz ]; then
+   if [ -f "${CACHE_FILES}/${TOOL_NAME}.tgz" ]; then
       echo ""
       echo "============================"
       echo " Installing Cached ${TOOL_NAME}"

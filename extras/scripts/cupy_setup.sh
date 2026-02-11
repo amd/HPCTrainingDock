@@ -161,6 +161,8 @@ else
       export HIPCC=${ROCM_HOME}/bin/hipcc
       export HCC_AMDGPU_ARCH=${AMDGPU_GFXMODEL}
       UV_LOC=`which uv`
+      python3 -m venv cupy_env
+      source cupy_build/bin/activate
       if [ "x$UV_LOC" == "x" ]; then
          pip3 install uv
          PATH="${PATH}:~/.local/bin"
@@ -182,12 +184,6 @@ else
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod a+w $CUPY_PATH
       fi
-      if [[ "${DISTRO_VERSION}" == "22.04" ]]; then
-         uv venv cupy_build --python 3.10
-      else
-         uv venv cupy_build
-      fi
-      source cupy_build/bin/activate
       uv pip install -v --target=$CUPY_PATH pytest mock xarray[complete] build numpy-allocator --no-cache
       export PYTHONPATH=$PYTHONPATH:$CUPY_PATH
       if [ "$(printf '%s\n' "$ROCM_VERSION" "6.4.4" | sort -V | head -n1)" = "$ROCM_VERSION" ]; then
