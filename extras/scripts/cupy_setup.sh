@@ -161,7 +161,7 @@ else
       export HIPCC=${ROCM_HOME}/bin/hipcc
       export HCC_AMDGPU_ARCH=${AMDGPU_GFXMODEL}
       UV_LOC=`which uv`
-      python3 -m venv cupy_env
+      python3 -m venv cupy_build
       source cupy_build/bin/activate
       if [ "x$UV_LOC" == "x" ]; then
          pip3 install uv
