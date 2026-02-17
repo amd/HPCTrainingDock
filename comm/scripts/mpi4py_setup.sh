@@ -182,8 +182,8 @@ else
 
       echo "[model]              = ${MPI_PATH}" >> mpi.cfg
       echo "mpi_dir              = ${MPI_PATH}" >> mpi.cfg
-      echo "mpicc                = ${MPI_PATH}"/bin/mpicc >> mpi.cfg
-      echo "mpic++               = ${MPI_PATH}"/bin/mpic++ >> mpi.cfg
+      echo "mpicc                = ${MPI_PATH}/bin/mpicc" >> mpi.cfg
+      echo "mpic++               = ${MPI_PATH}/bin/mpic++" >> mpi.cfg
       echo "library_dirs         = %(mpi_dir)s/lib" >> mpi.cfg
       echo "include_dirs         = %(mpi_dir)s/include" >> mpi.cfg
 
