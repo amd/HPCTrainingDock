@@ -672,7 +672,7 @@ EOF
          cd projects/rocprofiler-compute
 	 mv requirements.txt requirements.txt.back
 
-	 if [ "$DISTRO" == "Ubuntu" ]; then
+	 if [ "$DISTRO" == "ubuntu" ]; then
 	 # Locking down the python package versions
             cat <<-EOF > requirements.txt
 	astunparse==1.6.2
