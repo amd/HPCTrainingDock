@@ -125,6 +125,11 @@ do
           ROCM_VERSION=${1}
           reset-last
           ;;
+      "--rocm-module")
+          shift
+          ROCM_MODULE=${1}
+          reset-last
+          ;;
       "--netcdf-c-version")
           shift
           NETCDF_C_VERSION=${1}
