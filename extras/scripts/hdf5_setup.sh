@@ -4,6 +4,7 @@
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/hdf5
 BUILD_HDF5=0
 ROCM_VERSION=6.2.0
+ROCM_MODULE="rocm"
 C_COMPILER=`which gcc`
 C_COMPILER_INPUT=""
 CXX_COMPILER=`which g++`
@@ -31,6 +32,7 @@ usage()
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --rocm-module [ ROCM_MODULE ] default $ROCM_MODULE"
    echo "  --hdf5-version [ HDF5_VERSION ] default $HDF5_VERSION"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
@@ -111,6 +113,11 @@ do
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
+          reset-last
+          ;;
+      "--rocm-module")
+          shift
+          ROCM_MODULE=${1}
           reset-last
           ;;
       "--hdf5-version")
@@ -223,6 +230,7 @@ else
 
       # default build is serial hdf5
       ENABLE_PARALLEL="OFF"
+      module load ${ROCM_MODULE}
       module load ${MPI_MODULE}
       if [[ `which mpicc | wc -l` -eq 1 ]]; then
 	 # if mpicc is found in the path, build hdf5 parallel
