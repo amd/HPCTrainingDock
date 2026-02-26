@@ -219,37 +219,30 @@ else
       cd fftw-${FFTW_VERSION}
 
       USE_MPICC=""
-      USE_MPIF77=""
-      USE_MPIF90=""
-      USE_MPIFORT=""
       if [ "${ENABLE_MPI}" == "1" ]; then
          USE_MPICC="MPICC=mpicc"
-         USE_MPIF77="MPIF77=mpif77"
-         USE_MPIFORT="MPIFORT=mpifort"
-	 USE_MPIF90="MPIF90=mpif90"
 	 C_COMPILER="mpicc"
-	 FC_COMPILER="mpifort"
       fi	      
 
       # configure for double precision
       ./configure --prefix=${FFTW_PATH} \
 	          --enable-shared --enable-static --enable-threads --enable-openmp \
 		  ${ENABLE_MPI} --enable-threads --enable-sse2 --enable-avx --enable-avx2 \
-		  CC=${C_COMPILER} FC=${FC_COMPILER} F77=${FC_COMPILER} ${USE_MPICC} ${USE_MPIF77} ${USE_MPIFORT} ${USE_MPIF90}
+		  CC=${C_COMPILER} ${USE_MPICC}
       make install
 
       # configure for single precision
       ./configure --prefix=${FFTW_PATH} \
 	          --enable-shared --enable-static --enable-threads --enable-openmp \
 		  ${ENABLE_MPI} --enable-threads --enable-sse2 --enable-avx --enable-avx2 --enable-float \
-		  CC=${C_COMPILER} FC=${FC_COMPILER} F77=${FC_COMPILER} ${USE_MPICC} ${USE_MPIF77} ${USE_MPIFORT} ${USE_MPIF90}
+		  CC=${C_COMPILER} ${USE_MPICC}
       make install
 
       # configure for long double precision
       ./configure --prefix=${FFTW_PATH} \
 	          --enable-shared --enable-static --enable-threads --enable-openmp \
 		  ${ENABLE_MPI} --enable-threads --enable-long-double \
-		  CC=${C_COMPILER} FC=${FC_COMPILER} F77=${FC_COMPILER} ${USE_MPICC} ${USE_MPIF77} ${USE_MPIFORT} ${USE_MPIF90}
+		  CC=${C_COMPILER} ${USE_MPICC}
       make install
 
       cd ..
