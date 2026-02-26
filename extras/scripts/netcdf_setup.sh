@@ -5,6 +5,7 @@ NETCDF_C_MODULE_PATH=/etc/lmod/modules/ROCmPlus/netcdf-c
 NETCDF_F_MODULE_PATH=/etc/lmod/modules/ROCmPlus/netcdf-fortran
 BUILD_NETCDF=0
 ROCM_VERSION=6.2.0
+ROCM_MODULE="rocm"
 C_COMPILER=gcc
 C_COMPILER_INPUT=""
 CXX_COMPILER=g++
@@ -40,6 +41,7 @@ usage()
    echo "  WARNING: when specifying --install-path, --netcdf-c-module-path,  and --netcdf-f-module-path the directories have to already exist because the script checks for write permissions"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --rocm-module [ ROCM_MODULE ] default $ROCM_MODULE"
    echo "  --netcdf-c-version [ NETCDF_C_VERSION ] default $NETCDF_C_VERSION"
    echo "  --netcdf-f-version [ NETCDF_F_VERSION ] default $NETCDF_F_VERSION"
    echo "  --netcdf-c-module-path [ NETCDF_C_MODULE_PATH ] default $NETCDF_C_MODULE_PATH"
@@ -243,6 +245,7 @@ else
          ${SUDO} chmod -R a+w ${NETCDF_PATH}
       fi
 
+      module load ${ROCM_MODULE}
       module load ${HDF5_MODULE}
       if [[ `which h5dump | wc -l` -eq 0 ]]; then
          echo "h5dump was not found in PATH after loading the hdf5 module"
