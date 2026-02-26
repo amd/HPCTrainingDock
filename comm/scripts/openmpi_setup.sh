@@ -780,7 +780,7 @@ else
       make -j 16
 
       if [[ "${DRY_RUN}" == "0" ]]; then
-         ${SUDO} make install
+         ${SUDO} env PATH=$PATH make install
 	 for file in ${OPENMPI_PATH}/share/man/man1/*
          do
             ${SUDO} gzip $file
