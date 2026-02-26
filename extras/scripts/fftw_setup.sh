@@ -6,8 +6,6 @@ BUILD_FFTW=0
 ROCM_VERSION=6.2.0
 C_COMPILER=`which gcc`
 C_COMPILER_INPUT=""
-CXX_COMPILER=`which g++`
-CXX_COMPILER_INPUT=""
 FC_COMPILER=`which gfortran`
 FC_COMPILER_INPUT=""
 ENABLE_MPI_INPUT=""
@@ -37,7 +35,6 @@ usage()
    echo "  --enable-mpi [ ENABLE_MPI ], set to 1 to enable, enabled by default if MPI is installed"
    echo "  --install-path [ FFTW_PATH ] default $FFTW_PATH"
    echo "  --c-compiler [ C_COMPILER ] default ${C_COMPILER}"
-   echo "  --cxx-compiler [ CXX_COMPILER ] default ${CXX_COMPILER}"
    echo "  --fc-compiler [ FC_COMPILER ] default ${FC_COMPILER}"
    echo "  --build-fftw [ BUILD_FFTW ], set to 1 to build FFTW, default is 0"
    echo "  --help: print this usage information"
@@ -96,11 +93,6 @@ do
       "--c-compiler")
           shift
           C_COMPILER=${1}
-          reset-last
-          ;;
-      "--cxx-compiler")
-          shift
-          CXX_COMPILER=${1}
           reset-last
           ;;
       "--fc-compiler")
@@ -218,22 +210,38 @@ else
       tar zxf fftw-${FFTW_VERSION}.tar.gz
       cd fftw-${FFTW_VERSION}
 
+      USE_MPICC=""
+      USE_MPIF77=""
+      USE_MPIF90=""
+      USE_MPIFORT=""
+      if [ "${ENABLE_MPI}" == "1" ]; then
+         USE_MPICC="MPICC=mpicc"
+         USE_MPIF77="MPIF77=mpif77"
+         USE_MPIFORT="MPIFORT=mpifort"
+	 USE_MPIF90="MPIF90=mpif90"
+	 C_COMPILER="mpicc"
+	 FC_COMPILER="mpifort"
+      fi	      
+
       # configure for double precision
       ./configure --prefix=${FFTW_PATH} \
 	          --enable-shared --enable-static --enable-threads --enable-openmp \
-		  ${ENABLE_MPI} --enable-threads --enable-sse2 --enable-avx --enable-avx2
+		  ${ENABLE_MPI} --enable-threads --enable-sse2 --enable-avx --enable-avx2 \
+		  CC=${C_COMPILER} FC=${FC_COMPILER} F77=${FC_COMPILER} ${USE_MPICC} ${USE_MPIF77} ${USE_MPIFORT} ${USE_MPIF90}
       make install
 
       # configure for single precision
       ./configure --prefix=${FFTW_PATH} \
 	          --enable-shared --enable-static --enable-threads --enable-openmp \
-		  ${ENABLE_MPI} --enable-threads --enable-sse2 --enable-avx --enable-avx2 --enable-float
+		  ${ENABLE_MPI} --enable-threads --enable-sse2 --enable-avx --enable-avx2 --enable-float \
+		  CC=${C_COMPILER} FC=${FC_COMPILER} F77=${FC_COMPILER} ${USE_MPICC} ${USE_MPIF77} ${USE_MPIFORT} ${USE_MPIF90}
       make install
 
       # configure for long double precision
       ./configure --prefix=${FFTW_PATH} \
 	          --enable-shared --enable-static --enable-threads --enable-openmp \
-		  ${ENABLE_MPI} --enable-threads --enable-long-double
+		  ${ENABLE_MPI} --enable-threads --enable-long-double \
+		  CC=${C_COMPILER} FC=${FC_COMPILER} F77=${FC_COMPILER} ${USE_MPICC} ${USE_MPIF77} ${USE_MPIFORT} ${USE_MPIF90}
       make install
 
       cd ..

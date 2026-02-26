@@ -234,6 +234,7 @@ else
 
 	prereq("rocm/${ROCM_VERSION}")
 	prepend_path("PYTHONPATH","$CUPY_PATH")
+	prepend_path("CPATH","/usr/lib/gcc/x86_64-linux-gnu/12/include")
         setenv("ROCM_HOME","$ROCM_HOME")
 EOF
 
