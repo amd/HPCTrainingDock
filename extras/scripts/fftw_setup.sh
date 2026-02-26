@@ -4,6 +4,7 @@
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/fftw
 BUILD_FFTW=0
 ROCM_VERSION=6.2.0
+ROCM_MODULE="rocm"
 C_COMPILER=`which gcc`
 C_COMPILER_INPUT=""
 FC_COMPILER=`which gfortran`
@@ -29,6 +30,7 @@ usage()
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --rocm-module [ ROCM_MODULE ] default $ROCM_MODULE"
    echo "  --fftw-version [ FFTW_VERSION ] default $FFTW_VERSION"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
@@ -103,6 +105,11 @@ do
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
+          reset-last
+          ;;
+      "--rocm-module")
+          shift
+          ROCM_MODULE=${1}
           reset-last
           ;;
       "--fftw-version")
@@ -195,6 +202,7 @@ else
 
       # default build is without mpi
       ENABLE_MPI=""
+      module load ${ROCM_MODULE}
       module load ${MPI_MODULE}
       if [[ `which mpicc | wc -l` -eq 1 ]]; then
 	 # if mpi is found in the path, build fftw parallel
