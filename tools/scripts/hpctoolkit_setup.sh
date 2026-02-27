@@ -103,17 +103,13 @@ do
    shift
 done
 
+HPCTOOLKIT_PATH=/opt/rocmplus-${ROCM_VERSION}/hpctoolkit
+HPCVIEWER_PATH=/opt/rocmplus-${ROCM_VERSION}/hpcviewer
 if [ "${HPCTOOLKIT_PATH_INPUT}" != "" ]; then
    HPCTOOLKIT_PATH=${HPCTOOLKIT_PATH_INPUT}
-else
-   # override path in case ROCM_VERSION has been supplied as input
-   HPCTOOLKIT_PATH=/opt/rocmplus-${ROCM_VERSION}/hpctoolkit
 fi
 if [ "${HPCVIEWER_PATH_INPUT}" != "" ]; then
    HPCVIEWER_PATH=${HPCVIEWER_PATH_INPUT}
-else
-   # override path in case ROCM_VERSION has been supplied as input
-   HPCVIEWER_PATH=/opt/rocmplus-${ROCM_VERSION}/hpcviewer
 fi
 
 echo ""
