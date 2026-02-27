@@ -252,7 +252,7 @@ else
 
          # get petsc install dir created by spack
          PETSC_PATH_ORIGINAL=$PETSC_PATH
-         PETSC_PATH=`spack find -p petsc | awk '{print $2}' | grep opt`
+         PETSC_PATH=$(spack location -i petsc)
 
          rm -rf spack
 

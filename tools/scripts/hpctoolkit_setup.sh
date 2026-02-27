@@ -239,7 +239,7 @@ else
       spack install hpcviewer
 
       # get hpcviewer install dir created by spack
-      HPCVIEWER_PATH=`spack find -p hpcviewer | awk '{print $2}' | grep opt`
+      HPCVIEWER_PATH=$(spack location -i hpcviewer)
 
       ${SUDO} rm -rf spack
 

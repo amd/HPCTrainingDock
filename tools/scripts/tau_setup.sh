@@ -233,7 +233,8 @@ else
 
       # get PDT install dir created by spack
       PDT_PATH_ORIGINAL=$PDT_PATH
-      PDT_PATH=`spack find -p pdt | awk '{print $2}' | grep opt`
+      PDT_PATH=$(spack location -i pdt)
+      export PDTDIR=$PDT_PATH
 
       # cloning the latest version of TAU
       git clone https://github.com/UO-OACISS/tau2.git

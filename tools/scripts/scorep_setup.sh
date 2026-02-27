@@ -227,7 +227,7 @@ else
 
       # get PDT install dir created by spack
       PDT_PATH_ORIGINAL=$PDT_PATH
-      PDT_PATH=`spack find -p pdt | awk '{print $2}' | grep opt`
+      PDT_PATH=$(spack location -i pdt)
       export PATH=$PDT_PATH/bin:$PATH
 
       # install OpenMPI if not in the system already

@@ -221,7 +221,7 @@ else
          spack install hypre@$HYPRE_VERSION+rocm+unified-memory+gpu-aware-mpi amdgpu_target=$AMDGPU_GFXMODEL
 
          # get hypre install dir created by spack
-         HYPRE_PATH=`spack find -p hypre | awk '{print $2}' | grep opt`
+         HYPRE_PATH=$(spack location -i hypre)
 
          ${SUDO} rm -rf spack
 
