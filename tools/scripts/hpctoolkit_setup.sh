@@ -151,6 +151,7 @@ else
       #source /etc/profile.d/lmod.sh
       #source /etc/profile.d/z00_lmod.sh
       module load rocm/${ROCM_VERSION}
+      module load openmpi
 
       # don't use sudo if user has write access to both install paths
       if [ -d "$HPCTOOLKIT_PATH" ]; then
