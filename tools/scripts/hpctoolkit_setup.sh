@@ -4,6 +4,7 @@
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/hpctoolkit
 BUILD_HPCTOOLKIT=0
+HPCTOOLKIT_VERSION=2025.1.2
 ROCM_VERSION=6.2.0
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
@@ -27,6 +28,7 @@ usage()
    echo "Usage:"
    echo "  WARNING: when specifying --hpctoolkit-install-path, --hpcviewer-install-path  and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
+   echo "  --hpctoolkit-version [ HPCTOOLKIT_VERSION ] default $HPCTOOLKIT_VERSION"
    echo "  --hpctoolkit-install-path [ HPCTOOLKIT_PATH_INPUT ] default $HPCTOOLKIT_PATH "
    echo "  --hpcviewer-install-path [ HPCVIEWER_PATH_INPUT ] default $HPCVIEWER_PATH "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
@@ -65,6 +67,11 @@ do
       "--hpctoolkit-install-path")
           shift
           HPCTOOLKIT_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--hpctoolkit-version")
+          shift
+          HPCTOOLKIT_VERSION=${1}
           reset-last
           ;;
       "--hpcviewer-install-path")
@@ -188,13 +195,18 @@ else
 
       pipx install 'meson>=1.3.2'
       export PATH=$HOME/.local/bin:$PATH
-      git clone https://gitlab.com/hpctoolkit/hpctoolkit.git
+      rm -rf /tmp/hpctoolkit
+      git clone -b ${HPCTOOLKIT_VERSION} https://gitlab.com/hpctoolkit/hpctoolkit.git
       cd hpctoolkit
-      git checkout 0bfc9cd58da73e3e5b973d754677ebfe2b0da55d # previous commit used: fda401c1f6f4a219f7c07f0606fa1e479f2f341e
       export CMAKE_PREFIX_PATH=$ROCM_PATH:$CMAKE_PREFIX_PATH
+
+      # Force subproject headers to use -I instead of -isystem so they take
+      # priority over the system libunwind-dev 1.3.2 headers at /usr/include/
+      sed -i "s/include_type: 'system'/include_type: 'non-system'/g" meson.build
+
       meson setup -Drocm=enabled -Dopencl=disabled --prefix=${HPCTOOLKIT_PATH} --libdir=${HPCTOOLKIT_PATH}/lib build
-      cd  build
-      meson compile
+      cd build
+      meson compile || { echo "ERROR: meson compile failed"; exit 1; }
       meson install
 
       if [[ "${USER}" != "root" ]]; then
@@ -219,7 +231,7 @@ else
       # find already installed libs for spack
       spack external find --all
 
-      # change spack install dir for PDT
+      # change spack install dir for hpcviewer
       ${SUDO} sed -i 's|$spack/opt/spack|'"${HPCVIEWER_PATH}"'|g' spack/etc/spack/defaults/config.yaml
 
       # open permissions to use spack to install hpcviewer
@@ -264,7 +276,7 @@ else
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/2024.01.99-next.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${HPCTOOLKIT_VERSION}.lua
 	whatis("HPCToolkit - integrated suite of tools for measurement and analysis of program performance")
 
 	local base = "${HPCTOOLKIT_PATH}"
