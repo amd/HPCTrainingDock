@@ -10,9 +10,9 @@ PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
 TAU_PATH_INPUT=""
 C_COMPILER=amdclang
 CXX_COMPILER=amdclang++
-F_COMPILER=gfortran
+F_COMPILER=amdflang
 PDT_PATH_INPUT=""
-GIT_COMMIT="23a56e2a1a728e99ff03341c30f9d24892c5952b"
+GIT_COMMIT="fb4abfffa6683dd82a2b6ffddbfc497e6e1f5d60"
 SUDO="sudo"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -187,7 +187,6 @@ else
 
       source /etc/profile.d/lmod.sh
       module load rocm/${ROCM_VERSION}
-      module load amdclang
 
      # don't use sudo if user has write access to both install paths
       if [ -d "$TAU_PATH" ]; then
@@ -236,7 +235,7 @@ else
       PDT_PATH=$(spack location -i pdt)
       export PDTDIR=$PDT_PATH
 
-      # cloning the latest version of TAU
+      # cloning the latest version of TAU as of Feb 27th 2026
       git clone https://github.com/UO-OACISS/tau2.git
       cd tau2
       git checkout $GIT_COMMIT
@@ -266,42 +265,42 @@ else
       # configure with: MPI OMPT OPENMP PDT ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -pdt=${PDT_PATH} -iowrapper
 
-      ${SUDO} make install
+      ${SUDO} env PATH=$PATH make install
 
       # configure with: MPI PDT ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -pdt=${PDT_PATH} -iowrapper
 
-      ${SUDO} make install
+      ${SUDO} env PATH=$PATH make install
 
       # configure with: OMPT OPENMP PDT ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -pdt=${PDT_PATH} -iowrapper
 
-      ${SUDO} make install
+      ${SUDO} env PATH=$PATH make install
 
       # configure with: PDT ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -pdt=${PDT_PATH} -iowrapper
 
-      ${SUDO} make install
+      ${SUDO} env PATH=$PATH make install
 
       # configure with: ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -iowrapper
 
-      ${SUDO} make install
+      ${SUDO} env PATH=$PATH make install
 
       # configure with: OMPT OPENMP ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -iowrapper
 
-      ${SUDO} make install
+      ${SUDO} env PATH=$PATH make install
 
       # configure with: MPI ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -mpi -iowrapper
 
-      ${SUDO} make install
+      ${SUDO} env PATH=$PATH make install
 
       # configure with: MPI OMPT OPENMP ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -iowrapper
 
-      ${SUDO} make install
+      ${SUDO} env PATH=$PATH make install
 
       # the configure flag -no_pthread_create
       # still creates linking options for the pthread wrapper
