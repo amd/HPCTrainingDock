@@ -232,7 +232,7 @@ else
       spack external find --all
 
       # change spack install dir for hpcviewer
-      ${SUDO} sed -i 's|$spack/opt/spack|'"${HPCVIEWER_PATH}"'|g' spack/etc/spack/defaults/config.yaml
+      ${SUDO} sed -i 's|$spack/opt/spack|'"${HPCVIEWER_PATH}"'|g' spack/etc/spack/defaults/base/config.yaml
 
       # open permissions to use spack to install hpcviewer
       if [[ "${USER}" != "root" ]]; then
