@@ -159,7 +159,7 @@ else
          source spack/share/spack/setup-env.sh
          spack compiler find
          spack external find --all
-         sed -i 's|$spack/opt/spack|'"${INSTALL_PATH}"'|g' spack/etc/spack/defaults/config.yaml
+         sed -i 's|$spack/opt/spack|'"${INSTALL_PATH}"'|g' spack/etc/spack/defaults/base/config.yaml
          spack install lammps +rocm amdgpu_target=${AMDGPU_GFXMODEL}
 
          rm -rf spack .spack

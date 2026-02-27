@@ -214,7 +214,7 @@ else
       spack external find --all
 
       # change spack install dir for PDT
-      sed -i 's|$spack/opt/spack|'"${PDT_PATH}"'|g' spack/etc/spack/defaults/config.yaml
+      sed -i 's|$spack/opt/spack|'"${PDT_PATH}"'|g' spack/etc/spack/defaults/base/config.yaml 
 
       # open permissions to use spack to install PDT
       if [[ "${USER}" != "root" ]]; then

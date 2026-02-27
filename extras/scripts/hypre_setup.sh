@@ -214,7 +214,7 @@ else
          spack install rocm-core@${ROCM_VERSION} rocm-cmake@${ROCM_VERSION} hipblas-common@${ROCM_VERSION} rocthrust@${ROCM_VERSION} rocprim@${ROCM_VERSION}
 
          # change spack install dir for Hypre
-         sed -i 's|$spack/opt/spack|'"${HYPRE_PATH}"'|g' spack/etc/spack/defaults/config.yaml
+         sed -i 's|$spack/opt/spack|'"${HYPRE_PATH}"'|g' spack/etc/spack/defaults/base/config.yaml 
 
          # install hypre with spack
          #spack install hypre+rocm+rocblas+unified-memory
