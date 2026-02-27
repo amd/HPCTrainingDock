@@ -121,18 +121,14 @@ do
    shift
 done
 
+TAU_PATH=/opt/rocmplus-${ROCM_VERSION}/tau
 if [ "${TAU_PATH_INPUT}" != "" ]; then
    TAU_PATH=${TAU_PATH_INPUT}
-else
-   # override tau path in case ROCM_VERSION has been supplied as input
-   TAU_PATH=/opt/rocmplus-${ROCM_VERSION}/tau
 fi
 
+PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
 if [ "${PDT_PATH_INPUT}" != "" ]; then
    PDT_PATH=${PDT_PATH_INPUT}
-else
-   # override pdt path in case ROCM_VERSION has been supplied as input
-   PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
 fi
 
 if [[ "$AMDGPU_GFXMODEL_INPUT" != "" ]]; then

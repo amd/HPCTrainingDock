@@ -9,7 +9,7 @@ SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 MPI_MODULE="openmpi"
 MPI_CONFIG=""
-SCOREP_VERSION=9.0
+SCOREP_VERSION=9.4
 SCOREP_PATH=/opt/rocmplus-${ROCM_VERSION}/scorep
 PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
 SCOREP_PATH_INPUT=""
@@ -116,18 +116,14 @@ do
    shift
 done
 
+SCOREP_PATH=/opt/rocmplus-${ROCM_VERSION}/scorep
 if [ "${SCOREP_PATH_INPUT}" != "" ]; then
    SCOREP_PATH=${SCOREP_PATH_INPUT}
-else
-   # override score-p path in case ROCM_VERSION has been supplied as input
-   SCOREP_PATH=/opt/rocmplus-${ROCM_VERSION}/scorep
 fi
 
+PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
 if [ "${PDT_PATH_INPUT}" != "" ]; then
    PDT_PATH=${PDT_PATH_INPUT}
-else
-   # override pdt path in case ROCM_VERSION has been supplied as input
-   PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
 fi
 
 echo ""
@@ -176,12 +172,7 @@ else
 
       source /etc/profile.d/lmod.sh
       module load rocm/${ROCM_VERSION}
-      module load amdflang-new
-      if [[ `which amdflang-new | wc -l` -eq 0 ]]; then
-         # if amdflang-new is not found in the path
-         # build with compilers from ROCm
-         module load amdclang
-      fi
+      module load amdclang
 
 
      # don't use sudo if user has write access to both install paths
@@ -205,29 +196,36 @@ else
       ${SUDO} mkdir -p ${SCOREP_PATH}
       ${SUDO} mkdir -p ${PDT_PATH}
 
-      git clone https://github.com/spack/spack.git
-
-      # load spack environment
-      source spack/share/spack/setup-env.sh
-
-      # find already installed libs for spack
-      spack external find --all
-
-      # change spack install dir for PDT
-      sed -i 's|$spack/opt/spack|'"${PDT_PATH}"'|g' spack/etc/spack/defaults/base/config.yaml 
-
       # open permissions to use spack to install PDT
       if [[ "${USER}" != "root" ]]; then
 	 ${SUDO} chmod -R a+rwX ${PDT_PATH}
 	 ${SUDO} chmod -R a+rwX ${SCOREP_PATH}
       fi
 
-      # install PDT with spack
-      spack install pdt
+#----- begin PDT install
+      if [ -d "${PDT_PATH}" ] && [ "$(ls -A ${PDT_PATH})" ]; then
+         echo "PDT_PATH ${PDT_PATH} already exists and is non-empty, skipping PDT install"
+         PDT_PATH_ORIGINAL=$PDT_PATH
+      else
+         git clone https://github.com/spack/spack.git
 
-      # get PDT install dir created by spack
-      PDT_PATH_ORIGINAL=$PDT_PATH
-      PDT_PATH=$(spack location -i pdt)
+         # load spack environment
+         source spack/share/spack/setup-env.sh
+
+         # find already installed libs for spack
+         spack external find --all
+
+         # change spack install dir for PDT
+         sed -i 's|$spack/opt/spack|'"${PDT_PATH}"'|g' spack/etc/spack/defaults/base/config.yaml 
+
+         # install PDT with spack
+         spack install pdt
+
+         # get PDT install dir created by spack
+         PDT_PATH_ORIGINAL=$PDT_PATH
+         PDT_PATH=$(spack location -i pdt)
+      fi
+#----- end PDT install
       export PATH=$PDT_PATH/bin:$PATH
 
       # install OpenMPI if not in the system already
