@@ -300,7 +300,8 @@ else
 	    # install the wheel for jaxlib
             pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
             # next we need to install the jax python module
-            pip3 install --target=${JAX_PATH} .
+            pip3 install --no-deps --target=${JAX_PATH} .
+            pip3 install --no-deps --target=${JAX_PATH} opt-einsum
 
             cd ..
 	    # then we are using the ROCm/rocm-jax repo to build the other wheels
@@ -345,7 +346,8 @@ else
                pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
 
                # next we need to install the jax python module
-               pip3 install --target=${JAX_PATH} .
+               pip3 install --no-deps --target=${JAX_PATH} .
+               pip3 install --no-deps --target=${JAX_PATH} opt-einsum
 
             elif [[ $JAX_VERSION == "5.0" || $JAX_VERSION == "6.0" ]]; then
                PATCHELF_PATH=${JAX_PATH}/patchelf
@@ -376,7 +378,8 @@ else
                pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
 
                # next we need to install the jax python module
-               pip3 install --target=${JAX_PATH} .
+               pip3 install --no-deps --target=${JAX_PATH} .
+               pip3 install --no-deps --target=${JAX_PATH} opt-einsum
 
             else
                echo " JAX version $JAX_VERSION not compatible with ROCm 6.4.0 "
@@ -412,7 +415,8 @@ else
                pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
 
                # next we need to install the jax python module
-               pip3 install --target=${JAX_PATH} .
+               pip3 install --no-deps --target=${JAX_PATH} .
+               pip3 install --no-deps --target=${JAX_PATH} opt-einsum
 
             else
                # build the wheel for jaxlib using gcc
@@ -428,7 +432,8 @@ else
                pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
 
                # next we need to install the jax python module
-               pip3 install --target=${JAX_PATH} .
+               pip3 install --no-deps --target=${JAX_PATH} .
+               pip3 install --no-deps --target=${JAX_PATH} opt-einsum
 
             fi
          fi
@@ -475,6 +480,7 @@ else
 
 	load("rocm/${ROCM_VERSION}")
 	setenv("XLA_FLAGS","--xla_gpu_enable_triton_gemm=False --xla_gpu_autotune_level=3")
+	setenv("JAX_PLATFORMS","rocm,cpu")
 	prepend_path("PYTHONPATH","${JAX_PATH}")
 	prepend_path("PYTHONPATH","${JAXLIB_PATH}")
 EOF

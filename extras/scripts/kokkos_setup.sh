@@ -211,7 +211,8 @@ else
 
 	prereq("rocm/${ROCM_VERSION}")
 	prepend_path("PATH","${KOKKOS_PATH}")
-	setenv("Kokkos_DIR","${KOKKOS_PATH}")
+	setenv("Kokkos_ROOT","${KOKKOS_PATH}")
+	setenv("Kokkos_DIR","${KOKKOS_PATH}/lib/cmake/Kokkos")
 	setenv("HSA_XNACK","1")
 EOF
 
