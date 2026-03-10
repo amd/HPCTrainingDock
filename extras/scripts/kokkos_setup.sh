@@ -170,10 +170,17 @@ else
       ${SUDO} mkdir build
       cd build
 
+      HIP_MALLOC_ASYNC_OFF=""
+      if [ "$(printf '%s\n' "7.0.0" "$ROCM_VERSION" | sort -V | head -n1)" = "7.0.0" ]; then
+         echo "ROCM_VERSION is >= 7.0.0"
+         HIP_MALLOC_ASYNC_OFF="-DKokkos_ENABLE_IMPL_HIP_MALLOC_ASYNC=OFF"
+      fi
+
       ${SUDO} cmake -DCMAKE_INSTALL_PREFIX=${KOKKOS_PATH} \
 	         -DCMAKE_PREFIX_PATH=${ROCM_PATH} \
                  -DKokkos_ENABLE_SERIAL=ON \
                  -DKokkos_ENABLE_HIP=ON \
+		 ${HIP_MALLOC_ASYNC_OFF} \
 		 -DKokkos_ENABLE_OPENMP=ON \
                  -DKokkos_ARCH_AMD_GFX942_APU=${KOKKOS_ARCH_AMD_GFX942_APU} \
                  -DKokkos_ARCH_ZEN4=ON \
