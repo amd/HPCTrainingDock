@@ -260,6 +260,7 @@ else
       cd pytorch_build
 
       # install of pre-built pytorch using a wheel
+      ROCM_VERSION_WHEEL=${ROCM_VERSION}
       echo "Installing PyTorch, Torchaudio and Torchvision with wheel"
       if [[ `echo ${ROCM_VERSION} | cut -f3-3 -d'.'` == 0 ]]; then
          ROCM_VERSION_WHEEL=`echo ${ROCM_VERSION} | cut -f1-2 -d'.'`
