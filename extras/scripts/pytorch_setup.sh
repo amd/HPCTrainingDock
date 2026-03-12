@@ -267,23 +267,32 @@ else
       fi
       echo "ROCM_VERSION_WHEEL is ${ROCM_VERSION_WHEEL}"
       pip3 install torch==${PYTORCH_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${PYTORCH_PATH}
-      export PYTHONPATH=$PYTHONPATH:$PYTORCH_PATH
+
+      export PYTHONPATH=$PYTORCH_PATH:$PYTHONPATH
 
       # Installing Torchaudio
 
       pip3 install torchaudio==${TORCHAUDIO_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHAUDIO_PATH} --no-build-isolation
 
+      export PYTHONPATH=$PYTORCH_PATH:$PYTHONPATH
+
       # Installing Torchvision
 
       pip3 install torchvision==${TORCHVISION_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHVISION_PATH} --no-build-isolation
+
+      export PYTHONPATH=$PYTORCH_PATH:$PYTHONPATH
 
       # Installing Transformers
 
       pip3 install --target=${TRANSFORMERS_PATH} transformers --no-build-isolation
 
+      export PYTHONPATH=$PYTORCH_PATH:$PYTHONPATH
+
       # Installing Sage Attention
 
       pip3 install --target=${SAGEATTENTION_PATH} sageattention==${SAGEATTENTION_VERSION} --no-build-isolation
+
+      export PYTHONPATH=$PYTORCH_PATH:$PYTHONPATH
 
       # Installing Flash Attention
 
@@ -292,6 +301,8 @@ else
       git clone --branch v${FLASHATTENTION_VERSION} https://github.com/Dao-AILab/flash-attention.git
       cd flash-attention
       python3 setup.py install --prefix=${FLASHATTENTION_PATH}
+
+      export PYTHONPATH=$PYTORCH_PATH:$PYTHONPATH
 
       # Installing Triton
 
@@ -310,6 +321,8 @@ else
 
       echo "pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation"
       pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
+
+      export PYTHONPATH=$PYTORCH_PATH:$PYTHONPATH
 
       # Buidling Deep Speed
 
