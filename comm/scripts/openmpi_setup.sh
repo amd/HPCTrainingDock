@@ -78,7 +78,7 @@ usage()
     echo "  --ucx-version [VERSION] default $UCX_VERSION"
     echo "  --ucx-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
     echo "  --xpmem-path default ${INSTALL_PATH}/xpmem-${XPMEM_VERSION}"
-    echo "  --xpmem-version [VERSION] default $UCX_VERSION"
+    echo "  --xpmem-version [VERSION] default $XPMEM_VERSION"
     echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
     echo "  --help: print this usage information"
     exit 1
@@ -164,7 +164,7 @@ do
           REPLACE=1
           reset-last
           ;;
-      "--replace-xpmen")
+      "--replace-xpmem")
           REPLACE_XPMEM=1
           reset-last
           ;;
@@ -435,14 +435,14 @@ if [ "${BUILD_XPMEM}" == "1" ]; then
 
          make -j 16
          if [[ "${DRY_RUN}" == "0" ]]; then
-            ${SUDO} make install
+            ${SUDO} -E env PATH=$PATH make install
          fi
 
-         cd ../..
-         rm -rf xpmem-${XPMEM_VERSION} v${XPMEM_VERSION}.tar.gz
-      fi
+      cd ..
+      rm -rf xpmem-${XPMEM_VERSION} v${XPMEM_VERSION}.tar.gz
+   fi
 
-      if [[ ! -d ${XPMEM_PATH}/lib ]] ; then
+   if [[ ! -d ${XPMEM_PATH}/lib ]] ; then
          echo "XPMEM (OpenMPI) installation failed -- missing installation directories"
          echo " XPMEM Installation path is ${XPMEM_PATH}"
          ls -l "${XPMEM_PATH}"
@@ -553,7 +553,7 @@ fi
 
       make -j 16
       if [[ "${DRY_RUN}" == "0" ]]; then
-         ${SUDO} make install
+         ${SUDO} -E env PATH=$PATH make install
       fi
 
       cd ../..
@@ -664,7 +664,7 @@ else
       make -j 16
 
       if [[ "${DRY_RUN}" == "0" ]]; then
-         ${SUDO} make install
+         ${SUDO} -E env PATH=$PATH make install
       fi
 
       cd ..
@@ -722,12 +722,7 @@ else
       export OMPI_ALLOW_RUN_AS_ROOT=1
       export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
 
-      export OMPI_MCA_pml=ucx
-      export OMPI_MCA_osc=ucx
 
-      export OMPI_MCA_pml_ucx_tls=any
-      export OMPI_MCA_pml_ucx_devices=any
-      export OMPI_MCA_pml_ucx_verbose=100
 
       # dad 3/25/3023 removed --enable-mpi-f90 --enable-mpi-c as they apparently are not options
       # dad 3/30/2023 remove --with-pmix
@@ -780,17 +775,17 @@ else
       make -j 16
 
       if [[ "${DRY_RUN}" == "0" ]]; then
-         ${SUDO} env PATH=$PATH make install
+         ${SUDO} -E env PATH=$PATH make install
 	 for file in ${OPENMPI_PATH}/share/man/man1/*
          do
             ${SUDO} gzip $file
          done
       fi
       # make ucx the default point-to-point
-      echo "pml = ucx" | ${SUDO} tee -a "${OMPI_PATH}"/etc/openmpi-mca-params.conf
-      echo "osc = ucx" | ${SUDO} tee -a "${OMPI_PATH}"/etc/openmpi-mca-params.conf
-      echo "coll_ucc_enable = 1" | ${SUDO} tee -a "${OMPI_PATH}"/etc/openmpi-mca-params.conf
-      echo "coll_ucc_priority = 100" | ${SUDO} tee -a "${OMPI_PATH}"/etc/openmpi-mca-params.conf
+      echo "pml = ucx" | ${SUDO} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
+      echo "osc = ucx" | ${SUDO} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
+      echo "coll_ucc_enable = 1" | ${SUDO} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
+      echo "coll_ucc_priority = 100" | ${SUDO} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
       cd ../..
       rm -rf openmpi-${OPENMPI_VERSION} openmpi-${OPENMPI_VERSION}.tar.bz2
    fi

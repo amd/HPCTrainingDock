@@ -27,7 +27,8 @@ do
           BUILD_LLVM_LATEST=${1}
           ;;
       *)
-         last ${1}
+         echo "Unknown option: ${1}"
+         exit 1
          ;;
    esac
    n=$((${n} + 1))
@@ -64,6 +65,7 @@ if [ "${BUILD_LLVM_LATEST}" = "1" ]; then
       echo ""
 
       INSTALL_DIR=/opt/rocmplus-${ROCM_VERSION}/llvm-latest
+      LLVM_BUILD_DIR=$(pwd)
       git clone https://github.com/llvm/llvm-project.git
       cd llvm-project
 
@@ -90,7 +92,7 @@ if [ "${BUILD_LLVM_LATEST}" = "1" ]; then
       cd ${INSTALL_DIR}/include
       wget -q https://raw.githubusercontent.com/ROCm/roc-stdpar/main/include/hipstdpar_lib.hpp
 
-      rm -rf /app/llvm-project
+      rm -rf ${LLVM_BUILD_DIR}/llvm-project
    fi
 
    # In either case, create a module file for llvm-latest compiler

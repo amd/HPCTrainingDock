@@ -173,7 +173,7 @@ else
       fi
    fi
 
-   # Create a module file for fftw
+   # Create a module file for makedepf90
    if [ -d "$MODULE_PATH" ]; then
       # use sudo if user does not have write access to module path
       if [ ! -w ${MODULE_PATH} ]; then

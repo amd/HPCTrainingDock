@@ -349,6 +349,8 @@ else
       pip3 install --upgrade deepspeed einops psutil pydantic==2.11.9 hjson pydantic-core==2.33.2 msgpack typing_inspection annotated_types py-cpuinfo --no-cache-dir --target=$DEEPSPEED_PATH --no-build-isolation --no-deps
 
       deactivate
+      cd ..
+      rm -rf pytorch_build
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
@@ -470,7 +472,7 @@ else
       echo ""
       echo "============================"
       echo " Installing Pytorch, "
-      echo " Torchaudio and Torchivision"
+      echo " Torchaudio and Torchvision"
       echo " from source"
       echo "============================"
       echo ""

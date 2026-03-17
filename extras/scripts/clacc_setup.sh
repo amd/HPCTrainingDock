@@ -26,7 +26,8 @@ do
           BUILD_CLACC_LATEST=${1}
           ;;
       *)
-         last ${1}
+         echo "Unknown option: ${1}"
+         exit 1
          ;;
    esac
    n=$((${n} + 1))
@@ -67,6 +68,7 @@ if [ "${BUILD_CLACC_LATEST}" = "1" ]; then
       echo "============================"
       echo ""
 
+      CLACC_BUILD_DIR=$(pwd)
       git clone -b clacc/main https://github.com/llvm-doe-org/llvm-project.git clacc-clang
 
       cd clacc-clang
@@ -85,7 +87,7 @@ if [ "${BUILD_CLACC_LATEST}" = "1" ]; then
        ninja -j20 -l10
        ninja install
 
-       rm -rf /app/clacc-clang
+       rm -rf ${CLACC_BUILD_DIR}/clacc-clang
    fi
 
    # In either case, create a module file for CLACC compiler

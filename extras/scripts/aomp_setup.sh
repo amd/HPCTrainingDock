@@ -27,7 +27,7 @@ usage()
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-LatestCompilers/aomp"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "  --install-path [ AOMP_PATH ] default ${AOMP}/aomp_${AOMP_VERSION_NUMBER}"
+   echo "  --install-path [ AOMP_PATH ] default ${AOMP_PATH}/aomp_${AOMP_VERSION_NUMBER}"
    echo "  --help: this usage information"
    exit 1
 }
@@ -161,6 +161,8 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
 
       cd ..
       rm -rf aomp-${AOMP_VERSION_NUMBER}.tar.gz aomp${AOMP_VERSION_SHORT}
+      cd ..
+      rm -rf aomp_tmp_install_dir
 
       # move installation from $HOME dir to desired AOMP_PATH
       cd $AOMP_PATH

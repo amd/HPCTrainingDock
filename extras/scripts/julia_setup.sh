@@ -55,7 +55,7 @@ do
           ;;
       "--parent-dir")
           shift
-          JULIA_PARENT_DIR=${1}
+          JULIA_PARENT_DIR_INPUT=${1}
           reset-last
           ;;
       "--*")

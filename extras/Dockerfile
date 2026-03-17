@@ -28,6 +28,7 @@ ARG BUILD_OG_LATEST
 ARG BUILD_CLACC_LATEST
 ARG BUILD_PYTORCH
 ARG BUILD_CUPY
+ARG BUILD_HIP_PYTHON
 ARG BUILD_TENSORFLOW
 ARG BUILD_FTORCH
 ARG BUILD_JULIA
@@ -78,7 +79,7 @@ RUN  /tmp/extras/miniconda3_setup.sh \
         --python-version ${PYTHON_VERSION} \
         --build-miniconda3 ${BUILD_MINICONDA3} && \
      /tmp/extras/miniforge3_setup.sh \
-        --build-miniforge3 ${BUILD_MINICONDA3} && \
+        --build-miniforge3 ${BUILD_MINIFORGE3} && \
      rm -f /tmp/extras/miniconda3_setup.sh && \
      rm -f /tmp/extras/miniforge3_setup.sh
 
@@ -119,7 +120,7 @@ RUN  /tmp/extras/cupy_setup.sh --build-cupy ${BUILD_CUPY} --rocm-version ${ROCM_
      rm -f /tmp/extras/cupy_setup.sh
 
 COPY extras/scripts/hip-python_setup.sh /tmp/extras/hip-python_setup.sh
-RUN  /tmp/extras/hip-python_setup.sh --build-hip-python ${BUILD_CUPY} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+RUN  /tmp/extras/hip-python_setup.sh --build-hip-python ${BUILD_HIP_PYTHON} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
      rm -f /tmp/extras/hip-python_setup.sh
 
 COPY extras/scripts/tensorflow_setup.sh /tmp/extras/tensorflow_setup.sh
@@ -156,7 +157,7 @@ RUN  /tmp/extras/ftorch_setup.sh --build-ftorch ${BUILD_FTORCH} --rocm-version $
 
 COPY extras/scripts/apps_setup.sh /tmp/extras/apps_setup.sh
 RUN  /tmp/extras/apps_setup.sh && \
-     rm -f /tmp/extras/apps_setup
+     rm -f /tmp/extras/apps_setup.sh
 
 WORKDIR /tmp
 

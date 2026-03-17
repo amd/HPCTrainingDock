@@ -22,7 +22,7 @@ fi
 usage()
 {
    echo "Usage:"
-   echo "  gARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --install-path [INSTALL_PATH ] default $INSTALL_PATH"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"

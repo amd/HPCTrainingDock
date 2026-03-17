@@ -148,7 +148,7 @@ usage()
     print_default_option build-flang-new "[BUILD_FLANGNEW: 0 or 1]" "include this flag to unpack the latest ROCm AFAR drop" "${BUILD_FLANGNEW} (don't build)"
     print_default_option install-grafana "[INSTALL_GRAFANA: 0 or 1]" "include this flag to install Grafana" "${INSTALL_GRAFANA} (don't build)"
     print_default_option build-all-latest "[BUILD_ALL_LATEST: 0 or 1]" "include this flag to build all the additional libraries that need a flag to be built except LLVM latest, GCC latest and CLACC latest" "${BUILD_ALL_LATEST} (don't build)"
-    print_default_option use_cached-apps "[USE_CACHED_APPS: 0 or 1]" "use pre-built gcc and aomp located in CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} directory" "${USE_CACHED_APPS} (don't use)"
+    print_default_option use-cached-apps "[USE_CACHED_APPS: 0 or 1]" "use pre-built gcc and aomp located in CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} directory" "${USE_CACHED_APPS} (don't use)"
     print_default_option install-rocprof-sys-from-source "[INSTALL_ROCPROF_SYS_FROM_SOURCE: 0 or 1]" "include this flag (with no numerical value following) to build rocprof-sys from source, the default branch is amd-staging" "${INSTALL_ROCPROF_SYS_FROM_SOURCE} (don't install)"
     print_default_option install-rocprof-compute-from-source "[INSTALL_ROCPROF_COMPUTE_FROM_SOURCE: 0 or 1]" "include this flag (with no numerical value following) to build rocprof-compute from source, the default branch is amd-staging" "${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE} (don't install)"
     print_default_option build-rocprofiler-sdk "[BUILD_ROCPROFILER_SDK: 0 or 1]" "include this flag to build rocprofiler-sdk from source, the default branch is amd-staging" "${BUILD_ROCPROFILER_SDK} (don't install)"
@@ -440,7 +440,7 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
 	 # optional tool packages
          "grafana")
 	    echo "Setting grafana build"
-            BUILD_GRAFANA=1
+            INSTALL_GRAFANA=1
 	    ;;
          "hpctoolkit")
 	    echo "Setting hpctoolkit build"
@@ -742,6 +742,6 @@ do
        -f extras/Dockerfile .
 
     if [ "${PUSH}" -ne 0 ]; then
-        docker push ${CONTAINER}
+        docker push ${DOCKER_USER}/training:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}
     fi
 done

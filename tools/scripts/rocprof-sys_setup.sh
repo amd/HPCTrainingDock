@@ -190,7 +190,7 @@ echo ""
 
 if [[ "$INSTALL_ROCPROF_SYS_FROM_SOURCE" == "0" ]];then
    echo " Exiting due to value of INSTALL_ROCPROF_SYS_FROM_SOURCE being: $INSTALL_ROCPROF_SYS_FROM_SOURCE "
-   echo " Use '--install-rocprof-sys-from source 1' as input to enable this installation"
+   echo " Use '--install-rocprof-sys-from-source 1' as input to enable this installation"
    exit
 fi
 
@@ -220,13 +220,13 @@ if [ "${INSTALL_ROCPROF_SYS_FROM_SOURCE}" = "1" ] ; then
       module load ${MPI_MODULE}
 
       CPU_TYPE=zen3
-      if [ "${AMDGFX_GFXMODEL}" = "gfx1030" ]; then
+      if [ "${AMDGPU_GFXMODEL}" = "gfx1030" ]; then
          CPU_TYPE=zen2
       fi
-      if [ "${AMDGFX_GFXMODEL}" = "gfx90a" ]; then
+      if [ "${AMDGPU_GFXMODEL}" = "gfx90a" ]; then
          CPU_TYPE=zen3
       fi
-      if [ "${AMDGFX_GFXMODEL}" = "gfx942" ]; then
+      if [ "${AMDGPU_GFXMODEL}" = "gfx942" ]; then
          CPU_TYPE=zen4
       fi
 

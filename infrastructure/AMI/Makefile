@@ -51,10 +51,10 @@ ABLE_ULLP_SQSH=able_usr_local_lib_python.sqsh
 #
 # create the able_machine_image for the OS image construction
 # this will wipe ${TARGET} if it is already mounted (it shouldn't be unless
-# it is a physcal device )
+# it is a physical device )
 able_machine_image_build_1:
 	
-	bash -c "if [ `grep -q  ${TARGET} /proc/mounts ` ]; then rm -rf ${TARGET} ;	fi"
+	bash -c "if grep -q ${TARGET} /proc/mounts; then rm -rf ${TARGET}; fi"
 	rm -f ${TARGET}/able_snap.tar*
 	echo TARGET = ${TARGET}
 	mkdir -p ${TARGET}

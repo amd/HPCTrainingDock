@@ -106,8 +106,8 @@ popd
 pushd /var/lib/grafana/plugins/custom-svg
 ${SUDO} sed -i "s/  bindIp.*/  bindIp: 0.0.0.0/" /etc/mongod.conf
 ${SUDO} mkdir -p /var/lib/grafana
-touch /var/lib/grafana/grafana.lib
-chown grafana:grafana /var/lib/grafana/grafana.lib
+${SUDO} touch /var/lib/grafana/grafana.lib
+${SUDO} chown grafana:grafana /var/lib/grafana/grafana.lib
 popd
 rm grafana-enterprise_8.3.4_amd64.deb server-6.0.asc
 

@@ -176,7 +176,7 @@ else
       tar -xzf  ${CACHE_FILES}/hdf5-v${HDF5_VERSION}.tgz
       chown -R root:root /opt/hdf5-v${HDF5_VERSION}
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm -f ${CACHE_FILES}/hdf5${HDF5_VERSION}.tgz
+         ${SUDO} rm -f ${CACHE_FILES}/hdf5-v${HDF5_VERSION}.tgz
       fi
 
    else

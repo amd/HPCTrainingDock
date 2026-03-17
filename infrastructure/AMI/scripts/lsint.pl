@@ -35,7 +35,7 @@ $NCPU          = $#cpu+1;
 
 # subsequent line structures are "int_number: counts x NCPU irq_type driver(s)"
 foreach $line (@interrupts) {
-   $line    =~ s/^\s+]//g; # trim line begin space
+   $line    =~ s/^\s+//g; # trim line begin space
    @int     = ($line =~ /(\S+)/g);
    $irq     = shift @int;
    $irq     =~ s/\://g;

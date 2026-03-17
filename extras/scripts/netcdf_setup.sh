@@ -398,7 +398,7 @@ EOF
 
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua
-	whatis("Netcdf-fortan Library")
+	whatis("Netcdf-fortran Library")
 
 	load("netcdf-c")
 	local base = "${NETCDF_F_PATH}"

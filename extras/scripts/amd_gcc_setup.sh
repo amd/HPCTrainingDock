@@ -30,7 +30,8 @@ do
           BUILD_GCC_LATEST=${1}
           ;;
       *)
-         last ${1}
+         echo "Unknown option: ${1}"
+         exit 1
          ;;
    esac
    n=$((${n} + 1))

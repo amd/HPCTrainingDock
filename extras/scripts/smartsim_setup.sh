@@ -202,7 +202,7 @@ else
 
       # cleanup
       cd ..
-      rm -rf smartsim
+      rm -rf SmartSim SmartRedis
       module unload rocm/${ROCM_VERSION}
       module unload amdflang-new
       module unload pytorch

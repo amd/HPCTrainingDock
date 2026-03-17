@@ -120,7 +120,7 @@ do
           if [ "$group_entry" = "" ]; then
              echo group $group_name needs to be added to compute node
              gid=`echo $(getent group $group_name) | cut -f3 -d':'`
-             if [ "$VERBOSE" > "0" ]; then
+             if [ "$VERBOSE" -gt 0 ]; then
                 echo ssh $host "sudo groupadd -g $gid $group_name" 
              fi
              if [ "$DRY_RUN" = "1" ]; then
@@ -140,7 +140,7 @@ do
           # Add user to their groups that are missing on compute node
        #   if [ "`echo $current_group_list | tr ' ' '\n' | grep -w $group_name`" == "" ];then
           if [ "$VERBOSE" = "1" ]; then
-             echo user $f1 needs to be addd to group $group_name with gid $f4
+             echo user $f1 needs to be added to group $group_name with gid $f4
              echo ssh $host "sudo usermod -a -G $group_name $f1"
           fi
           if [ "$DRY_RUN" = "1" ]; then
