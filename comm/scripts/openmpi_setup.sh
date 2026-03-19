@@ -435,7 +435,11 @@ if [ "${BUILD_XPMEM}" == "1" ]; then
 
          make -j 16
          if [[ "${DRY_RUN}" == "0" ]]; then
-            ${SUDO} -E env PATH=$PATH make install
+            if [ -n "${SUDO}" ]; then
+               ${SUDO} -E env "PATH=$PATH" make install
+            else
+               make install
+            fi
          fi
 
       cd ..
@@ -553,7 +557,11 @@ fi
 
       make -j 16
       if [[ "${DRY_RUN}" == "0" ]]; then
-         ${SUDO} -E env PATH=$PATH make install
+         if [ -n "${SUDO}" ]; then
+            ${SUDO} -E env "PATH=$PATH" make install
+         else
+            make install
+         fi
       fi
 
       cd ../..
@@ -664,7 +672,11 @@ else
       make -j 16
 
       if [[ "${DRY_RUN}" == "0" ]]; then
-         ${SUDO} -E env PATH=$PATH make install
+         if [ -n "${SUDO}" ]; then
+            ${SUDO} -E env "PATH=$PATH" make install
+         else
+            make install
+         fi
       fi
 
       cd ..
@@ -775,7 +787,11 @@ else
       make -j 16
 
       if [[ "${DRY_RUN}" == "0" ]]; then
-         ${SUDO} -E env PATH=$PATH make install
+         if [ -n "${SUDO}" ]; then
+            ${SUDO} -E env "PATH=$PATH" make install
+         else
+            make install
+         fi
 	 for file in ${OPENMPI_PATH}/share/man/man1/*
          do
             ${SUDO} gzip $file

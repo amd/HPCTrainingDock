@@ -176,18 +176,31 @@ else
          HIP_MALLOC_ASYNC_OFF="-DKokkos_ENABLE_IMPL_HIP_MALLOC_ASYNC=OFF"
       fi
 
-      ${SUDO} cmake -DCMAKE_INSTALL_PREFIX=${KOKKOS_PATH} \
-	         -DCMAKE_PREFIX_PATH=${ROCM_PATH} \
-                 -DKokkos_ENABLE_SERIAL=ON \
-                 -DKokkos_ENABLE_HIP=ON \
-		 ${HIP_MALLOC_ASYNC_OFF} \
-		 -DKokkos_ENABLE_OPENMP=ON \
-                 -DKokkos_ARCH_AMD_GFX942_APU=${KOKKOS_ARCH_AMD_GFX942_APU} \
-                 -DKokkos_ARCH_ZEN4=ON \
-                 -DCMAKE_CXX_COMPILER=${ROCM_PATH}/bin/hipcc ..
-
-      ${SUDO} make -j
-      ${SUDO} make install
+      if [ -n "${SUDO}" ]; then
+         ${SUDO} -E env "PATH=$PATH" cmake -DCMAKE_INSTALL_PREFIX=${KOKKOS_PATH} \
+	            -DCMAKE_PREFIX_PATH=${ROCM_PATH} \
+                    -DKokkos_ENABLE_SERIAL=ON \
+                    -DKokkos_ENABLE_HIP=ON \
+		    ${HIP_MALLOC_ASYNC_OFF} \
+		    -DKokkos_ENABLE_OPENMP=ON \
+                    -DKokkos_ARCH_AMD_GFX942_APU=${KOKKOS_ARCH_AMD_GFX942_APU} \
+                    -DKokkos_ARCH_ZEN4=ON \
+                    -DCMAKE_CXX_COMPILER=${ROCM_PATH}/bin/hipcc ..
+         ${SUDO} -E env "PATH=$PATH" make -j
+         ${SUDO} -E env "PATH=$PATH" make install
+      else
+         cmake -DCMAKE_INSTALL_PREFIX=${KOKKOS_PATH} \
+	            -DCMAKE_PREFIX_PATH=${ROCM_PATH} \
+                    -DKokkos_ENABLE_SERIAL=ON \
+                    -DKokkos_ENABLE_HIP=ON \
+		    ${HIP_MALLOC_ASYNC_OFF} \
+		    -DKokkos_ENABLE_OPENMP=ON \
+                    -DKokkos_ARCH_AMD_GFX942_APU=${KOKKOS_ARCH_AMD_GFX942_APU} \
+                    -DKokkos_ARCH_ZEN4=ON \
+                    -DCMAKE_CXX_COMPILER=${ROCM_PATH}/bin/hipcc ..
+         make -j
+         make install
+      fi
 
       cd ../..
       ${SUDO} rm -rf kokkos

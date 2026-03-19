@@ -179,20 +179,32 @@ else
       git checkout 8bd6bad750b2b0d908
       git apply ../../gklib_force_fpic.patch
       make config cc=${CC} prefix=$INSTALL_PATH
-      ${SUDO} make install -j16
+      if [ -n "${SUDO}" ]; then
+         ${SUDO} -E env "PATH=$PATH" make install -j16
+      else
+         make install -j16
+      fi
       cd ..
 
       git clone https://github.com/KarypisLab/METIS.git metis
       cd metis
       make config shared=1 cc=${CC} prefix=$INSTALL_PATH gklib_path=$INSTALL_PATH i64=1
-      ${SUDO} make install -j16
+      if [ -n "${SUDO}" ]; then
+         ${SUDO} -E env "PATH=$PATH" make install -j16
+      else
+         make install -j16
+      fi
       cd ..
 
       export CC=$MPI_PATH/bin/mpicc
       git clone https://github.com/KarypisLab/ParMETIS.git parmetis
       cd parmetis
       make config shared=1 cc=${CC} prefix=$INSTALL_PATH gklib_path=$INSTALL_PATH metis_path=$INSTALL_PATH
-      ${SUDO} make install -j16
+      if [ -n "${SUDO}" ]; then
+         ${SUDO} -E env "PATH=$PATH" make install -j16
+      else
+         make install -j16
+      fi
       cd ..
 
       cd ..
