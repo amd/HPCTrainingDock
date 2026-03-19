@@ -375,7 +375,7 @@ else
 	setenv("SLEPC_DIR", "$SLEPC_PATH")
 	prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
 	prepend_path("LD_LIBRARY_PATH",pathJoin("${SLEPC_PATH}", "lib"))
-	prepend_path("LD_LIBRARY_PATH","/usr/lib")
+	append_path("LD_LIBRARY_PATH","/usr/lib")
 EOF
 
 fi
