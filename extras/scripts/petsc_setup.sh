@@ -7,7 +7,7 @@ BUILD_PETSC=0
 ROCM_VERSION=6.2.0
 INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/petsc
 INSTALL_PATH_INPUT=""
-PETSC_VERSION="3.23.0"
+PETSC_VERSION="3.24.1"
 SUDO="sudo"
 USE_SPACK=0
 USE_AMDFLANG=0
@@ -262,6 +262,36 @@ else
          git clone --branch v$PETSC_VERSION https://gitlab.com/petsc/petsc.git petsc_to_install
          cd petsc_to_install
          PETSC_REPO=$PWD
+
+         # Patch ScaLAPACK.py: override CDEFS to fix broken Fortran mangling
+         # detection with AMD flang (LLVMFlang) in ScaLAPACK's CMake
+         python3 -c "
+import os
+f = os.path.join('config','BuildSystem','config','packages','ScaLAPACK.py')
+txt = open(f).read()
+old = '''  def formCMakeConfigureArgs(self):
+    args = config.package.CMakePackage.formCMakeConfigureArgs(self)
+    args.append('-DLAPACK_LIBRARIES=\"'+self.libraries.toString(self.blasLapack.dlib)+'\"')
+    args.append('-DSCALAPACK_BUILD_TESTS=OFF')
+    return args'''
+new = '''  def formCMakeConfigureArgs(self):
+    args = config.package.CMakePackage.formCMakeConfigureArgs(self)
+    args.append('-DLAPACK_LIBRARIES=\"'+self.libraries.toString(self.blasLapack.dlib)+'\"')
+    args.append('-DSCALAPACK_BUILD_TESTS=OFF')
+    if self.compilers.fortranManglingDoubleUnderscore:
+      args.append('-DCDEFS=Add__')
+    elif self.compilers.fortranMangling == \"underscore\":
+      args.append('-DCDEFS=Add_')
+    elif self.compilers.fortranMangling == \"caps\":
+      args.append('-DCDEFS=UPPER')
+    elif self.compilers.fortranMangling == \"unchanged\":
+      args.append('-DCDEFS=NOCHANGE')
+    return args'''
+assert old in txt, 'ScaLAPACK.py patch target not found; the file may have changed'
+open(f,'w').write(txt.replace(old, new))
+print('ScaLAPACK.py patched successfully')
+"
+
          DOWNLOAD_HDF5=1
          module load hdf5
          if [[ "HDF5_PATH" != "" ]]; then
