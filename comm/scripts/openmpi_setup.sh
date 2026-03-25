@@ -777,6 +777,10 @@ else
          --disable-debug \
        	 CC=${C_COMPILER} CXX=${CXX_COMPILER} FC=${FC_COMPILER}"
 
+      if [ "${BUILD_XPMEM}" == "1" ]; then
+         OPENMPI_CONFIGURE_COMMAND="${OPENMPI_CONFIGURE_COMMAND} --with-xpmem=${XPMEM_PATH}"
+      fi
+
       echo ""
       echo "OPENMPI_CONFIGURE_COMMAND: "
       echo "${OPENMPI_CONFIGURE_COMMAND}" | sed 's/\s\+/ \\\n   /g'
