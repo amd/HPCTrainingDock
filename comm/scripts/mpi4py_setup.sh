@@ -187,10 +187,16 @@ else
       echo "library_dirs         = %(mpi_dir)s/lib" >> mpi.cfg
       echo "include_dirs         = %(mpi_dir)s/include" >> mpi.cfg
 
+      python3 -m venv mpi4py_build_venv
+      source mpi4py_build_venv/bin/activate
+      pip install --upgrade pip setuptools wheel cython
+
       CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py build --mpi=model
       CC=${ROCM_PATH}/bin/amdclang CXX=${ROCM_PATH}/bin/amdclang++ python3 setup.py bdist_wheel
 
-      pip3 install -v --target=${MPI4PY_PATH} dist/mpi4py-*.whl
+      pip install -v --target=${MPI4PY_PATH} dist/mpi4py-*.whl
+
+      deactivate
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${MPI4PY_PATH} -type f -execdir chown root:root "{}" +
