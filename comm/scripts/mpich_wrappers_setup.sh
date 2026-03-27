@@ -153,7 +153,7 @@ else
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-${ROCM_MODULE}-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
-   if [ -f ${CACHE_FILES}/mpich-v${MPICH_VERSION}.tgz ]; then
+   if [ -f "${CACHE_FILES}/mpich-v${MPICH_VERSION}.tgz" ]; then
       echo ""
       echo "============================"
       echo " Installing Cached MPICH Wrappers"
