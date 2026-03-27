@@ -7,7 +7,7 @@ BUILD_PETSC=0
 ROCM_VERSION=6.2.0
 INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/petsc
 INSTALL_PATH_INPUT=""
-PETSC_VERSION="3.24.1"
+PETSC_VERSION="3.23.0"
 SUDO="sudo"
 USE_SPACK=0
 USE_AMDFLANG=0
@@ -262,39 +262,9 @@ else
          git clone --branch v$PETSC_VERSION https://gitlab.com/petsc/petsc.git petsc_to_install
          cd petsc_to_install
          PETSC_REPO=$PWD
-
-         # Patch ScaLAPACK.py: override CDEFS to fix broken Fortran mangling
-         # detection with AMD flang (LLVMFlang) in ScaLAPACK's CMake
-         python3 -c "
-import os
-f = os.path.join('config','BuildSystem','config','packages','ScaLAPACK.py')
-txt = open(f).read()
-old = '''  def formCMakeConfigureArgs(self):
-    args = config.package.CMakePackage.formCMakeConfigureArgs(self)
-    args.append('-DLAPACK_LIBRARIES=\"'+self.libraries.toString(self.blasLapack.dlib)+'\"')
-    args.append('-DSCALAPACK_BUILD_TESTS=OFF')
-    return args'''
-new = '''  def formCMakeConfigureArgs(self):
-    args = config.package.CMakePackage.formCMakeConfigureArgs(self)
-    args.append('-DLAPACK_LIBRARIES=\"'+self.libraries.toString(self.blasLapack.dlib)+'\"')
-    args.append('-DSCALAPACK_BUILD_TESTS=OFF')
-    if self.compilers.fortranManglingDoubleUnderscore:
-      args.append('-DCDEFS=Add__')
-    elif self.compilers.fortranMangling == \"underscore\":
-      args.append('-DCDEFS=Add_')
-    elif self.compilers.fortranMangling == \"caps\":
-      args.append('-DCDEFS=UPPER')
-    elif self.compilers.fortranMangling == \"unchanged\":
-      args.append('-DCDEFS=NOCHANGE')
-    return args'''
-assert old in txt, 'ScaLAPACK.py patch target not found; the file may have changed'
-open(f,'w').write(txt.replace(old, new))
-print('ScaLAPACK.py patched successfully')
-"
-
          DOWNLOAD_HDF5=1
          module load hdf5
-         if [[ "HDF5_PATH" != "" ]]; then
+         if [[ "${HDF5_PATH}" != "" ]]; then
             DOWNLOAD_HDF5=0
          fi
 
@@ -306,7 +276,15 @@ print('ScaLAPACK.py patched successfully')
                      --prefix=$PETSC_PATH --with-hip=1 --with-hip-dir=$ROCM_PATH
 
          make PETSC_DIR=$PETSC_REPO PETSC_ARCH=arch-linux-c-opt all
+         if [ $? -ne 0 ]; then
+            echo "ERROR: PETSc build failed"
+            exit 1
+         fi
          ${SUDO} make PETSC_DIR=$PETSC_REPO PETSC_ARCH=arch-linux-c-opt install
+         if [ $? -ne 0 ]; then
+            echo "ERROR: PETSc install failed"
+            exit 1
+         fi
 
          cd ../
 
@@ -318,15 +296,27 @@ print('ScaLAPACK.py patched successfully')
          export PETSC_DIR=$PETSC_PATH
 
          ./configure --prefix=$SLEPC_PATH
+         if [ $? -ne 0 ]; then
+            echo "ERROR: SLEPc configure failed"
+            exit 1
+         fi
 
          make SLEPC_DIR=$SLEPC_REPO PETSC_DIR=$PETSC_PATH
-         ${SUDO} make SLEPC_DIR=$SLEPC_REPO PETSC_DIR=$PETSC_PATH install
+         if [ $? -ne 0 ]; then
+            echo "ERROR: SLEPc build failed"
+            exit 1
+         fi
+         ${SUDO} make SLEPC_DIR=$SLEPC_REPO PETSC_DIR=$PETSC_PATH install-lib
+         if [ $? -ne 0 ]; then
+            echo "ERROR: SLEPc install failed"
+            exit 1
+         fi
 
          cd ../
 
          # eigen install
 
-         git clone --branch nightly https://gitlab.com/libeigen/eigen.git eigen_to_install
+         git clone --branch 5.0.0 https://gitlab.com/libeigen/eigen.git eigen_to_install
          cd eigen_to_install
          mkdir build && cd build
 
@@ -336,10 +326,27 @@ print('ScaLAPACK.py patched successfully')
          #-- Could NOT find MPFR (missing: MPFR_INCLUDES MPFR_LIBRARIES MPFR_VERSION_OK) (Required is at least version "1.0.0")
          #-- Found PkgConfig: /usr/bin/pkg-config (found version "0.29.2")
          #-- Could NOT find FFTW (missing: FFTW_INCLUDES FFTW_LIBRARIES)
+         #
+         # EIGEN_BUILD_TESTING=OFF is required to avoid a bug in Eigen 5.x's
+         # cmake/EigenTesting.cmake (line 78): separate_arguments() is called with
+         # ${ARGV2} unquoted, so CMake list variables like FFTW_LIBRARIES expand to
+         # multiple arguments, causing "separate_arguments given unexpected argument(s)".
+         # Eigen defines a safe wrapper (ei_maybe_separate_arguments) but EigenTesting.cmake
+         # does not use it. Disabling tests skips the entire EigenTesting.cmake code path.
+         #
          cmake -DCMAKE_INSTALL_PREFIX=$EIGEN_PATH -DCHOLMOD_LIBRARIES=$PETSC_PATH/lib -DCHOLMOD_INCLUDES=$PETSC_PATH/include \
                -DKLU_LIBRARIES=$PETSC_PATH/lib -DKLU_INCLUDES=$PETSC_PATH/include \
-               -DCMAKE_PREFIX_PATH=${ROCM_PATH} -DCMAKE_MODULE_PATH=${ROCM_PATH}/hip/cmake ..
+               -DCMAKE_PREFIX_PATH=${ROCM_PATH} -DCMAKE_MODULE_PATH=${ROCM_PATH}/hip/cmake \
+               -DEIGEN_BUILD_TESTING=OFF ..
+         if [ $? -ne 0 ]; then
+            echo "ERROR: Eigen cmake configuration failed"
+            exit 1
+         fi
          ${SUDO} make install
+         if [ $? -ne 0 ]; then
+            echo "ERROR: Eigen install failed"
+            exit 1
+         fi
 
          cd ../..
          ${SUDO} rm -rf petsc_to_install slepc_to_install eigen_to_install
@@ -405,7 +412,7 @@ print('ScaLAPACK.py patched successfully')
 	setenv("SLEPC_DIR", "$SLEPC_PATH")
 	prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
 	prepend_path("LD_LIBRARY_PATH",pathJoin("${SLEPC_PATH}", "lib"))
-	append_path("LD_LIBRARY_PATH","/usr/lib")
+	prepend_path("LD_LIBRARY_PATH","/usr/lib")
 EOF
 
 fi
