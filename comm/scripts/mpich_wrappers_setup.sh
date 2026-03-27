@@ -3,14 +3,15 @@
 # Variables controlling setup process
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/mpich_wrappers
 BUILD_MPICH_WRAPPERS=0
-ROCM_AFAR_VERSION=22.3.0
+ROCM_VERSION=23.1.0
+ROCM_MODULE="rocm-therock"
 CRAY_MPICH_VERSION=8.1.33
 AMDGPU_GFXMODEL=gfx942
 CPU_TYPE=genoa
 MPICH_VERSION=4.3.0
 LIBFABRIC_PATH=/opt/cray/libfabric/2.2.0rc1
 INSTALL_PATH_INPUT=""
-INSTALL_PATH=/shared/apps/rhel9/rocm-afar-${ROCM_AFAR_VERSION}/mpich-wrappers
+INSTALL_PATH=/shared/apps/rhel9/${ROCM_MODULE}-${ROCM_VERSION}/mpich-wrappers
 
 SUDO="sudo"
 
@@ -25,7 +26,8 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
-   echo "  --rocm-afar-version [ ROCM_AFAR_VERSION ] default $ROCM_AFAR_VERSION"
+   echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --rocm-module [ ROCM_MODULE ] default $ROCM_MODULE"
    echo "  --cray-mpich-version [ CRAY_MPICH_VERSION ] default $CRAY_MPICH_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default $AMDGPU_GFXMODEL"
    echo "  --cpu-type [ CPU_TYPE ] default $CPU_TYPE"
@@ -59,9 +61,14 @@ do
           BUILD_MPICH_WRAPPERS=${1}
           reset-last
           ;;
-      "--rocm-afar-version")
+      "--rocm-version")
           shift
-          ROCM_AFAR_VERSION=${1}
+          ROCM_VERSION=${1}
+          reset-last
+          ;;
+      "--rocm-module")
+          shift
+          ROCM_MODULE=${1}
           reset-last
           ;;
       "--cray-mpich-version")
@@ -116,7 +123,7 @@ done
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
-   INSTALL_PATH=/shared/apps/rhel9/rocm-afar-${ROCM_AFAR_VERSION}/mpich-wrappers
+   INSTALL_PATH=/shared/apps/rhel9/${ROCM_MODULE}-${ROCM_VERSION}/mpich-wrappers
 fi
 
 if [ "${BUILD_MPICH_WRAPPERS}" = "0" ]; then
@@ -134,7 +141,8 @@ else
    echo " Install directory: $INSTALL_PATH"
    echo " Module directory: $MODULE_PATH"
    echo " MPICH Version: $MPICH_VERSION"
-   echo " ROCm AFAR Version: $ROCM_AFAR_VERSION"
+   echo " ROCm: $ROCM_MODULE"
+   echo " ROCm Version: $ROCM_VERSION"
    echo " Cray MPICH Version: $CRAY_MPICH_VERSION"
    echo " AMDGPU GFX Model: $AMDGPU_GFXMODEL"
    echo " CPU Type: $CPU_TYPE"
@@ -143,7 +151,7 @@ else
    echo ""
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
-   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-afar-${ROCM_AFAR_VERSION}-${AMDGPU_GFXMODEL_STRING}
+   CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-${ROCM_MODULE}-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
    if [ -f ${CACHE_FILES}/mpich-v${MPICH_VERSION}.tgz ]; then
       echo ""
@@ -154,7 +162,7 @@ else
 
       cd /opt
       tar -xzf ${CACHE_FILES}/mpich-v${MPICH_VERSION}.tgz
-      chown -R root:root ${INSTALL_PATH}
+      ${SUDO} chown -R root:root ${INSTALL_PATH}
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm -f ${CACHE_FILES}/mpich-v${MPICH_VERSION}.tgz
       fi
@@ -172,7 +180,7 @@ else
       module load craype-accel-amd-${AMDGPU_GFXMODEL}
       module load cray-python
       module load cray-mpich/${CRAY_MPICH_VERSION}
-      module load rocm-afar/${ROCM_AFAR_VERSION}
+      module load ${ROCM_MODULE}/${ROCM_VERSION}
 
       if [ -d "$INSTALL_PATH" ]; then
          if [ -w ${INSTALL_PATH} ]; then
@@ -209,7 +217,7 @@ else
           --with-libfabric=${LIBFABRIC_PATH} \
           > log.configure.txt 2>&1
 
-      sed -i 's#wl=""#wl="-Wl,#g' libtool
+      sed -i 's#wl=""#wl="-Wl,"#g' libtool
 
       make VERBOSE=1 V=1 -j |& tee log.make.txt
 
@@ -256,7 +264,7 @@ else
 	module load craype-accel-amd-${AMDGPU_GFXMODEL}
 	module load cray-python
 	module load cray-mpich/${CRAY_MPICH_VERSION}
-	module load rocm-afar/${ROCM_AFAR_VERSION}
+	module load ${ROCM_MODULE}/${ROCM_VERSION}
 
 	## Paths
 	prepend-path LD_LIBRARY_PATH \$base/lib
