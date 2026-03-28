@@ -176,8 +176,10 @@ else
          HIP_MALLOC_ASYNC_OFF="-DKokkos_ENABLE_IMPL_HIP_MALLOC_ASYNC=OFF"
       fi
 
+      # sudo strips LD_LIBRARY_PATH even with -E; pass it explicitly so
+      # CMake's compiler-validation binaries can find ROCm shared libraries
       if [ -n "${SUDO}" ]; then
-         ${SUDO} -E env "PATH=$PATH" cmake -DCMAKE_INSTALL_PREFIX=${KOKKOS_PATH} \
+         ${SUDO} -E env "PATH=$PATH" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" cmake -DCMAKE_INSTALL_PREFIX=${KOKKOS_PATH} \
 	            -DCMAKE_PREFIX_PATH=${ROCM_PATH} \
                     -DKokkos_ENABLE_SERIAL=ON \
                     -DKokkos_ENABLE_HIP=ON \
@@ -185,9 +187,9 @@ else
 		    -DKokkos_ENABLE_OPENMP=ON \
                     -DKokkos_ARCH_AMD_GFX942_APU=${KOKKOS_ARCH_AMD_GFX942_APU} \
                     -DKokkos_ARCH_ZEN4=ON \
-                    -DCMAKE_CXX_COMPILER=${ROCM_PATH}/bin/hipcc ..
-         ${SUDO} -E env "PATH=$PATH" make -j
-         ${SUDO} -E env "PATH=$PATH" make install
+                    -DCMAKE_CXX_COMPILER=${ROCM_PATH}/bin/hipcc .
+         ${SUDO} -E env "PATH=$PATH" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" make -j
+         ${SUDO} -E env "PATH=$PATH" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" make install
       else
          cmake -DCMAKE_INSTALL_PREFIX=${KOKKOS_PATH} \
 	            -DCMAKE_PREFIX_PATH=${ROCM_PATH} \
