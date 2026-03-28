@@ -192,7 +192,7 @@ else
 		    -DKokkos_ENABLE_OPENMP=ON \
                     -DKokkos_ARCH_AMD_GFX942_APU=${KOKKOS_ARCH_AMD_GFX942_APU} \
                     -DKokkos_ARCH_ZEN4=ON \
-                    -DCMAKE_CXX_COMPILER=${ROCM_PATH}/bin/hipcc .
+                    -DCMAKE_CXX_COMPILER=${ROCM_PATH}/bin/hipcc ..
          ${SUDO} -E env "PATH=$PATH" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" make -j
          ${SUDO} -E env "PATH=$PATH" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" make install
       else

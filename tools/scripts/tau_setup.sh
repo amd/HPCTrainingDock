@@ -237,7 +237,7 @@ else
       ${SUDO} rm -rf tau2
       git clone https://github.com/UO-OACISS/tau2.git || { echo "ERROR: git clone of tau2 failed"; exit 1; }
       cd tau2
-      git checkout $GIT_COMMIT  || { echo "ERROR: git checkout $GIT_COMMIT failed"; exit 1; }
+      git checkout $GIT_COMMIT || { echo "ERROR: git checkout $GIT_COMMIT failed"; exit 1; }
 
       # install third party dependencies
       wget http://tau.uoregon.edu/ext.tgz
