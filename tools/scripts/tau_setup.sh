@@ -215,7 +215,9 @@ else
       spack external find --all
 
       # change spack install dir for PDT
-      sed -i 's|$spack/opt/spack|'"${PDT_PATH}"'|g' spack/etc/spack/defaults/base/config.yaml 
+      # Use spack config add to set user-scope config, which takes precedence
+      # over any stale ~/.spack/config.yaml left by other spack-based builds
+      spack config add "config:install_tree:root:${PDT_PATH}"
 
       # open permissions to use spack to install PDT
       if [[ "${USER}" != "root" ]]; then
@@ -232,9 +234,10 @@ else
       export PDTDIR=$PDT_PATH
 
       # cloning the latest version of TAU as of Feb 27th 2026
-      git clone https://github.com/UO-OACISS/tau2.git
+      ${SUDO} rm -rf tau2
+      git clone https://github.com/UO-OACISS/tau2.git || { echo "ERROR: git clone of tau2 failed"; exit 1; }
       cd tau2
-      git checkout $GIT_COMMIT
+      git checkout $GIT_COMMIT  || { echo "ERROR: git checkout $GIT_COMMIT failed"; exit 1; }
 
       # install third party dependencies
       wget http://tau.uoregon.edu/ext.tgz
@@ -304,7 +307,7 @@ else
       ${SUDO} rm ${TAU_PATH}/x86_64/lib/wrappers/pthread_wrapper/link_options.tau
 
       cd ..
-      rm -rf tau2
+      ${SUDO} rm -rf tau2
       rm -rf spack
 
       if [[ "${USER}" != "root" ]]; then
