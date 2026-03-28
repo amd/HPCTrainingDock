@@ -176,11 +176,16 @@ else
          HIP_MALLOC_ASYNC_OFF="-DKokkos_ENABLE_IMPL_HIP_MALLOC_ASYNC=OFF"
       fi
 
-      # sudo strips LD_LIBRARY_PATH even with -E; pass it explicitly so
-      # CMake's compiler-validation binaries can find ROCm shared libraries
+      # TheRock's hipcc with the new offload driver produces fat binaries that
+      # CMake cannot parse for ABI info, leaving CMAKE_SIZEOF_VOID_P and
+      # CMAKE_LIBRARY_ARCHITECTURE unset. Supply them so Kokkos configures
+      # correctly and find_library can locate system libs like libdl.
+      # sudo also strips LD_LIBRARY_PATH even with -E, so pass it explicitly.
       if [ -n "${SUDO}" ]; then
          ${SUDO} -E env "PATH=$PATH" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" cmake -DCMAKE_INSTALL_PREFIX=${KOKKOS_PATH} \
 	            -DCMAKE_PREFIX_PATH=${ROCM_PATH} \
+                    -DCMAKE_SIZEOF_VOID_P=8 \
+                    -DCMAKE_LIBRARY_ARCHITECTURE=x86_64-linux-gnu \
                     -DKokkos_ENABLE_SERIAL=ON \
                     -DKokkos_ENABLE_HIP=ON \
 		    ${HIP_MALLOC_ASYNC_OFF} \
@@ -193,6 +198,8 @@ else
       else
          cmake -DCMAKE_INSTALL_PREFIX=${KOKKOS_PATH} \
 	            -DCMAKE_PREFIX_PATH=${ROCM_PATH} \
+                    -DCMAKE_SIZEOF_VOID_P=8 \
+                    -DCMAKE_LIBRARY_ARCHITECTURE=x86_64-linux-gnu \
                     -DKokkos_ENABLE_SERIAL=ON \
                     -DKokkos_ENABLE_HIP=ON \
 		    ${HIP_MALLOC_ASYNC_OFF} \
