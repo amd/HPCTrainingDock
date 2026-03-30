@@ -160,6 +160,7 @@ else
       export ROCM_HOME=${ROCM_PATH}
       export HIPCC=${ROCM_HOME}/bin/hipcc
       export HCC_AMDGPU_ARCH=${AMDGPU_GFXMODEL}
+      export HIPCC_COMPILE_FLAGS_APPEND="--offload-arch=${AMDGPU_GFXMODEL} ${HIPCC_COMPILE_FLAGS_APPEND}"
       UV_LOC=`which uv`
       python3 -m venv cupy_build
       source cupy_build/bin/activate
