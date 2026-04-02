@@ -176,40 +176,31 @@ else
          HIP_MALLOC_ASYNC_OFF="-DKokkos_ENABLE_IMPL_HIP_MALLOC_ASYNC=OFF"
       fi
 
-      # TheRock's hipcc with the new offload driver produces fat binaries that
-      # CMake cannot parse for ABI info, leaving CMAKE_SIZEOF_VOID_P and
-      # CMAKE_LIBRARY_ARCHITECTURE unset. Supply them so Kokkos configures
-      # correctly and find_library can locate system libs like libdl.
-      # sudo also strips LD_LIBRARY_PATH even with -E, so pass it explicitly.
+      # Use amdclang++ instead of hipcc.  hipcc is a deprecated wrapper around
+      # amdclang++ whose new offload driver produces fat binaries that CMake
+      # cannot parse for CXX ABI info.  That failure left CMAKE_SIZEOF_VOID_P
+      # and CMAKE_LIBRARY_ARCHITECTURE unset, which broke find_library for
+      # system libs like libdl and caused a hardcoded /usr/include to leak
+      # into KokkosTargets.cmake.  It also prevented FindOpenMP from setting
+      # link libraries.  amdclang++ avoids all of these issues.
+      #
+      # sudo strips LD_LIBRARY_PATH even with -E, so pass it explicitly.
+      SUDO_ENV=""
       if [ -n "${SUDO}" ]; then
-         ${SUDO} -E env "PATH=$PATH" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" cmake -DCMAKE_INSTALL_PREFIX=${KOKKOS_PATH} \
-	            -DCMAKE_PREFIX_PATH=${ROCM_PATH} \
-                    -DCMAKE_SIZEOF_VOID_P=8 \
-                    -DCMAKE_LIBRARY_ARCHITECTURE=x86_64-linux-gnu \
-                    -DKokkos_ENABLE_SERIAL=ON \
-                    -DKokkos_ENABLE_HIP=ON \
-		    ${HIP_MALLOC_ASYNC_OFF} \
-		    -DKokkos_ENABLE_OPENMP=ON \
-                    -DKokkos_ARCH_AMD_GFX942_APU=${KOKKOS_ARCH_AMD_GFX942_APU} \
-                    -DKokkos_ARCH_ZEN4=ON \
-                    -DCMAKE_CXX_COMPILER=${ROCM_PATH}/bin/hipcc ..
-         ${SUDO} -E env "PATH=$PATH" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" make -j
-         ${SUDO} -E env "PATH=$PATH" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" make install
-      else
-         cmake -DCMAKE_INSTALL_PREFIX=${KOKKOS_PATH} \
-	            -DCMAKE_PREFIX_PATH=${ROCM_PATH} \
-                    -DCMAKE_SIZEOF_VOID_P=8 \
-                    -DCMAKE_LIBRARY_ARCHITECTURE=x86_64-linux-gnu \
-                    -DKokkos_ENABLE_SERIAL=ON \
-                    -DKokkos_ENABLE_HIP=ON \
-		    ${HIP_MALLOC_ASYNC_OFF} \
-		    -DKokkos_ENABLE_OPENMP=ON \
-                    -DKokkos_ARCH_AMD_GFX942_APU=${KOKKOS_ARCH_AMD_GFX942_APU} \
-                    -DKokkos_ARCH_ZEN4=ON \
-                    -DCMAKE_CXX_COMPILER=${ROCM_PATH}/bin/hipcc ..
-         make -j
-         make install
+         SUDO_ENV="${SUDO} -E env PATH=$PATH LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
       fi
+
+      ${SUDO_ENV} cmake -DCMAKE_INSTALL_PREFIX=${KOKKOS_PATH} \
+                    -DCMAKE_PREFIX_PATH=${ROCM_PATH} \
+                    -DKokkos_ENABLE_SERIAL=ON \
+                    -DKokkos_ENABLE_HIP=ON \
+                    ${HIP_MALLOC_ASYNC_OFF} \
+                    -DKokkos_ENABLE_OPENMP=ON \
+                    -DKokkos_ARCH_AMD_GFX942_APU=${KOKKOS_ARCH_AMD_GFX942_APU} \
+                    -DKokkos_ARCH_ZEN4=ON \
+                    -DCMAKE_CXX_COMPILER=${ROCM_PATH}/llvm/bin/amdclang++ ..
+      ${SUDO_ENV} make -j
+      ${SUDO_ENV} make install
 
       cd ../..
       ${SUDO} rm -rf kokkos
@@ -236,14 +227,13 @@ else
 
    # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${KOKKOS_VERSION}.lua
-	whatis("Kokkos version ${KOKKOS_VERSION} - Performance Portability Language")
+        whatis("Kokkos version ${KOKKOS_VERSION} - Performance Portability Language")
 
-	prereq("rocm/${ROCM_VERSION}")
-	prepend_path("PATH","${KOKKOS_PATH}")
-	setenv("Kokkos_ROOT","${KOKKOS_PATH}")
-	setenv("Kokkos_DIR","${KOKKOS_PATH}/lib/cmake/Kokkos")
-	setenv("HSA_XNACK","1")
+        prereq("rocm/${ROCM_VERSION}")
+        prepend_path("PATH","${KOKKOS_PATH}")
+        setenv("Kokkos_ROOT","${KOKKOS_PATH}")
+        setenv("Kokkos_DIR","${KOKKOS_PATH}/lib/cmake/Kokkos")
+        setenv("HSA_XNACK","1")
 EOF
 
 fi
-
