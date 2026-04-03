@@ -541,6 +541,13 @@ else
 	 cd ..
       fi
 
+      # Ensure PyTorch's bundled flatbuffers headers are found before any
+      # ROCm-provided flatbuffers headers to avoid version mismatches.
+      # Must use target_include_directories on torch_cpu (not global
+      # include_directories) because target-level includes take priority
+      # over directory-level includes in CMake's compile command ordering.
+      echo 'target_include_directories(torch_cpu BEFORE PRIVATE "${CMAKE_SOURCE_DIR}/third_party/flatbuffers/include")' >> caffe2/CMakeLists.txt
+
       python3 -m pip install -r requirements.txt
       pip3 install -r requirements.txt --target=${INSTALL_PATH}/pypackages
       python3 tools/amd_build/build_amd.py >& /dev/null

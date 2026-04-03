@@ -214,7 +214,7 @@ else
          echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
-      ROCM_VERSION_BAZEL=`echo "$ROCM_VERSION" | awk -F. '{print $1}'`
+      ROCM_VERSION_BAZEL=`echo "$ROCM_VERSION" | sed 's/therock-//' | awk -F. '{print $1}'`
       if [[ "${ROCM_VERSION_BAZEL}" == "6" ]]; then
          ROCM_VERSION_BAZEL="${ROCM_VERSION_BAZEL}0"
       fi
