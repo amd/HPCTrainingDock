@@ -147,6 +147,7 @@ else
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm ${CACHE_FILES}/cupy.tgz
       fi
+      SAVED_ROCM_HOME=${ROCM_HOME}
    else
       echo ""
       echo "============================"
@@ -159,8 +160,12 @@ else
       export CUPY_INSTALL_USE_HIP=1
       export ROCM_HOME=${ROCM_PATH}
       export HIPCC=${ROCM_HOME}/bin/hipcc
-      export HCC_AMDGPU_ARCH=${AMDGPU_GFXMODEL}
-      export HIPCC_COMPILE_FLAGS_APPEND="--offload-arch=${AMDGPU_GFXMODEL} ${HIPCC_COMPILE_FLAGS_APPEND}"
+      export HCC_AMDGPU_ARCH=$(echo ${AMDGPU_GFXMODEL} | cut -d';' -f1)
+      OFFLOAD_ARCH_FLAGS=""
+      for arch in $(echo ${AMDGPU_GFXMODEL} | tr ';' ' '); do
+          OFFLOAD_ARCH_FLAGS+=" --offload-arch=${arch}"
+      done
+      export HIPCC_COMPILE_FLAGS_APPEND="${OFFLOAD_ARCH_FLAGS} ${HIPCC_COMPILE_FLAGS_APPEND}"
       UV_LOC=`which uv`
       python3 -m venv cupy_build
       source cupy_build/bin/activate
@@ -210,6 +215,7 @@ else
          ${SUDO} chmod go-w $CUPY_PATH
       fi
 
+      SAVED_ROCM_HOME=${ROCM_HOME}
       module unload rocm/${ROCM_VERSION}
    fi
 
@@ -236,7 +242,7 @@ else
 	prereq("rocm/${ROCM_VERSION}")
 	prepend_path("PYTHONPATH","$CUPY_PATH")
 	prepend_path("CPATH","/usr/lib/gcc/x86_64-linux-gnu/12/include")
-        setenv("ROCM_HOME","$ROCM_HOME")
+        setenv("ROCM_HOME","$SAVED_ROCM_HOME")
 EOF
 
 fi
