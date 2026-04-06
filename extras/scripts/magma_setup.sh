@@ -205,6 +205,9 @@ else
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find ${OPENBLAS_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${OPENBLAS_PATH} -type d -execdir chown root:root "{}" +
+      fi
+
+      if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod go-w ${OPENBLAS_PATH}
       fi
    fi
@@ -262,6 +265,9 @@ else
    if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
       ${SUDO} find ${MAGMA_PATH} -type f -execdir chown root:root "{}" +
       ${SUDO} find ${MAGMA_PATH} -type d -execdir chown root:root "{}" +
+   fi
+
+   if [[ "${USER}" != "root" ]]; then
       ${SUDO} chmod go-w ${MAGMA_PATH}
    fi
 

@@ -357,7 +357,7 @@ else
          ${SUDO} find ${INSTALL_PATH} -type d -execdir chown root:root "{}" +
       fi
 
-      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
+      if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod go-w ${INSTALL_PATH}
       fi
 
@@ -688,7 +688,7 @@ else
          ${SUDO} find ${INSTALL_PATH} -type d -execdir chown root:root "{}" +
       fi
 
-      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
+      if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod go-w ${INSTALL_PATH}
       fi
 

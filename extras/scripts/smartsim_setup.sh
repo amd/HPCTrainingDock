@@ -196,7 +196,9 @@ else
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find $CRAYLABS_PATH -type f -execdir chown root:root "{}" +
          ${SUDO} find $CRAYLABS_PATH -type d -execdir chown root:root "{}" +
+      fi
 
+      if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod go-w $CRAYLABS_PATH
       fi
 

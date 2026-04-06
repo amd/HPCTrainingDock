@@ -178,7 +178,9 @@ else
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find $FTORCH_PATH -type f -execdir chown root:root "{}" +
          ${SUDO} find $FTORCH_PATH -type d -execdir chown root:root "{}" +
+      fi
 
+      if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod go-w $FTORCH_PATH
       fi
 

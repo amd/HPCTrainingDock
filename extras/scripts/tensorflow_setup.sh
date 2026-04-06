@@ -235,7 +235,9 @@ else
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find $TF_PATH -type f -execdir chown root:root "{}" +
          ${SUDO} find $TF_PATH -type d -execdir chown root:root "{}" +
+      fi
 
+      if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod go-w $TF_PATH
       fi
 

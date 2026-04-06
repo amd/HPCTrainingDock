@@ -389,7 +389,7 @@ print('ScaLAPACK.py patched successfully')
          ${SUDO} find ${SLEPC_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${EIGEN_PATH} -type f -execdir chown root:root "{}" +
       fi
-      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
+      if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod go-w ${INSTALL_PATH}
          ${SUDO} chmod go-w ${PETSC_PATH}
          ${SUDO} chmod go-w ${SLEPC_PATH}

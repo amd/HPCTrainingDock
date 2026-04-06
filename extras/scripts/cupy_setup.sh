@@ -211,7 +211,9 @@ else
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find $CUPY_PATH -type f -execdir chown root:root "{}" +
          ${SUDO} find $CUPY_PATH -type d -execdir chown root:root "{}" +
+      fi
 
+      if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod go-w $CUPY_PATH
       fi
 

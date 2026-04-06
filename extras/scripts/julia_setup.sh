@@ -132,6 +132,9 @@ else
    if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
       ${SUDO} find $JULIA_PARENT_DIR -type f -execdir chown root:root "{}" +
       ${SUDO} find $JULIA_PARENT_DIR -type d -execdir chown root:root "{}" +
+   fi
+
+   if [[ "${USER}" != "root" ]]; then
       ${SUDO} chmod -R go-w $JULIA_PARENT_DIR
    fi
 

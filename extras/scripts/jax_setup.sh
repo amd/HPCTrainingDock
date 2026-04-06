@@ -450,7 +450,9 @@ else
          ${SUDO} find ${JAXLIB_PATH} -type d -execdir chown root:root "{}" +
          ${SUDO} find ${JAX_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${JAX_PATH} -type d -execdir chown root:root "{}" +
+      fi
 
+      if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod go-w ${JAXLIB_PATH}
          ${SUDO} chmod go-w ${JAX_PATH}
       fi
