@@ -186,7 +186,7 @@ else
       python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python "numba-hip[rocm-6-4-0] @ git+https://github.com/ROCm/numba-hip.git"
       deactivate
       rm -rf hip-python-build
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find $HIP_PYTHON_PATH -type f -execdir chown root:root "{}" +
          ${SUDO} find $HIP_PYTHON_PATH -type d -execdir chown root:root "{}" +
 

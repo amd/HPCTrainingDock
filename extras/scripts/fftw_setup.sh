@@ -248,7 +248,7 @@ else
       cd ..
       rm -rf fftw-${FFTW_VERSION} fftw-${FFTW_VERSION}.tar.gz
 
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find ${FFTW_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${FFTW_PATH} -type d -execdir chown root:root "{}" +
 

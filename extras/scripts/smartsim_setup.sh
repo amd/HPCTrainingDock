@@ -193,7 +193,7 @@ else
 
       smart build --device rocm-6 --config-dir $PWD
 
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find $CRAYLABS_PATH -type f -execdir chown root:root "{}" +
          ${SUDO} find $CRAYLABS_PATH -type d -execdir chown root:root "{}" +
 

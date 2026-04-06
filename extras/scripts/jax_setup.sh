@@ -445,7 +445,7 @@ else
       rm -rf /tmp/rocm-jax
       rm -rf /tmp/xla
 
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find ${JAXLIB_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${JAXLIB_PATH} -type d -execdir chown root:root "{}" +
          ${SUDO} find ${JAX_PATH} -type f -execdir chown root:root "{}" +

@@ -194,10 +194,10 @@ else
       cd ../..
       rm -rf adios2
 
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
       fi
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} chmod go-w ${INSTALL_PATH}
       fi
 

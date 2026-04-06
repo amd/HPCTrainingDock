@@ -208,7 +208,7 @@ else
       cd ../
       # clean-up
       rm -rf cupy cupy_build
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find $CUPY_PATH -type f -execdir chown root:root "{}" +
          ${SUDO} find $CUPY_PATH -type d -execdir chown root:root "{}" +
 

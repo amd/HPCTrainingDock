@@ -232,7 +232,7 @@ else
 
       pip3 install -v --target=$TF_PATH --upgrade bazel-bin/tensorflow/tools/pip_package/wheel_house/tensorflow*.whl
 
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find $TF_PATH -type f -execdir chown root:root "{}" +
          ${SUDO} find $TF_PATH -type d -execdir chown root:root "{}" +
 

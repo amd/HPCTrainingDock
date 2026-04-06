@@ -129,7 +129,7 @@ else
    ${SUDO} mv .julia/juliaupself.json .
    ${SUDO} chmod -R 755 .julia/*
 
-   if [[ "${USER}" != "root" ]]; then
+   if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
       ${SUDO} find $JULIA_PARENT_DIR -type f -execdir chown root:root "{}" +
       ${SUDO} find $JULIA_PARENT_DIR -type d -execdir chown root:root "{}" +
       ${SUDO} chmod -R go-w $JULIA_PARENT_DIR

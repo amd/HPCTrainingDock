@@ -337,7 +337,7 @@ else
       rm -rf netcdf-fortran
       ${SUDO} rm -rf PnetCDF
 
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find ${NETCDF_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${NETCDF_PATH} -type d -execdir chown root:root "{}" +
 

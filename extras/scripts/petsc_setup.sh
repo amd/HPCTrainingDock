@@ -383,13 +383,13 @@ print('ScaLAPACK.py patched successfully')
 
       fi
 
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${PETSC_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${SLEPC_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${EIGEN_PATH} -type f -execdir chown root:root "{}" +
       fi
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} chmod go-w ${INSTALL_PATH}
          ${SUDO} chmod go-w ${PETSC_PATH}
          ${SUDO} chmod go-w ${SLEPC_PATH}

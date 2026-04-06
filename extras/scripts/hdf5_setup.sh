@@ -278,7 +278,7 @@ else
       cd ../..
       rm -rf hdf5
 
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find ${HDF5_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${HDF5_PATH} -type d -execdir chown root:root "{}" +
 
