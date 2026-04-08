@@ -352,7 +352,7 @@ else
       cd ..
       rm -rf pytorch_build
 
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${INSTALL_PATH} -type d -execdir chown root:root "{}" +
       fi
@@ -700,7 +700,7 @@ else
       rm -rf pytorch_build
 
 
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${INSTALL_PATH} -type d -execdir chown root:root "{}" +
       fi
