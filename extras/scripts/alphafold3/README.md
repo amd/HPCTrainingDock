@@ -1,5 +1,5 @@
-# Setup and Run Alphafold3 with ROCm 7.1.1 and JAX 7.1 on MI300A
-These instructions go over how to build and run Alphafold3 ( commit hash 3a09f04 from Dec 2nd 2025) on MI300A with ROCm 7.1.1 and JAX 7.1.
+# Setup and Run Alphafold3 with ROCm 7.1.1 and JAX 7.1 on MI300 and MI200 series Instinct GPUs
+These instructions go over how to build and run Alphafold3 ( commit hash 3a09f04 from Dec 2nd 2025) on MI300 and MI200 series GPUs with ROCm 7.1.1 and JAX 7.1.
 **Note**: we are NOT using the official model weights, but rather dummy random weights, generated with [these](https://github.com/google-deepmind/alphafold3/blob/main/docs/model_parameters.md) instructions.
 
 Begin by accessing your system: in this case we consider the aac7 AMD system, adjust as needed:
@@ -77,9 +77,9 @@ Run the image, make sure to put your image ID before `/bin/bash` (note: you also
 podman run -it   --name alphafold   --shm-size=256m   --device=/dev/kfd   --device=/dev/dri   --group-add video   --group-add render   --security-opt seccomp=unconfined   -v $HOME/104-P55854/inputs:/root/af_input   -v $HOME/104-P55854/outputs:/root/af_output  -v /shareddata/alphafold3_database:/root/public_databases:ro   59e5b8637925 /bin/bash
 ``` 
 
-After the above command, you'll be in the container, set these for starters (we consider MI300A so the gfx arch is gfx942):
+After the above command, you'll be in the container, set these for starters (we consider MI300 and MI200 series GPUs so the gfx archs are respectively gfx942 and gfx90a):
 ```
-export AMDGPU_GFXMODEL=gfx942
+export AMDGPU_GFXMODEL=gfx942,gfx90a
 export ROCM_VERSION=7.1.1
 export ROCM_PATH=/opt/rocm-$ROCM_VERSION
 export ROCM_VERSION_BAZEL=`echo "$ROCM_VERSION" | awk -F. '{print $1}'`
@@ -94,7 +94,7 @@ Sanity check:
 ```
 rocminfo | grep MI
 ``` 
-and confirm that you see MI300A.
+and confirm that you see the name of the GPU you are currently using.
 
 Install basic OS software:
 ```
