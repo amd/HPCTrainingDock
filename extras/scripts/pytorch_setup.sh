@@ -298,7 +298,7 @@ else
 
       pip3 install --target=${FLASHATTENTION_PATH} packaging
       export PYTHONPATH=$PYTHONPATH:${FLASHATTENTION_PATH}
-      git clone --branch v${FLASHATTENTION_VERSION} https://github.com/Dao-AILab/flash-attention.git
+      git clone --depth 1 --branch v${FLASHATTENTION_VERSION} https://github.com/Dao-AILab/flash-attention.git
       cd flash-attention
       python3 setup.py install --prefix=${FLASHATTENTION_PATH}
 
@@ -352,7 +352,7 @@ else
       cd ..
       rm -rf pytorch_build
 
-      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
+      if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${INSTALL_PATH} -type d -execdir chown root:root "{}" +
       fi
@@ -436,18 +436,21 @@ else
       export GPU_TARGETS=${AMDGPU_GFXMODEL}
       export AMDGPU_TARGETS=${AMDGPU_GFXMODEL}
 
-      git clone --branch v${ZSTD_VERSION} https://github.com/facebook/zstd.git
+      # Clean up stale source trees from prior interrupted runs
+      rm -rf zstd aotriton
+
+      git clone --depth 1 --branch v${ZSTD_VERSION} https://github.com/facebook/zstd.git
       cd zstd/build/cmake
       cmake -DCMAKE_INSTALL_PREFIX=${ZSTD_PATH}
-      make install
+      make -j$(nproc) install
       export PATH=${ZSTD_PATH}:${ZSTD_PATH}/bin:$PATH
       cd ../../../
 
-      git clone --branch ${AOTRITON_VERSION}  https://github.com/ROCm/aotriton.git
+      git clone --depth 1 --branch ${AOTRITON_VERSION}  https://github.com/ROCm/aotriton.git
 
       cd aotriton
-      git submodule update --init --recursive
-      mkdir build && cd build
+      git submodule update --init --recursive --depth 1
+      mkdir -p build && cd build
 
       if [[ "${AMDGPU_GFXMODEL}" == "gfx90a" ]]; then
          TARGET_GPUS="MI200"
@@ -477,6 +480,10 @@ else
       echo "============================"
       echo ""
 
+      # Remove any stale build directory from a prior interrupted run.
+      # Uses sudo because a previous build may have created root-owned
+      # files via the sed fixup of torchrun scripts.
+      ${SUDO} rm -rf pytorch_build
       python3 -m venv pytorch_build
       source pytorch_build/bin/activate
       cd pytorch_build
@@ -537,7 +544,7 @@ else
 
       if [ "${PYTORCH_SHORT_VERSION}" == "2.9" ]; then
          cd third_party
-	 find . -type f -exec sed -i 's/^CMAKE_MINIMUM_REQUIRED(VERSION .*/CMAKE_MINIMUM_REQUIRED(VERSION 3.5)/' {} +
+	 find . -name 'CMakeLists.txt' -exec sed -i 's/^CMAKE_MINIMUM_REQUIRED(VERSION .*/CMAKE_MINIMUM_REQUIRED(VERSION 3.5)/' {} +
 	 cd ..
       fi
 
@@ -568,7 +575,7 @@ else
         ${SUDO} cp -a lib/python*/site-packages/* ${PYTORCH_PATH_SITE_PACKAGES}
 	${SUDO} mkdir -p ${PYTORCH_PATH}/bin
 	export PYTHON3_PATH=`which python3`
-	${SUDO} sed -i "s#${PYTORCH_BUILD_DIR}/bin/python3#${PYTHON3_PATH}#g" bin/*
+	${SUDO} find bin/ -maxdepth 1 -type f ! -name 'python*' -exec sed -i "s#${PYTORCH_BUILD_DIR}/bin/python3#${PYTHON3_PATH}#g" {} +
 	${SUDO} cp -a bin/* ${PYTORCH_PATH}/bin
       fi
       echo ""
@@ -596,9 +603,17 @@ else
 
       git clone --recursive --depth 1 --branch v${TORCHVISION_VERSION} https://github.com/pytorch/vision
       cd vision
+      export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages:$PYTHONPATH
       python3 setup.py install --prefix=${TORCHVISION_PATH}
       cd ..
       export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchvision-${TORCHVISION_VERSION}+${TORCHVISION_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
+      # Detect the actual installed pillow version from the egg directory name,
+      # since torchvision pulls pillow as a dependency and the version may differ
+      # from what PILLOW_VERSION specifies.
+      PILLOW_EGG=$(ls -d ${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/pillow-*-py3.${PYTHON_VERSION}-linux-x86_64.egg 2>/dev/null | head -1)
+      if [ -n "${PILLOW_EGG}" ]; then
+         PILLOW_VERSION=$(basename "${PILLOW_EGG}" | sed 's/^pillow-\(.*\)-py3\..*/\1/')
+      fi
       export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/pillow-${PILLOW_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
       if [[ "${DEBUG}" != 0 ]]; then
          echo "Testing import torchvision"
@@ -610,6 +625,7 @@ else
 
       git clone --recursive --depth 1 --branch v${TORCHAUDIO_VERSION} https://github.com/pytorch/audio
       cd audio
+      export PYTHONPATH=${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages:$PYTHONPATH
       python3 setup.py install --prefix=${TORCHAUDIO_PATH}
       export PYTHONPATH=${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
       if [[ "${DEBUG}" != 0 ]]; then
@@ -649,7 +665,7 @@ else
       pip3 install --target=${FLASHATTENTION_PATH} packaging
       export PYTHONPATH=$PYTHONPATH:${FLASHATTENTION_PATH}
       export PYTHONPATH=$PYTHONPATH:${FLASHATTENTION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages
-      git clone --branch v${FLASHATTENTION_VERSION} https://github.com/Dao-AILab/flash-attention.git
+      git clone --depth 1 --branch v${FLASHATTENTION_VERSION} https://github.com/Dao-AILab/flash-attention.git
       cd flash-attention
       #FLASH_ATTENTION_SKIP_CUDA_BUILD="FALSE" FLASH_ATTENTION_TRITON_AMD_ENABLE="TRUE" python3 setup.py install --prefix=${FLASHATTENTION_PATH}
       BUILD_TARGET="rocm" GPU_ARCHS="$AMDGPU_GFXMODEL" FLASH_ATTENTION_SKIP_CUDA_BUILD="FALSE" python3 setup.py install --prefix=${FLASHATTENTION_PATH}
@@ -679,11 +695,12 @@ else
       pip3 install --upgrade deepspeed einops psutil pydantic==2.11.9 hjson pydantic-core==2.33.2 msgpack typing_inspection annotated_types py-cpuinfo --no-cache-dir --target=$DEEPSPEED_PATH --no-build-isolation --no-deps
 
       deactivate
-      cd ..
+      # cd from pytorch_build/flash-attention back to the starting directory
+      cd ../..
       rm -rf pytorch_build
 
 
-      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
+      if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${INSTALL_PATH} -type d -execdir chown root:root "{}" +
       fi
@@ -693,8 +710,6 @@ else
       fi
 
       # cleanup
-      cd ..
-      rm -rf vision audio flash-attention
       rm -f intel-onemkl-2025.0.0.940.sh
       ${SUDO} rm -rf /tmp/amd_triton_kernel* /tmp/can*
 
