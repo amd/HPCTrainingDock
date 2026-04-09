@@ -1,16 +1,27 @@
-Last review of this README: **September 16, 2025**
+Last review of this README: **April 9, 2026**
 
 # 1. Synopsis
 
 Welcome to AMD's model installation repo!
 
 In this repo, we provide two options to test the installation of a variety of AMD GPU software and frameworks that support running on AMD GPUs:
-1. Container Installation (based on **Docker** or **Podman**. **Singularity** can also be used as explained in [Section 1.3](https://github.com/amd/HPCTrainingDock#13-using-singularity-to-build-an-image)). Jupyter-ready images can be built using the instructions in [Section 1.4](https://github.com/amd/HPCTrainingDock#14-jupyer-ready-containers-with-rocm).
+1. Container Installation (based on **Docker** or **Podman**. **Singularity** can also be used as explained in [Section 1.2](https://github.com/amd/HPCTrainingDock#12-using-singularity-to-build-an-image)). Jupyter-ready images can be built using the instructions in [Section 1.3](https://github.com/amd/HPCTrainingDock#13-jupyter-ready-containers-with-rocm).
 2. Bare Metal Installation
 
-## 1.2 Podman Detection
+## 1.1 Podman Detection
 
-If Podman is installed on your system instead of Docker, the scripts should detect it and automatically include the `--format docker` flag in the `docker build` commands present in our scripts. The detection is done as follows, where `ADD_OPTIONS` will be added to the `docker build` command:
+If Podman is installed on your system instead of Docker, the scripts should detect it and automatically include the `--format docker` flag in the `docker build` commands present in our scripts. The detection is done in two ways depending on the script:
+
+In `build-docker.sh`, the detection checks if the `docker` command is actually Podman emulating Docker:
+```
+ADD_OPTIONS=""
+PODMAN_DETECT=$(docker info 2>&1 | grep -i "emulate docker cli using podman" | wc -l)
+if [[ "${PODMAN_DETECT}" -ge "1" ]]; then
+   ADD_OPTIONS="${ADD_OPTIONS} --format docker"
+fi
+```
+
+In `bare_system/test_install.sh`, the detection selects between the `docker` and `podman` commands:
 ```
 ADD_OPTIONS=""
 echo "Using Docker as default, falling back to Podman if Docker is not installed"
@@ -28,7 +39,7 @@ if [[ "$BUILDER" == "podman" ]]; then
 fi
 ```
 
-## 1.3 Using Singularity to Build an Image
+## 1.2 Using Singularity to Build an Image
 
 If Singularity is installed in your system, it is possible to create a Singularity image using the installation scripts in this repo. First, make a new directory from which the Singularity image will be built, and record the location of this directory:
 
@@ -69,7 +80,7 @@ singularity run -e ${SINGULARITY_DIR_PATH}/singularity_image.sif
 
 **NOTE**: Once again, note that changes made while on the image to the directories from the host that are mirrored to the image will reflect once you exit the image.
 
-## 1.4 Jupyter-ready Containers with ROCm
+## 1.3 Jupyter-ready Containers with ROCm
 
 It is possible to use the scripts in this repo to build Jupyter-ready containers with ROCm installations. The Dockerfile to use is [this](https://github.com/amd/HPCTrainingDock/blob/main/rocm/Dockerfile.jupyter) one and it should be used as follows to build and run an image. Note that we are assuming you are running the container from a compute node on a system where `podman` is installed and to which system you have to ssh to from your local machine, and then use slurm for instance to get on the compute node.
 
@@ -127,11 +138,11 @@ http://localhost:10000/lab?token=token_number
 
 The Dockerfile used here can be customized to use more of the scripts we have in this repo, and create images with a richer software stack than just ROCm.
 
-## 1.5 Operating System Info
+## 1.4 Operating System Info
 
 Currently, we are mainly focused on Ubuntu, but some support is also available for Red Hat (RockyLinux), Suse and Debian. Work is underway to increase this support.
 
-## 1.6 Supported Hardware
+## 1.5 Supported Hardware
 
 Data Center GPUs, Workstation GPUs and Desktop GPUs are currently supported.
 
@@ -163,7 +174,7 @@ Here is a flowchart of the container installation process:
 <img src="figures/container_flowchart.png" \>
 </p>
 
-This documentation considers version 6.4.1 of ROCm as an example. The ROCm version can be specified at build time as an input flag. The latest version at the time of this README's last update is 6.4.3.
+This documentation considers version 7.2.0 of ROCm as an example. The ROCm version can be specified at build time as an input flag. The latest version at the time of this README's last update is 7.2.1.
 
 Several compilers and other dependencies will be built as part of the images setup (more on this later). First, clone this repo and go into the folder where the Docker build script lives:
 
@@ -175,7 +186,7 @@ cd HPCTrainingDock
 To build the four images, run the following command (note that `<admin>` is set to `admin` by default but the password **must** be specified, otherwise you will get an error from the build script):
 
 ```
-   ./build-docker.sh --rocm-versions 6.4.1 --distro ubuntu --distro-version 24.04 --admin-username <admin> --admin-password <password>
+   ./build-docker.sh --rocm-versions 7.2.0 --distro ubuntu --distro-version 24.04 --admin-username <admin> --admin-password <password>
 ```
 Note that the default distribution is Ubuntu 24.04 so if you don't specify `--distro` and `--distro-version` that is what you will get. To visualize all the input flags that can be provided to the script, run: `./build-docker.sh --help`.
 
@@ -196,15 +207,15 @@ For the MI200 series, the value to specify is `gfx90a`, for the MI300 series, th
 Building extra compilers takes a long time, but a cached option can be used  to shorten subsequent build times, just append these options to the build command above:
 
 ```bash
---build-gcc-option
---build-aomp-option
+--build-gcc-latest
+--build-aomp-latest
 ```
 
 The first one builds the latest version of `gcc` for offloading, the second builds the latest version of `LLVM` for offloading. Once a version of these compilers is built, they can be tarred up and placed in the following directory structure:
 
 ```bash
 CacheFiles/:
-  ubuntu-22.04-rocm-5.6.0
+  ubuntu-24.04-rocm-7.2.0-gfx942
      aomp_18.0-1.tgz
       gcc-13.2.0.tgz
 ```
@@ -228,14 +239,14 @@ which will have an output similar to this one:
 ```bash
  REPOSITORY           TAG                                    IMAGE ID       CREATED          SIZE
  training             latest                                 fe63d37c10f4   40 minutes ago   27GB
- <admin>/tools       release-base-ubuntu-24.04-rocm-6.4.1   4ecc6b7a80f2   44 minutes ago   18.7GB
- <admin>/comm        release-base-ubuntu-24.04-rocm-6.4.1   37a84bef709a   47 minutes ago   16.1GB
- <admin>/rocm        release-base-ubuntu-24.04-rocm-6.4.1   bd8ca598d8a0   48 minutes ago   16.1GB
+ <admin>/tools       release-base-ubuntu-24.04-rocm-7.2.0   4ecc6b7a80f2   44 minutes ago   18.7GB
+ <admin>/comm        release-base-ubuntu-24.04-rocm-7.2.0   37a84bef709a   47 minutes ago   16.1GB
+ <admin>/rocm        release-base-ubuntu-24.04-rocm-7.2.0   bd8ca598d8a0   48 minutes ago   16.1GB
 ```
 You can also display the operating system running on the container by doing:
 
 ```bash
-cat ../../etc/os-release
+cat /etc/os-release
 ```
 
 ### 2.1.3 Starting the Container
@@ -425,7 +436,7 @@ In addition, the Linux distro version can be specified (default is Ubuntu 24.04)
 --distro opensuse/leap
 ```
 
-The above command sequence will clone this repo and then execute the `test_install.sh` script. This script calls the `main_install.sh` which is what you would execute to perform the actual installation on your system. The `test_install.sh` sets up a Docker container where you can test the installation of the software before proceeding to deploy it on your actual system by running `main_install.sh`. The `test_install.sh` script automatically runs the Docker container after it is built, and you can inspect it as `sysadmin`. Here is a flowchart of the process initiated by the script:
+The above command sequence will clone this repo and then execute the `test_install.sh` script. This script calls the `main_setup.sh` which is what you would execute to perform the actual installation on your system. The `test_install.sh` sets up a Docker container where you can test the installation of the software before proceeding to deploy it on your actual system by running `main_setup.sh`. The `test_install.sh` script automatically runs the Docker container after it is built, and you can inspect it as `sysadmin`. Here is a flowchart of the process initiated by the script:
 
 <p>
 <img src="figures/script_flowchart.png" \>
@@ -437,13 +448,13 @@ To visualize all the input flags that can be provided to the script, run: `./bar
 If you are satisfied with the test installation, you can proceed with the actual installation on your system by doing:
 
 ```bash
-git clone --recursive git@github.com:amd/HPCTrainingDock.git && \
+git clone --recursive https://github.com/amd/HPCTrainingDock.git && \
 cd HPCTrainingDock && \
 ./bare_system/main_setup.sh --rocm-version <rocm-version> + other options
 ```
 
-The above command will execute the `main_install.sh` script on your system that will proceed with the installation for you. Note that you need to be able to run `sudo` on your system for things to work.  To visualize all the input flags that can be provided to the script, run: `./bare_system/main_setup.sh --help`.
-The `main_install.sh` script calls a series of other scripts to install the software (these are given several runtime flags that are not reported here for simplicity): packages are added routinely so the best way to see what will be installed is to open `main_setup.sh` and inspect it. Note that each of these single scripts can be run individually to install a single package. These are all listed in the `rocm`, `comm`, `tools` and `extras` directories. 
+The above command will execute the `main_setup.sh` script on your system that will proceed with the installation for you. Note that you need to be able to run `sudo` on your system for things to work.  To visualize all the input flags that can be provided to the script, run: `./bare_system/main_setup.sh --help`.
+The `main_setup.sh` script calls a series of other scripts to install the software (these are given several runtime flags that are not reported here for simplicity): packages are added routinely so the best way to see what will be installed is to open `main_setup.sh` and inspect it. Note that each of these single scripts can be run individually to install a single package. These are all listed in the `rocm`, `comm`, `tools` and `extras` directories. 
 
 **NOTE**: As mentioned before, the scripts called from within `main_setup.sh`  are the same used by the Docker containers (either the actual training Docker container or the test Docker container run by `test_install.sh`). The reason why the script work for both installations (bare system and Docker) is because the commands are executed at the `sudo` level. Since Docker is already at the `sudo` level, the instructions in the scripts work in both contexts. 
 
@@ -451,7 +462,7 @@ The `main_install.sh` script calls a series of other scripts to install the soft
 
 ### 2.2.1 Alternative installation directory for ROCm
 
-There is a possibility to install ROCm outside of the usual `/opt/`. `test_install.sh` and `main_install.sh` scripts have optional argument `--rocm-install-path` which allows to specify the desired path for ROCm:
+There is a possibility to install ROCm outside of the usual `/opt/`. `test_install.sh` and `main_setup.sh` scripts have optional argument `--rocm-install-path` which allows to specify the desired path for ROCm:
 
 ```bash
 ./bare_system/test_install.sh --rocm-version <rocm-version> --rocm-install-path <new_path>
@@ -509,52 +520,48 @@ Click on *Save and Connect*, then type the `<password>` noted from Step 8. This 
 
 # 3. Inspecting the Model Installation Environment
 
-The training environment comes with a variety of modules installed, with their necessary dependencies. To inspect the modules available, run `module avail`, which will show you this output (assuming the installation has been performed with ROCm 6.4.1):
+The training environment comes with a variety of modules installed, with their necessary dependencies. To inspect the modules available, run `module avail`, which will show you this output (assuming the installation has been performed with ROCm 7.2.0):
 
 ```bash
---------------------------------------------------------------------- /etc/lmod/modules/Linux ----------------------------------------------------------------------
-   clang/base    gcc/base
+------------- /etc/lmod/modules/rocmplus-7.2.0 -------------
+   cupy/13.6.0            mpi4py/4.1.0
+   dgl/dev                netcdf-c/4.9.3
+   elpa/2025.06.001       netcdf-fortran/4.6.2
+   fftw/3.3.10            openmpi/5.0.7-ucc1.4.4-ucx1.18.1-xpmem-2.7.4
+   ftorch/dev             openmpi/5.0.10-ucc1.6.0-ucx1.19.1-xpmem-2.7.4 (D)
+   hdf5/1.14.6            petsc/3.23.0
+   hip-python/13.6.0      petsc/3.23.1                                  (D)
+   hipifly/dev            pfunit/4.1.4
+   hpctoolkit/2025.1.2    pytorch/2.9.1_tunableop_enabled
+   hypre/3.0.0            pytorch/2.9.1                                 (D)
+   jax/0.6.0              scorep/9.4
+   kokkos/4.7.01          tau/dev
+   libxc/7.0.0            tensorflow/r2.20-rocm-enhanced
+   likwid/5.5.1           umpire/2025.09.0
 
-------------------------------------------------------------------- /etc/lmod/modules/LinuxPlus --------------------------------------------------------------------
-   miniconda3/25.3.1    miniforge3/24.9.0
+--------------- /etc/lmod/modules/rocm-7.2.0 ---------------
+   amdclang/22.0.0-7.2.0    rocprofiler-compute/7.2.0    usercontrib
+   hipfort/7.2.0            rocprofiler-systems/7.2.0
 
----------------------------------------------------------------------- /etc/lmod/modules/ROCm ----------------------------------------------------------------------
-   amdclang/19.0.0-6.4.1           hipfort/6.4.1    rocm/6.4.1                       rocprofiler-sdk/6.4.1
-   amdflang-new/rocm-afar-7.0.5    opencl/6.4.1     rocprofiler-compute/6.4.1 (D)    rocprofiler-systems/6.4.1 (D)
-
--------------------------------------------------------------------- /etc/lmod/modules/ROCmPlus --------------------------------------------------------------------
-   adios2/2.10.1    hdf5/1.14.6                   hypre/2.33.0     netcdf-c/4.9.3          petsc/3.23.1    tau/dev
-   fftw/3.3.10      hpctoolkit/2024.01.99-next    kokkos/4.6.01    netcdf-fortran/4.6.2    scorep/9.0
-
------------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-MPI ------------------------------------------------------------------
-   mpi4py/4.0.3    openmpi/5.0.7-ucc1.4.4-ucx1.18.1
-
------------------------------------------------------------ /etc/lmod/modules/ROCmPlus-AMDResearchTools ------------------------------------------------------------
-   rocprofiler-compute/develop    rocprofiler-systems/develop
-
------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-LatestCompilers ------------------------------------------------------------
-   hipfort_from_source/6.4.1
-
------------------------------------------------------------------- /etc/lmod/modules/ROCmPlus-AI -------------------------------------------------------------------
-   cupy/14.0.0a1    ftorch/dev    jax/0.6.0    pytorch/2.7.1_tunableop_enabled    pytorch/2.7.1 (D)    tensorflow/merge-250318
-
----------------------------------------------------------------------- /etc/lmod/modules/misc ----------------------------------------------------------------------
-   hipifly/dev
+------------------ /etc/lmod/modules/base ------------------
+   gcc/base             miniconda3/25.3.1    miniforge3/24.9.0
+   rocm/7.2.0  (L,D)
 
   Where:
    D:  Default Module
+   L:  Module is loaded
 ```
 
 The modules are searched in the `MODULEPATH` environment variable, which is set during the images creation. To see what environment variables the module is setting, run:
 ```bash
 module show <module>
 ```
-where `<module>` is the module you want to inspect. For example, `module show cupy` will show (in case ROCm 6.2.1 has been selected at build time):
+where `<module>` is the module you want to inspect. For example, `module show cupy` will show (in case ROCm 7.2.0 has been selected at build time):
 
 ```bash
-whatis("HIP version of CuPy")
-load("rocm/6.4.1")
-prepend_path("PYTHONPATH","/opt/rocmplus-6.4.1/cupy")
+whatis("CuPy with ROCm support")
+prereq("rocm/7.2.0")
+prepend_path("PYTHONPATH","/opt/rocmplus-7.2.0/cupy")
 ```
 
 # 4. Adding Your Own Modules
@@ -613,7 +620,7 @@ touch 1.12.lua
 vi 1.12.lua
 ```
 
-Copy paste the lines below in `1.11.5.lua` and save:
+Copy paste the lines below in `1.12.lua` and save:
 
 ```bash
 whatis("Julia Version 1.12")
@@ -671,7 +678,7 @@ git clone https://github.com/AMD/HPCTrainingDock
 cd HPCTrainingDock
 ./bare_system/test_install.sh --use-makefile 1
 ```
-**NOTE**: If `--distro` and `--distro-versions` are left out, the test install script will detect the current distro and distro version on the system where the script is being run and use that. If `--rocm-version` is left out, the script also tries to detect the current ROCm version on your system and use that as default. As explained, the above script will automatically get you into a container as `sysdamin`. Once in the container do:
+**NOTE**: If `--distro` and `--distro-versions` are left out, the test install script will detect the current distro and distro version on the system where the script is being run and use that. If `--rocm-version` is left out, the script also tries to detect the current ROCm version on your system and use that as default. As explained, the above script will automatically get you into a container as `sysadmin`. Once in the container do:
 
 ```bash
 make <package>
@@ -682,15 +689,15 @@ For instance, for CuPy: `make cupy`, followed by `make cupy_tests`.
 
 # 6. Create a Pre-built Binary Distribution of ROCm
 
-It is possible to create a binary distribution of ROCm by taring up the `rocm-<rocm-version>` directory. Then, the next build will restore from the tar file. This can reduce the build time for the subsequent test installs. For example, considering the 6.4.1 version of ROCm and Ubuntu as distro as an example, do:
+It is possible to create a binary distribution of ROCm by taring up the `rocm-<rocm-version>` directory. Then, the next build will restore from the tar file. This can reduce the build time for the subsequent test installs. For example, considering the 7.2.0 version of ROCm and Ubuntu as distro as an example, do:
 
 ```bash
 git clone https://github.com/AMD/HPCTrainingDock
 cd HPCTrainingDock
-bare_system/test_install.sh --distro ubuntu --distro-versions 24.04 --rocm-version 6.4.1 --use-makefile 1
+bare_system/test_install.sh --distro ubuntu --distro-versions 24.04 --rocm-version 7.2.0 --use-makefile 1
 make rocm_package
 ```
-This make command tars up the `rocm-6.4.1` directory and then the next build it will restore from the tar file.
+This make command tars up the `rocm-7.2.0` directory and then the next build it will restore from the tar file.
 
 # 7. Installing HIP Software on an Nvidia Machine
 
