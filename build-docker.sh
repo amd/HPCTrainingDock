@@ -35,6 +35,7 @@
 : ${BUILD_JULIA:="0"}
 : ${BUILD_X11VNC:="0"}
 : ${BUILD_FLANGNEW:="0"}
+: ${BUILD_MAGMA:="0"}
 : ${BUILD_OLLAMA:="1"}
 : ${BUILD_HIPFORT:="0"}
 : ${BUILD_ALL_LATEST:="0"}
@@ -140,6 +141,7 @@ usage()
     print_default_option build-hpctoolkit "[BUILD_HPCTOOLKIT: 0 or 1]"  "include this flag to build version 2025.1.2" "${BUILD_HPCTOOLKIT} (don't build)"
     print_default_option build-tau "[BUILD_TAU: 0 or 1]"  "include this flag to build version dev" "${BUILD_TAU} (don't build)"
     print_default_option build-scorep "[BUILD_SCOREP: 0 or 1]" "include this flag to build version 9.4" "${BUILD_SCOREP} (don't build)"
+    print_default_option build-magma "[BUILD_MAGMA: 0 or 1]" "include this flag to build version master" "${BUILD_MAGMA} (don't build)"
     print_default_option build-x11vnc "[BUILD_X11VNC: 0 or 1]" "include this flag to enable x11 screen forwarding in the container" "${BUILD_X11VNC} (don't build)"
     print_default_option build-petsc "[BUILD_PETSC: 0 or 1]" "include this flag to build version 3.24.1" "${BUILD_PETSC} (don't build)"
     print_default_option build-hypre "[BUILD_HYPRE: 0 or 1]" "include this flag to build version 3.0.0" "${BUILD_HYPRE} (don't build)"
@@ -364,6 +366,10 @@ do
             BUILD_JULIA="1"
             reset-last
             ;;
+        "--build-magma")
+            BUILD_MAGMA="1"
+            reset-last
+            ;;
         "--install-grafana")
             INSTALL_GRAFANA="1"
             reset-last
@@ -396,6 +402,7 @@ do
 	    BUILD_FLANGNEW="1"
 	    BUILD_HIPFORT="1"
 	    BUILD_FTORCH="1"
+	    BUILD_MAGMA="1"
 	    #BUILD_JULIA="1"
 	    INSTALL_ROCPROF_SYS_FROM_SOURCE="0"
             INSTALL_ROCPROF_COMPUTE_FROM_SOURCE="0"
@@ -511,6 +518,10 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
 	    echo "Setting JULIA build"
             BUILD_JULIA=1
 	    ;;
+         "magma")
+	    echo "Setting MAGMA build"
+            BUILD_MAGMA=1
+	    ;;
          "gcc_latest")
 	    echo "Setting GCC_LATEST build"
             BUILD_GCC_LATEST=1
@@ -594,6 +605,7 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             BUILD_FLANGNEW="1"
             BUILD_HIPFORT="1"
             BUILD_FTORCH="1"
+            BUILD_MAGMA="1"
             #BUILD_JULIA="1"
 	    INSTALL_ROCPROF_SYS_FROM_SOURCE="0"
             INSTALL_ROCPROF_COMPUTE_FROM_SOURCE="0"
@@ -729,6 +741,7 @@ do
        --build-arg HIPIFLY_MODULE=${HIPIFLY_MODULE} \
        --build-arg BUILD_HIPFORT=${BUILD_HIPFORT} \
        --build-arg BUILD_FTORCH=${BUILD_FTORCH} \
+       --build-arg BUILD_MAGMA=${BUILD_MAGMA} \
        --build-arg BUILD_JULIA=${BUILD_JULIA} \
        --build-arg BUILD_DATE=$(date +'%Y-%m-%dT%H:%M:%SZ') \
        --build-arg OG_BUILD_DATE=$(date -u +'%y-%m-%d') \

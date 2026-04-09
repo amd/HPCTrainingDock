@@ -1,13 +1,17 @@
 #!/bin/bash
 
-: ${ROCM_VERSION:="6.2.0"}
+: ${ROCM_VERSION:=""}
 : ${ROCM_INSTALLPATH:="/opt/"}
+: ${TOP_INSTALL_PATH:="/opt"}
+: ${TOP_MODULE_PATH:="/etc/lmod/modules"}
 : ${BUILD_PYTORCH:="1"}
 : ${BUILD_CUPY:="1"}
+: ${BUILD_HIP_PYTHON:="1"}
 : ${BUILD_TENSORFLOW:="1"}
 : ${BUILD_JAX:="1"}
 : ${BUILD_FTORCH:="1"}
 : ${BUILD_JULIA:="1"}
+: ${BUILD_MAGMA:="1"}
 : ${BUILD_PETSC:="1"}
 : ${BUILD_HYPRE:="1"}
 : ${BUILD_SCOREP:="1"}
@@ -29,6 +33,7 @@
 
 INSTALL_ROCPROF_SYS_FROM_SOURCE=0
 INSTALL_ROCPROF_COMPUTE_FROM_SOURCE=0
+AMDGPU_GFXMODEL_INPUT=""
 SUDO="sudo"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -52,10 +57,12 @@ reset-last()
 usage()
 {
    echo "Usage:"
-   echo "  --rocm-version [ ROCM_VERSION ]:  default is $ROCM_VERSION"
+   echo "  --rocm-version [ ROCM_VERSION ]:  auto-detected from loaded module, or specify explicitly"
    echo "  --rocm-install-path [ ROCM_INSTALL_PATH ]:  default is $ROCM_INSTALLPATH"
+   echo "  --top-install-path [ TOP_INSTALL_PATH ]:  top-level directory for software installation, default is $TOP_INSTALL_PATH"
+   echo "  --top-module-path [ TOP_MODULE_PATH ]:  top-level directory for module files, default is $TOP_MODULE_PATH"
    echo "  --python-version [ PYTHON_VERSION ]: python3 minor release, default is $PYTHON_VERSION"
-   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: if not provided, rocminfo is used to assign a value"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: auto-detected via rocminfo, can specify multiple separated by semicolons (e.g. gfx942;gfx90a)"
    echo "  --install-rocprof-compute-from-source [0 or 1]:  default is $INSTALL_ROCPROF_COMPUTE_FROM_SOURCE (false)"
    echo "  --install-rocprof-sys-from-source [0 or 1]:  default is $INSTALL_ROCPROF_SYS_FROM_SOURCE (false)"
    echo "  --use-makefile [0 or 1]:  default is 0 (false)"
@@ -77,6 +84,16 @@ do
           ROCM_INSTALLPATH=${1}
           reset-last
           ;;
+      "--top-install-path")
+          shift
+          TOP_INSTALL_PATH=${1}
+          reset-last
+          ;;
+      "--top-module-path")
+          shift
+          TOP_MODULE_PATH=${1}
+          reset-last
+          ;;
       "--python-version")
           shift
           PYTHON_VERSION=${1}
@@ -84,7 +101,7 @@ do
           ;;
       "--amdgpu-gfxmodel")
           shift
-          AMDGPU_GFXMODEL=${1}
+          AMDGPU_GFXMODEL_INPUT=${1}
           reset-last
           ;;
       "--install-rocprof-sys-from-source")
@@ -113,90 +130,259 @@ do
    shift
 done
 
-if [ -z "${AMDGPU_GFXMODEL}" ]; then
-   AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+# ── Detect ROCm version from loaded module (if any) ──────────────────
+# Always check what's loaded so we can decide whether to skip the install.
+ROCM_MODULE_VERSION=""
+
+if [ -n "${ROCM_PATH}" ] && [ -f "${ROCM_PATH}/.info/version" ]; then
+   ROCM_MODULE_VERSION=$(cat "${ROCM_PATH}/.info/version" | cut -f1 -d'-')
+   echo "Detected loaded ROCm module version ${ROCM_MODULE_VERSION} (ROCM_PATH=${ROCM_PATH})"
 fi
 
-# Not available until docker run command
-#ls -l /CacheFiles
-#${SUDO} chmod a+w /CacheFiles/
-#${SUDO} mkdir /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/
-#${SUDO} chmod a+w /CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL}/
+if [ -z "${ROCM_MODULE_VERSION}" ]; then
+   ROCM_AFAR_LINE=$(module list 2>&1 | grep 'rocm/afar' || true)
+   if [[ $ROCM_AFAR_LINE =~ (rocm/afar-[0-9.]*) ]]; then
+      ROCM_MODULE_VERSION=$(echo "${BASH_REMATCH[1]}" | sed -e 's!rocm/!!')
+      echo "Detected loaded ROCm AFAR module: ${ROCM_MODULE_VERSION}"
+   fi
+fi
+
+if [ -z "${ROCM_MODULE_VERSION}" ]; then
+   ROCM_THEROCK_LINE=$(module list 2>&1 | grep 'rocm/therock' || true)
+   if [[ $ROCM_THEROCK_LINE =~ (rocm/therock-[0-9.]*) ]]; then
+      ROCM_MODULE_VERSION=$(echo "${BASH_REMATCH[1]}" | sed -e 's!rocm/!!')
+      echo "Detected loaded ROCm TheRock module: ${ROCM_MODULE_VERSION}"
+   fi
+fi
+
+# If --rocm-version was not provided, use detected version or fall back.
+if [ -z "${ROCM_VERSION}" ]; then
+   if [ -n "${ROCM_MODULE_VERSION}" ]; then
+      ROCM_VERSION="${ROCM_MODULE_VERSION}"
+      echo "Using detected ROCm version: ${ROCM_VERSION}"
+   else
+      echo "WARNING: ROCm version not specified and no ROCm module detected."
+      echo -n "         Proceed with default ROCm version 6.2.0? [y/N] "
+      read -r REPLY
+      if [[ "${REPLY}" =~ ^[Yy]$ ]]; then
+         ROCM_VERSION="6.2.0"
+         echo "         Using default ROCm version ${ROCM_VERSION}"
+      else
+         echo "Aborting. Please load a ROCm module or specify --rocm-version."
+         exit 1
+      fi
+   fi
+fi
+
+# ── GPU architecture detection ───────────────────────────────────────
+# If --amdgpu-gfxmodel was provided, use it; otherwise try rocminfo.
+if [ -n "${AMDGPU_GFXMODEL_INPUT}" ]; then
+   AMDGPU_GFXMODEL="${AMDGPU_GFXMODEL_INPUT}"
+else
+   AMDGPU_GFXMODEL=$(rocminfo 2>/dev/null | grep gfx | sed -e 's/Name://' | head -1 | sed 's/ //g' || true)
+   if [ -z "${AMDGPU_GFXMODEL}" ]; then
+      echo "ERROR: No GPU architecture specified and rocminfo is not available or found no GPUs."
+      echo "       Please provide --amdgpu-gfxmodel (e.g. --amdgpu-gfxmodel gfx942 or --amdgpu-gfxmodel 'gfx942;gfx90a')"
+      exit 1
+   fi
+fi
 
 if [ "${USE_MAKEFILE}" == 1 ]; then
    exit
 fi
 
+# ── Derived paths ────────────────────────────────────────────────────
+ROCMPLUS="${TOP_INSTALL_PATH}/rocmplus-${ROCM_VERSION}"
 
-rocm/scripts/baseospackages_setup.sh
+USE_CUSTOM_PATHS=0
+if [[ "${TOP_INSTALL_PATH}" != "/opt" || "${TOP_MODULE_PATH}" != "/etc/lmod/modules" ]]; then
+   USE_CUSTOM_PATHS=1
+fi
 
-rocm/scripts/lmod_setup.sh
+COMMON_OPTIONS="--rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}"
 
-source ~/.bashrc
+# Helper: returns --install-path + --module-path flags for a given package.
+# Usage: $(path_args <install_subpath> <module_category/package>)
+path_args()
+{
+   if [ "${USE_CUSTOM_PATHS}" == 1 ]; then
+      echo "--install-path ${ROCMPLUS}/${1} --module-path ${TOP_MODULE_PATH}/${2}"
+   fi
+}
 
-rocm/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION}
+# ── ROCm base install ────────────────────────────────────────────────
+SKIP_ROCM_INSTALL=0
+if [ -n "${ROCM_MODULE_VERSION}" ] && [ "${ROCM_MODULE_VERSION}" == "${ROCM_VERSION}" ]; then
+   echo "ROCm ${ROCM_VERSION} already loaded from module — skipping ROCm base installation"
+   SKIP_ROCM_INSTALL=1
+elif [ -n "${ROCM_MODULE_VERSION}" ] && [ "${ROCM_MODULE_VERSION}" != "${ROCM_VERSION}" ]; then
+   echo "ERROR: Loaded ROCm module (${ROCM_MODULE_VERSION}) does not match requested version (${ROCM_VERSION})."
+   echo "       Please unload the current module or use --rocm-version ${ROCM_MODULE_VERSION}"
+   exit 1
+fi
 
-rocm/scripts/rocm_rocprof-sys_setup.sh --rocm-version ${ROCM_VERSION}
+if [ "${SKIP_ROCM_INSTALL}" == 0 ]; then
+   rocm/scripts/baseospackages_setup.sh
 
-rocm/scripts/rocm_rocprof-compute_setup.sh --rocm-version ${ROCM_VERSION}
+   rocm/scripts/lmod_setup.sh
 
-rocm/flang-new_setup.sh --build-flang-new ${BUILD_FLANGNEW} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} 
+   source ~/.bashrc
 
-comm/scripts/openmpi_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL}
+   rocm/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION}
 
-comm/scripts/mpi4py_setup.sh --rocm-version ${ROCM_VERSION} --build-mpi4py ${BUILD_MPI4PY}
+   rocm/scripts/rocm_rocprof-sys_setup.sh --rocm-version ${ROCM_VERSION}
 
-comm/scripts/mvapich_setup.sh --rocm-version ${ROCM_VERSION}
+   rocm/scripts/rocm_rocprof-compute_setup.sh --rocm-version ${ROCM_VERSION}
+else
+   source ~/.bashrc
+fi
 
-tools/scripts/rocprof-sys_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --install-rocprof-sys-from-source ${INSTALL_ROCPROF_SYS_FROM_SOURCE} --python-version ${PYTHON_VERSION}
+# ── Package installation ─────────────────────────────────────────────
+# Each block checks whether the package directory already exists before
+# invoking the setup script, allowing incremental/rerun installs.
+
+if [[ ! -d ${ROCMPLUS}/flang-new ]] || [ "${SKIP_ROCM_INSTALL}" == 0 ]; then
+   rocm/scripts/flang-new_setup.sh ${COMMON_OPTIONS} --build-flang-new ${BUILD_FLANGNEW} \
+      $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${ROCMPLUS} --module-path ${TOP_MODULE_PATH}/ROCm/amdflang-new")
+fi
+
+if [[ ! -d ${ROCMPLUS}/openmpi* ]]; then
+   comm/scripts/openmpi_setup.sh ${COMMON_OPTIONS} --build-xpmem 1 \
+      $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${ROCMPLUS} --module-path ${TOP_MODULE_PATH}/ROCmPlus-MPI/openmpi")
+fi
+
+if [[ ! -d ${ROCMPLUS}/mpi4py ]]; then
+   comm/scripts/mpi4py_setup.sh ${COMMON_OPTIONS} --build-mpi4py ${BUILD_MPI4PY} \
+      $(path_args mpi4py ROCmPlus-MPI/mpi4py)
+fi
+
+if [[ ! -d ${ROCMPLUS}/mvapich* ]]; then
+   comm/scripts/mvapich_setup.sh ${COMMON_OPTIONS} \
+      $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${ROCMPLUS}/mvapich --module-path ${TOP_MODULE_PATH}/ROCmPlus-MPI/mvapich")
+fi
+
+if [[ ! -d ${ROCMPLUS}/omnitrace ]]; then
+   tools/scripts/rocprof-sys_setup.sh ${COMMON_OPTIONS} --install-rocprof-sys-from-source ${INSTALL_ROCPROF_SYS_FROM_SOURCE} --python-version ${PYTHON_VERSION} \
+      $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${ROCMPLUS}/omnitrace --module-path ${TOP_MODULE_PATH}/ROCmPlus-AMDResearchTools/omnitrace")
+fi
 
 tools/scripts/grafana_setup.sh
 
-tools/scripts/rocprof-compute_setup.sh --rocm-version ${ROCM_VERSION} --install-rocprof-compute-from-source ${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE} --python-version ${PYTHON_VERSION}
+if [[ ! -d ${ROCMPLUS}/rocprofiler-compute* ]]; then
+   tools/scripts/rocprof-compute_setup.sh ${COMMON_OPTIONS} --install-rocprof-compute-from-source ${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE} --python-version ${PYTHON_VERSION} \
+      $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${ROCMPLUS}/rocprofiler-compute --module-path ${TOP_MODULE_PATH}/ROCmPlus-AMDResearchTools/rocprofiler-compute")
+fi
 
-tools/scripts/hpctoolkit_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-hpctoolkit ${BUILD_HPCTOOLKIT}
+if [[ ! -d ${ROCMPLUS}/hpctoolkit ]]; then
+   tools/scripts/hpctoolkit_setup.sh ${COMMON_OPTIONS} --build-hpctoolkit ${BUILD_HPCTOOLKIT} \
+      $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--hpctoolkit-install-path ${ROCMPLUS}/hpctoolkit --hpcviewer-install-path ${ROCMPLUS}/hpcviewer --module-path ${TOP_MODULE_PATH}/ROCmPlus/hpctoolkit")
+fi
 
-tools/scripts/scorep_setup.sh --rocm-version ${ROCM_VERSION} --build-scorep ${BUILD_SCOREP}
+if [[ ! -d ${ROCMPLUS}/scorep ]]; then
+   tools/scripts/scorep_setup.sh ${COMMON_OPTIONS} --build-scorep ${BUILD_SCOREP} \
+      $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--scorep-install-path ${ROCMPLUS}/scorep --pdt-install-path ${ROCMPLUS}/pdt --module-path ${TOP_MODULE_PATH}/ROCmPlus/scorep")
+fi
 
-tools/scripts/tau_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-tau ${BUILD_TAU}
+if [[ ! -d ${ROCMPLUS}/tau ]]; then
+   tools/scripts/tau_setup.sh ${COMMON_OPTIONS} --build-tau ${BUILD_TAU} \
+      $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--tau-install-path ${ROCMPLUS}/tau --pdt-install-path ${ROCMPLUS}/pdt --module-path ${TOP_MODULE_PATH}/ROCmPlus/tau")
+fi
 
 extras/scripts/compiler_setup.sh
 
-extras/scripts/cupy_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-cupy ${BUILD_CUPY}
+if [[ ! -d ${ROCMPLUS}/cupy ]]; then
+   extras/scripts/cupy_setup.sh ${COMMON_OPTIONS} --build-cupy ${BUILD_CUPY} \
+      $(path_args cupy ROCmPlus-AI/cupy)
+fi
 
-extras/scripts/tensorflow_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-tensorflow ${BUILD_TENSORFLOW}
+if [[ ! -d ${ROCMPLUS}/hip-python ]]; then
+   extras/scripts/hip-python_setup.sh ${COMMON_OPTIONS} --build-hip-python ${BUILD_HIP_PYTHON} \
+      $(path_args hip-python ROCmPlus-AI/hip-python)
+fi
 
-extras/scripts/jax_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-jax ${BUILD_JAX}
+if [[ ! -d ${ROCMPLUS}/tensorflow ]]; then
+   extras/scripts/tensorflow_setup.sh ${COMMON_OPTIONS} --build-tensorflow ${BUILD_TENSORFLOW} \
+      $(path_args tensorflow ROCmPlus-AI/tensorflow)
+fi
 
-extras/scripts/julia_setup.sh --build-julia ${BUILD_JULIA}
+if [[ ! -d ${ROCMPLUS}/jax ]]; then
+   extras/scripts/jax_setup.sh ${COMMON_OPTIONS} --build-jax ${BUILD_JAX} \
+      $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--jax-install-path ${ROCMPLUS}/jax --jaxlib-install-path ${ROCMPLUS}/jaxlib --module-path ${TOP_MODULE_PATH}/ROCmPlus-AI/jax")
+fi
 
-extras/scripts/ftorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-ftorch ${BUILD_FTORCH}
+if [[ ! -d ${TOP_INSTALL_PATH}/julia-* ]]; then
+   extras/scripts/julia_setup.sh --build-julia ${BUILD_JULIA} \
+      $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--parent-dir ${TOP_INSTALL_PATH} --module-path ${TOP_MODULE_PATH}/LinuxPlus/julia")
+fi
 
-extras/scripts/pytorch_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-pytorch ${BUILD_PYTORCH} --python_version ${PYTHON_VERSION}
+if [[ ! -d ${ROCMPLUS}/ftorch ]]; then
+   extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} --build-ftorch ${BUILD_FTORCH} \
+      $(path_args ftorch ROCmPlus-AI/ftorch)
+fi
+
+if [[ ! -d ${ROCMPLUS}/pytorch ]]; then
+   extras/scripts/pytorch_setup.sh ${COMMON_OPTIONS} --build-pytorch ${BUILD_PYTORCH} --python_version ${PYTHON_VERSION} \
+      $(path_args pytorch ROCmPlus-AI/pytorch)
+fi
+
+if [[ ! -d ${ROCMPLUS}/magma ]]; then
+   extras/scripts/magma_setup.sh ${COMMON_OPTIONS} --build-magma ${BUILD_MAGMA} \
+      $(path_args magma ROCmPlus/magma)
+fi
 
 extras/scripts/apps_setup.sh
 
-extras/scripts/kokkos_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-kokkos ${BUILD_KOKKOS}
+if [[ ! -d ${ROCMPLUS}/kokkos ]]; then
+   extras/scripts/kokkos_setup.sh ${COMMON_OPTIONS} --build-kokkos ${BUILD_KOKKOS} \
+      $(path_args kokkos ROCmPlus/kokkos)
+fi
 
-extras/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniconda3 ${BUILD_MINICONDA3} --python-version ${PYTHON_VERSION}
+if [[ ! -d ${TOP_INSTALL_PATH}/miniconda3* ]]; then
+   extras/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniconda3 ${BUILD_MINICONDA3} --python-version ${PYTHON_VERSION} \
+      $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH}/miniconda3 --module-path ${TOP_MODULE_PATH}/LinuxPlus/miniconda3")
+fi
 
-extras/scripts/miniforge3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniforge3 ${BUILD_MINIFORGE3}
+if [[ ! -d ${TOP_INSTALL_PATH}/miniforge3* ]]; then
+   extras/scripts/miniforge3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniforge3 ${BUILD_MINIFORGE3} \
+      $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH}/miniforge3 --module-path ${TOP_MODULE_PATH}/LinuxPlus/miniforge3")
+fi
 
-extras/scripts/hipfort_setup.sh --rocm-version ${ROCM_VERSION} --build-hipfort ${BUILD_HIPFORT}
+if [[ ! -d ${ROCMPLUS}/hipfort ]]; then
+   extras/scripts/hipfort_setup.sh ${COMMON_OPTIONS} --build-hipfort ${BUILD_HIPFORT} \
+      $(path_args hipfort ROCmPlus-LatestCompilers/hipfort_from_source)
+fi
 
-extras/scripts/hipifly_setup.sh --rocm-version ${ROCM_VERSION} --hipifly-module ${HIPIFLY_MODULE} --hipifly-header-path extras/sources/hipifly/
+if [[ ! -d ${ROCMPLUS}/hipifly ]]; then
+   extras/scripts/hipifly_setup.sh --rocm-version ${ROCM_VERSION} --hipifly-module ${HIPIFLY_MODULE} \
+      $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--hipifly-path ${ROCMPLUS}/hipifly --module-path ${TOP_MODULE_PATH}/misc/hipifly")
+fi
 
-extras/scripts/hdf5_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-hdf5 ${BUILD_HDF5}
+if [[ ! -d ${ROCMPLUS}/hdf5* ]]; then
+   extras/scripts/hdf5_setup.sh ${COMMON_OPTIONS} --build-hdf5 ${BUILD_HDF5} \
+      $(path_args hdf5 ROCmPlus/hdf5)
+fi
 
-extras/scripts/netcdf_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-netcdf ${BUILD_NETCDF}
+if [[ ! -d ${ROCMPLUS}/netcdf ]]; then
+   extras/scripts/netcdf_setup.sh ${COMMON_OPTIONS} --build-netcdf ${BUILD_NETCDF} \
+      $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${ROCMPLUS}/netcdf --netcdf-c-module-path ${TOP_MODULE_PATH}/ROCmPlus/netcdf-c --netcdf-f-module-path ${TOP_MODULE_PATH}/ROCmPlus/netcdf-fortran")
+fi
 
-extras/scripts/fftw_setup.sh --rocm-version ${ROCM_VERSION} --build-fftw ${BUILD_FFTW}
+if [[ ! -d ${ROCMPLUS}/fftw* ]]; then
+   extras/scripts/fftw_setup.sh ${COMMON_OPTIONS} --build-fftw ${BUILD_FFTW} \
+      $(path_args fftw ROCmPlus/fftw)
+fi
 
 extras/scripts/x11vnc_setup.sh --build-x11vnc ${BUILD_X11VNC}
 
-extras/scripts/petsc_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-petsc ${BUILD_PETSC}
+if [[ ! -d ${ROCMPLUS}/petsc ]]; then
+   extras/scripts/petsc_setup.sh ${COMMON_OPTIONS} --build-petsc ${BUILD_PETSC} \
+      $(path_args petsc ROCmPlus/petsc)
+fi
 
-extras/scripts/hypre_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-hypre ${BUILD_HYPRE}
+if [[ ! -d ${ROCMPLUS}/hypre ]]; then
+   extras/scripts/hypre_setup.sh ${COMMON_OPTIONS} --build-hypre ${BUILD_HYPRE} \
+      $(path_args hypre ROCmPlus/hypre)
+fi
 
 #If ROCm should be installed in a different location
 if [ "${ROCM_INSTALLPATH}" != "/opt/" ]; then

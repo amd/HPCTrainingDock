@@ -460,7 +460,33 @@ The `main_setup.sh` script calls a series of other scripts to install the softwa
 
 **NOTE**: There is also the option to install a package in a directory where the user has write access. In that case, `sudo` will not be used. Just make sure that the install path and module file path exist and the user has write access to those. When launching a single script, provide the install path and module file path as input arguments to the script. The script will check whether the directories exist and if the user has write access. If both are true, then no `sudo` will be used.
 
-### 2.2.1 Alternative installation directory for ROCm
+### 2.2.1 ROCm Version and GPU Architecture Auto-Detection
+
+`main_setup.sh` can **auto-detect the ROCm version** from a currently loaded ROCm module. The script inspects `$ROCM_PATH/.info/version` (standard module) or checks for AFAR/TheRock variant modules (e.g. `rocm/afar-0.6.0`, `rocm/therock-0.8.0`). The behavior depends on the combination of loaded module and `--rocm-version` flag:
+
+- **Module loaded, no `--rocm-version`**: The detected version is used and ROCm base installation is skipped.
+- **Module loaded, `--rocm-version` matches**: ROCm base installation is skipped.
+- **Module loaded, `--rocm-version` differs**: The script exits with an error asking you to either unload the current module or match the version.
+- **No module, `--rocm-version` provided**: ROCm is installed as requested.
+- **No module, no `--rocm-version`**: The script prompts whether to proceed with the default version (6.2.0). If declined, the script exits.
+
+The **GPU architecture** is auto-detected using `rocminfo`. If `rocminfo` is not available and no `--amdgpu-gfxmodel` flag is provided, the script will exit with an error. You can specify multiple GPU targets separated by semicolons (e.g. `--amdgpu-gfxmodel "gfx942;gfx90a"`) to build for more than one architecture.
+
+### 2.2.2 Skip-If-Already-Installed
+
+When re-running `main_setup.sh` (e.g. to add a package that was not installed previously, or after a failed run), the script checks whether each package's install directory already exists. If it does, that package's setup script is skipped. This makes the script safe to re-run without wasting time reinstalling packages that are already present.
+
+### 2.2.3 Custom Installation and Module Directories
+
+By default, packages are installed under `/opt` and module files are placed under `/etc/lmod/modules`. You can override both locations with:
+
+```bash
+./bare_system/main_setup.sh --top-install-path /my/software --top-module-path /my/modules
+```
+
+When custom paths are specified, every package setup script invoked from `main_setup.sh` receives the appropriate `--install-path` and `--module-path` flags derived from the top-level paths. Individual packages are placed in subdirectories following the same convention as the default layout (e.g. `<top-install-path>/rocmplus-<version>/pytorch`, `<top-module-path>/ROCmPlus-AI/pytorch`, etc.).
+
+### 2.2.4 Alternative installation directory for ROCm
 
 There is a possibility to install ROCm outside of the usual `/opt/`. `test_install.sh` and `main_setup.sh` scripts have optional argument `--rocm-install-path` which allows to specify the desired path for ROCm:
 
@@ -472,7 +498,7 @@ If the argument `--rocm-install-path` is specified, installation scripts will fi
 
 **NOTE**: In general, if you are moving the ROCm folder outside of the usual `/opt/`, it is very important not to forget to update the new path in all of its dependencies and module files.
 
-### 2.2.2 Enable VNC Server to Test Bare Metal Scripts
+### 2.2.5 Enable VNC Server to Test Bare Metal Scripts
 
 It is possible to enable the VNC server for the container that is brought up by the `test_install.sh` script. To do so, first add the following to your `.ssh/config`:
 

@@ -43,6 +43,7 @@ ARG BUILD_ADIOS2
 ARG BUILD_JAX
 ARG BUILD_X11VNC
 ARG BUILD_HIPFORT
+ARG BUILD_MAGMA
 ARG BUILD_FFTW
 ARG HIPIFLY_MODULE
 ARG BUILD_OLLAMA=1
@@ -142,6 +143,10 @@ RUN  /tmp/extras/petsc_setup.sh --build-petsc ${BUILD_PETSC} --rocm-version ${RO
 COPY extras/scripts/hypre_setup.sh /tmp/extras/hypre_setup.sh
 RUN  /tmp/extras/hypre_setup.sh --build-hypre ${BUILD_HYPRE} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
      rm -f /tmp/extras/hypre_setup.sh
+
+COPY extras/scripts/magma_setup.sh /tmp/extras/magma_setup.sh
+RUN  /tmp/extras/magma_setup.sh --build-magma ${BUILD_MAGMA} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+     rm -f /tmp/extras/magma_setup.sh
 
 COPY extras/scripts/pytorch_setup.sh /tmp/extras/pytorch_setup.sh
 RUN  /tmp/extras/pytorch_setup.sh --build-pytorch ${BUILD_PYTORCH} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --python-version ${PYTHON_VERSION} |& tee /app/pytorch_build.out && \
