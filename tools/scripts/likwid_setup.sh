@@ -1,12 +1,13 @@
 #!/bin/bash
 
 # Variables controlling setup process
+AMDGPU_GFXMODEL_INPUT=""
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/likwid
 BUILD_LIKWID=0
 ROCM_VERSION=6.2.0
 LIKWID_VERSION="5.5.1"
-INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/likwid
-INSTALL_PATH_INPUT=""
+LIKWID_PATH=/opt/rocmplus-${ROCM_VERSION}/likwid
+LIKWID_PATH_INPUT=""
 SUDO="sudo"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -20,12 +21,14 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 usage()
 {
    echo "Usage:"
-   echo "  --build-likwid [ BUILD_LIKWID ] default is $BUILD_LIKWID"
-   echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  WARNING: when specifying --likwid-install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  --build-likwid: default $BUILD_LIKWID"
    echo "  --likwid-version [ LIKWID_VERSION ] default $LIKWID_VERSION"
-   echo "  --install-path [ INSTALL_PATH ] default $INSTALL_PATH"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
-   echo "  --help: this usage information"
+   echo "  --likwid-install-path [ LIKWID_PATH_INPUT ] default $LIKWID_PATH"
+   echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
+   echo "  --help: print this usage information"
    exit 1
 }
 
@@ -45,6 +48,11 @@ n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
+      "--amdgpu-gfxmodel")
+          shift
+          AMDGPU_GFXMODEL_INPUT=${1}
+          reset-last
+          ;;
       "--build-likwid")
           shift
           BUILD_LIKWID=${1}
@@ -53,9 +61,9 @@ do
       "--help")
           usage
           ;;
-      "--install-path")
+      "--likwid-install-path")
           shift
-          INSTALL_PATH_INPUT=${1}
+          LIKWID_PATH_INPUT=${1}
           reset-last
           ;;
       "--likwid-version")
@@ -84,11 +92,15 @@ do
    shift
 done
 
-if [ "${INSTALL_PATH_INPUT}" != "" ]; then
-   INSTALL_PATH=${INSTALL_PATH_INPUT}
+LIKWID_PATH=/opt/rocmplus-${ROCM_VERSION}/likwid
+if [ "${LIKWID_PATH_INPUT}" != "" ]; then
+   LIKWID_PATH=${LIKWID_PATH_INPUT}
+fi
+
+if [[ "$AMDGPU_GFXMODEL_INPUT" != "" ]]; then
+   AMDGPU_GFXMODEL=$AMDGPU_GFXMODEL_INPUT
 else
-   # override path in case ROCM_VERSION has been supplied as input
-   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/likwid
+   AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 fi
 
 echo ""
@@ -97,7 +109,7 @@ echo "Starting LIKWID Install with"
 echo "ROCM_VERSION: $ROCM_VERSION"
 echo "BUILD_LIKWID: $BUILD_LIKWID"
 echo "LIKWID_VERSION: $LIKWID_VERSION"
-echo "INSTALL_PATH: $INSTALL_PATH"
+echo "LIKWID_PATH: $LIKWID_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
 echo "==================================="
 echo ""
@@ -133,7 +145,27 @@ else
       echo "============================"
       echo ""
 
+      source /etc/profile.d/lmod.sh
       module load rocm/${ROCM_VERSION}
+
+      # don't use sudo if user has write access to install path
+      if [ -d "$LIKWID_PATH" ]; then
+         if [ -w ${LIKWID_PATH} ]; then
+            SUDO=""
+            echo "WARNING: not using sudo since user has write access to install path"
+         else
+            echo "WARNING: using install paths that require sudo"
+         fi
+      else
+         # if install path does not exist yet
+         echo "WARNING: using sudo, make sure you have sudo privileges"
+      fi
+
+      ${SUDO} mkdir -p ${LIKWID_PATH}
+
+      if [[ "${USER}" != "root" ]]; then
+         ${SUDO} chmod -R a+rwX ${LIKWID_PATH}
+      fi
 
       cd /tmp
       rm -rf likwid*
@@ -141,7 +173,7 @@ else
       tar -xzf v${LIKWID_VERSION}.tar.gz
       cd likwid-${LIKWID_VERSION}
       sed -i -e '/^ROCM_INTERFACE/s/false/true/' \
-             -e '/^PREFIX/s!/usr/local!'"${INSTALL_PATH}"'!' \
+             -e '/^PREFIX/s!/usr/local!'"${LIKWID_PATH}"'!' \
              config.mk
 
       export ROCM_HOME=${ROCM_PATH}
@@ -150,6 +182,14 @@ else
 
       cd /tmp
       rm -rf likwid* v${LIKWID_VERSION}.tar.gz
+
+      if [[ "${USER}" != "root" ]]; then
+         ${SUDO} find ${LIKWID_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO} find ${LIKWID_PATH} -type d -execdir chown root:root "{}" +
+      fi
+      if [[ "${USER}" != "root" ]]; then
+         ${SUDO} chmod go-w ${LIKWID_PATH}
+      fi
 
       module unload rocm/${ROCM_VERSION}
 
@@ -175,7 +215,7 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${LIKWID_VERSION}.lua
 	whatis("LIKWID - Lightweight performance tools")
 
-	local base = "${INSTALL_PATH}"
+	local base = "${LIKWID_PATH}"
 
 	prereq("rocm/${ROCM_VERSION}")
 	prepend_path("PATH", pathJoin(base, "bin"))
