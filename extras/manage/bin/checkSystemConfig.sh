@@ -1,6 +1,13 @@
 #!/bin/bash
 set -u
 
+# System configuration checker for AMD Instinct GPUs.
+#
+# Each check is sourced from the official AMD system optimization guides:
+#   MI300A: instinct.docs.amd.com/projects/amdgpu-docs/en/latest/system-optimization/mi300a.html
+#   MI300X: instinct.docs.amd.com/projects/amdgpu-docs/en/latest/system-optimization/mi300x.html
+#   MI200:  instinct.docs.amd.com/projects/amdgpu-docs/en/latest/system-optimization/mi200.html
+
 # Try to load the ROCm module so rocminfo/rocm-smi are available
 if command -v module &>/dev/null; then
    module load rocm 2>/dev/null || true
@@ -81,6 +88,8 @@ detect_gpu() {
             case "$devid" in
                0x74a0) gpu="MI300A"; break ;;
                0x74a1) gpu="MI300X"; break ;;
+               0x740f|0x7408) gpu="MI250X"; break ;;
+               0x740c) gpu="MI210"; break ;;
             esac
          fi
       done
@@ -118,7 +127,6 @@ check_grub_param() {
          ok "$param is set in GRUB config"
       fi
 
-      # Cross-check: verify the running kernel was actually booted with this param
       if [[ -f /proc/cmdline ]]; then
          if grep -q "$param" /proc/cmdline; then
             ok "$param is active in the running kernel (/proc/cmdline)"
@@ -150,7 +158,7 @@ show_grub_update_instructions() {
    cat /proc/cmdline 2>/dev/null || echo "  (not available)"
 }
 
-# ─── Transparent Huge Pages check ───────────────────────────────────────────────
+# ─── Transparent Huge Pages check (MI300A only per AMD docs) ────────────────────
 
 check_hugepages() {
    banner "Checking Transparent Huge Pages (THP)"
@@ -173,7 +181,7 @@ check_hugepages() {
    echo "  Current setting: $thp_setting"
 }
 
-# ─── NUMA balancing check ───────────────────────────────────────────────────────
+# ─── NUMA balancing check (MI300A, MI300X per AMD docs) ─────────────────────────
 
 check_numa_balancing() {
    banner "Checking NUMA balancing"
@@ -200,17 +208,124 @@ check_numa_balancing() {
    fi
 }
 
-# ─── IOMMU check ────────────────────────────────────────────────────────────────
+# ─── IOMMU checks ───────────────────────────────────────────────────────────────
 
-check_iommu() {
-   banner "Checking IOMMU settings"
-   check_grub_param "iommu=" "IOMMU"
-   echo ""
-   info "For AMD systems use: amd_iommu=on iommu=pt"
-   info "For Intel systems use: intel_iommu=on iommu=pt"
+# MI300A: IOMMU should be OFF at BIOS level (per MI300A system optimization guide)
+check_iommu_off() {
+   banner "Checking IOMMU settings (should be OFF)"
+   info "Optimal config: IOMMU disabled at BIOS level"
+   if command -v acpidump &>/dev/null; then
+      if sudo acpidump 2>/dev/null | grep -q "IVRS\|DMAR"; then
+         warn "IOMMU tables (IVRS/DMAR) found -- IOMMU may be enabled"
+         recommendation "Disable IOMMU in the system BIOS"
+      else
+         ok "No IOMMU tables (IVRS/DMAR) found -- IOMMU appears disabled"
+      fi
+   else
+      info "acpidump not available (install acpica-tools to verify IOMMU state)"
+   fi
+   if [[ -f /proc/cmdline ]]; then
+      if grep -q "iommu=pt" /proc/cmdline; then
+         info "iommu=pt found in kernel cmdline (pass-through is acceptable but OFF is preferred)"
+      fi
+   fi
 }
 
-# ─── amdttm memory pool check ───────────────────────────────────────────────────
+# MI300X: IOMMU enabled + pass-through (per MI300X system optimization guide)
+check_iommu_pt() {
+   banner "Checking IOMMU settings (pass-through mode)"
+   check_grub_param "iommu=pt" "IOMMU pass-through"
+   echo ""
+   info "For AMD host CPUs use: iommu=pt"
+   info "For Intel host CPUs use: intel_iommu=on iommu=pt"
+}
+
+# MI200: IOMMU disabled by default; only iommu=pt if >=256 threads with SMT
+# (per MI200 system optimization guide, "Systems with 256 CPU threads" section)
+check_iommu_mi200() {
+   banner "Checking IOMMU settings (MI200)"
+   info "MI200 default: IOMMU disabled in BIOS"
+
+   local nproc
+   nproc=$(nproc 2>/dev/null || echo 0)
+   if [[ "$nproc" -ge 256 ]]; then
+      info "System has $nproc logical CPUs (>= 256)"
+      info "With SMT enabled + 256+ threads, IOMMU must be enabled with iommu=pt"
+      info "Otherwise Linux falls back to APIC which only enumerates 255 cores"
+      check_grub_param "iommu=pt" "IOMMU pass-through (required for 256+ threads)"
+   else
+      info "System has $nproc logical CPUs (< 256)"
+      ok "IOMMU disabled in BIOS is the correct default for this configuration"
+   fi
+}
+
+# ─── CPU C-states check (MI300X, MI200 per AMD docs; MI300A handled by BIOS) ───
+
+check_cstates() {
+   banner "Checking CPU C-states"
+   info "Disabling deep C-states (C2) reduces latency for HPC workloads"
+   if ! command -v cpupower &>/dev/null; then
+      info "cpupower not installed -- cannot check C-state settings"
+      info "Install with: sudo apt install linux-tools-common (Ubuntu)"
+      info "              sudo yum install cpupowerutils      (RHEL)"
+      info "              sudo zypper install cpupower        (SLES)"
+      return
+   fi
+
+   local cstate_output
+   cstate_output=$(cpupower idle-info 2>/dev/null) || true
+   if echo "$cstate_output" | grep -qi "C2"; then
+      local c2_disabled
+      c2_disabled=$(cpupower idle-info 2>/dev/null | grep -A1 "C2" | grep -ci "DISABLED") || true
+      if [[ "$c2_disabled" -ge 1 ]]; then
+         ok "C2 (deep idle) state appears disabled"
+      else
+         warn "C2 (deep idle) state may be enabled"
+         recommendation "Disable C2 for lower latency: sudo cpupower idle-set -d 2"
+      fi
+   else
+      ok "No C2 state found in idle-info"
+   fi
+}
+
+# ─── Compaction check (MI300A only per AMD docs) ────────────────────────────────
+
+check_compaction() {
+   banner "Checking memory compaction (required for MI300A)"
+   info "The APU dynamically shares memory between CPU and GPU."
+   info "Without compaction, performance degrades as fragmentation increases."
+
+   local proactive_file="/proc/sys/vm/compaction_proactiveness"
+   local unevictable_file="/proc/sys/vm/compact_unevictable_allowed"
+
+   if [[ -f "$proactive_file" ]]; then
+      local proactive_val
+      proactive_val=$(< "$proactive_file")
+      if [[ "$proactive_val" -ge 20 ]]; then
+         ok "compaction_proactiveness = $proactive_val (>= 20)"
+      else
+         warn "compaction_proactiveness = $proactive_val (recommended >= 20)"
+         fix "echo 20 | sudo tee /proc/sys/vm/compaction_proactiveness"
+      fi
+   else
+      info "$proactive_file not found -- skipping"
+   fi
+
+   if [[ -f "$unevictable_file" ]]; then
+      local unevictable_val
+      unevictable_val=$(< "$unevictable_file")
+      if [[ "$unevictable_val" == "1" ]]; then
+         ok "compact_unevictable_allowed = 1"
+      else
+         warn "compact_unevictable_allowed = $unevictable_val (should be 1)"
+         fix "echo 1 | sudo tee /proc/sys/vm/compact_unevictable_allowed"
+      fi
+   else
+      info "$unevictable_file not found -- skipping"
+   fi
+}
+
+# ─── amdttm memory pool check (MI300A, MI300X per AMD docs) ─────────────────────
 
 check_amdttm_memory() {
    banner "Checking amdttm GPU memory pool"
@@ -308,7 +423,7 @@ check_rocm_smi_health() {
 
    if echo "$smi_output" | grep -q "low-power state"; then
       info "GPU device(s) are in a low-power state -- rocm-smi cannot query details"
-      info "This is normal when no GPU workload is active on MI300A APUs"
+      info "This can be normal when no GPU workload is active (especially on ${GPU_TYPE})"
    elif echo "$smi_output" | grep -q "No AMD GPUs"; then
       info "rocm-smi reports no AMD GPUs visible"
       info "The driver may need ROCm userspace libraries or KFD/HSA configuration"
@@ -355,28 +470,46 @@ banner "System Settings Check for $GPU_TYPE"
 
 check_amdgpu_driver
 
-banner "Checking GRUB settings"
-check_grub_param "pci=realloc=off" "PCI realloc"
-
-# ─── GPU-specific checks ────────────────────────────────────────────────────
+# ─── GPU-specific checks (strictly per official AMD system optimization guides)
+#
+# MI300A: instinct.docs.amd.com/.../system-optimization/mi300a.html
+#   - pci=realloc=off, THP=always, IOMMU off, NUMA balancing off,
+#     compaction, amdttm pool. C-states handled by BIOS.
+#
+# MI300X: instinct.docs.amd.com/.../system-optimization/mi300x.html
+#   - pci=realloc=off, iommu=pt, C-states (cpupower), NUMA balancing off,
+#     amdttm pool. THP not mentioned.
+#
+# MI200:  instinct.docs.amd.com/.../system-optimization/mi200.html
+#   - C-states (cpupower), IOMMU disabled by default (iommu=pt only
+#     for >=256 threads with SMT). THP/NUMA balancing not mentioned
+#     (defers to EPYC 7003 HPC tuning guide).
 
 case "$GPU_TYPE" in
    MI300A)
+      banner "Checking GRUB settings"
+      check_grub_param "pci=realloc=off" "PCI realloc"
       check_hugepages
-      check_iommu
+      check_iommu_off
       check_numa_balancing
+      check_compaction
       check_amdttm_memory
       ;;
    MI300X)
-      check_iommu
+      banner "Checking GRUB settings"
+      check_grub_param "pci=realloc=off" "PCI realloc"
+      check_grub_param "iommu=pt" "IOMMU pass-through"
       check_numa_balancing
       check_amdttm_memory
+      check_cstates
       ;;
    MI250X)
-      check_numa_balancing
+      check_iommu_mi200
+      check_cstates
       ;;
    MI210)
-      check_numa_balancing
+      check_iommu_mi200
+      check_cstates
       ;;
 esac
 
