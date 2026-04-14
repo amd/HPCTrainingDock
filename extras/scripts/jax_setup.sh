@@ -483,7 +483,7 @@ else
 	load("rocm/${ROCM_VERSION}")
 	setenv("XLA_FLAGS","--xla_gpu_enable_triton_gemm=False --xla_gpu_autotune_level=3")
 	setenv("JAX_PLATFORMS","rocm,cpu")
-	prepend_path("LD_PRELOAD","/shared/apps/ubuntu/opt/rocm-7.2.1/lib/llvm/lib/libunwind.so.1")
+	prepend_path("LD_PRELOAD","${ROCM_PATH}/lib/llvm/lib/libunwind.so.1")
 	prepend_path("PYTHONPATH","${JAX_PATH}")
 	prepend_path("PYTHONPATH","${JAXLIB_PATH}")
 EOF
