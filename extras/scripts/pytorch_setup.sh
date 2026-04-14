@@ -266,19 +266,19 @@ else
          ROCM_VERSION_WHEEL=`echo ${ROCM_VERSION} | cut -f1-2 -d'.'`
       fi
       echo "ROCM_VERSION_WHEEL is ${ROCM_VERSION_WHEEL}"
-      pip3 install torch==${PYTORCH_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${PYTORCH_PATH}
+      pip3 install torch==${PYTORCH_VERSION} --no-index -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${PYTORCH_PATH}
 
       export PYTHONPATH=$PYTORCH_PATH:$PYTHONPATH
 
       # Installing Torchaudio
 
-      pip3 install torchaudio==${TORCHAUDIO_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHAUDIO_PATH} --no-build-isolation
+      pip3 install torchaudio==${TORCHAUDIO_VERSION} --no-index -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHAUDIO_PATH} --no-build-isolation
 
       export PYTHONPATH=$PYTORCH_PATH:$PYTHONPATH
 
       # Installing Torchvision
 
-      pip3 install torchvision==${TORCHVISION_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHVISION_PATH} --no-build-isolation
+      pip3 install torchvision==${TORCHVISION_VERSION} --no-index -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHVISION_PATH} --no-build-isolation
 
       export PYTHONPATH=$PYTORCH_PATH:$PYTHONPATH
 
@@ -319,8 +319,8 @@ else
         TRITON_WHEEL_NAME="pytorch_triton_rocm"
       fi
 
-      echo "pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation"
-      pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
+      echo "pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} --no-index -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation"
+      pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} --no-index -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
 
       export PYTHONPATH=$PYTORCH_PATH:$PYTHONPATH
 
@@ -499,7 +499,7 @@ else
       export PYTORCH_ROCM_ARCH=${AMDGPU_GFXMODEL}
       export PYTORCH_INSTALL_DIR=${PYTORCH_PATH}
       export AOTRITON_INSTALLED_PREFIX=${AOTRITON_PATH}
-      if [ "${PYTORCH_SHORT_VERSION}" == "2.9" ] && [ "${AMDGPU_GFXMODEL}" == "gfx942" ]; then
+      if [ "${PYTORCH_SHORT_VERSION}" == "2.9" ] && [[ "${AMDGPU_GFXMODEL}" == *"gfx942"* ]]; then
          export USE_FBGEMM_GENAI=0
       fi
 
@@ -557,7 +557,17 @@ else
 
       python3 -m pip install -r requirements.txt
       pip3 install -r requirements.txt --target=${INSTALL_PATH}/pypackages
-      python3 tools/amd_build/build_amd.py >& /dev/null
+
+      echo ""
+      echo "===================="
+      echo "Running build_amd.py (hipification)"
+      echo "===================="
+      echo ""
+      python3 tools/amd_build/build_amd.py
+      if [ $? -ne 0 ]; then
+         echo "ERROR: build_amd.py (hipification) failed"
+         exit 1
+      fi
 
       echo ""
       echo "===================="
@@ -654,7 +664,7 @@ else
         TRITON_WHEEL_NAME="pytorch_triton_rocm"
       fi
 
-      pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
+      pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} --no-index -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
 
       # Installing Sage Attention
 
