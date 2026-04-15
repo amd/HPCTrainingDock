@@ -319,8 +319,8 @@ else
         TRITON_WHEEL_NAME="pytorch_triton_rocm"
       fi
 
-      echo "pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} --no-index -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation"
-      pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} --no-index -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
+      echo "pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation"
+      pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
 
       export PYTHONPATH=$PYTORCH_PATH:$PYTHONPATH
 
@@ -664,7 +664,7 @@ else
         TRITON_WHEEL_NAME="pytorch_triton_rocm"
       fi
 
-      pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} --no-index -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
+      pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
 
       # Installing Sage Attention
 
