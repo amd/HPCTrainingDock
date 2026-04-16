@@ -180,10 +180,12 @@ else
       python3 -m pip install pip
       # remove the last digit from the version and replace with 0
       ROCM_VERSION_MODIFIED="${ROCM_VERSION::-1}0"
+      # replace points with dashes as separators for numba-hip
+      ROCM_VERSION_DASHED=$(echo $ROCM_VERSION_MODIFIED | sed 's/\./-/g')
       # will be installed as a dependency of numba-hip and avoid an extra subdirectory
       #python3 -m pip install --target=$HIP_PYTHON_PATH -i https://test.pypi.org/simple hip-python~=${ROCM_VERSION_MODIFIED}
       python3 -m pip config set global.extra-index-url https://test.pypi.org/simple
-      python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python "numba-hip[rocm-6-4-0] @ git+https://github.com/ROCm/numba-hip.git"
+      python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python "numba-hip[rocm-${ROCM_VERSION_DASHED}] @ git+https://github.com/ROCm/numba-hip.git"
       deactivate
       rm -rf hip-python-build
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
