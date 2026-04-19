@@ -7,7 +7,6 @@ MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/hip-python
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 HIP_PYTHON_PATH=/opt/rocmplus-${ROCM_VERSION}/hip-python
 HIP_PYTHON_PATH_INPUT=""
-HIP_PYTHON_VERSION="13.6.0"
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -28,7 +27,6 @@ usage()
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --install-path [ HIP_PYTHON_PATH ] default $HIP_PYTHON_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "  --hip-python-version [ HIP_PYTHON_VERSION ] specify the version of HIP-Python, default is $HIP_PYTHON_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --help: print this usage information"
    exit 1
@@ -58,11 +56,6 @@ do
       "--build-hip-python")
           shift
           BUILD_HIP_PYTHON=${1}
-          reset-last
-          ;;
-      "--hip-python-version")
-          shift
-          HIP_PYTHON_VERSION=${1}
           reset-last
           ;;
       "--help")
@@ -109,7 +102,6 @@ echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL"
 echo "BUILD_HIP_PYTHON: $BUILD_HIP_PYTHON"
 echo "HIP_PYTHON_PATH: $HIP_PYTHON_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
-echo "HIP_PYTHON_VERSION: $HIP_PYTHON_VERSION"
 echo "==================================="
 echo ""
 
@@ -177,13 +169,11 @@ else
       fi
       python3 -m venv hip-python-build
       source hip-python-build/bin/activate
-      python3 -m pip install pip
-      # remove the last digit from the version and replace with 0
-      ROCM_VERSION_MODIFIED="${ROCM_VERSION::-1}0"
-      # will be installed as a dependency of numba-hip and avoid an extra subdirectory
-      #python3 -m pip install --target=$HIP_PYTHON_PATH -i https://test.pypi.org/simple hip-python~=${ROCM_VERSION_MODIFIED}
+      python3 -m pip install pip --upgrade
+      python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python -i https://test.pypi.org/simple hip-python~=7.2.0 --force-reinstall --no-cache 
+      python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python -i https://test.pypi.org/simple hip-python-as-cuda~=7.2.0 --force-reinstall --no-cache
       python3 -m pip config set global.extra-index-url https://test.pypi.org/simple
-      python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python "numba-hip[rocm-6-4-0] @ git+https://github.com/ROCm/numba-hip.git"
+      python3 -m pip install --target=$HIP_PYTHON_PATH/numba-hip "numba-hip[rocm-${ROCM_VERSION}] @ git+https://github.com/ROCm/numba-hip.git" --force-reinstall --no-cache
       deactivate
       rm -rf hip-python-build
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
@@ -213,11 +203,13 @@ else
    ${SUDO} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${HIP_PYTHON_VERSION}.lua
+   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
         whatis("HIP-Python with ROCm support")
 
         prereq("rocm/${ROCM_VERSION}")
         prepend_path("PYTHONPATH","$HIP_PYTHON_PATH/hip-python")
+        prepend_path("PYTHONPATH","$HIP_PYTHON_PATH/numba-hip")
+	setenv("NUMBA_HIP_USE_DEVICE_LIB_CACHE","0")
 EOF
 
 fi
