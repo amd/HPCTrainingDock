@@ -170,8 +170,8 @@ else
       python3 -m venv hip-python-build
       source hip-python-build/bin/activate
       python3 -m pip install pip --upgrade
-      python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python -i https://test.pypi.org/simple hip-python~=7.2.0 --force-reinstall --no-cache 
-      python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python -i https://test.pypi.org/simple hip-python-as-cuda~=7.2.0 --force-reinstall --no-cache
+      python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python -i https://test.pypi.org/simple hip-python~=${ROCM_VERSION} --force-reinstall --no-cache
+      python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python -i https://test.pypi.org/simple hip-python-as-cuda~=${ROCM_VERSION} --force-reinstall --no-cache
       python3 -m pip config set global.extra-index-url https://test.pypi.org/simple
       python3 -m pip install --target=$HIP_PYTHON_PATH/numba-hip "numba-hip[rocm-${ROCM_VERSION}] @ git+https://github.com/ROCm/numba-hip.git" --force-reinstall --no-cache
       deactivate
