@@ -198,6 +198,7 @@ else
                     -DKokkos_ENABLE_OPENMP=ON \
                     -DKokkos_ARCH_AMD_GFX942_APU=${KOKKOS_ARCH_AMD_GFX942_APU} \
                     -DKokkos_ARCH_ZEN4=ON \
+		    -DGPU_TARGETS=${AMDGPU_GFXMODEL} \
                     -DCMAKE_CXX_COMPILER=${ROCM_PATH}/llvm/bin/amdclang++ ..
       ${SUDO_ENV} make -j
       ${SUDO_ENV} make install
