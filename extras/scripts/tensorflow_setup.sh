@@ -180,7 +180,7 @@ else
 
       # get tensorflow dependencies
       ${SUDO} apt-get update
-      ${SUDO} apt-get install -y python3-dev python3-pip openjdk-8-jdk openjdk-8-jre unzip wget git python-is-python3 patchelf
+      ${SUDO} apt-get install -y python3-dev python3-pip openjdk-8-jdk openjdk-8-jre unzip wget git python-is-python3 patchelf 'argcomplete>=1.9.4'
 
       pip3 install -v --target=$TF_PATH numpy wheel mock future pyyaml setuptools requests keras_preprocessing keras_applications jupyter
 
@@ -202,7 +202,7 @@ else
 
       cd tensorflow-upstream
 
-      if [[ "${GITHUB_BRANCH}" != "r2.20-rocm-enhanced" ]]; then
+      if [[ "${GIT_BRANCH}" != "r2.20-rocm-enhanced" ]]; then
 
          sed -i '/name = "net_zstd"/,/tf_mirror_urls/{
          s|build_file = "@local_xla//third_party:net_zstd.BUILD"|build_file = "@local_xla//third_party:net_zstd.BUILD"|
