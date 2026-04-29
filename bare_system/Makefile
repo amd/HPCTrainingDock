@@ -521,10 +521,10 @@ MODULE_PACKAGES := rocm openmpi rocprof-sys_source cupy kokkos
 $(foreach p,$(MODULE_PACKAGES),$(eval $(p)_module_package: $(p)_module_package.timestamp))
 
 %_module_package.timestamp: %.timestamp
-       bare_system/deploy_module_package.sh \
-          --package $(patsubst %_source,%,$*) \
-          --rocm-version ${ROCM_VERSION}
-       touch $@
+	bare_system/deploy_module_package.sh \
+	  --package $(patsubst %_source,%,$*) \
+	  --rocm-version ${ROCM_VERSION}
+	touch $@
 
 all_module_packages: $(addsuffix _module_package.timestamp, $(MODULE_PACKAGES))
-       touch all_module_packages.timestamp
+	touch all_module_packages.timestamp
