@@ -505,3 +505,26 @@ kokkos_package.timestamp: kokkos.timestamp
 
 all_packages.timestamp: rocm_package.timestamp openmpi_package.timestamp rocprof-sys_source_package.timestamp cupy_package.timestamp kokkos_package.timestamp
 	touch all_packages.timestamp
+
+# ----------------------------------------------------------------------------
+# Module-package targets: tar up Lmod modulefiles for each package, structured
+# for extraction under /nfsapps/modules (base/, rocm-<v>/, rocmplus-<v>/).
+# Each <pkg>_module_package depends on the corresponding <pkg>.timestamp so the
+# package must have been built (and its modulefile written) first. The pattern
+# rule strips trailing _source so e.g. rocprof-sys_source_module_package looks
+# up /etc/lmod/modules/<cat>/rocprof-sys for its modulefiles.
+# ----------------------------------------------------------------------------
+MODULE_PACKAGES := rocm openmpi rocprof-sys_source cupy kokkos
+
+.PHONY: $(addsuffix _module_package, $(MODULE_PACKAGES)) all_module_packages
+
+$(foreach p,$(MODULE_PACKAGES),$(eval $(p)_module_package: $(p)_module_package.timestamp))
+
+%_module_package.timestamp: %.timestamp
+       bare_system/deploy_module_package.sh \
+          --package $(patsubst %_source,%,$*) \
+          --rocm-version ${ROCM_VERSION}
+       touch $@
+
+all_module_packages: $(addsuffix _module_package.timestamp, $(MODULE_PACKAGES))
+       touch all_module_packages.timestamp

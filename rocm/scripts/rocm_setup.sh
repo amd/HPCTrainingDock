@@ -454,6 +454,8 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	setenv("HSA_NO_SCRATCH_RECLAIM","1")
 	setenv("HIPCC_COMPILE_FLAGS_APPEND","--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_BASE_VERSION}")
 	setenv("HIPCC_LINK_FLAGS_APPEND","--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_BASE_VERSION}")
+	prepend_path("MODULEPATH", pathJoin(mbase, "rocm-${ROCM_VERSION}"))
+	prepend_path("MODULEPATH", pathJoin(mbase, "rocmplus-${ROCM_VERSION}"))
 	setenv("ROCM_PATH", base)
 	family("GPUSDK")
 EOF
@@ -475,6 +477,8 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	prepend_path("CPATH", pathJoin(base, "include"))
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("INCLUDE", pathJoin(base, "include"))
+	prepend_path("MODULEPATH", pathJoin(mbase, "rocm-${ROCM_VERSION}"))
+	prepend_path("MODULEPATH", pathJoin(mbase, "rocmplus-${ROCM_VERSION}"))
 	setenv("ROCM_PATH", base)
 	family("GPUSDK")
 EOF
@@ -510,7 +514,6 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${AMDCLANG_VERSION}-${ROCM_VERSION}.lua
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("LD_RUN_PATH", pathJoin(base, "lib"))
 	prepend_path("CPATH", pathJoin(base, "include"))
-	load("rocm/${ROCM_VERSION}")
 	family("compiler")
 EOF
 
@@ -529,7 +532,6 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
         setenv("LIBS", "-L" .. pathJoin(base, "/lib") .. " -lhipfort-amdgcn.a")
         setenv("HIPFORT_LIB", pathJoin(base, "/lib"))
         setenv("HIPFORT_INC", pathJoin(base, "/include/hipfort"))
-	load("rocm/${ROCM_VERSION}")
 EOF
 
 # Create a module file for opencl compiler
@@ -597,11 +599,13 @@ if [ "${INCLUDE_TOOLS}" = "1" ]; then
          fi
       fi
 
-      if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
-         export MODULE_PATH=/etc/lmod/modules/ROCm/${TOOL_NAME}
-         ${SUDO} mkdir -p ${MODULE_PATH}
-         # The - option suppresses tabs
-      cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
+      # if ROCM_VERSION is greater than equal to 7.1.0, the sort by version will give the smaller ROCM_VERSION number
+      if [ "$(printf '%s\n' "7.1.0" "$ROCM_VERSION" | sort -V | head -n1)" != "7.1.0" ]; then
+         if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
+            export MODULE_PATH=/etc/lmod/modules/ROCm/${TOOL_NAME}
+            ${SUDO} mkdir -p ${MODULE_PATH}
+            # The - option suppresses tabs
+         cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ${TOOL_NAME}")
 	whatis("Version: ${ROCM_VERSION}")
 	whatis("Category: AMD")
@@ -619,11 +623,9 @@ if [ "${INCLUDE_TOOLS}" = "1" ]; then
 
 	load("rocm/${ROCM_VERSION}")
 	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
-        set_shell_function("omnitrace-avail",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-avail "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-avail $*")
-        set_shell_function("omnitrace-instrument",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-instrument "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-instrument $*")
-        set_shell_function("omnitrace-run",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-run "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-sys-run $*")
 EOF
 
+         fi
       fi
    fi
 
@@ -936,11 +938,13 @@ EOF
          ${SUDO} chmod go-w /opt/rocm-${ROCM_VERSION}
       fi
 
-      if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
-         export MODULE_PATH=/etc/lmod/modules/ROCm/${TOOL_NAME}
-         ${SUDO} mkdir -p ${MODULE_PATH}
-         # The - option suppresses tabs
-      cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
+      # if ROCM_VERSION is greater than or equal to 7.1.0, the sort by version will give the smaller ROCM_VERSION number
+      if [ "$(printf '%s\n' "7.1.0" "$ROCM_VERSION" | sort -V | head -n1)" != "7.1.0" ]; then
+         if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
+            export MODULE_PATH=/etc/lmod/modules/ROCm/${TOOL_NAME}
+            ${SUDO} mkdir -p ${MODULE_PATH}
+            # The - option suppresses tabs
+         cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	local help_message = [[
 
 	${TOOL_NAME_MC} is an open-source performance analysis tool for profiling
@@ -985,6 +989,7 @@ EOF
 	set_shell_function("omniperf",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-compute "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-compute $*")
 
 EOF
+         fi
       fi
    fi
 fi
