@@ -498,6 +498,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${AMDCLANG_VERSION}-${ROCM_VERSION}.lua
 	whatis("AMDCLANG")
 
 	local base = "/opt/rocm-${ROCM_VERSION}/llvm"
+	local rocm_base = "/opt/rocm-${ROCM_VERSION}"
 	local mbase = "/etc/lmod/modules/ROCm/amdclang"
 
 	setenv("CC", pathJoin(base, "bin/amdclang"))
@@ -508,8 +509,8 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${AMDCLANG_VERSION}-${ROCM_VERSION}.lua
 	setenv("OMPI_FC", pathJoin(base, "bin/amdflang"))
 	setenv("F77", pathJoin(base, "bin/amdflang"))
 	setenv("F90", pathJoin(base, "bin/amdflang"))
-	setenv("STDPAR_PATH", "/opt/rocm-${ROCM_VERSION}/include/thrust/system/hip/hipstdpar")
-        setenv("STDPAR_CXX", pathJoin(base, "bin/amdclang++"))
+	setenv("STDPAR_PATH", pathJoin(rocm_base, "include/thrust/system/hip/hipstdpar")
+	setenv("STDPAR_CXX", pathJoin(base, "bin/amdclang++"))
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("LD_RUN_PATH", pathJoin(base, "lib"))
@@ -526,12 +527,12 @@ ${SUDO} mkdir -p ${MODULE_PATH}
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ROCm HIPFort")
 	whatis("Version: ${ROCM_VERSION}")
-
-        local base = "/opt/rocm-${ROCM_VERSION}"
-        append_path("LD_LIBRARY_PATH", pathJoin(base, "/lib"))
-        setenv("LIBS", "-L" .. pathJoin(base, "/lib") .. " -lhipfort-amdgcn.a")
-        setenv("HIPFORT_LIB", pathJoin(base, "/lib"))
-        setenv("HIPFORT_INC", pathJoin(base, "/include/hipfort"))
+	load("amdclang")
+	local base = "/opt/rocm-${ROCM_VERSION}"
+	append_path("LD_LIBRARY_PATH", pathJoin(base, "/lib"))
+	setenv("LIBS", "-L" .. pathJoin(base, "/lib") .. " -lhipfort-amdgcn.a")
+	setenv("HIPFORT_LIB", pathJoin(base, "/lib"))
+	setenv("HIPFORT_INC", pathJoin(base, "/include/hipfort"))
 EOF
 
 # Create a module file for opencl compiler
