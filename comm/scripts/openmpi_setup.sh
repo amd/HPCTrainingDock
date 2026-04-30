@@ -529,7 +529,11 @@ if [ "${BUILD_XPMEM}" == "1" ]; then
          ./autogen.sh
          ./configure --prefix=${XPMEM_PATH}
 
-         make -j 16
+         # S7.A: scale parallel build to all allocated cores instead of a
+         # hardcoded 16 on a 48-core compute node. Audited as S7.A in
+         # slurm-7935-rocmplus-7.0.1.out. `make install` kept serial --
+         # mostly file copies, no measurable benefit from -j.
+         make -j $(nproc)
          if [[ "${DRY_RUN}" == "0" ]]; then
             if [ -n "${SUDO_XPMEM}" ]; then
                ${SUDO_XPMEM} -E env "PATH=$PATH" make install
@@ -651,7 +655,10 @@ fi
 
       ${UCX_CONFIGURE_COMMAND}
 
-      make -j 16
+      # S7.A: scale parallel build to all allocated cores instead of a
+      # hardcoded 16 on a 48-core compute node. Audited as S7.A in
+      # slurm-7935-rocmplus-7.0.1.out.
+      make -j $(nproc)
       if [[ "${DRY_RUN}" == "0" ]]; then
          if [ -n "${SUDO_UCX}" ]; then
             ${SUDO_UCX} -E env "PATH=$PATH" make install
@@ -765,7 +772,10 @@ else
 
       ${UCC_CONFIGURE_COMMAND}
 
-      make -j 16
+      # S7.A: scale parallel build to all allocated cores instead of a
+      # hardcoded 16 on a 48-core compute node. Audited as S7.A in
+      # slurm-7935-rocmplus-7.0.1.out.
+      make -j $(nproc)
 
       if [[ "${DRY_RUN}" == "0" ]]; then
          if [ -n "${SUDO_UCC}" ]; then
@@ -835,7 +845,17 @@ else
       # dad 3/25/3023 removed --enable-mpi-f90 --enable-mpi-c as they apparently are not options
       # dad 3/30/2023 remove --with-pmix
 
-      cd 
+      # S7.B: build OpenMPI under /tmp (compute-node local disk) instead
+      # of $HOME (NFS). Previously a bare `cd` (= cd $HOME) sent the
+      # ~30MB tarball, the configure write storm, and the thousands of
+      # .o intermediates through NFS. Only `make install` writes hit NFS
+      # via the absolute --prefix=${OPENMPI_PATH}. EXIT trap guarantees
+      # the temp build dir is cleaned up even on failure (set -e).
+      # Audited as S7.B in slurm-7935-rocmplus-7.0.1.out; mirrors the
+      # scorep S6.C pattern in tools/scripts/scorep_setup.sh.
+      OPENMPI_BUILD_DIR=$(mktemp -d -t openmpi-build.XXXXXX)
+      trap '[ -n "${OPENMPI_BUILD_DIR:-}" ] && rm -rf "${OPENMPI_BUILD_DIR}"' EXIT
+      cd "${OPENMPI_BUILD_DIR}"
 
       OPENMPI_SHORT_VERSION=`echo ${OPENMPI_VERSION} | cut -f1-2 -d'.' `
       count=0
@@ -884,7 +904,10 @@ else
 
       ${OPENMPI_CONFIGURE_COMMAND}
 
-      make -j 16
+      # S7.A: scale parallel build to all allocated cores instead of a
+      # hardcoded 16 on a 48-core compute node. Audited as S7.A in
+      # slurm-7935-rocmplus-7.0.1.out.
+      make -j $(nproc)
 
       if [[ "${DRY_RUN}" == "0" ]]; then
          if [ -n "${SUDO_OPENMPI}" ]; then
@@ -892,10 +915,12 @@ else
          else
             make install
          fi
-	 for file in ${OPENMPI_PATH}/share/man/man1/*
-         do
-            ${SUDO_OPENMPI} gzip $file
-         done
+         # S7.C: single gzip invocation across all man1 pages instead of
+         # one sudo+gzip fork per file. With ~hundreds of man pages and
+         # sudo's per-call overhead on NFS, the prior loop dominated the
+         # tail of the install phase. Audited as S7.C in
+         # slurm-7935-rocmplus-7.0.1.out.
+         ${SUDO_OPENMPI} gzip ${OPENMPI_PATH}/share/man/man1/*
       fi
       # make ucx the default point-to-point
       echo "pml = ucx" | ${SUDO_OPENMPI} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
