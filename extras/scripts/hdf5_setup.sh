@@ -250,7 +250,10 @@ else
       # install dependencies
 
       # get ZLIB
-      wget https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
+      # -q to drop wget dot-progress noise from the per-package log,
+      # matching the precedent in comm/scripts/openmpi_setup.sh and the
+      # S6.E fix in tools/scripts/scorep_setup.sh.
+      wget -q https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
       tar zxf zlib-1.3.1.tar.gz
       cd zlib-1.3.1
       ./configure --prefix=${HDF5_PATH}/zlib

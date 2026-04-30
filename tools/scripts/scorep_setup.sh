@@ -300,7 +300,10 @@ else
       trap '[ -n "${SCOREP_BUILD_DIR:-}" ] && rm -rf "${SCOREP_BUILD_DIR}"' EXIT
       cd "${SCOREP_BUILD_DIR}"
 
-      wget https://perftools.pages.jsc.fz-juelich.de/cicd/scorep/tags/scorep-${SCOREP_VERSION}/scorep-${SCOREP_VERSION}.tar.gz
+      # S6.E: -q to drop ~440 lines of dot-progress noise for a 21MB
+      # / 3s download. Audited as S6.E in slurm-7934-rocmplus-7.0.2.out
+      # (lines 48-493 of log_scorep_04_30_2026.txt).
+      wget -q https://perftools.pages.jsc.fz-juelich.de/cicd/scorep/tags/scorep-${SCOREP_VERSION}/scorep-${SCOREP_VERSION}.tar.gz
       # tar -xf (not -xvf): the verbose flag dumps ~4500 file lines into
       # the per-package log, making it harder to grep for real signal.
       # Audited as S6.D in slurm-7934-rocmplus-7.0.2.out.
