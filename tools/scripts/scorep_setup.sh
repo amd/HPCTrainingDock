@@ -290,8 +290,21 @@ else
          fi
       fi
 
+      # S6.C: Build under /tmp (compute-node local disk) so the ~4500
+      # .o intermediates and the build-dir write traffic don't all
+      # round-trip through NFS. Only `make install` writes hit NFS via
+      # the absolute --prefix=${SCOREP_PATH}. EXIT trap guarantees the
+      # temp build dir is cleaned up even on a build failure (we have
+      # set -e). Audited as S6.C in slurm-7934-rocmplus-7.0.2.out.
+      SCOREP_BUILD_DIR=$(mktemp -d -t scorep-build.XXXXXX)
+      trap '[ -n "${SCOREP_BUILD_DIR:-}" ] && rm -rf "${SCOREP_BUILD_DIR}"' EXIT
+      cd "${SCOREP_BUILD_DIR}"
+
       wget https://perftools.pages.jsc.fz-juelich.de/cicd/scorep/tags/scorep-${SCOREP_VERSION}/scorep-${SCOREP_VERSION}.tar.gz
-      tar -xvf scorep-${SCOREP_VERSION}.tar.gz
+      # tar -xf (not -xvf): the verbose flag dumps ~4500 file lines into
+      # the per-package log, making it harder to grep for real signal.
+      # Audited as S6.D in slurm-7934-rocmplus-7.0.2.out.
+      tar -xf scorep-${SCOREP_VERSION}.tar.gz
       cd scorep-${SCOREP_VERSION}
       mkdir build
       cd build
@@ -299,10 +312,17 @@ else
                    --with-librocm_smi64-lib=$ROCM_PATH/lib --with-libunwind=download --enable-shared --with-libbfd=download --without-shmem  \
 		   --with-libgotcha=download CC=$CC CXX=$CXX FC=$FC CFLAGS=-fPIE
 
-      make
+      # Parallel build over all allocated cores; install left serial since
+      # `make install` is mostly file copies and rarely benefits from -j.
+      # Audited as S6.A in slurm-7934-rocmplus-7.0.2.out: `make` alone
+      # was the dominant 42-minute phase of a 56-minute scorep run.
+      make -j $(nproc)
       ${SUDO} make install
 
       cd ${CUR_DIR}
+      # SCOREP_BUILD_DIR (under /tmp) is removed by the EXIT trap. The
+      # rm of any stale scorep-${SCOREP_VERSION}* in CUR_DIR is kept for
+      # defense in depth (e.g., debris from a pre-S6.C run on NFS).
       rm -rf scorep-${SCOREP_VERSION}*
       rm -rf spack
 

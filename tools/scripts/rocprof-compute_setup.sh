@@ -143,7 +143,11 @@ echo ""
 if [[ "$INSTALL_ROCPROF_COMPUTE_FROM_SOURCE" == "0" ]];then
    echo " The script is aborting due to the value of the INSTALL_ROCPROF_COMPUTE_FROM_SOURCE flag: $INSTALL_ROCPROF_COMPUTE_FROM_SOURCE	"
    echo " Please supply this option when running the script: '--install-rocprof-compute-from-source 1'"
-   exit
+   # Sentinel rc=43 (NOOP_RC) tells main_setup.sh's run_and_log to
+   # classify this as SKIPPED(no-op), not OK. The SDK already ships
+   # rocprofiler-compute; this script only adds value when building
+   # from source. Kept in sync by convention with main_setup.sh.
+   exit 43
 fi
 
 AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`

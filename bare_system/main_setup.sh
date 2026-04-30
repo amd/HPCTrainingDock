@@ -316,8 +316,14 @@ if (( ${#PACKAGES_ARR[@]} > 0 )); then
 fi
 
 # ── Logging setup ────────────────────────────────────────────────────
+# Per-package logs go under logs_<date>/rocm-<version>_<jobid>/ so that
+# concurrent or sequential same-day sweep jobs don't trample each other's
+# log_<pkg>_<date>.txt files. Audited as P2 in slurm-7934-rocmplus-7.0.2.out:
+# log_openmpi_04_30_2026.txt from job 7934 was overwritten by job 7935
+# within minutes of 7934 ending, leaving us with no openmpi log for 7934.
+# SLURM_JOB_ID is set in sbatch context; falls back to pid for ad-hoc runs.
 TODAY=$(date +%m_%d_%Y)
-LOG_DIR="${PWD}/logs_${TODAY}"
+LOG_DIR="${PWD}/logs_${TODAY}/rocm-${ROCM_VERSION}_${SLURM_JOB_ID:-pid$$}"
 mkdir -p "${LOG_DIR}"
 
 # Per-package outcome tracking. Three buckets:
@@ -364,14 +370,27 @@ cleanup_pkg() {
    fi
 }
 
-# Sentinel rc returned by each setup script's inlined preflight_modules
-# helper to signal "this package's required modules are not all
-# available" (e.g., openmpi failed earlier so its module was never
-# written, or the user typoed a module name). Reclassified below as
-# SKIPPED, not FAILED -- no cleanup, doesn't force non-zero exit on
-# its own. Each setup script defines its own copy of this constant
-# (see e.g. comm/scripts/openmpi_setup.sh); kept in sync by convention.
+# Sentinel return codes for setup scripts. Both reclassify the result as
+# SKIPPED (not FAILED) and do not force a non-zero overall exit on their
+# own. Distinguished so the per-package summary tells the operator WHY
+# the package was skipped:
+#
+#   MISSING_PREREQ_RC=42 -- preflight_modules failed: a required module
+#       wasn't loadable (e.g., openmpi failed earlier so its module was
+#       never written, or the user typoed a module name). Each setup
+#       script defines its own copy of this constant (see e.g.
+#       comm/scripts/openmpi_setup.sh); kept in sync by convention.
+#
+#   NOOP_RC=43 -- the setup script intentionally declined to do anything
+#       (e.g., mvapich on Ubuntu where the install path isn't
+#       implemented; rocprof-sys/rocprof-compute when their
+#       --install-from-source flag is 0 because the SDK already ships
+#       these tools). The script ran cleanly to its no-op exit; no
+#       artifacts to clean up. Audited as P5 in
+#       slurm-7934-rocmplus-7.0.2.out: those scripts were misclassified
+#       as OK, making the summary lie about what was actually built.
 MISSING_PREREQ_RC=42
+NOOP_RC=43
 
 run_and_log() {
    local log_name="$1"
@@ -389,6 +408,16 @@ run_and_log() {
       echo ""
       echo "### SKIP ${log_name}: a required module was not available."
       echo "### See ${LOG_DIR}/log_${log_name}_${TODAY}.txt for which module."
+      echo "### No artifacts created; nothing to clean up."
+      echo ""
+   elif [ "${rc}" -eq "${NOOP_RC}" ]; then
+      # The sub-script declined the install on purpose (unsupported
+      # distro, --install-from-source 0, etc.). Treat as SKIPPED, not
+      # FAILED. No cleanup -- the script never wrote anything.
+      SKIPPED_PKGS+=("${log_name}(no-op)")
+      echo ""
+      echo "### SKIP ${log_name}: setup script intentionally declined to install."
+      echo "### See ${LOG_DIR}/log_${log_name}_${TODAY}.txt for the reason."
       echo "### No artifacts created; nothing to clean up."
       echo ""
    else
@@ -754,19 +783,19 @@ fi
 replace_pkg BUILD_HIPFORT "${ROCMPLUS}/hipfort" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/hipfort_from_source"
 if [[ "${BUILD_HIPFORT}" == "1" ]] && [[ ! -d ${ROCMPLUS}/hipfort ]]; then
    run_and_log hipfort extras/scripts/hipfort_setup.sh ${COMMON_OPTIONS} --build-hipfort ${BUILD_HIPFORT} \
-      $(path_args hipfort rocmplus-${ROCM_VESION}/hipfort_from_source)
+      $(path_args hipfort rocmplus-${ROCM_VERSION}/hipfort_from_source)
 fi
 
 replace_pkg BUILD_HIPIFLY "${ROCMPLUS}/hipifly" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/hipifly"
 if [[ "${BUILD_HIPIFLY}" == "1" ]] && [[ ! -d ${ROCMPLUS}/hipifly ]]; then
    run_and_log hipifly extras/scripts/hipifly_setup.sh --rocm-version ${ROCM_VERSION} --hipifly-module ${HIPIFLY_MODULE} \
-      $(path_args hipifly rocmplus-${ROCM_VESION}/hipifly)
+      $(path_args hipifly rocmplus-${ROCM_VERSION}/hipifly)
 fi
 
 replace_pkg BUILD_HDF5 "${ROCMPLUS}/hdf5" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/hdf5"
 if [[ "${BUILD_HDF5}" == "1" ]] && [[ ! -d ${ROCMPLUS}/hdf5 ]]; then
    run_and_log hdf5 extras/scripts/hdf5_setup.sh ${COMMON_OPTIONS} --build-hdf5 ${BUILD_HDF5} \
-      $(path_args hdf5 rocmplus-${ROCM_VESION}/hdf5)
+      $(path_args hdf5 rocmplus-${ROCM_VERSION}/hdf5)
 fi
 
 replace_pkg BUILD_NETCDF "${ROCMPLUS}/netcdf" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/netcdf-c" "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/netcdf-fortran"

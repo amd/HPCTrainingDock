@@ -227,7 +227,11 @@ echo ""
 if [[ "$INSTALL_ROCPROF_SYS_FROM_SOURCE" == "0" ]];then
    echo " Exiting due to value of INSTALL_ROCPROF_SYS_FROM_SOURCE being: $INSTALL_ROCPROF_SYS_FROM_SOURCE "
    echo " Use '--install-rocprof-sys-from-source 1' as input to enable this installation"
-   exit
+   # Sentinel rc=43 (NOOP_RC) tells main_setup.sh's run_and_log to
+   # classify this as SKIPPED(no-op), not OK. The SDK already ships
+   # rocprofiler-systems; this script only adds value when building
+   # from source. Kept in sync by convention with main_setup.sh.
+   exit 43
 fi
 
 if [ "${INSTALL_ROCPROF_SYS_FROM_SOURCE}" = "1" ] ; then
