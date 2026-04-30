@@ -253,7 +253,7 @@ else
 
       # ------------ Installing HPCViewer
 
-      git clone https://github.com/spack/spack.git
+      git clone --depth 1 https://github.com/spack/spack.git
 
       # load spack environment
       source spack/share/spack/setup-env.sh

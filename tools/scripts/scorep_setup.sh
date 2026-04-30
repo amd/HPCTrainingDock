@@ -245,7 +245,7 @@ else
          echo "PDT_PATH ${PDT_PATH} already exists and is non-empty, skipping PDT install"
          PDT_PATH_ORIGINAL=$PDT_PATH
       else
-         git clone https://github.com/spack/spack.git
+         git clone --depth 1 https://github.com/spack/spack.git
 
          # load spack environment
          source spack/share/spack/setup-env.sh
