@@ -29,8 +29,21 @@
 : ${BUILD_FLANGNEW:="0"}
 : ${BUILD_ROCPROFILER_SDK:="1"}
 : ${HIPIFLY_MODULE:="1"}
+# BUILD_<X> flags for packages that previously had no top-level gate.
+# These default to 1 (matching the previous "always" behavior); when
+# --packages is used these are flipped to 0 for every package not on the
+# whitelist so each block becomes uniformly gated.
+: ${BUILD_OPENMPI:="1"}
+: ${BUILD_MVAPICH:="1"}
+: ${BUILD_ROCPROF_SYS:="1"}
+: ${BUILD_ROCPROF_COMPUTE:="1"}
+: ${BUILD_HIPIFLY:="1"}
+: ${PACKAGES_INPUT:=""}      # comma- or space-separated whitelist; empty = all (subject to other flags)
 : ${PYTHON_VERSION:="12"} # python3 minor release
 : ${USE_MAKEFILE:="0"}
+: ${QUICK_INSTALLS:="0"}     # 1 = skip long-pole (>~1h) packages
+: ${REPLACE_EXISTING:="0"}   # 1 = remove prior rocmplus-<v> install + module dirs first
+: ${KEEP_FAILED_INSTALLS:="0"}  # 1 = keep partial install dirs/modulefiles when a package fails (for post-mortem)
 
 INSTALL_ROCPROF_SYS_FROM_SOURCE=0
 INSTALL_ROCPROF_COMPUTE_FROM_SOURCE=0
@@ -67,6 +80,10 @@ usage()
    echo "  --install-rocprof-compute-from-source [0 or 1]:  default is $INSTALL_ROCPROF_COMPUTE_FROM_SOURCE (false)"
    echo "  --install-rocprof-sys-from-source [0 or 1]:  default is $INSTALL_ROCPROF_SYS_FROM_SOURCE (false)"
    echo "  --use-makefile [0 or 1]:  default is 0 (false)"
+   echo "  --quick-installs [0 or 1]:  skip long-pole (>~1h) packages: pytorch, tensorflow, jax, ftorch, julia, magma, petsc, hpctoolkit, flang-new, cupy. Default $QUICK_INSTALLS"
+   echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Default $REPLACE_EXISTING"
+   echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
+   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, kokkos, miniconda3, miniforge3, hipfort, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs)."
    echo "  --help: prints this message"
    exit 1
 }
@@ -118,6 +135,26 @@ do
       "--use-makefile")
           shift
           USE_MAKEFILE=${1}
+          reset-last
+          ;;
+      "--quick-installs")
+          shift
+          QUICK_INSTALLS=${1}
+          reset-last
+          ;;
+      "--replace-existing")
+          shift
+          REPLACE_EXISTING=${1}
+          reset-last
+          ;;
+      "--keep-failed-installs")
+          shift
+          KEEP_FAILED_INSTALLS=${1}
+          reset-last
+          ;;
+      "--packages")
+          shift
+          PACKAGES_INPUT=${1}
           reset-last
           ;;
       "--help")
@@ -192,16 +229,214 @@ if [ "${USE_MAKEFILE}" == 1 ]; then
    exit
 fi
 
+# ── --quick-installs: disable long-pole packages (>~1h on this hardware) ──
+# Each one gates a sub-script that has been observed to dominate wall time.
+# This runs AFTER arg parsing so a user could (in theory) re-enable a single
+# package by exporting BUILD_<name>=1 between this point and sub-script
+# invocation; we don't expose per-package CLI flags here on purpose.
+QUICK_INSTALLS_PKGS=( BUILD_PYTORCH BUILD_TENSORFLOW BUILD_JAX BUILD_FTORCH \
+                     BUILD_JULIA BUILD_MAGMA BUILD_PETSC BUILD_HPCTOOLKIT \
+                     BUILD_FLANGNEW BUILD_CUPY )
+if [[ "${QUICK_INSTALLS}" == "1" ]]; then
+   echo ""
+   echo "QUICK_INSTALLS=1 -> disabling long-pole packages (>~1h):"
+   for v in "${QUICK_INSTALLS_PKGS[@]}"; do
+      printf "  %-22s %s -> 0\n" "${v}" "${!v}"
+      eval "${v}=0"
+   done
+   echo ""
+fi
+
+# ── --packages: whitelist which packages to build ────────────────────
+# Maps user-facing package names to their BUILD_<X> flag variable. Only
+# names listed here are recognized by --packages; --packages "openmpi mpi4py"
+# turns BUILD_<X>=0 for every package NOT in the list and BUILD_<X>=1 for
+# every package that IS on the list (overriding any --quick-installs decision
+# that might have turned it off). Order: --quick-installs runs first, then
+# --packages, so explicitly whitelisted packages always build.
+declare -A PKG_FLAG=(
+   [flang-new]=BUILD_FLANGNEW
+   [openmpi]=BUILD_OPENMPI
+   [mpi4py]=BUILD_MPI4PY
+   [mvapich]=BUILD_MVAPICH
+   [rocprof-sys]=BUILD_ROCPROF_SYS
+   [rocprof-compute]=BUILD_ROCPROF_COMPUTE
+   [hpctoolkit]=BUILD_HPCTOOLKIT
+   [scorep]=BUILD_SCOREP
+   [tau]=BUILD_TAU
+   [cupy]=BUILD_CUPY
+   [hip-python]=BUILD_HIP_PYTHON
+   [tensorflow]=BUILD_TENSORFLOW
+   [jax]=BUILD_JAX
+   [ftorch]=BUILD_FTORCH
+   [pytorch]=BUILD_PYTORCH
+   [magma]=BUILD_MAGMA
+   [kokkos]=BUILD_KOKKOS
+   [miniconda3]=BUILD_MINICONDA3
+   [miniforge3]=BUILD_MINIFORGE3
+   [hipfort]=BUILD_HIPFORT
+   [hipifly]=BUILD_HIPIFLY
+   [hdf5]=BUILD_HDF5
+   [netcdf]=BUILD_NETCDF
+   [fftw]=BUILD_FFTW
+   [petsc]=BUILD_PETSC
+   [hypre]=BUILD_HYPRE
+)
+
+PACKAGES_NORM="${PACKAGES_INPUT//,/ }"
+read -r -a PACKAGES_ARR <<< "${PACKAGES_NORM}"
+
+if (( ${#PACKAGES_ARR[@]} > 0 )); then
+   # Validate all requested names first; abort on unknown.
+   UNKNOWN_PKGS=()
+   for p in "${PACKAGES_ARR[@]}"; do
+      if [[ -z "${PKG_FLAG[${p}]:-}" ]]; then
+         UNKNOWN_PKGS+=("${p}")
+      fi
+   done
+   if (( ${#UNKNOWN_PKGS[@]} > 0 )); then
+      echo "ERROR: --packages contains unknown name(s): ${UNKNOWN_PKGS[*]}" >&2
+      echo "       Recognized names: ${!PKG_FLAG[*]}" >&2
+      exit 1
+   fi
+
+   echo ""
+   echo "PACKAGES whitelist active. Disabling all packages, then enabling:"
+   # Disable every gated package first.
+   for flag in "${PKG_FLAG[@]}"; do
+      eval "${flag}=0"
+   done
+   # Then enable the requested ones (overrides --quick-installs).
+   for p in "${PACKAGES_ARR[@]}"; do
+      flag="${PKG_FLAG[${p}]}"
+      printf "  %-18s -> %s=1\n" "${p}" "${flag}"
+      eval "${flag}=1"
+   done
+   echo ""
+fi
+
 # ── Logging setup ────────────────────────────────────────────────────
 TODAY=$(date +%m_%d_%Y)
 LOG_DIR="${PWD}/logs_${TODAY}"
 mkdir -p "${LOG_DIR}"
 
+# Per-package outcome tracking. Three buckets:
+#   SUCCESS_PKGS  -- built or already-installed and verified clean.
+#   FAILED_PKGS   -- the setup script exited non-zero. Partial install
+#                    artifacts are wiped automatically (unless
+#                    --keep-failed-installs 1) so a re-run starts clean.
+#   SKIPPED_PKGS  -- a declared dependency failed or was skipped, so the
+#                    build was not even attempted.
+#
+# Without this, a failed sub-script silently returned rc=0 (because
+# `tee` was the last command in the pipe), and main_setup.sh advertised
+# success even when xpmem / pnetcdf / openmpi etc. blew up. Audited as
+# P3 in slurm-7865-rocmplus-7.0.2.out.
+FAILED_PKGS=()
+SUCCESS_PKGS=()
+SKIPPED_PKGS=()
+
+# cleanup_pkg <label> -- remove install dirs and modulefiles for a
+# package whose setup script just failed. Lookup tables PKG_CLEAN_DIRS
+# and PKG_CLEAN_MODS are populated below (after ROCMPLUS is defined).
+# Globs are expanded by ${SUDO} rm -rf via the shell, matching the same
+# pattern replace_pkg uses upstream.
+cleanup_pkg() {
+   local label="$1"
+   if [ "${KEEP_FAILED_INSTALLS}" = "1" ]; then
+      echo "### KEEP_FAILED_INSTALLS=1: leaving partial artifacts for ${label} on disk."
+      return 0
+   fi
+   local dirs="${PKG_CLEAN_DIRS[${label}]:-}"
+   local mods="${PKG_CLEAN_MODS[${label}]:-}"
+   if [ -z "${dirs}" ] && [ -z "${mods}" ]; then
+      # No cleanup metadata for this label (e.g., baseospackages, lmod).
+      # That is intentional -- those steps don't install into ROCMPLUS.
+      return 0
+   fi
+   echo "### Cleaning up partial install artifacts for ${label}..."
+   if [ -n "${dirs}" ]; then
+      # `eval` so that globs like ${ROCMPLUS}/openmpi* expand correctly.
+      eval ${SUDO:-sudo} rm -rf -- ${dirs} 2>/dev/null || true
+   fi
+   if [ -n "${mods}" ]; then
+      eval ${SUDO:-sudo} rm -rf -- ${mods} 2>/dev/null || true
+   fi
+}
+
+# Sentinel rc returned by bare_system/lib/preflight.sh's
+# preflight_modules helper to signal "this package's required modules
+# are not all available" (e.g., openmpi failed earlier so its module
+# was never written, or the user typoed a module name). Reclassified
+# below as SKIPPED, not FAILED -- no cleanup, doesn't force non-zero
+# exit on its own.
+MISSING_PREREQ_RC=42
+
 run_and_log() {
    local log_name="$1"
    shift
+   # PIPESTATUS[0] is the exit status of the actual sub-script (before tee).
    "$@" 2>&1 | tee "${LOG_DIR}/log_${log_name}_${TODAY}.txt"
+   local rc=${PIPESTATUS[0]}
+   if [ "${rc}" -eq 0 ]; then
+      SUCCESS_PKGS+=("${log_name}")
+   elif [ "${rc}" -eq "${MISSING_PREREQ_RC}" ]; then
+      # The sub-script's preflight_modules call failed: a required
+      # module wasn't available. Treat as SKIPPED, not FAILED.
+      # No cleanup -- the script aborted before installing anything.
+      SKIPPED_PKGS+=("${log_name}(missing-prereq)")
+      echo ""
+      echo "### SKIP ${log_name}: a required module was not available."
+      echo "### See ${LOG_DIR}/log_${log_name}_${TODAY}.txt for which module."
+      echo "### No artifacts created; nothing to clean up."
+      echo ""
+   else
+      FAILED_PKGS+=("${log_name}(rc=${rc})")
+      echo ""
+      echo "######################################################"
+      echo "### WARNING: ${log_name} setup script exited rc=${rc}."
+      echo "### See ${LOG_DIR}/log_${log_name}_${TODAY}.txt for details."
+      echo "### main_setup.sh will continue with remaining packages."
+      echo "### Packages whose preflight requires ${log_name}'s module"
+      echo "### will mark themselves SKIPPED on entry."
+      echo "### main_setup.sh will exit non-zero at the end."
+      echo "######################################################"
+      echo ""
+      cleanup_pkg "${log_name}"
+   fi
+   return ${rc}
 }
+
+# Print a per-run summary on EXIT and propagate failure as a non-zero
+# exit code. Critical for the rocmplus sweep: dependent jobs use
+# --dependency=afterany so the chain proceeds either way, but we still
+# want sacct + the slurm log to clearly mark which versions had package
+# failures. SKIPPED alone does NOT force non-zero -- the chain ran
+# cleanly given the constraint imposed by the actual FAILED package.
+final_summary() {
+   local saved_rc=$?
+   echo ""
+   echo "=================================================================="
+   echo "  main_setup.sh per-package summary for rocm-${ROCM_VERSION:-?}"
+   echo "=================================================================="
+   if [ ${#SUCCESS_PKGS[@]} -gt 0 ]; then
+      echo "  OK       (${#SUCCESS_PKGS[@]}): ${SUCCESS_PKGS[*]}"
+   fi
+   if [ ${#SKIPPED_PKGS[@]} -gt 0 ]; then
+      echo "  SKIPPED  (${#SKIPPED_PKGS[@]}): ${SKIPPED_PKGS[*]}"
+   fi
+   if [ ${#FAILED_PKGS[@]} -gt 0 ]; then
+      echo "  FAILED   (${#FAILED_PKGS[@]}): ${FAILED_PKGS[*]}"
+      echo "=================================================================="
+      # If we got here on a normal path with zero saved_rc, force non-zero
+      # so callers (the slurm sbatch, sacct, the dependency chain logger)
+      # see this version as failed.
+      [ "${saved_rc}" -eq 0 ] && exit 1
+   else
+      echo "=================================================================="
+   fi
+}
+trap final_summary EXIT
 
 # ── Configuration summary ────────────────────────────────────────────
 echo ""
@@ -216,6 +451,10 @@ echo "  PYTHON_VERSION   : 3.${PYTHON_VERSION}"
 echo "  ROCM_INSTALLPATH : ${ROCM_INSTALLPATH}"
 echo "  DISTRO           : ${DISTRO} ${DISTRO_VERSION}"
 echo "  LOG_DIR          : ${LOG_DIR}"
+echo "  QUICK_INSTALLS   : ${QUICK_INSTALLS}"
+echo "  REPLACE_EXISTING : ${REPLACE_EXISTING}"
+echo "  KEEP_FAILED      : ${KEEP_FAILED_INSTALLS}"
+echo "  PACKAGES         : ${PACKAGES_INPUT:-<all>}"
 echo "=============================================="
 echo ""
 echo -n "Does this look correct? [Y/n] (default Y, continuing in 30s) "
@@ -231,6 +470,106 @@ fi
 
 # ── Derived paths ────────────────────────────────────────────────────
 ROCMPLUS="${TOP_INSTALL_PATH}/rocmplus-${ROCM_VERSION}"
+
+# ── Cleanup tables for failed installs ───────────────────────────────
+#
+# When a package's setup script exits with a non-zero, non-MISSING_PREREQ
+# rc, run_and_log calls
+# cleanup_pkg <label>, which `rm -rf`s every entry in the two tables
+# below for that label (unless --keep-failed-installs 1 is set).
+# Globs are intentional and are expanded by the shell at cleanup time
+# (see cleanup_pkg). These mirror the install patterns already passed
+# to the upstream `replace_pkg` helper, so any new package added to
+# main_setup.sh should add an entry here too.
+declare -A PKG_CLEAN_DIRS=(
+   [flang-new]="${ROCMPLUS}/flang-new"
+   [openmpi]="${ROCMPLUS}/openmpi* ${ROCMPLUS}/xpmem-* ${ROCMPLUS}/ucx-* ${ROCMPLUS}/ucc-*"
+   [mpi4py]="${ROCMPLUS}/mpi4py"
+   [mvapich]="${ROCMPLUS}/mvapich"
+   [rocprof-sys]="${ROCMPLUS}/rocprofiler-system"
+   [rocprof-compute]="${ROCMPLUS}/rocprofiler-compute"
+   [hpctoolkit]="${ROCMPLUS}/hpctoolkit ${ROCMPLUS}/hpcviewer"
+   [scorep]="${ROCMPLUS}/scorep ${ROCMPLUS}/pdt"
+   [tau]="${ROCMPLUS}/tau"
+   [cupy]="${ROCMPLUS}/cupy"
+   [hip-python]="${ROCMPLUS}/hip-python"
+   [tensorflow]="${ROCMPLUS}/tensorflow"
+   [jax]="${ROCMPLUS}/jax ${ROCMPLUS}/jaxlib"
+   [ftorch]="${ROCMPLUS}/ftorch"
+   [pytorch]="${ROCMPLUS}/pytorch"
+   [magma]="${ROCMPLUS}/magma"
+   [kokkos]="${ROCMPLUS}/kokkos"
+   [miniconda3]="${TOP_INSTALL_PATH}/miniconda3"
+   [miniforge3]="${TOP_INSTALL_PATH}/miniforge3"
+   [hipfort]="${ROCMPLUS}/hipfort"
+   [hipifly]="${ROCMPLUS}/hipifly"
+   [hdf5]="${ROCMPLUS}/hdf5"
+   [netcdf]="${ROCMPLUS}/netcdf"
+   [fftw]="${ROCMPLUS}/fftw"
+   [petsc]="${ROCMPLUS}/petsc"
+   [hypre]="${ROCMPLUS}/hypre"
+)
+declare -A PKG_CLEAN_MODS=(
+   [flang-new]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/amdflang-new"
+   [openmpi]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/openmpi"
+   [mpi4py]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/mpi4py"
+   [mvapich]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/mvapich"
+   [rocprof-sys]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/rocprofiler-system"
+   [rocprof-compute]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/rocprofiler-compute"
+   [hpctoolkit]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/hpctoolkit"
+   [scorep]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/scorep"
+   [tau]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/tau"
+   [cupy]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/cupy"
+   [hip-python]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/hip-python"
+   [tensorflow]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/tensorflow"
+   [jax]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/jax"
+   [ftorch]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/ftorch"
+   [pytorch]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/pytorch"
+   [magma]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/magma"
+   [kokkos]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/kokkos"
+   [miniconda3]="${TOP_MODULE_PATH}/LinuxPlus/miniconda3"
+   [miniforge3]="${TOP_MODULE_PATH}/LinuxPlus/miniforge3"
+   [hipfort]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/hipfort_from_source"
+   [hipifly]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/hipifly"
+   [hdf5]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/hdf5"
+   [netcdf]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/netcdf-c ${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/netcdf-fortran"
+   [fftw]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/fftw"
+   [petsc]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/petsc"
+   [hypre]="${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/hypre"
+)
+
+# ── --replace-existing: per-package replacement helper ───────────────
+# Called before each per-package install block. Removes that one package's
+# install + module dirs ONLY when:
+#   1. REPLACE_EXISTING=1, AND
+#   2. its build flag is 1 (or "always" for packages with no build gate)
+# This way --quick-installs 1 does not nuke the long-pole packages
+# (pytorch/jax/etc.) that the current run is *not* going to rebuild.
+#
+# Usage:
+#   replace_pkg <build_flag_var | "always"> <install_path> [install_path...] \
+#               -- <module_path> [module_path...]
+# Paths may contain shell globs.
+replace_pkg()
+{
+   [[ "${REPLACE_EXISTING}" == "1" ]] || return 0
+   local flag="$1"; shift
+   if [[ "${flag}" != "always" ]]; then
+      # Indirect expansion: BUILD_PYTORCH, BUILD_JAX, etc.
+      [[ "${!flag:-0}" == "1" ]] || return 0
+   fi
+   local label="install"
+   shopt -s nullglob
+   for p in "$@"; do
+      if [[ "${p}" == "--" ]]; then label="module"; continue; fi
+      local matched=( ${p} )
+      for q in "${matched[@]}"; do
+         echo "[replace_pkg] removing ${label}: ${q}"
+         ${SUDO} rm -rf "${q}"
+      done
+   done
+   shopt -u nullglob
+}
 
 USE_CUSTOM_PATHS=0
 if [[ "${TOP_INSTALL_PATH}" != "/opt" || "${TOP_MODULE_PATH}" != "/etc/lmod/modules" ]]; then
@@ -279,32 +618,40 @@ fi
 # Each block checks whether the package directory already exists before
 # invoking the setup script, allowing incremental/rerun installs.
 
-if [[ ! -d ${ROCMPLUS}/flang-new ]] || [ "${SKIP_ROCM_INSTALL}" == 0 ]; then
+replace_pkg BUILD_FLANGNEW "${ROCMPLUS}/flang-new" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/amdflang-new"
+if [[ "${BUILD_FLANGNEW}" == "1" ]] && { [[ ! -d ${ROCMPLUS}/flang-new ]] || [ "${SKIP_ROCM_INSTALL}" == 0 ]; }; then
    run_and_log flang-new rocm/scripts/flang-new_setup.sh ${COMMON_OPTIONS} --build-flang-new ${BUILD_FLANGNEW} \
       $(path_args " " rocmplus-${ROCM_VERSION}/amdflang-new)
 fi
 
-if ! compgen -G "${ROCMPLUS}/openmpi*" >/dev/null; then
+# openmpi block also produces xpmem-*, ucx-*, ucc-* under ROCMPLUS.
+replace_pkg BUILD_OPENMPI "${ROCMPLUS}/openmpi*" "${ROCMPLUS}/xpmem-*" "${ROCMPLUS}/ucx-*" "${ROCMPLUS}/ucc-*" \
+   -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/openmpi"
+if [[ "${BUILD_OPENMPI}" == "1" ]] && ! compgen -G "${ROCMPLUS}/openmpi*" >/dev/null; then
    run_and_log openmpi comm/scripts/openmpi_setup.sh ${COMMON_OPTIONS} --build-xpmem 1 \
       $(path_args " " rocmplus-${ROCM_VERSION}/openmpi)
 fi
 
-if [[ ! -d ${ROCMPLUS}/mpi4py ]]; then
+replace_pkg BUILD_MPI4PY "${ROCMPLUS}/mpi4py" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/mpi4py"
+if [[ "${BUILD_MPI4PY}" == "1" ]] && [[ ! -d ${ROCMPLUS}/mpi4py ]]; then
    run_and_log mpi4py comm/scripts/mpi4py_setup.sh ${COMMON_OPTIONS} --build-mpi4py ${BUILD_MPI4PY} \
       $(path_args mpi4py rocmplus-${ROCM_VERSION}/mpi4py)
 fi
 
-if [[ ! -d ${ROCMPLUS}/mvapich ]]; then
+replace_pkg BUILD_MVAPICH "${ROCMPLUS}/mvapich" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/mvapich"
+if [[ "${BUILD_MVAPICH}" == "1" ]] && [[ ! -d ${ROCMPLUS}/mvapich ]]; then
    run_and_log mvapich comm/scripts/mvapich_setup.sh ${COMMON_OPTIONS} \
       $(path_args mvapich rocmplus-${ROCM_VERSION}/mvapich)
 fi
 
-if [[ ! -d ${ROCMPLUS}/rocprofiler-system ]]; then
+replace_pkg BUILD_ROCPROF_SYS "${ROCMPLUS}/rocprofiler-system" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/rocprofiler-system"
+if [[ "${BUILD_ROCPROF_SYS}" == "1" ]] && [[ ! -d ${ROCMPLUS}/rocprofiler-system ]]; then
    run_and_log rocprof-sys tools/scripts/rocprof-sys_setup.sh ${COMMON_OPTIONS} --install-rocprof-sys-from-source ${INSTALL_ROCPROF_SYS_FROM_SOURCE} --python-version ${PYTHON_VERSION} \
       $(path_args rocprofiler-system rocmplus-${ROCM_VERSION}/rocprofiler-system)
 fi
 
-if [[ ! -d ${ROCMPLUS}/rocprofiler-compute ]]; then
+replace_pkg BUILD_ROCPROF_COMPUTE "${ROCMPLUS}/rocprofiler-compute" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/rocprofiler-compute"
+if [[ "${BUILD_ROCPROF_COMPUTE}" == "1" ]] && [[ ! -d ${ROCMPLUS}/rocprofiler-compute ]]; then
    run_and_log rocprof-compute tools/scripts/rocprof-compute_setup.sh ${COMMON_OPTIONS} --install-rocprof-compute-from-source ${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE} --python-version ${PYTHON_VERSION} \
       $(path_args rocprofiler-compute rocmplus-${ROCM_VERSION}/rocprofiler-compute)
 fi
@@ -314,111 +661,135 @@ fi
 #      $(path_args rocprofiler-sdk rocmplus-${ROCM_VERSION}/rocprofiler-sdk)
 #fi
 
-if [[ ! -d ${ROCMPLUS}/hpctoolkit ]]; then
+replace_pkg BUILD_HPCTOOLKIT "${ROCMPLUS}/hpctoolkit" "${ROCMPLUS}/hpcviewer" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/hpctoolkit"
+if [[ "${BUILD_HPCTOOLKIT}" == "1" ]] && [[ ! -d ${ROCMPLUS}/hpctoolkit ]]; then
    run_and_log hpctoolkit tools/scripts/hpctoolkit_setup.sh ${COMMON_OPTIONS} --build-hpctoolkit ${BUILD_HPCTOOLKIT} \
       $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--hpctoolkit-install-path ${ROCMPLUS}/hpctoolkit --hpcviewer-install-path ${ROCMPLUS}/hpcviewer --module-path ${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/hpctoolkit")
 fi
 
-if [[ ! -d ${ROCMPLUS}/scorep ]]; then
+# scorep + tau share ${ROCMPLUS}/pdt; replace pdt only if BOTH scorep and tau
+# are being rebuilt (otherwise leave it alone for whichever is staying).
+if [[ "${BUILD_SCOREP}" == "1" && "${BUILD_TAU}" == "1" ]]; then
+   replace_pkg always "${ROCMPLUS}/pdt"
+fi
+replace_pkg BUILD_SCOREP "${ROCMPLUS}/scorep" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/scorep"
+if [[ "${BUILD_SCOREP}" == "1" ]] && [[ ! -d ${ROCMPLUS}/scorep ]]; then
    run_and_log scorep tools/scripts/scorep_setup.sh ${COMMON_OPTIONS} --build-scorep ${BUILD_SCOREP} \
       $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--scorep-install-path ${ROCMPLUS}/scorep --pdt-install-path ${ROCMPLUS}/pdt --module-path ${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/scorep")
 fi
 
 #run_and_log grafana tools/scripts/grafana_setup.sh
 
-if [[ ! -d ${ROCMPLUS}/tau ]]; then
+replace_pkg BUILD_TAU "${ROCMPLUS}/tau" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/tau"
+if [[ "${BUILD_TAU}" == "1" ]] && [[ ! -d ${ROCMPLUS}/tau ]]; then
    run_and_log tau tools/scripts/tau_setup.sh ${COMMON_OPTIONS} --build-tau ${BUILD_TAU} \
       $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--tau-install-path ${ROCMPLUS}/tau --pdt-install-path ${ROCMPLUS}/pdt --module-path ${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/tau")
 fi
-exit
 
 #run_and_log compiler extras/scripts/compiler_setup.sh
 
-if [[ ! -d ${ROCMPLUS}/cupy ]]; then
+replace_pkg BUILD_CUPY "${ROCMPLUS}/cupy" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/cupy"
+if [[ "${BUILD_CUPY}" == "1" ]] && [[ ! -d ${ROCMPLUS}/cupy ]]; then
    run_and_log cupy extras/scripts/cupy_setup.sh ${COMMON_OPTIONS} --build-cupy ${BUILD_CUPY} \
       $(path_args cupy rocmplus-${ROCM_VERSION}/cupy)
 fi
 
-if [[ ! -d ${ROCMPLUS}/hip-python ]]; then
+replace_pkg BUILD_HIP_PYTHON "${ROCMPLUS}/hip-python" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/hip-python"
+if [[ "${BUILD_HIP_PYTHON}" == "1" ]] && [[ ! -d ${ROCMPLUS}/hip-python ]]; then
    run_and_log hip-python extras/scripts/hip-python_setup.sh ${COMMON_OPTIONS} --build-hip-python ${BUILD_HIP_PYTHON} \
       $(path_args hip-python rocmplus-${ROCM_VERSION}/hip-python)
 fi
 
-if [[ ! -d ${ROCMPLUS}/tensorflow ]]; then
+replace_pkg BUILD_TENSORFLOW "${ROCMPLUS}/tensorflow" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/tensorflow"
+if [[ "${BUILD_TENSORFLOW}" == "1" ]] && [[ ! -d ${ROCMPLUS}/tensorflow ]]; then
    run_and_log tensorflow extras/scripts/tensorflow_setup.sh ${COMMON_OPTIONS} --build-tensorflow ${BUILD_TENSORFLOW} \
       $(path_args tensorflow rocmplus-${ROCM_VERSION}/tensorflow)
 fi
 
-if [[ ! -d ${ROCMPLUS}/jax ]]; then
+replace_pkg BUILD_JAX "${ROCMPLUS}/jax" "${ROCMPLUS}/jaxlib" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/jax"
+if [[ "${BUILD_JAX}" == "1" ]] && [[ ! -d ${ROCMPLUS}/jax ]]; then
    run_and_log jax extras/scripts/jax_setup.sh ${COMMON_OPTIONS} --build-jax ${BUILD_JAX} \
       $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--jax-install-path ${ROCMPLUS}/jax --jaxlib-install-path ${ROCMPLUS}/jaxlib --module-path ${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/jax")
 fi
 
-if [[ ! -d ${ROCMPLUS}/ftorch ]]; then
+replace_pkg BUILD_FTORCH "${ROCMPLUS}/ftorch" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/ftorch"
+if [[ "${BUILD_FTORCH}" == "1" ]] && [[ ! -d ${ROCMPLUS}/ftorch ]]; then
    run_and_log ftorch extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} --build-ftorch ${BUILD_FTORCH} \
       $(path_args ftorch rocmplus-${ROCM_VERSION}/ftorch)
 fi
 
-if [[ ! -d ${ROCMPLUS}/pytorch ]]; then
+replace_pkg BUILD_PYTORCH "${ROCMPLUS}/pytorch" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/pytorch"
+if [[ "${BUILD_PYTORCH}" == "1" ]] && [[ ! -d ${ROCMPLUS}/pytorch ]]; then
    run_and_log pytorch extras/scripts/pytorch_setup.sh ${COMMON_OPTIONS} --build-pytorch ${BUILD_PYTORCH} --python_version ${PYTHON_VERSION} \
       $(path_args pytorch rocmplus-${ROCM_VERSION}/pytorch)
 fi
 
-if [[ ! -d ${ROCMPLUS}/magma ]]; then
+replace_pkg BUILD_MAGMA "${ROCMPLUS}/magma" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/magma"
+if [[ "${BUILD_MAGMA}" == "1" ]] && [[ ! -d ${ROCMPLUS}/magma ]]; then
    run_and_log magma extras/scripts/magma_setup.sh ${COMMON_OPTIONS} --build-magma ${BUILD_MAGMA} \
       $(path_args magma rocmplus-${ROCM_VERSION}/magma)
 fi
 
 run_and_log apps extras/scripts/apps_setup.sh
 
-if [[ ! -d ${ROCMPLUS}/kokkos ]]; then
+replace_pkg BUILD_KOKKOS "${ROCMPLUS}/kokkos" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/kokkos"
+if [[ "${BUILD_KOKKOS}" == "1" ]] && [[ ! -d ${ROCMPLUS}/kokkos ]]; then
    run_and_log kokkos extras/scripts/kokkos_setup.sh ${COMMON_OPTIONS} --build-kokkos ${BUILD_KOKKOS} \
       $(path_args kokkos rocmplus-${ROCM_VERSION}/kokkos)
 fi
 
-if [[ ! -d ${TOP_INSTALL_PATH}/miniconda3 ]]; then
+replace_pkg BUILD_MINICONDA3 "${TOP_INSTALL_PATH}/miniconda3" -- "${TOP_MODULE_PATH}/LinuxPlus/miniconda3"
+if [[ "${BUILD_MINICONDA3}" == "1" ]] && [[ ! -d ${TOP_INSTALL_PATH}/miniconda3 ]]; then
    run_and_log miniconda3 extras/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniconda3 ${BUILD_MINICONDA3} --python-version ${PYTHON_VERSION} \
       $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH}/miniconda3 --module-path ${TOP_MODULE_PATH}/LinuxPlus/miniconda3")
 fi
 
-if [[ ! -d ${TOP_INSTALL_PATH}/miniforge3 ]]; then
+replace_pkg BUILD_MINIFORGE3 "${TOP_INSTALL_PATH}/miniforge3" -- "${TOP_MODULE_PATH}/LinuxPlus/miniforge3"
+if [[ "${BUILD_MINIFORGE3}" == "1" ]] && [[ ! -d ${TOP_INSTALL_PATH}/miniforge3 ]]; then
    run_and_log miniforge3 extras/scripts/miniforge3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniforge3 ${BUILD_MINIFORGE3} \
       $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH}/miniforge3 --module-path ${TOP_MODULE_PATH}/LinuxPlus/miniforge3")
 fi
 
-if [[ ! -d ${ROCMPLUS}/hipfort ]]; then
+replace_pkg BUILD_HIPFORT "${ROCMPLUS}/hipfort" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/hipfort_from_source"
+if [[ "${BUILD_HIPFORT}" == "1" ]] && [[ ! -d ${ROCMPLUS}/hipfort ]]; then
    run_and_log hipfort extras/scripts/hipfort_setup.sh ${COMMON_OPTIONS} --build-hipfort ${BUILD_HIPFORT} \
       $(path_args hipfort rocmplus-${ROCM_VESION}/hipfort_from_source)
 fi
 
-if [[ ! -d ${ROCMPLUS}/hipifly ]]; then
+replace_pkg BUILD_HIPIFLY "${ROCMPLUS}/hipifly" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/hipifly"
+if [[ "${BUILD_HIPIFLY}" == "1" ]] && [[ ! -d ${ROCMPLUS}/hipifly ]]; then
    run_and_log hipifly extras/scripts/hipifly_setup.sh --rocm-version ${ROCM_VERSION} --hipifly-module ${HIPIFLY_MODULE} \
       $(path_args hipifly rocmplus-${ROCM_VESION}/hipifly)
 fi
 
-if [[ ! -d ${ROCMPLUS}/hdf5 ]]; then
+replace_pkg BUILD_HDF5 "${ROCMPLUS}/hdf5" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/hdf5"
+if [[ "${BUILD_HDF5}" == "1" ]] && [[ ! -d ${ROCMPLUS}/hdf5 ]]; then
    run_and_log hdf5 extras/scripts/hdf5_setup.sh ${COMMON_OPTIONS} --build-hdf5 ${BUILD_HDF5} \
       $(path_args hdf5 rocmplus-${ROCM_VESION}/hdf5)
 fi
 
-if [[ ! -d ${ROCMPLUS}/netcdf ]]; then
+replace_pkg BUILD_NETCDF "${ROCMPLUS}/netcdf" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/netcdf-c" "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/netcdf-fortran"
+if [[ "${BUILD_NETCDF}" == "1" ]] && [[ ! -d ${ROCMPLUS}/netcdf ]]; then
    run_and_log netcdf extras/scripts/netcdf_setup.sh ${COMMON_OPTIONS} --build-netcdf ${BUILD_NETCDF} \
       $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${ROCMPLUS}/netcdf --netcdf-c-module-path ${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/netcdf-c --netcdf-f-module-path ${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/netcdf-fortran")
 fi
 
-if [[ ! -d ${ROCMPLUS}/fftw ]]; then
+replace_pkg BUILD_FFTW "${ROCMPLUS}/fftw" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/fftw"
+if [[ "${BUILD_FFTW}" == "1" ]] && [[ ! -d ${ROCMPLUS}/fftw ]]; then
    run_and_log fftw extras/scripts/fftw_setup.sh ${COMMON_OPTIONS} --build-fftw ${BUILD_FFTW} \
       $(path_args fftw rocmplus-${ROCM_VERSION}/fftw)
 fi
 
 #run_and_log x11vnc extras/scripts/x11vnc_setup.sh --build-x11vnc ${BUILD_X11VNC}
 
-if [[ ! -d ${ROCMPLUS}/petsc ]]; then
+replace_pkg BUILD_PETSC "${ROCMPLUS}/petsc" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/petsc"
+if [[ "${BUILD_PETSC}" == "1" ]] && [[ ! -d ${ROCMPLUS}/petsc ]]; then
    run_and_log petsc extras/scripts/petsc_setup.sh ${COMMON_OPTIONS} --build-petsc ${BUILD_PETSC} \
       $(path_args petsc rocmplus-${ROCM_VERSION}/petsc)
 fi
 
-if [[ ! -d ${ROCMPLUS}/hypre ]]; then
+replace_pkg BUILD_HYPRE "${ROCMPLUS}/hypre" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/hypre"
+if [[ "${BUILD_HYPRE}" == "1" ]] && [[ ! -d ${ROCMPLUS}/hypre ]]; then
    run_and_log hypre extras/scripts/hypre_setup.sh ${COMMON_OPTIONS} --build-hypre ${BUILD_HYPRE} \
       $(path_args hypre rocmplus-${ROCM_VERSION}/hypre)
 fi

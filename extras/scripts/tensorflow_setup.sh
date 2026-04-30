@@ -7,7 +7,8 @@ MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/tensorflow
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 TF_PATH=/opt/rocmplus-${ROCM_VERSION}/tensorflow
 TF_PATH_INPUT=""
-GIT_BRANCH="r2.20-rocm-enhanced"
+TENSORFLOW_VERSION="r2.20-rocm-enhanced"
+GIT_BRANCH="${TENSORFLOW_VERSION}"
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -28,6 +29,7 @@ usage()
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
    echo "  --install-path [ TF_PATH ] default $TF_PATH "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
+   echo "  --tensorflow-version [ TENSORFLOW_VERSION ] git branch/tag of the upstream TensorFlow tree to build (synonym for --git-branch), default $TENSORFLOW_VERSION"
    echo "  --git-branch [ GIT_BRANCH ] specify what commit git branch you want to build, default is $GIT_BRANCH"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --help: print this usage information"
@@ -64,6 +66,12 @@ do
           shift
           GIT_BRANCH=${1}
 	  reset-last
+          ;;
+      "--tensorflow-version")
+          shift
+          TENSORFLOW_VERSION=${1}
+          GIT_BRANCH=${1}
+          reset-last
           ;;
       "--help")
           usage

@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Fail fast on errors and surface failures inside pipes. Not using -u
+# (nounset) because some conditional code paths rely on unset variables.
+set -eo pipefail
+
+# Shared module-prerequisite checker (exits 42 = SKIPPED if a module is
+# unavailable). See bare_system/lib/preflight.sh.
+# shellcheck source=../../bare_system/lib/preflight.sh
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../bare_system/lib/preflight.sh"
+
 # Variables controlling setup process
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/fftw
 BUILD_FFTW=0
@@ -202,8 +211,8 @@ else
 
       # default build is without mpi
       ENABLE_MPI=""
-      module load ${ROCM_MODULE}
-      module load ${MPI_MODULE}
+      REQUIRED_MODULES=( "${ROCM_MODULE}/${ROCM_VERSION}" "${MPI_MODULE}" )
+      preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
       if [[ `which mpicc | wc -l` -eq 1 ]]; then
 	 # if mpi is found in the path, build fftw parallel
          ENABLE_MPI="--enable-mpi"
@@ -224,11 +233,18 @@ else
 	 C_COMPILER="mpicc"
       fi	      
 
+      # Use all available cores for the three precision variants. Without
+      # `-j` each of these three full builds runs serially on one core,
+      # which dominated the rocmplus install wallclock at ~23min on the
+      # sh5 nodes (96 cores). With `-j$(nproc)` it drops to a few minutes.
+      MAKE_JOBS=$(nproc 2>/dev/null || echo 16)
+
       # configure for double precision
       ./configure --prefix=${FFTW_PATH} \
 	          --enable-shared --enable-static --enable-threads --enable-openmp \
 		  ${ENABLE_MPI} --enable-threads --enable-sse2 --enable-avx --enable-avx2 \
 		  CC=${C_COMPILER} ${USE_MPICC}
+      make -j ${MAKE_JOBS}
       make install
 
       # configure for single precision
@@ -236,6 +252,7 @@ else
 	          --enable-shared --enable-static --enable-threads --enable-openmp \
 		  ${ENABLE_MPI} --enable-threads --enable-sse2 --enable-avx --enable-avx2 --enable-float \
 		  CC=${C_COMPILER} ${USE_MPICC}
+      make -j ${MAKE_JOBS}
       make install
 
       # configure for long double precision
@@ -243,6 +260,7 @@ else
 	          --enable-shared --enable-static --enable-threads --enable-openmp \
 		  ${ENABLE_MPI} --enable-threads --enable-long-double \
 		  CC=${C_COMPILER} ${USE_MPICC}
+      make -j ${MAKE_JOBS}
       make install
 
       cd ..

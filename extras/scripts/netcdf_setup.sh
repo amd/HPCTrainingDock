@@ -1,5 +1,17 @@
 #!/bin/bash
 
+# Fail fast on errors (errexit) and surface failures inside pipes
+# (pipefail). Without this the audited PnetCDF + netcdf-c failures in
+# job 7865 were hidden under rc=0 and the modulefiles were still
+# written. Note: NOT using -u (nounset); some conditional code paths
+# below intentionally use unset variables.
+set -eo pipefail
+
+# Shared module-prerequisite checker (exits 42 = SKIPPED if a module is
+# unavailable). See bare_system/lib/preflight.sh.
+# shellcheck source=../../bare_system/lib/preflight.sh
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../bare_system/lib/preflight.sh"
+
 # Variables controlling setup process
 NETCDF_C_MODULE_PATH=/etc/lmod/modules/ROCmPlus/netcdf-c
 NETCDF_F_MODULE_PATH=/etc/lmod/modules/ROCmPlus/netcdf-fortran
@@ -15,6 +27,14 @@ F_COMPILER_INPUT=""
 NETCDF_C_VERSION="4.9.3"
 NETCDF_F_VERSION="4.6.2"
 HDF5_MODULE="hdf5"
+# netcdf depends on hdf5, which itself depends on openmpi. Without
+# loading openmpi explicitly here, the only MPI on the build path was
+# whatever hdf5's modulefile happened to drag in -- when hdf5 was
+# rebuilt against a /nfsapps rocm SDK that exposed mismatched libstdc++,
+# netcdf's PnetCDF + netcdf-c configure picked up the wrong toolchain.
+# Loading the openmpi module up front fixes that and matches what
+# hdf5_setup.sh, hypre_setup.sh, petsc_setup.sh, etc. already do.
+MPI_MODULE="openmpi"
 NETCDF_PATH=/opt/rocmplus-${ROCM_VERSION}/netcdf
 NETCDF_PATH_INPUT=""
 ENABLE_PNETCDF="OFF"
@@ -47,6 +67,7 @@ usage()
    echo "  --netcdf-c-module-path [ NETCDF_C_MODULE_PATH ] default $NETCDF_C_MODULE_PATH"
    echo "  --netcdf-f-module-path [ NETCDF_F_MODULE_PATH ] default $NETCDF_F_MODULE_PATH"
    echo "  --hdf5-module [ HDF5_MODULE ] default $HDF5_MODULE"
+   echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
    echo "  --install-path [ NETCDF_PATH ] default $NETCDF_PATH"
    echo "  --c-compiler [ C_COMPILER ] default ${C_COMPILER}"
    echo "  --cxx-compiler [ CXX_COMPILER ] default ${CXX_COMPILER}"
@@ -103,6 +124,11 @@ do
       "--hdf5-module")
           shift
           HDF5_MODULE=${1}
+          reset-last
+          ;;
+      "--mpi-module")
+          shift
+          MPI_MODULE=${1}
           reset-last
           ;;
       "--c-compiler")
@@ -250,8 +276,14 @@ else
          ${SUDO} chmod -R a+w ${NETCDF_PATH}
       fi
 
-      module load ${ROCM_MODULE}
-      module load ${HDF5_MODULE}
+      # Order matters: ROCm first (extends MODULEPATH with rocmplus-<v>
+      # so MPI / HDF5 / etc. are findable), then MPI before HDF5 so
+      # mpicc / mpifort and openmpi's runtime libs are first on
+      # PATH / LD_LIBRARY_PATH (otherwise the hdf5 module's MPI hints
+      # can be inconsistent with what PnetCDF / netcdf-c pick up via
+      # `which mpicc`).
+      REQUIRED_MODULES=( "${ROCM_MODULE}/${ROCM_VERSION}" "${MPI_MODULE}" "${HDF5_MODULE}" )
+      preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
       if [[ `which h5dump | wc -l` -eq 0 ]]; then
          echo "h5dump was not found in PATH after loading the hdf5 module"
          echo "hdf5 is a requirement for netcdf, please make sure hdf5"
@@ -274,14 +306,26 @@ else
          F_COMPILER=${F_COMPILER_INPUT}
       fi
 
+      # Use all available cores for the netcdf builds. Without -j, each of
+      # pnetcdf, netcdf-c, netcdf-fortran ran serially on one core (~10min
+      # combined on sh5); with -j$(nproc) it drops to a couple of minutes.
+      MAKE_JOBS=$(nproc 2>/dev/null || echo 16)
+
       if [ "${HDF5_ENABLE_PARALLEL}" = "ON" ]; then
          ENABLE_PNETCDF="ON"
-	 module load ${HDF5_MPI_MODULE}
+         # HDF5_MPI_MODULE was historically referenced here but never set
+         # by main_setup.sh -- a latent no-op. The MPI_MODULE load above
+         # is what was actually wanted. Keep the conditional load only if
+         # an explicit override is provided (defensive).
+         if [ -n "${HDF5_MPI_MODULE:-}" ]; then
+            module load "${HDF5_MPI_MODULE}"
+         fi
          # install pnetcdf
          git clone --branch checkpoint.1.14.0 https://github.com/Parallel-NetCDF/PnetCDF.git
          cd PnetCDF
          autoreconf -i
          ./configure --prefix=${NETCDF_PATH}/pnetcdf MPICC=`which mpicc` MPIF90=`which mpifort`
+         make -j ${MAKE_JOBS}
          make install
          cd ..
       fi
@@ -309,6 +353,7 @@ else
 	    -DPNETCDF_INCLUDE_DIR=${NETCDF_PATH}/pnetcdf/include \
 	    -DNETCDF_ENABLE_FILTER_SZIP=OFF -DNETCDF_ENABLE_NCZARR=OFF ..
 
+      cmake --build . -j ${MAKE_JOBS}
       make install
 
       cd ../..
@@ -330,6 +375,7 @@ else
 	    -DENABLE_TESTS=OFF -DBUILD_EXAMPLES=OFF \
 	    -DCMAKE_Fortran_COMPILER=$F_COMPILER ..
 
+      cmake --build . -j ${MAKE_JOBS}
       make install
 
       cd ../..
@@ -346,6 +392,27 @@ else
          ${SUDO} chmod go-w ${NETCDF_PATH}
       fi
 
+   fi
+
+   # Sanity gate: only write modulefiles if the install actually produced
+   # the expected libraries. Catches the silent-failure case where
+   # PnetCDF / netcdf-c failed mid-build (audit P1 in 7865) but the
+   # script still went on to publish broken modulefiles.
+   for lib in \
+      "${NETCDF_C_PATH}/lib/libnetcdf.so" \
+      "${NETCDF_F_PATH}/lib/libnetcdff.so"; do
+      if ! { [ -f "${lib}" ] || [ -f "${lib}.0" ] || [ -L "${lib}" ]; }; then
+         echo "ERROR: expected netcdf library not found: ${lib}" >&2
+         echo "       Refusing to write netcdf-c / netcdf-fortran modulefiles." >&2
+         exit 1
+      fi
+   done
+   if [ "${ENABLE_PNETCDF}" = "ON" ] && [ ! -f "${NETCDF_PATH}/pnetcdf/lib/libpnetcdf.so" ] \
+        && [ ! -f "${NETCDF_PATH}/pnetcdf/lib/libpnetcdf.a" ]; then
+      echo "ERROR: PnetCDF was requested (HDF5_ENABLE_PARALLEL=ON) but" >&2
+      echo "       ${NETCDF_PATH}/pnetcdf/lib/libpnetcdf.{so,a} is missing." >&2
+      echo "       Refusing to write netcdf-c / netcdf-fortran modulefiles." >&2
+      exit 1
    fi
 
    # Create a module file for netcdf-c

@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Fail fast on errors and surface failures inside pipes. Not using -u
+# (nounset) because some conditional code paths rely on unset variables.
+set -eo pipefail
+
+# Shared module-prerequisite checker (exits 42 = SKIPPED if a module is
+# unavailable). See bare_system/lib/preflight.sh.
+# shellcheck source=../../bare_system/lib/preflight.sh
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../bare_system/lib/preflight.sh"
+
 # Variables controlling setup process
 ROCM_VERSION=6.2.0
 BUILD_FTORCH=0
@@ -8,6 +17,7 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 FTORCH_PATH=/opt/rocmplus-${ROCM_VERSION}/ftorch
 FTORCH_PATH_INPUT=""
 PYTORCH_MODULE=pytorch
+FTORCH_VERSION=""    # empty -> default branch (main); else passed to git checkout after clone
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -29,6 +39,7 @@ usage()
    echo "  --pytorch-module [ PYTORCH_MODULE ] default $PYTORCH_MODULE"
    echo "  --install-path [ FTORCH_PATH ] default $FTORCH_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --ftorch-version [ FTORCH_VERSION ] git tag/branch/commit to check out after clone (default: repo HEAD)"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --help: print this usage information"
    exit 1
@@ -82,6 +93,11 @@ do
           shift
           PYTORCH_MODULE=${1}
 	  reset-last
+          ;;
+      "--ftorch-version")
+          shift
+          FTORCH_VERSION=${1}
+          reset-last
           ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
@@ -144,11 +160,8 @@ else
       echo "============================"
       echo ""
 
-      # Load the ROCm version for this FTorch build
-      #source /etc/profile.d/lmod.sh
-      #source /etc/profile.d/z00_lmod.sh
-      module load rocm/${ROCM_VERSION}
-      module load ${PYTORCH_MODULE}
+      REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" "${PYTORCH_MODULE}" )
+      preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
       if [ -d "$FTORCH_PATH" ]; then
          # don't use sudo if user has write access to install path
@@ -167,7 +180,11 @@ else
          ${SUDO} chmod a+w $FTORCH_PATH
       fi
 
-      git clone https://github.com/Cambridge-ICCS/FTorch.git 
+      git clone https://github.com/Cambridge-ICCS/FTorch.git
+      if [ -n "${FTORCH_VERSION}" ]; then
+         echo "Checking out FTorch ref: ${FTORCH_VERSION}"
+         (cd FTorch && git checkout "${FTORCH_VERSION}")
+      fi
       cd FTorch
 
       mkdir build && cd build

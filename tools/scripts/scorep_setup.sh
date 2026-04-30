@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Fail fast on errors and surface failures inside pipes. Not using -u
+# (nounset) because some conditional code paths rely on unset variables.
+set -eo pipefail
+
+# Shared module-prerequisite checker (exits 42 = SKIPPED if a module is
+# unavailable). See bare_system/lib/preflight.sh.
+# shellcheck source=../../bare_system/lib/preflight.sh
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../bare_system/lib/preflight.sh"
+
 # Variables controlling setup process
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/scorep
@@ -170,9 +179,11 @@ else
 
       CUR_DIR=`pwd`
 
-      source /etc/profile.d/lmod.sh
-      module load rocm/${ROCM_VERSION}
-      module load amdclang
+      # MPI is preflighted as a soft dep -- the script has an apt-get
+      # fallback if the MPI_MODULE module isn't available, so we do not
+      # gate on it here. rocm + amdclang are hard deps.
+      REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" "amdclang" )
+      preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
 
      # don't use sudo if user has write access to both install paths

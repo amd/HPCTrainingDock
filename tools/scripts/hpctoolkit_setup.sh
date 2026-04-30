@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Fail fast on errors and surface failures inside pipes. Not using -u
+# (nounset) because some conditional code paths rely on unset variables.
+set -eo pipefail
+
+# Shared module-prerequisite checker (exits 42 = SKIPPED if a module is
+# unavailable). See bare_system/lib/preflight.sh.
+# shellcheck source=../../bare_system/lib/preflight.sh
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../bare_system/lib/preflight.sh"
+
 # Variables controlling setup process
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/hpctoolkit
@@ -151,10 +160,8 @@ else
       echo "============================"
       echo ""
 
-      #source /etc/profile.d/lmod.sh
-      #source /etc/profile.d/z00_lmod.sh
-      module load rocm/${ROCM_VERSION}
-      module load openmpi
+      REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" "openmpi" )
+      preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
       # don't use sudo if user has write access to both install paths
       if [ -d "$HPCTOOLKIT_PATH" ]; then
