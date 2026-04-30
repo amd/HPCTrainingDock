@@ -277,7 +277,7 @@ else
 
 	local base = "${HPCTOOLKIT_PATH}"
 
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	setenv("HPCTOOLKIT_PATH", base)
 	prepend_path("PATH",pathJoin(base, "bin"))
 	prepend_path("PATH","${HPCVIEWER_PATH}/bin")

@@ -746,7 +746,7 @@ ${SUDO} mkdir -p ${MODULE_PATH}
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	whatis("PyTorch version ${PYTORCH_VERSION} with ROCm Support")
 
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	load("${MPI_MODULE}")
 	conflict("miniconda3")
 	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}")

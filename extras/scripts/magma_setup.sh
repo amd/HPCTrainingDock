@@ -291,7 +291,7 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${MAGMA_VERSION}.lua
 	whatis("Magma version ${MAGMA_VERSION} for AMD hardware")
 
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	load("amdclang")
 	setenv("MAGMA_PATH","${MAGMA_PATH}")
 	prepend_path("LD_LIBRARY_PATH","${MAGMA_PATH}/lib")

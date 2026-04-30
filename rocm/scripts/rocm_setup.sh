@@ -515,6 +515,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${AMDCLANG_VERSION}-${ROCM_VERSION}.lua
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("LD_RUN_PATH", pathJoin(base, "lib"))
 	prepend_path("CPATH", pathJoin(base, "include"))
+	prereq("rocm/${ROCM_VERSION}")
 	family("compiler")
 EOF
 
@@ -622,7 +623,7 @@ if [ "${INCLUDE_TOOLS}" = "1" ]; then
         setenv("${TOOL_NAME_UC}_SHARE",shareDir)
         prepend_path("PATH", pathJoin(shareDir, "bin"))
 
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
 EOF
 
@@ -987,7 +988,6 @@ EOF
 	--  prereq("mongodb-tools")
 	local home = os.getenv("HOME")
 	setenv("MPLCONFIGDIR",pathJoin(home,".matplotlib"))
-	set_shell_function("omniperf",'/opt/rocm-${ROCM_VERSION}/bin/rocprof-compute "$@"',"/opt/rocm-${ROCM_VERSION}/bin/rocprof-compute $*")
 
 EOF
          fi
