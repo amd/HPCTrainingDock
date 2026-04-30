@@ -364,12 +364,13 @@ cleanup_pkg() {
    fi
 }
 
-# Sentinel rc returned by bare_system/lib/preflight.sh's
-# preflight_modules helper to signal "this package's required modules
-# are not all available" (e.g., openmpi failed earlier so its module
-# was never written, or the user typoed a module name). Reclassified
-# below as SKIPPED, not FAILED -- no cleanup, doesn't force non-zero
-# exit on its own.
+# Sentinel rc returned by each setup script's inlined preflight_modules
+# helper to signal "this package's required modules are not all
+# available" (e.g., openmpi failed earlier so its module was never
+# written, or the user typoed a module name). Reclassified below as
+# SKIPPED, not FAILED -- no cleanup, doesn't force non-zero exit on
+# its own. Each setup script defines its own copy of this constant
+# (see e.g. comm/scripts/openmpi_setup.sh); kept in sync by convention.
 MISSING_PREREQ_RC=42
 
 run_and_log() {

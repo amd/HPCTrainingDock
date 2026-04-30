@@ -4,10 +4,37 @@
 # (nounset) because some conditional code paths rely on unset variables.
 set -eo pipefail
 
-# Shared module-prerequisite checker (exits 42 = SKIPPED if a module is
-# unavailable). See bare_system/lib/preflight.sh.
-# shellcheck source=../../bare_system/lib/preflight.sh
-. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../bare_system/lib/preflight.sh"
+# ── Preflight: declare and load required Lmod modules ─────────────────
+# Inlined (formerly bare_system/lib/preflight.sh) so this script is
+# self-contained and can be copied/run standalone. preflight_modules
+# loads each module in order; on the first failure it prints the Lmod
+# diagnostic and returns MISSING_PREREQ_RC=42, which the parent
+# main_setup.sh re-classifies as SKIPPED rather than FAILED.
+MISSING_PREREQ_RC=42
+if ! type module >/dev/null 2>&1; then
+   [ -r /etc/profile.d/lmod.sh ]            && . /etc/profile.d/lmod.sh
+   [ -r /usr/share/lmod/lmod/init/bash ]    && . /usr/share/lmod/lmod/init/bash
+fi
+preflight_modules() {
+   [ "$#" -eq 0 ] && return 0
+   if ! type module >/dev/null 2>&1; then
+      echo "ERROR: Lmod 'module' command not available; needed:$(printf ' %s' "$@")" >&2
+      return ${MISSING_PREREQ_RC}
+   fi
+   echo "preflight: required modules:$(printf ' %s' "$@")"
+   local m err
+   err=$(mktemp -t preflight.XXXXXX.err 2>/dev/null || echo /tmp/preflight.$$.err)
+   for m in "$@"; do
+      if ! module load "${m}" 2>"${err}"; then
+         echo "ERROR: required module '${m}' could not be loaded." >&2
+         [ -s "${err}" ] && sed 's/^/  module> /' "${err}" >&2
+         rm -f "${err}"
+         return ${MISSING_PREREQ_RC}
+      fi
+   done
+   rm -f "${err}"
+   echo "preflight: all required modules loaded."
+}
 
 # Variables controlling setup process
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/hipfort_from_source
