@@ -88,6 +88,12 @@ do
           ROCM_VERSION=${1}
           reset-last
           ;;
+      "--amdgpu-gfxmodel")
+          # Accepted for compatibility with COMMON_OPTIONS in
+          # main_setup.sh; mvapich install path doesn't actually use it.
+          shift
+          reset-last
+          ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
@@ -121,7 +127,10 @@ MVAPICH_DOWNLOAD_URL=https://mvapich.cse.ohio-state.edu/download/mvapich/plus/3.
 
 if [ "${DISTRO}" = "ubuntu" ]; then
    echo "Mvapich install on Ubuntu not working yet"
-   exit
+   # Sentinel rc=43 (NOOP_RC) tells main_setup.sh's run_and_log to
+   # classify this as SKIPPED(no-op), not FAILED. Kept in sync by
+   # convention with bare_system/main_setup.sh.
+   exit 43
    ${SUDO} ${DEB_FRONTEND} apt-get -qqy install alien
    ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/mvapich
 
@@ -144,10 +153,10 @@ elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    rm ${MVAPICH_RPM_NAME}
 elif [ "${DISTRO}" = "opensuse leap" ]; then
    echo "Mvapich install on Suse not working yet"
-   exit
+   exit 43
 else
    echo "DISTRO version ${DISTRO} not recognized or supported"
-   exit
+   exit 43
 fi
 
 # Create a module file for Mvapich
