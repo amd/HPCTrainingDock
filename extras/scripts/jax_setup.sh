@@ -480,7 +480,7 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/0.${JAX_VERSION}.lua
 	whatis("JAX version ${JAX_VERSION} with ROCm support")
 
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	setenv("XLA_FLAGS","--xla_gpu_enable_triton_gemm=False --xla_gpu_autotune_level=3")
 	setenv("JAX_PLATFORMS","rocm,cpu")
 	prepend_path("LD_PRELOAD","${ROCM_PATH}/lib/llvm/lib/libunwind.so.1")

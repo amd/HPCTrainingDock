@@ -230,7 +230,7 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/dev.lua
 	whatis("SmartSim from CrayLabs")
 
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	load("amdflang-new")
 	load("pytorch")
 	prepend_path("PYTHONPATH","$SMART_REDIS_PATH")

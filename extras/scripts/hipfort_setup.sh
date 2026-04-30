@@ -214,7 +214,7 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis(" hipfort module ")
 	whatis(" this hipfort build has been compiled with: $FC_COMPILER. ")
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	local fc_compiler = "${FC_COMPILER}"
 	if fc_compiler == "amdflang-new" then
 		load("amdflang-new")

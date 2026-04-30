@@ -120,7 +120,7 @@ if [ "${BUILD_LLVM_LATEST}" = "1" ]; then
 	prepend_path("MANPATH", pathJoin(base, "man"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	family("compiler")
 EOF
 fi

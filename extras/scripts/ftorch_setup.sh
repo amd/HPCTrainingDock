@@ -211,7 +211,7 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/dev.lua
 	whatis("FTorch: a library for directly calling PyTorch ML models from Fortran")
 
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	load("${PYTORCH_MODULE}")
 	prepend_path("LD_LIBRARY_PATH", pathJoin("${FTORCH_PATH}", "lib"))
 	setenv("FTORCH_HOME","${FTORCH_PATH}")

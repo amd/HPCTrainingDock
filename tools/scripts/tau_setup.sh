@@ -345,7 +345,7 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/dev.lua
 	whatis(" TAU - portable profiling and tracing toolkit ")
 
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	prepend_path("PATH","${TAU_PATH}/x86_64/bin")
 	prepend_path("PATH","${PDT_PATH}/bin")
 	setenv("TAU_LIB_DIR","${TAU_LIB_DIR}")

@@ -281,7 +281,7 @@ cat <<-EOF | ${SUDO_MODULE_INSTALL} tee ${MODULE_PATH}/${GITHUB_BRANCH}.lua
 	setenv("${TOOL_NAME_UC}_SHARE",shareDir)
 	prepend_path("PATH", pathJoin(shareDir, "bin"))
 
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	prepend_path("LD_LIBRARY_PATH", pathJoin(topDir, "lib"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(topDir, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(topDir, "include"))
@@ -290,9 +290,6 @@ cat <<-EOF | ${SUDO_MODULE_INSTALL} tee ${MODULE_PATH}/${GITHUB_BRANCH}.lua
 	prepend_path("PYTHONPATH",pathJoin(topDir,"lib/python3.${PYTHON_VERSION}/site-packages"))
 	prepend_path("INCLUDE", pathJoin(topDir, "include"))
 	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
-	set_shell_function("omnitrace-avail",'${INSTALL_PATH}/bin/rocprof-sys-avail "$@"',"${INSTALL_PATH}/bin/rocprof-sys-avail $*")
-	set_shell_function("omnitrace-instrument",'${INSTALL_PATH}/bin/rocprof-sys-instrument "$@"',"${INSTALL_PATH}/bin/rocprof-sys-instrument $*")
-	set_shell_function("omnitrace-run",'${INSTALL_PATH}/bin/rocprof-sys-run "$@"',"${INSTALL_PATH}/bin/rocprof-sys-run $*")
 EOF
 
 

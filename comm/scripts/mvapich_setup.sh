@@ -2,7 +2,7 @@
 
 # Variables controlling setup process
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/mvapich
-ROCM_VERSION=`cat /opt/rocm*/.info/version | head -1 | cut -f1 -d'-' `
+ROCM_VERSION=6.2.0
 ROCM_PATH=/opt/rocm-${ROCM_VERSION}
 REPLACE=0
 DRY_RUN=0
@@ -166,6 +166,6 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/3.0.lua
 	prepend_path("C_INCLUDE_PATH",pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH",pathJoin(base, "include"))
 	prepend_path("PATH",pathJoin(base, "bin"))
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	family("MPI")
 EOF

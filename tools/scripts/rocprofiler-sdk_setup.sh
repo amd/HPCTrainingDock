@@ -222,7 +222,7 @@ cat <<-EOF | ${SUDO_MODULE_INSTALL} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 
 	local base = "${INSTALL_PATH}"
 
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))

@@ -302,7 +302,7 @@ else
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${SCOREP_VERSION}.lua
 	whatis(" Score-P Performance Analysis Tool ")
 
-	load("rocm/${ROCM_VERSION}")
+	prereq("rocm/${ROCM_VERSION}")
 	prepend_path("PATH","${SCOREP_PATH}/bin")
 	prepend_path("PATH","${PDT_PATH}/bin")
 EOF
