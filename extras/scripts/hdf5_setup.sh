@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Fail fast on errors and surface failures inside pipes. Not using -u
+# (nounset) because some conditional code paths rely on unset variables.
+set -eo pipefail
+
+# Shared module-prerequisite checker (exits 42 = SKIPPED if a module is
+# unavailable). See bare_system/lib/preflight.sh.
+# shellcheck source=../../bare_system/lib/preflight.sh
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../bare_system/lib/preflight.sh"
+
 # Variables controlling setup process
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/hdf5
 BUILD_HDF5=0
@@ -230,8 +239,8 @@ else
 
       # default build is serial hdf5
       ENABLE_PARALLEL="OFF"
-      module load ${ROCM_MODULE}
-      module load ${MPI_MODULE}
+      REQUIRED_MODULES=( "${ROCM_MODULE}/${ROCM_VERSION}" "${MPI_MODULE}" )
+      preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
       if [[ `which mpicc | wc -l` -eq 1 ]]; then
 	 # if mpicc is found in the path, build hdf5 parallel
          ENABLE_PARALLEL="ON"

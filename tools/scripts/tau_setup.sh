@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Fail fast on errors and surface failures inside pipes. Not using -u
+# (nounset) because some conditional code paths rely on unset variables.
+set -eo pipefail
+
+# Shared module-prerequisite checker (exits 42 = SKIPPED if a module is
+# unavailable). See bare_system/lib/preflight.sh.
+# shellcheck source=../../bare_system/lib/preflight.sh
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../bare_system/lib/preflight.sh"
+
 # Variables controlling setup process
 AMDGPU_GFXMODEL_INPUT=""
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/tau
@@ -181,8 +190,11 @@ else
       echo "============================"
       echo ""
 
-      source /etc/profile.d/lmod.sh
-      module load rocm/${ROCM_VERSION}
+      # rocm + openmpi are required at build time. openmpi is loaded
+      # later (line ~252) but pre-flighting it here surfaces the missing
+      # dep early rather than after a multi-minute PDT/spack download.
+      REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" "openmpi" )
+      preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
      # don't use sudo if user has write access to both install paths
       if [ -d "$TAU_PATH" ]; then
@@ -245,7 +257,7 @@ else
       tar zxf ext.tgz
 
       # install OpenMPI if not in the system already
-      module load openmpi
+      # openmpi already loaded by preflight_modules above.
       if [[ `which mpicc | wc -l` -eq 0 ]]; then
          ${SUDO} apt-get update
          ${SUDO} apt-get install -q -y libopenmpi-dev

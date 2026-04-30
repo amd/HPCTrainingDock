@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Fail fast on errors and surface failures inside pipes. Not using -u
+# (nounset) because some conditional code paths rely on unset variables.
+set -eo pipefail
+
+# Shared module-prerequisite checker (exits 42 = SKIPPED if a module is
+# unavailable). See bare_system/lib/preflight.sh.
+# shellcheck source=../../bare_system/lib/preflight.sh
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../bare_system/lib/preflight.sh"
+
 # Variables controlling setup process
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-LatestCompilers/hipfort_from_source
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
@@ -8,6 +17,7 @@ ROCM_VERSION=6.2.0
 HIPFORT_PATH="/opt/rocmplus-${ROCM_VERSION}/hipfort"
 HIPFORT_PATH_INPUT=""
 FC_COMPILER=gfortran
+HIPFORT_VERSION=""    # empty -> use rocm-${ROCM_VERSION} branch (legacy default)
 
 SUDO="sudo"
 
@@ -25,6 +35,7 @@ usage()
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default is $AMDGPU_GFXMODEL"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --hipfort-version [ HIPFORT_VERSION ] git branch/tag to clone (default: rocm-\${ROCM_VERSION})"
    echo "  --build-hipfort [ BUILD_HIPFORT ], set to 1 to build hipfort, default is $BUILD_HIPFORT"
    echo "  --fc-compiler [FC_COMPILER: gfortran|amdflang-new|cray-ftn], default is $FC_COMPILER"
    echo "  --install-path [ HIPFORT_PATH ], default is $HIPFORT_PATH"
@@ -79,6 +90,11 @@ do
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
+          reset-last
+          ;;
+      "--hipfort-version")
+          shift
+          HIPFORT_VERSION=${1}
           reset-last
           ;;
       "--*")
@@ -149,9 +165,13 @@ else
 
       if  [ "${BUILD_HIPFORT}" = "1" ]; then
 
-         #source /etc/profile.d/lmod.sh
-         #source /etc/profile.d/z00_lmod.sh
-         module load rocm/${ROCM_VERSION}
+         REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" )
+         # Conditional dep: amdflang-new is needed only when building
+         # against that compiler (added below if FC_COMPILER selects it).
+         if [ "${FC_COMPILER:-}" = "amdflang-new" ]; then
+            REQUIRED_MODULES+=( "amdflang-new" )
+         fi
+         preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
          if [ -d "$HIPFORT_PATH" ]; then
             # don't use sudo if user has write access to install path
@@ -167,7 +187,9 @@ else
 
          ${SUDO} mkdir -p ${HIPFORT_PATH}
 
-         git clone --branch rocm-${ROCM_VERSION} https://github.com/ROCm/hipfort.git
+         HIPFORT_BRANCH="${HIPFORT_VERSION:-rocm-${ROCM_VERSION}}"
+         echo "Cloning hipfort branch/tag: ${HIPFORT_BRANCH}"
+         git clone --branch "${HIPFORT_BRANCH}" https://github.com/ROCm/hipfort.git
          cd hipfort
 
          mkdir build && cd build
@@ -175,7 +197,7 @@ else
          if [ "${FC_COMPILER}" = "gfortran" ]; then
             cmake -DHIPFORT_INSTALL_DIR=${HIPFORT_PATH} ..
          elif [ "${FC_COMPILER}" = "amdflang-new" ]; then
-            module load amdflang-new
+            # amdflang-new was already loaded by preflight above.
             cmake -DHIPFORT_INSTALL_DIR=${HIPFORT_PATH} -DHIPFORT_COMPILER=$FC -DHIPFORT_COMPILER_FLAGS="-ffree-form -cpp" ..
          elif [ "${FC_COMPILER}" = "cray-ftn" ]; then
             cmake -DHIPFORT_INSTALL_DIR=$HIPFORT_PATH -DHIPFORT_BUILD_TYPE=RELEASE -DHIPFORT_COMPILER=$(which ftn) -DHIPFORT_COMPILER_FLAGS="-ffree -eT" -DHIPFORT_AR=$(which ar) -DHIPFORT_RANLIB=$(which ranlib) ..
@@ -185,6 +207,13 @@ else
             exit 1
          fi
 
+         # Parallel build then install. `make install` alone re-runs the
+         # serial build dependency graph; splitting it lets cmake fan
+         # out across cores. (S6 audit follow-up: hipfort was building
+         # one Fortran source at a time, ~4 minutes wall, when nproc
+         # cores were idle.)
+         MAKE_JOBS=$(nproc)
+         ${SUDO} make -j ${MAKE_JOBS}
          ${SUDO} make install
 
          cd ../..

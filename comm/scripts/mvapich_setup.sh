@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Fail fast on errors and surface failures inside pipes. Not using -u
+# (nounset) because some conditional code paths rely on unset variables.
+set -eo pipefail
+
 # Variables controlling setup process
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/mvapich
 ROCM_VERSION=6.2.0

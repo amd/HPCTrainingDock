@@ -1,5 +1,17 @@
 #!/bin/bash
 
+# Fail fast on errors and surface failures inside pipes. Without this,
+# audited xpmem/ucx Permission-denied failures returned rc=0 to the
+# caller and main_setup.sh reported success. Not using -u (nounset)
+# because some conditional code paths rely on unset variables.
+set -eo pipefail
+
+# Shared module-prerequisite checker. Provides preflight_modules and
+# MISSING_PREREQ_RC=42. main_setup.sh's run_and_log re-classifies
+# rc=42 as SKIPPED instead of FAILED.
+# shellcheck source=../../bare_system/lib/preflight.sh
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../bare_system/lib/preflight.sh"
+
 # This script installs OpenMPI along with the XPEM, UCX and UCC libraries. The simplest use case is:
 #   ./openmpi_setup.sh --rocm-version <ROCM_VERSION>
 # Most of the needed information for the install is autodetected. Others are set to the latest
@@ -49,6 +61,41 @@ SUDO="sudo"
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
 fi
+
+# pick_sudo_for <path>: prints "sudo" if writing to <path> requires elevation
+# for the current user, "" otherwise. If <path> does not exist yet, walks up
+# to the nearest existing ancestor and tests that. Used per component so a
+# writable parent does not falsely waive sudo for a root-owned subdir, and a
+# root-owned parent does not force sudo on a subdir the user already owns.
+#
+# IMPORTANT: must NOT use `[ -w ]` -- the bash test is implemented on top of
+# the NFS client's cached mode/uid view, which can disagree with the
+# server's actual permission decision (observed on this cluster: client
+# said writable, server returned EACCES on the very next mkdir). Instead,
+# do a real probe -- atomically create+remove a tempfile -- which exercises
+# the same NFS code path as the subsequent install operations.
+pick_sudo_for()
+{
+   local target="$1"
+   local probe_dir
+   if [ -d "${target}" ]; then
+      probe_dir="${target}"
+   else
+      probe_dir="${target%/*}"
+      while [ -n "${probe_dir}" ] && [ ! -d "${probe_dir}" ]; do
+         probe_dir="${probe_dir%/*}"
+      done
+      [ -z "${probe_dir}" ] && probe_dir="/"
+   fi
+   local probe="${probe_dir}/.openmpi_setup_writeprobe.$$.${RANDOM}"
+   # Use ( : > "${probe}" ) so the truncate/create happens in a subshell
+   # whose stderr is silenced; avoids set -e ambiguity at the call site.
+   if ( umask 077 && : > "${probe}" ) 2>/dev/null; then
+      rm -f "${probe}" 2>/dev/null
+      echo ""; return
+   fi
+   echo "sudo"
+}
 
 usage()
 {
@@ -256,12 +303,13 @@ do
    shift
 done
 
-# Load the ROCm version for this build
-#if [ -f "/etc/profile.d/lmod.sh" ]; then
-#   source /etc/profile.d/lmod.sh
-#   source /etc/profile.d/z00_lmod.sh
-#fi
-module load rocm/${ROCM_VERSION}
+# Preflight + load required modules. preflight_modules exits the script
+# with rc=42 (MISSING_PREREQ) on the first module that doesn't resolve;
+# main_setup.sh's run_and_log treats that as SKIPPED rather than FAILED.
+# This is the SINGLE place where openmpi's module prerequisites are
+# declared -- no central PKG_DEPS table to keep in sync.
+REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" )
+preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
 echo ""
 echo "============================"
@@ -320,18 +368,40 @@ if [ "${REPLACE}" == "1" ]; then
    REPLACE_OPENMPI=1
 fi
 
-if [ -d "$INSTALL_PATH" ]; then
-   # don't use sudo if user has write access to install path
-   if [ -w ${INSTALL_PATH} ]; then
-      SUDO=""
-      echo "WARNING: not using sudo since user has write privileges to install path, some dependencies may fail to get installed"
-   else
-      echo "WARNING: using an install path that requires sudo"
-   fi
+# ── Per-component sudo detection ──────────────────────────────────────
+# Each component (xpmem, ucx, ucc, openmpi) lives in its OWN subdir of
+# ${INSTALL_PATH}, e.g. ${INSTALL_PATH}/xpmem-2.7.4. A previous version
+# of this script computed a single SUDO based on whether ${INSTALL_PATH}
+# itself was writable; that produced silent failures when
+# ${INSTALL_PATH} was admin-writable but the component subdirs were
+# root-owned (or vice versa). Decide per-component instead.
+#
+# Inside Singularity (or any other context where the script-level SUDO
+# was forced empty above), keep all per-component SUDOs empty too —
+# pick_sudo_for would also return "" for root, but be explicit.
+if [ -z "${SUDO}" ]; then
+   SUDO_XPMEM=""
+   SUDO_UCX=""
+   SUDO_UCC=""
+   SUDO_OPENMPI=""
 else
-   # if install path does not exist yet, the check on write access will fail
-   echo "WARNING: using sudo, make sure you have sudo privileges"
+   SUDO_XPMEM=$(pick_sudo_for "${XPMEM_PATH}")
+   SUDO_UCX=$(pick_sudo_for "${UCX_PATH}")
+   SUDO_UCC=$(pick_sudo_for "${UCC_PATH}")
+   SUDO_OPENMPI=$(pick_sudo_for "${OPENMPI_PATH}")
+   # Top-level SUDO drives the apt/dnf step and `mkdir -p ${INSTALL_PATH}`
+   # below; base it on the parent install path the same way.
+   SUDO=$(pick_sudo_for "${INSTALL_PATH}")
+   [ -z "${SUDO}" ] && \
+      echo "NOTE: ${INSTALL_PATH} is writable by ${USER}; not using sudo for top-level steps"
 fi
+
+echo "Resolved sudo modes:"
+printf "  %-14s install_path=%-60s SUDO='%s'\n" "top-level"  "${INSTALL_PATH}"   "${SUDO}"
+printf "  %-14s install_path=%-60s SUDO='%s'\n" "xpmem"      "${XPMEM_PATH}"     "${SUDO_XPMEM}"
+printf "  %-14s install_path=%-60s SUDO='%s'\n" "ucx"        "${UCX_PATH}"       "${SUDO_UCX}"
+printf "  %-14s install_path=%-60s SUDO='%s'\n" "ucc"        "${UCC_PATH}"       "${SUDO_UCC}"
+printf "  %-14s install_path=%-60s SUDO='%s'\n" "openmpi"    "${OPENMPI_PATH}"   "${SUDO_OPENMPI}"
 
 if [ "${DISTRO}" = "ubuntu" ]; then
    echo "Install of libpmix-dev libhwloc-dev libevent-dev libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen packages"
@@ -374,7 +444,7 @@ if [ "${BUILD_XPMEM}" == "1" ]; then
       echo "  use --replace to request replacing the current installation"
    else
       if [[ -d "${XPMEM_PATH}" ]] && [[ "${REPLACE_XPMEM}" != "0" ]] ; then
-         ${SUDO} rm -rf "${XPMEM_PATH}"
+         ${SUDO_XPMEM} rm -rf "${XPMEM_PATH}"
       fi
       if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${CACHE_FILES}/xpmem-${XPMEM_VERSION}.tgz ]]; then
          echo ""
@@ -385,12 +455,12 @@ if [ "${BUILD_XPMEM}" == "1" ]; then
 
          #install the cached version
          echo "cached file is ${CACHE_FILES}/xpmem-${XPMEM_VERSION}.tgz"
-         ${SUDO} mkdir -p ${XPMEM_PATH}
+         ${SUDO_XPMEM} mkdir -p ${XPMEM_PATH}
          cd ${INSTALL_PATH}
-         ${SUDO} tar -xzpf ${CACHE_FILES}/xpmem-${XPMEM_VERSION}.tgz
+         ${SUDO_XPMEM} tar -xzpf ${CACHE_FILES}/xpmem-${XPMEM_VERSION}.tgz
          if [ "${USER}" != "root" ]; then
-            ${SUDO} find ${XPMEM_PATH} -type f -execdir chown root:root "{}" +
-            ${SUDO} find ${XPMEM_PATH} -type d -execdir chown root:root "{}" +
+            ${SUDO_XPMEM} find ${XPMEM_PATH} -type f -execdir chown root:root "{}" +
+            ${SUDO_XPMEM} find ${XPMEM_PATH} -type d -execdir chown root:root "{}" +
          fi
          if [ "${USER}" != "sysadmin" ]; then
             ${SUDO} rm "${CACHE_FILES}"/xpmem-${XPMEM_VERSION}.tgz
@@ -435,8 +505,8 @@ if [ "${BUILD_XPMEM}" == "1" ]; then
 
          make -j 16
          if [[ "${DRY_RUN}" == "0" ]]; then
-            if [ -n "${SUDO}" ]; then
-               ${SUDO} -E env "PATH=$PATH" make install
+            if [ -n "${SUDO_XPMEM}" ]; then
+               ${SUDO_XPMEM} -E env "PATH=$PATH" make install
             else
                make install
             fi
@@ -464,7 +534,7 @@ if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE_UCX}" == "0" ]] ; then
    echo "  use --replace to request replacing the current installation"
 else
    if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE_UCX}" != "0" ]] ; then
-      ${SUDO} rm -rf "${UCX_PATH}"
+      ${SUDO_UCX} rm -rf "${UCX_PATH}"
    fi
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f ${CACHE_FILES}/ucx-${UCX_VERSION}${XPMEM_STRING}.tgz ]]; then
       echo ""
@@ -475,12 +545,12 @@ else
 
       #install the cached version
       echo "cached file is ${CACHE_FILES}/ucx-${UCX_VERSION}${XPMEM_STRING}.tgz"
-      ${SUDO} mkdir -p ${UCX_PATH}
+      ${SUDO_UCX} mkdir -p ${UCX_PATH}
       cd ${INSTALL_PATH}
-      ${SUDO} tar -xzpf ${CACHE_FILES}/ucx-${UCX_VERSION}${XPMEM_STRING}.tgz
+      ${SUDO_UCX} tar -xzpf ${CACHE_FILES}/ucx-${UCX_VERSION}${XPMEM_STRING}.tgz
       if [ "${USER}" != "root" ]; then
-         ${SUDO} find ${UCX_PATH} -type f -execdir chown root:root "{}" +
-         ${SUDO} find ${UCX_PATH} -type d -execdir chown root:root "{}" +
+         ${SUDO_UCX} find ${UCX_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO_UCX} find ${UCX_PATH} -type d -execdir chown root:root "{}" +
       fi
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm "${CACHE_FILES}"/ucx-${UCX_VERSION}${XPMEM_STRING}.tgz
@@ -557,8 +627,8 @@ fi
 
       make -j 16
       if [[ "${DRY_RUN}" == "0" ]]; then
-         if [ -n "${SUDO}" ]; then
-            ${SUDO} -E env "PATH=$PATH" make install
+         if [ -n "${SUDO_UCX}" ]; then
+            ${SUDO_UCX} -E env "PATH=$PATH" make install
          else
             make install
          fi
@@ -585,7 +655,7 @@ if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE_UCC}" == "0" ]] ; then
    echo "  use --replace to request replacing the current installation"
 else
    if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE_UCC}" != "0" ]] ; then
-      ${SUDO} rm -rf "${UCC_PATH}"
+      ${SUDO_UCC} rm -rf "${UCC_PATH}"
    fi
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz ]]; then
       echo ""
@@ -596,12 +666,12 @@ else
 
       #install the cached version
       echo "cached file is ${CACHE_FILES}/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz"
-      ${SUDO} mkdir -p ${UCC_PATH}
+      ${SUDO_UCC} mkdir -p ${UCC_PATH}
       cd "${INSTALL_PATH}"
-      ${SUDO} tar -xzpf "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz
+      ${SUDO_UCC} tar -xzpf "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz
       if [ "${USER}" != "root" ]; then
-         ${SUDO} find ${UCC_PATH} -type f -execdir chown root:root "{}" +
-         ${SUDO} find ${UCC_PATH} -type d -execdir chown root:root "{}" +
+         ${SUDO_UCC} find ${UCC_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO_UCC} find ${UCC_PATH} -type d -execdir chown root:root "{}" +
       fi
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm "${CACHE_FILES}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz
@@ -672,8 +742,8 @@ else
       make -j 16
 
       if [[ "${DRY_RUN}" == "0" ]]; then
-         if [ -n "${SUDO}" ]; then
-            ${SUDO} -E env "PATH=$PATH" make install
+         if [ -n "${SUDO_UCC}" ]; then
+            ${SUDO_UCC} -E env "PATH=$PATH" make install
          else
             make install
          fi
@@ -700,7 +770,7 @@ if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE_OPENMPI}" == "0" ]] ; then
    echo "  use --replace to request replacing the current installation"
 else
    if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE_OPENMPI}" != "0" ]] ; then
-      ${SUDO} rm -rf "${OPENMPI_PATH}"
+      ${SUDO_OPENMPI} rm -rf "${OPENMPI_PATH}"
    fi
    if [[ "$USE_CACHE_BUILD" == "1" ]] && [[ -f "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz ]]; then
       echo ""
@@ -711,12 +781,12 @@ else
 
       #install the cached version
       echo "cached file is ${CACHE_FILES}/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz"
-      ${SUDO} mkdir -p ${OPENMPI_PATH}
+      ${SUDO_OPENMPI} mkdir -p ${OPENMPI_PATH}
       cd "${INSTALL_PATH}"
-      ${SUDO} tar -xzpf "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz
+      ${SUDO_OPENMPI} tar -xzpf "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz
       if [ "${USER}" != "root" ]; then
-         ${SUDO} find ${OPENMPI_PATH} -type f -execdir chown root:root "{}" +
-         ${SUDO} find ${OPENMPI_PATH} -type d -execdir chown root:root "{}" +
+         ${SUDO_OPENMPI} find ${OPENMPI_PATH} -type f -execdir chown root:root "{}" +
+         ${SUDO_OPENMPI} find ${OPENMPI_PATH} -type d -execdir chown root:root "{}" +
       fi
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm "${CACHE_FILES}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}.tgz
@@ -791,21 +861,21 @@ else
       make -j 16
 
       if [[ "${DRY_RUN}" == "0" ]]; then
-         if [ -n "${SUDO}" ]; then
-            ${SUDO} -E env "PATH=$PATH" make install
+         if [ -n "${SUDO_OPENMPI}" ]; then
+            ${SUDO_OPENMPI} -E env "PATH=$PATH" make install
          else
             make install
          fi
 	 for file in ${OPENMPI_PATH}/share/man/man1/*
          do
-            ${SUDO} gzip $file
+            ${SUDO_OPENMPI} gzip $file
          done
       fi
       # make ucx the default point-to-point
-      echo "pml = ucx" | ${SUDO} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
-      echo "osc = ucx" | ${SUDO} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
-      echo "coll_ucc_enable = 1" | ${SUDO} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
-      echo "coll_ucc_priority = 100" | ${SUDO} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
+      echo "pml = ucx" | ${SUDO_OPENMPI} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
+      echo "osc = ucx" | ${SUDO_OPENMPI} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
+      echo "coll_ucc_enable = 1" | ${SUDO_OPENMPI} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
+      echo "coll_ucc_priority = 100" | ${SUDO_OPENMPI} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
       cd ../..
       rm -rf openmpi-${OPENMPI_VERSION} openmpi-${OPENMPI_VERSION}.tar.bz2
    fi

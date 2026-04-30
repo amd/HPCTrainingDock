@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Fail fast on errors and surface failures inside pipes. Not using -u
+# (nounset) because some conditional code paths rely on unset variables.
+set -eo pipefail
+
+# Shared module-prerequisite checker (exits 42 = SKIPPED if a module is
+# unavailable). See bare_system/lib/preflight.sh.
+# shellcheck source=../../bare_system/lib/preflight.sh
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../bare_system/lib/preflight.sh"
+
 # Variables controlling setup process
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/petsc
@@ -180,15 +189,15 @@ else
       echo "============================"
       echo ""
 
-      #source /etc/profile.d/lmod.sh
-      #source /etc/profile.d/z00_lmod.sh
-      module load rocm/${ROCM_VERSION}
+      REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" )
       if [[ ${USE_AMDFLANG} == "1" ]]; then
-         # this module will set the openmpi wrappers to use the compilers from the ROCm AFAR release
-         # the AFAR releases can be found at: https://repo.radeon.com/rocm/misc/flang/
-         module load amdflang-new/rocm-afar-${AMDFLANG_RELEASE_NUMBER}
+         # AFAR amdflang-new wraps openmpi compilers; loaded BEFORE the
+         # MPI module so the MPI module sees the right Fortran compiler.
+         # AFAR releases: https://repo.radeon.com/rocm/misc/flang/
+         REQUIRED_MODULES+=( "amdflang-new/rocm-afar-${AMDFLANG_RELEASE_NUMBER}" )
       fi
-      module load $MPI_MODULE
+      REQUIRED_MODULES+=( "${MPI_MODULE}" )
+      preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
       if [[ $MPI_PATH == "" ]]; then
          echo "MPI module $MPI_MODULE is not setting the MPI_PATH env variable, aborting..."
          exit 1

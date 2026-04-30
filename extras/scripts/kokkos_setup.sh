@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Fail fast on errors and surface failures inside pipes. Not using -u
+# (nounset) because some conditional code paths rely on unset variables.
+set -eo pipefail
+
+# Shared module-prerequisite checker (exits 42 = SKIPPED if a module is
+# unavailable). See bare_system/lib/preflight.sh.
+# shellcheck source=../../bare_system/lib/preflight.sh
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../bare_system/lib/preflight.sh"
+
 # Variables controlling setup process
 AMDGPU_GFXMODEL_INPUT=""
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/kokkos
@@ -26,6 +35,7 @@ usage()
    echo "  --install-path [ KOKKOS_PATH ] default $KOKKOS_PATH"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL_INPUT ] default is autodetected "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --kokkos-version [ KOKKOS_VERSION ] default $KOKKOS_VERSION (used as git branch/tag)"
    echo "  --build-kokkos [ BUILD_KOKKOS ], set to 1 to build Kokkos, default is 0"
    echo "  --help: print this usage information"
    exit 1
@@ -73,6 +83,11 @@ do
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
+          reset-last
+          ;;
+      "--kokkos-version")
+          shift
+          KOKKOS_VERSION=${1}
           reset-last
           ;;
       "--*")
@@ -160,9 +175,8 @@ else
          KOKKOS_ARCH_VEGA90A="ON"
       fi
 
-      #source /etc/profile.d/lmod.sh
-      #source /etc/profile.d/z00_lmod.sh
-      module load rocm/${ROCM_VERSION}
+      REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" )
+      preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
       git clone --branch ${KOKKOS_VERSION} https://github.com/kokkos/kokkos
       cd kokkos

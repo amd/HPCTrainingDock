@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Fail fast on errors and surface failures inside pipes. Not using -u
+# (nounset) because some conditional code paths rely on unset variables.
+set -eo pipefail
+
+# Shared module-prerequisite checker (exits 42 = SKIPPED if a module is
+# unavailable). See bare_system/lib/preflight.sh.
+# shellcheck source=../../bare_system/lib/preflight.sh
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../bare_system/lib/preflight.sh"
+
 # Variables controlling setup process
 ROCM_VERSION=6.4.3
 BUILD_HIP_PYTHON=0
@@ -7,6 +16,7 @@ MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/hip-python
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 HIP_PYTHON_PATH=/opt/rocmplus-${ROCM_VERSION}/hip-python
 HIP_PYTHON_PATH_INPUT=""
+HIP_PYTHON_VERSION=""    # empty -> use "${ROCM_VERSION}.*" pip wildcard (legacy default)
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -27,6 +37,7 @@ usage()
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --install-path [ HIP_PYTHON_PATH ] default $HIP_PYTHON_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --hip-python-version [ HIP_PYTHON_VERSION ] PyPI version specifier (default: \${ROCM_VERSION}.*)"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --help: print this usage information"
    exit 1
@@ -74,6 +85,11 @@ do
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
+          reset-last
+          ;;
+      "--hip-python-version")
+          shift
+          HIP_PYTHON_VERSION=${1}
           reset-last
           ;;
       "--*")
@@ -142,10 +158,8 @@ else
       echo ""
 
 
-      # Load the ROCm version for this HIP-Python build -- use hip compiler, path to ROCm and the GPU model
-      #source /etc/profile.d/lmod.sh
-      #source /etc/profile.d/z00_lmod.sh
-      module load rocm/${ROCM_VERSION}
+      REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" )
+      preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
       export HIP_PYTHON_INSTALL_USE_HIP=1
       export ROCM_HOME=${ROCM_PATH}
       export HIPCC=${ROCM_HOME}/bin/hipcc
@@ -170,8 +184,10 @@ else
       python3 -m venv hip-python-build
       source hip-python-build/bin/activate
       python3 -m pip install pip --upgrade
-      python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python -i https://test.pypi.org/simple "hip-python==${ROCM_VERSION}.*" --force-reinstall --no-cache
-      python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python -i https://test.pypi.org/simple "hip-python-as-cuda==${ROCM_VERSION}.*" --force-reinstall --no-cache
+      HIP_PYTHON_PIP_SPEC="${HIP_PYTHON_VERSION:-${ROCM_VERSION}.*}"
+      echo "Installing hip-python with PyPI spec: ${HIP_PYTHON_PIP_SPEC}"
+      python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python -i https://test.pypi.org/simple "hip-python==${HIP_PYTHON_PIP_SPEC}" --force-reinstall --no-cache
+      python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python -i https://test.pypi.org/simple "hip-python-as-cuda==${HIP_PYTHON_PIP_SPEC}" --force-reinstall --no-cache
       python3 -m pip config set global.extra-index-url https://test.pypi.org/simple
       python3 -m pip install --target=$HIP_PYTHON_PATH/numba-hip "numba-hip[rocm-${ROCM_VERSION}] @ git+https://github.com/ROCm/numba-hip.git" --force-reinstall --no-cache
       deactivate
