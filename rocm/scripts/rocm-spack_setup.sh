@@ -7,9 +7,6 @@ AMDGPU_GFXMODEL=gfx90a,gfx942
 INSTALL_PATH=/opt/rocm-$ROCM_VERSION
 MODULE_PATH=/etc/lmod/modules/ROCm
 
-cd /tmp
-rm -rf spack
-
 # Spack user-scope isolation: per-job throwaway dirs for
 # SPACK_USER_CONFIG_PATH and SPACK_USER_CACHE_PATH so that
 # `spack compiler find`, `spack external find --all`, and the
@@ -22,12 +19,21 @@ rm -rf spack
 SPACK_USER_CONFIG_PATH=$(mktemp -d -t spack-user-config.XXXXXX)
 SPACK_USER_CACHE_PATH=$(mktemp -d -t spack-user-cache.XXXXXX)
 export SPACK_USER_CONFIG_PATH SPACK_USER_CACHE_PATH
-trap 'rm -rf "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+
+# Per-job throwaway build dir (mktemp under /tmp, or under
+# $TMPDIR if Slurm set one). The spack clone, the rocm-spack
+# environment dir, and all build scratch live here. Without this,
+# concurrent rocm-spack jobs on the same compute node would race
+# on fixed paths /tmp/spack and /tmp/rocm-spack and clobber each
+# other (matches the pattern in the 6 rocmplus setup scripts:
+# scorep, tau, hpctoolkit, hypre, petsc, lammps).
+ROCM_SPACK_BUILD_DIR=$(mktemp -d -t rocm-spack-build.XXXXXX)
+trap 'rm -rf "${ROCM_SPACK_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+cd "${ROCM_SPACK_BUILD_DIR}"
 
 git clone https://github.com/spack/spack.git
 source spack/share/spack/setup-env.sh
 
-rm -rf rocm-spack
 mkdir rocm-spack && cd rocm-spack
 
 sudo rm -rf /opt/rocm-6.4.2 
@@ -65,8 +71,8 @@ module avail
 # Lock down
 sudo chmod go-w "${INSTALL_PATH}" "${MODULE_PATH}" /opt
 spack env deactivate
-rm -rf /tmp/rocm-spack
-rm -rf /tmp/spack
+# ROCM_SPACK_BUILD_DIR (under /tmp, contains the spack clone and
+# the rocm-spack environment) is removed by the EXIT trap above.
 
 #export ROCM_SPACK_LIST_642="amdsmi aqlprofile comgr composable-kernel hip \
 #   hipblas hipblaslt hipcc hipcub hipfft hipfort hipify-clang hiprand \
