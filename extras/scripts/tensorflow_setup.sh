@@ -244,8 +244,41 @@ else
       yes "" | TF_NEED_CLANG=1 ROCM_PATH=$ROCM_PATH TF_NEED_ROCM=1 PYTHON_BIN_PATH=/usr/bin/python3 TF_ROCM_AMDGPU_TARGETS=${AMDGPU_GFXMODEL} ./configure
 
       # build and install tensorflow
-      bazel build --config=opt --config=rocm --repo_env=WHEEL_NAME=tensorflow_rocm \
-	          --action_env=project_name=tensorflow_rocm/ //tensorflow/tools/pip_package:wheel --verbose_failures
+      #
+      # Bazel performance tuning (audit_2026_05_01.md, bazel-perf inventory
+      # items B + C). Each --host_jvm_args appears once and Bazel
+      # accumulates them.
+      #
+      # JVM startup args (sized for the long "Computing main repo mapping"
+      # / "Loading"/ "Analyzing" phases that hold up TF for 25-30 min on a
+      # cold workspace):
+      #   -Xmx16g            : default heap is too small for TF's ~600
+      #                         transitive externals; the resolution phase
+      #                         spends a large fraction of wall time in GC
+      #                         on the default sizing.
+      #   -XX:+UseG1GC       : reduces resolve-phase pause clusters vs the
+      #                         default ParallelGC; better latency for the
+      #                         many short allocations that Skyframe makes.
+      #   -XX:+AlwaysPreTouch: pre-faults the heap pages at JVM start so
+      #                         the resolution loop doesn't stall on lazy
+      #                         page faults.
+      #
+      # Build flag:
+      #   --noexperimental_check_external_repository_files :
+      #     Bazel by default re-stats every file in every just-extracted
+      #     external repo (millions of files for TF) before each build to
+      #     detect on-disk drift. Safe to skip here because each setup-
+      #     script run extracts externals fresh into the per-job mktemp
+      #     workspace -- there is no opportunity for drift between
+      #     extraction and analysis. Saves ~5-15 min on TF wall time.
+      bazel \
+         --host_jvm_args=-Xmx16g \
+         --host_jvm_args=-XX:+UseG1GC \
+         --host_jvm_args=-XX:+AlwaysPreTouch \
+         build --config=opt --config=rocm --repo_env=WHEEL_NAME=tensorflow_rocm \
+               --action_env=project_name=tensorflow_rocm/ \
+               --noexperimental_check_external_repository_files \
+               //tensorflow/tools/pip_package:wheel --verbose_failures
 
       pip3 install -v --target=$TF_PATH --upgrade bazel-bin/tensorflow/tools/pip_package/wheel_house/tensorflow*.whl
 
