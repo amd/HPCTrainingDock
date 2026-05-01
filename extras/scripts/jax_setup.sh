@@ -254,6 +254,30 @@ else
       source /etc/profile.d/z01_lmod.sh
       module load rocm/${ROCM_VERSION}
 
+      # ---------------------------------------------------------------------
+      # Bazel performance tuning applied to every `python3 build/build.py`
+      # invocation below (audit_2026_05_01.md, bazel-perf inventory items B
+      # + C). Each --bazel_options / --bazel_startup_options pair below
+      # accumulates -- Bazel allows --host_jvm_args to be repeated.
+      #
+      # JVM startup args (sized for the long "Computing main repo mapping"
+      # / "Loading" / "Analyzing" phases that hold up jaxlib for ~20-30 min
+      # on a cold workspace):
+      #   -Xmx16g            : the previous values of -Xmx512m / -Xmx4g
+      #                         force constant GC during JAX's external-
+      #                         repo resolution (jax + xla + ~400
+      #                         transitive). 16g eliminates GC pressure.
+      #   -XX:+UseG1GC       : reduces resolve-phase pause clusters.
+      #   -XX:+AlwaysPreTouch: pre-faults the heap so the resolution loop
+      #                         doesn't stall on lazy page faults.
+      #
+      # Build flag:
+      #   --noexperimental_check_external_repository_files :
+      #     skip per-build re-stat of the freshly-extracted external repos
+      #     (they were just unpacked into the per-job mktemp workspace --
+      #     no opportunity for drift between extraction and analysis).
+      # ---------------------------------------------------------------------
+
       export JAX_PLATFORMS="rocm,cpu"
 
       AMDGPU_GFXMODEL=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/,/g'`
@@ -311,7 +335,10 @@ else
                                          --use_clang=true \
                                          --wheels=jaxlib \
                                          --bazel_options=--jobs=128 \
-                                         --bazel_startup_options=--host_jvm_args=-Xmx4g
+                                         --bazel_options=--noexperimental_check_external_repository_files \
+                                         --bazel_startup_options=--host_jvm_args=-Xmx16g \
+                                         --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC \
+                                         --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
 
 	    # install the wheel for jaxlib
             pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
@@ -333,7 +360,10 @@ else
                                          --use_clang=true \
                                          --wheels=jax-rocm-plugin,jax-rocm-pjrt \
                                          --bazel_options=--jobs=128 \
-                                         --bazel_startup_options=--host_jvm_args=-Xmx4g
+                                         --bazel_options=--noexperimental_check_external_repository_files \
+                                         --bazel_startup_options=--host_jvm_args=-Xmx16g \
+                                         --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC \
+                                         --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
             # next we need to install the wheels that we built
             pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
 
@@ -356,7 +386,10 @@ else
                                       --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
                                       --build_gpu_plugin --gpu_plugin_rocm_version=$ROCM_VERSION_BAZEL --build_gpu_kernel_plugin=rocm \
                                       --bazel_options=--jobs=128 \
-                                      --bazel_startup_options=--host_jvm_args=-Xmx512m
+                                      --bazel_options=--noexperimental_check_external_repository_files \
+                                      --bazel_startup_options=--host_jvm_args=-Xmx16g \
+                                      --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC \
+                                      --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
 
                # install the wheel for jaxlib
                pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
@@ -388,7 +421,10 @@ else
                                             --use_clang=true \
                                             --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
                                             --bazel_options=--jobs=128 \
-                                            --bazel_startup_options=--host_jvm_args=-Xmx4g
+                                            --bazel_options=--noexperimental_check_external_repository_files \
+                                            --bazel_startup_options=--host_jvm_args=-Xmx16g \
+                                            --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC \
+                                            --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
  
                # install the wheel for jaxlib
                pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
@@ -425,7 +461,10 @@ else
                                             --use_clang=true \
                                             --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
                                             --bazel_options=--jobs=128 \
-                                            --bazel_startup_options=--host_jvm_args=-Xmx512m
+                                            --bazel_options=--noexperimental_check_external_repository_files \
+                                            --bazel_startup_options=--host_jvm_args=-Xmx16g \
+                                            --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC \
+                                            --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
 
                # install the wheel for jaxlib
                pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
@@ -442,7 +481,10 @@ else
                                       --bazel_options=--action_env=CC=/usr/bin/gcc --nouse_clang \
                                       --build_gpu_plugin --gpu_plugin_rocm_version=$ROCM_VERSION_BAZEL --build_gpu_kernel_plugin=rocm \
                                       --bazel_options=--jobs=128 \
-                                      --bazel_startup_options=--host_jvm_args=-Xmx512m
+                                      --bazel_options=--noexperimental_check_external_repository_files \
+                                      --bazel_startup_options=--host_jvm_args=-Xmx16g \
+                                      --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC \
+                                      --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
 
                # install the wheel for jaxlib
                pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
