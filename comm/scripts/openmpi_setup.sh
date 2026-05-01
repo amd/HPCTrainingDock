@@ -429,23 +429,40 @@ printf "  %-14s install_path=%-60s SUDO='%s'\n" "ucx"        "${UCX_PATH}"      
 printf "  %-14s install_path=%-60s SUDO='%s'\n" "ucc"        "${UCC_PATH}"       "${SUDO_UCC}"
 printf "  %-14s install_path=%-60s SUDO='%s'\n" "openmpi"    "${OPENMPI_PATH}"   "${SUDO_OPENMPI}"
 
+# PKG_SUDO is independent of the install-path-writability-derived SUDO
+# above. apt-get / yum operate on /var/lib/{apt,dpkg,rpm}, which are
+# always root-owned; the only condition under which they should run
+# without sudo is when the script itself is already root (EUID==0).
+# Previously these used the top-level ${SUDO}, which gets set to ''
+# whenever ${INSTALL_PATH} happens to be writable by the script user.
+# That broke jobs 7960/7961 in the 2026-04-30 chain (Issue 2 in
+# audit_2026_05_01.md): /shared/apps/ubuntu/opt/rocmplus-7.{2.0,1.1}/
+# was admin-writable, SUDO='', apt-get ran as admin, lock file
+# Permission denied, openmpi rc=100, 12 dependent packages cascaded
+# to missing-prereq SKIPPED.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   PKG_SUDO=""
+else
+   PKG_SUDO="sudo"
+fi
+
 if [ "${DISTRO}" = "ubuntu" ]; then
    echo "Install of libpmix-dev libhwloc-dev libevent-dev libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen packages"
    if [[ "${DRY_RUN}" == "0" ]]; then
       # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
-      ${SUDO} apt-get update
-      ${SUDO} apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
+      ${PKG_SUDO} apt-get update
+      ${PKG_SUDO} apt-get install -y libpmix-dev libhwloc-dev libevent-dev \
          libfuse3-dev librdmacm-dev libtcmalloc-minimal4 doxygen
       if [ "${IS_DOCKER}" != "1" ]; then
-         ${SUDO} apt-get install -y linux-headers-$(uname -r)
+         ${PKG_SUDO} apt-get install -y linux-headers-$(uname -r)
       fi
    fi
 elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    echo "Install of pmix and hwloc packages"
    if [[ "${DRY_RUN}" == "0" ]]; then
       # these are for openmpi :  libpmix-dev  libhwloc-dev  libevent-dev
-      ${SUDO} yum update -y
-      ${SUDO} yum install -y pmix hwloc
+      ${PKG_SUDO} yum update -y
+      ${PKG_SUDO} yum install -y pmix hwloc
    fi
 else
    echo "DISTRO version ${DISTRO} not recognized or supported"
