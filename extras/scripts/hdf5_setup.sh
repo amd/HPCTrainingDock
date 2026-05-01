@@ -244,7 +244,21 @@ else
          ${SUDO} chmod -R a+w ${HDF5_PATH}
       fi
 
-      git clone --branch hdf5_${HDF5_VERSION} https://github.com/HDFGroup/hdf5.git
+      # Build under /tmp (compute-node local disk) so the hdf5
+      # source clone, the zlib build, and the main cmake build
+      # don't all round-trip through NFS for every .o, .a, .so.
+      # Only `make install` writes hit NFS via the absolute
+      # CMAKE_INSTALL_PREFIX=${HDF5_PATH}. EXIT trap guarantees
+      # cleanup even on build failure (we have set -e). Audit basis:
+      # 7950 hdf5 took ~11m50s with build under
+      # /home/admin/repos/HPCTrainingDock/hdf5/...
+      HDF5_BUILD_DIR=$(mktemp -d -t hdf5-build.XXXXXX)
+      trap '[ -n "${HDF5_BUILD_DIR:-}" ] && rm -rf "${HDF5_BUILD_DIR}"' EXIT
+      cd "${HDF5_BUILD_DIR}"
+
+      # --depth=1 to skip ~10 years of history we don't need; the
+      # branch tag pins us to the exact release.
+      git clone --depth=1 --branch hdf5_${HDF5_VERSION} https://github.com/HDFGroup/hdf5.git
       cd hdf5
 
       # install dependencies
@@ -257,7 +271,10 @@ else
       tar zxf zlib-1.3.1.tar.gz
       cd zlib-1.3.1
       ./configure --prefix=${HDF5_PATH}/zlib
-      make install
+      # zlib's autotools install target depends on `all`, so a
+      # parallel install is equivalent to `make -j && make install`
+      # here. Saves ~30s on a 96-core node vs serial.
+      make -j $(nproc) install
 
       # get LIBAEC -- support for szip library is currently broken: https://github.com/HDFGroup/hdf5/issues/4614
       #wget https://github.com/MathisRosenhauer/libaec/releases/download/v1.1.3/libaec-1.1.3.tar.gz
@@ -308,14 +325,19 @@ else
 				-DHDF5_BUILD_FORTRAN:BOOL=ON ..
 
 
-      cmake --build . --config Release
+      # --parallel $(nproc): cmake --build with the "Unix Makefiles"
+      # generator does NOT pass -j to make by default, so the build
+      # was running serially despite a 96-core node. Audit basis:
+      # 7950 hdf5 cmake build dominated the 11m50s total.
+      cmake --build . --config Release --parallel $(nproc)
 
       cpack -C Release CPackConfig.cmake
 
       ./HDF5-${HDF5_VERSION}-Linux.sh --prefix=${HDF5_PATH} --skip-license
 
+      # HDF5_BUILD_DIR (under /tmp) is removed by the EXIT trap
+      # above; no need to rm the source clone explicitly.
       cd ../..
-      rm -rf hdf5
 
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find ${HDF5_PATH} -type f -execdir chown root:root "{}" +
