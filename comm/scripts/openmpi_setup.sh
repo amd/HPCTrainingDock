@@ -477,6 +477,16 @@ cd "${INSTALL_PATH}"
 AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
 CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
+# Per-job throwaway build dir shared by XPMEM, UCX, and UCC source
+# builds. Replaces three independent `cd /tmp` calls (and their
+# `rm -rf <pkg>-<version>` cleanups) that would race with -- and
+# clobber -- any other concurrent openmpi-deps build on the same
+# node (different ROCm versions, sweeps, etc.). Also fixes a latent
+# bug where, if UCX was cached but UCC was built, UCC's wget would
+# inherit cwd=${INSTALL_PATH} from the cached-UCX branch.
+OPENMPI_DEPS_BUILD_DIR=$(mktemp -d -t openmpi-deps-build.XXXXXX)
+trap '[ -n "${OPENMPI_DEPS_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${OPENMPI_DEPS_BUILD_DIR}"' EXIT
+
 #
 # Install XPMEM
 #
@@ -516,7 +526,7 @@ if [ "${BUILD_XPMEM}" == "1" ]; then
          echo "============================"
          echo ""
 
-         cd /tmp
+         cd "${OPENMPI_DEPS_BUILD_DIR}"
 
          XPMEM_DOWNLOAD_URL=https://github.com/openucx/xpmem/archive/refs/tags/v${XPMEM_VERSION}.tar.gz
          count=0
@@ -559,8 +569,8 @@ if [ "${BUILD_XPMEM}" == "1" ]; then
             fi
          fi
 
-      cd ..
-      rm -rf xpmem-${XPMEM_VERSION} v${XPMEM_VERSION}.tar.gz
+      cd "${OPENMPI_DEPS_BUILD_DIR}"
+      # trap handles cleanup of xpmem-${XPMEM_VERSION} and the tarball
    fi
 
    if [[ ! -d ${XPMEM_PATH}/lib ]] ; then
@@ -610,7 +620,7 @@ else
       echo "============================"
       echo ""
 
-      cd /tmp
+      cd "${OPENMPI_DEPS_BUILD_DIR}"
 
       UCX_DOWNLOAD_URL=https://github.com/openucx/ucx/releases/download/v${UCX_VERSION}/ucx-${UCX_VERSION}.tar.gz
       count=0
@@ -684,8 +694,8 @@ fi
          fi
       fi
 
-      cd ../..
-      rm -rf ucx-${UCX_VERSION} ucx-${UCX_VERSION}.tar.gz
+      cd "${OPENMPI_DEPS_BUILD_DIR}"
+      # trap handles cleanup of ucx-${UCX_VERSION} and the tarball
    fi
 
    if [[ ! -d ${UCX_PATH}/lib ]] ; then
@@ -733,6 +743,10 @@ else
       echo " Building UCC"
       echo "============================"
       echo ""
+
+      # cwd may be ${INSTALL_PATH} if UCX was cached and we did not
+      # take the build branch above; reset to the shared build dir.
+      cd "${OPENMPI_DEPS_BUILD_DIR}"
 
       count=0
       while [ "$count" -lt 3 ]; do
@@ -802,8 +816,8 @@ else
          fi
       fi
 
-      cd ..
-      rm -rf ucc-${UCC_VERSION} v${UCC_VERSION}.tar.gz
+      cd "${OPENMPI_DEPS_BUILD_DIR}"
+      # trap handles cleanup of ucc-${UCC_VERSION} and the tarball
    fi
 
    if [[ ! -d "${UCC_PATH}"/lib ]] ; then
@@ -871,7 +885,13 @@ else
       # Audited as S7.B in slurm-7935-rocmplus-7.0.1.out; mirrors the
       # scorep S6.C pattern in tools/scripts/scorep_setup.sh.
       OPENMPI_BUILD_DIR=$(mktemp -d -t openmpi-build.XXXXXX)
-      trap '[ -n "${OPENMPI_BUILD_DIR:-}" ] && rm -rf "${OPENMPI_BUILD_DIR}"' EXIT
+      # Chain both cleanups: this `trap ... EXIT` would otherwise
+      # replace the OPENMPI_DEPS_BUILD_DIR trap installed earlier in
+      # the script, leaking the XPMEM/UCX/UCC scratch tree under /tmp.
+      # ${SUDO:-sudo} for sudo-tolerance (some build artefacts may be
+      # root-owned if a `${SUDO_*} make install` ran into the temp
+      # tree -- see the kokkos / hipfort fix in commit 9b27089).
+      trap '[ -n "${OPENMPI_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${OPENMPI_BUILD_DIR}"; [ -n "${OPENMPI_DEPS_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${OPENMPI_DEPS_BUILD_DIR}"' EXIT
       cd "${OPENMPI_BUILD_DIR}"
 
       OPENMPI_SHORT_VERSION=`echo ${OPENMPI_VERSION} | cut -f1-2 -d'.' `

@@ -45,12 +45,16 @@ done
 
 #module load rocm/6.0.0 cray-python/3.11.5 craype-accel-amd-gfx90a
 module load rocm
-cd /tmp
+# Per-job throwaway build dir; replaces a fixed `cd /tmp; git clone
+# rccl` pattern that would race with any other concurrent rccl build
+# on the same node.
+RCCL_BUILD_ROOT=$(mktemp -d -t rccl-build.XXXXXX)
+trap '[ -n "${RCCL_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${RCCL_BUILD_ROOT}"' EXIT
+cd "${RCCL_BUILD_ROOT}"
 git clone https://github.com/ROCm/rccl.git
 cd rccl
 mkdir build && cd build
 cmake -DCMAKE_INSTALL_PREFIX=/opt/rocmplus-${ROCM_VERSION}/rccl
 make -j 16
 make install
-cd ../..
-rm -rf rccl
+# trap handles cleanup of ${RCCL_BUILD_ROOT}

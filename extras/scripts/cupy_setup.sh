@@ -160,7 +160,12 @@ if [ "${BUILD_CUPY}" = "0" ]; then
    exit
 
 else
-   cd /tmp
+   # Per-job throwaway build dir; replaces a fixed `cd /tmp` (with a
+   # later `rm -rf cupy cupy_build`) that would race with any other
+   # concurrent cupy build on the same node.
+   CUPY_BUILD_ROOT=$(mktemp -d -t cupy-build.XXXXXX)
+   trap '[ -n "${CUPY_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${CUPY_BUILD_ROOT}"' EXIT
+   cd "${CUPY_BUILD_ROOT}"
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
@@ -239,9 +244,8 @@ else
       uv pip install -v --upgrade --target=$CUPY_PATH dist/*.whl
       uv pip install -v --target=$CUPY_PATH cupy-xarray --no-deps
       deactivate
-      cd ../
-      # clean-up
-      rm -rf cupy cupy_build
+      cd /
+      # clean-up: trap handles ${CUPY_BUILD_ROOT}/{cupy,cupy_build}
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find $CUPY_PATH -type f -execdir chown root:root "{}" +
          ${SUDO} find $CUPY_PATH -type d -execdir chown root:root "{}" +

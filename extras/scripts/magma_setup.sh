@@ -224,8 +224,13 @@ else
          ${SUDO} chmod -R a+w ${OPENBLAS_PATH}
       fi
 
-      cd /tmp
-      rm -rf openblas_build
+      # Per-job throwaway build dir; replaces a fixed `cd /tmp;
+      # rm -rf openblas_build` pattern that would race with -- and
+      # clobber -- any other concurrent magma/openblas build on the
+      # same node.
+      MAGMA_BUILD_ROOT=$(mktemp -d -t magma-build.XXXXXX)
+      trap '[ -n "${MAGMA_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${MAGMA_BUILD_ROOT}"' EXIT
+      cd "${MAGMA_BUILD_ROOT}"
       mkdir openblas_build && cd openblas_build
       curl -LO https://github.com/OpenMathLib/OpenBLAS/archive/refs/tags/v${OPENBLAS_VERSION}.tar.gz
       tar xf v${OPENBLAS_VERSION}.tar.gz
@@ -233,8 +238,7 @@ else
       make -j MAKE_NB_JOBS=0 ARCH=x86_64 TARGET=ZEN USE_LOCKING=1 USE_OPENMP=1 USE_THREAD=1 RANLIB=ranlib libs netlib shared
       make -j install PREFIX=${OPENBLAS_PATH} MAKE_NB_JOBS=0 ARCH=x86_64 TARGET=ZEN USE_LOCKING=1 USE_OPENMP=1 USE_THREAD=1 RANLIB=ranlib
 
-      cd /tmp
-      rm -rf openblas_build
+      # trap handles cleanup of ${MAGMA_BUILD_ROOT}/openblas_build
 
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find ${OPENBLAS_PATH} -type f -execdir chown root:root "{}" +
@@ -266,8 +270,14 @@ else
       CMAKE_PREFIX_PATHS="${OPENBLAS_PATH};${ROCM_PATH}"
    fi
 
-   cd /tmp
-   rm -rf magma_build
+   # MAGMA_BUILD_ROOT was created in the openblas-build branch above
+   # when BUILD_OPENBLAS=1; create one now if the openblas branch
+   # was skipped (cached or already-installed openblas).
+   if [ -z "${MAGMA_BUILD_ROOT:-}" ]; then
+      MAGMA_BUILD_ROOT=$(mktemp -d -t magma-build.XXXXXX)
+      trap '[ -n "${MAGMA_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${MAGMA_BUILD_ROOT}"' EXIT
+   fi
+   cd "${MAGMA_BUILD_ROOT}"
    mkdir magma_build && cd magma_build
    git clone https://github.com/icl-utk-edu/magma.git -b ${MAGMA_VERSION}
    cd magma
@@ -291,8 +301,7 @@ else
    make -j
    make install
 
-   cd /tmp
-   rm -rf magma_build
+   # trap handles cleanup of ${MAGMA_BUILD_ROOT}
 
    export LD_LIBRARY_PATH=${MAGMA_PATH}/lib:${LD_LIBRARY_PATH}
 

@@ -167,8 +167,13 @@ else
          ${SUDO} chmod -R a+rwX ${LIKWID_PATH}
       fi
 
-      cd /tmp
-      rm -rf likwid*
+      # Per-job throwaway build dir; replaces a fixed `cd /tmp; rm -rf
+      # likwid*` pattern that would race with -- and clobber -- any
+      # other concurrent likwid build on the same node (different
+      # ROCm versions, sweeps, etc.).
+      LIKWID_BUILD_ROOT=$(mktemp -d -t likwid-build.XXXXXX)
+      trap '[ -n "${LIKWID_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${LIKWID_BUILD_ROOT}"' EXIT
+      cd "${LIKWID_BUILD_ROOT}"
       wget -q https://github.com/RRZE-HPC/likwid/archive/refs/tags/v${LIKWID_VERSION}.tar.gz
       tar -xzf v${LIKWID_VERSION}.tar.gz
       cd likwid-${LIKWID_VERSION}
@@ -180,8 +185,7 @@ else
       make -j
       ${SUDO} make install
 
-      cd /tmp
-      rm -rf likwid* v${LIKWID_VERSION}.tar.gz
+      # trap handles cleanup of ${LIKWID_BUILD_ROOT}
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${LIKWID_PATH} -type f -execdir chown root:root "{}" +

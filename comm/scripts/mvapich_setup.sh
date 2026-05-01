@@ -148,14 +148,19 @@ if [ "${DISTRO}" = "ubuntu" ]; then
 elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/mvapich
 
-   cd /tmp
+   # Per-job throwaway build dir; replaces a fixed `cd /tmp` that
+   # would race with any other concurrent mvapich build on the same
+   # node. The trap cleans up the rpm download.
+   MVAPICH_BUILD_ROOT=$(mktemp -d -t mvapich-build.XXXXXX)
+   trap '[ -n "${MVAPICH_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${MVAPICH_BUILD_ROOT}"' EXIT
+   cd "${MVAPICH_BUILD_ROOT}"
    # install the GPU aware version of mvapich using an rpm (MVPlus3.0)
    wget -q ${MVAPICH_DOWNLOAD_URL}/${MVAPICH_RPM_NAME}
    if [[ "${DRY_RUN}" == "0" ]]; then
       ${SUDO} rpm --prefix ${INSTALL_PATH} -Uvh --nodeps ${MVAPICH_RPM_NAME}
       ${INSTALL_PATH}/mvapich/bin/mpicc -show
    fi
-   rm ${MVAPICH_RPM_NAME}
+   # trap handles cleanup of ${MVAPICH_BUILD_ROOT}/${MVAPICH_RPM_NAME}
 elif [ "${DISTRO}" = "opensuse leap" ]; then
    echo "Mvapich install on Suse not working yet"
    exit 43

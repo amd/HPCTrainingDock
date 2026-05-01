@@ -136,7 +136,13 @@ if [ "${BUILD_TF}" = "0" ]; then
    exit
 
 else
-   cd /tmp
+   # Per-job throwaway build dir; replaces a fixed `cd /tmp` (with a
+   # later `rm -rf tensorflow-upstream`) that would race with -- and
+   # could clobber -- any other concurrent tensorflow build on the
+   # same node.
+   TF_BUILD_ROOT=$(mktemp -d -t tensorflow-build.XXXXXX)
+   trap '[ -n "${TF_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${TF_BUILD_ROOT}"' EXIT
+   cd "${TF_BUILD_ROOT}"
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
@@ -252,9 +258,8 @@ else
          ${SUDO} chmod go-w $TF_PATH
       fi
 
-      # cleanup
-      cd ..
-      rm -rf tensorflow-upstream
+      # cleanup: trap handles ${TF_BUILD_ROOT}/tensorflow-upstream
+      cd /
       module unload rocm/${ROCM_VERSION}
       module unload amdclang
    fi

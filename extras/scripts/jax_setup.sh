@@ -167,7 +167,13 @@ if [ "${BUILD_JAX}" = "0" ]; then
    exit
 
 else
-   cd /tmp
+   # Per-job throwaway build dir; replaces a fixed `cd /tmp` (and the
+   # later `rm -rf /tmp/{jax,rocm-jax,xla}` cleanup) that would race
+   # with -- and clobber -- any other concurrent jax build on the
+   # same node (different ROCm versions, sweeps, etc.).
+   JAX_BUILD_ROOT=$(mktemp -d -t jax-build.XXXXXX)
+   trap '[ -n "${JAX_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${JAX_BUILD_ROOT}"' EXIT
+   cd "${JAX_BUILD_ROOT}"
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
@@ -449,11 +455,11 @@ else
          fi
       fi	 
 
-      # cleanup
-      cd ..
-      rm -rf /tmp/jax
-      rm -rf /tmp/rocm-jax
-      rm -rf /tmp/xla
+      # cleanup: trap on JAX_BUILD_ROOT (set in the build entry below)
+      # handles removal of jax / rocm-jax / xla source trees. The
+      # original `rm -rf /tmp/jax /tmp/rocm-jax /tmp/xla` pattern
+      # would clobber any other concurrent jax build on the same node.
+      cd /
 
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find ${JAXLIB_PATH} -type f -execdir chown root:root "{}" +
