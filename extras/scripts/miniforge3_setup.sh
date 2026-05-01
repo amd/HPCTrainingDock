@@ -129,12 +129,19 @@ else
       echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
 
+   # Per-job throwaway dir for the installer; replaces a fixed
+   # /tmp/Miniforge3-*.sh path / glob that would race with -- and
+   # could clobber -- any other concurrent miniforge3 install on the
+   # same node.
+   MINIFORGE_BUILD_ROOT=$(mktemp -d -t miniforge-build.XXXXXX)
+   trap '[ -n "${MINIFORGE_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${MINIFORGE_BUILD_ROOT}"' EXIT
+   MINIFORGE_INSTALLER="${MINIFORGE_BUILD_ROOT}/Miniforge3-$(uname)-$(uname -m).sh"
    # getting Miniforge3 version 24.9.0
-   wget -q "https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE3_VERSION_DOWNLOAD}/Miniforge3-$(uname)-$(uname -m).sh" -O /tmp/Miniforge3-$(uname)-$(uname -m).sh
-   chmod +x /tmp/Miniforge3-*.sh
+   wget -q "https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE3_VERSION_DOWNLOAD}/Miniforge3-$(uname)-$(uname -m).sh" -O "${MINIFORGE_INSTALLER}"
+   chmod +x "${MINIFORGE_INSTALLER}"
    ${SUDO} mkdir -p ${MINIFORGE3_PATH}
-   ${SUDO} /tmp/Miniforge3-*.sh -b -u -p ${MINIFORGE3_PATH}
-   rm -f /tmp/Miniforge3-*.sh
+   ${SUDO} "${MINIFORGE_INSTALLER}" -b -u -p ${MINIFORGE3_PATH}
+   # trap handles cleanup of ${MINIFORGE_BUILD_ROOT}
 
    # Create a module file for miniforge3
    if [ -d "$MODULE_PATH" ]; then

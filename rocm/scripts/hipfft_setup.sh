@@ -120,7 +120,13 @@ if [ "${BUILD_HIPFFT}" = "0" ]; then
    exit
 
 else
-   cd /tmp
+   # Per-job throwaway build dir; replaces a fixed `cd /tmp` (with a
+   # later `rm -rf rocm-libraries`) that would race with any other
+   # concurrent hipfft build on the same node (different ROCm
+   # versions, sweeps, etc.).
+   HIPFFT_BUILD_ROOT=$(mktemp -d -t hipfft-build.XXXXXX)
+   trap '[ -n "${HIPFFT_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${HIPFFT_BUILD_ROOT}"' EXIT
+   cd "${HIPFFT_BUILD_ROOT}"
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
@@ -182,8 +188,7 @@ else
       cmake -DGPU_TARGETS="${AMDGPU_GFXMODEL}" -DCMAKE_INSTALL_PREFIX=${HIPFFT_PATH} ..
       make
       make install
-      cd ../..
-      rm -rf rocm-libraries
+      # trap handles cleanup of ${HIPFFT_BUILD_ROOT}/rocm-libraries
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find $HIPFFT_PATH -type f -execdir chown root:root "{}" +

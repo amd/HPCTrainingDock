@@ -120,7 +120,13 @@ if [ "${BUILD_ROCFFT}" = "0" ]; then
    exit
 
 else
-   cd /tmp
+   # Per-job throwaway build dir; replaces a fixed `cd /tmp` (with a
+   # later `rm -rf rocm-libraries`) that would race with any other
+   # concurrent rocfft build on the same node (different ROCm
+   # versions, sweeps, etc.).
+   ROCFFT_BUILD_ROOT=$(mktemp -d -t rocfft-build.XXXXXX)
+   trap '[ -n "${ROCFFT_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${ROCFFT_BUILD_ROOT}"' EXIT
+   cd "${ROCFFT_BUILD_ROOT}"
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
@@ -182,8 +188,7 @@ else
       cmake -DGPU_TARGETS="${AMDGPU_GFXMODEL}" -DCMAKE_INSTALL_PREFIX=${ROCFFT_PATH} ..
       make
       make install
-      cd ../../..
-      rm -rf rocm-libraries
+      # trap handles cleanup of ${ROCFFT_BUILD_ROOT}/rocm-libraries
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find $ROCFFT_PATH -type f -execdir chown root:root "{}" +

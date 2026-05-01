@@ -119,7 +119,12 @@ if [ "${BUILD_SMARTSIM}" = "0" ]; then
    exit
 
 else
-   cd /tmp
+   # Per-job throwaway build dir; replaces a fixed `cd /tmp` (with a
+   # later `rm -rf SmartSim SmartRedis`) that would race with any
+   # other concurrent smartsim build on the same node.
+   SMARTSIM_BUILD_ROOT=$(mktemp -d -t smartsim-build.XXXXXX)
+   trap '[ -n "${SMARTSIM_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${SMARTSIM_BUILD_ROOT}"' EXIT
+   cd "${SMARTSIM_BUILD_ROOT}"
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
@@ -202,9 +207,8 @@ else
          ${SUDO} chmod go-w $CRAYLABS_PATH
       fi
 
-      # cleanup
-      cd ..
-      rm -rf SmartSim SmartRedis
+      # cleanup: trap handles ${SMARTSIM_BUILD_ROOT}/{SmartSim,SmartRedis}
+      cd /
       module unload rocm/${ROCM_VERSION}
       module unload amdflang-new
       module unload pytorch

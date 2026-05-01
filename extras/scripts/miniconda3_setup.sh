@@ -131,10 +131,17 @@ else
       echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
 
-   wget -q https://repo.anaconda.com/miniconda/Miniconda3-py3${PYTHON_VERSION}_${MINICONDA3_VERSION_DOWNLOAD}-$(uname)-$(uname -m).sh -O /tmp/miniconda-installer.sh
-   chmod +x /tmp/miniconda-installer.sh
+   # Per-job throwaway dir for the installer; replaces a fixed
+   # /tmp/miniconda-installer.sh path that would race with -- and
+   # could clobber -- any other concurrent miniconda3 install on the
+   # same node.
+   MINICONDA_BUILD_ROOT=$(mktemp -d -t miniconda-build.XXXXXX)
+   trap '[ -n "${MINICONDA_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${MINICONDA_BUILD_ROOT}"' EXIT
+   MINICONDA_INSTALLER="${MINICONDA_BUILD_ROOT}/miniconda-installer.sh"
+   wget -q https://repo.anaconda.com/miniconda/Miniconda3-py3${PYTHON_VERSION}_${MINICONDA3_VERSION_DOWNLOAD}-$(uname)-$(uname -m).sh -O "${MINICONDA_INSTALLER}"
+   chmod +x "${MINICONDA_INSTALLER}"
    ${SUDO} mkdir -p ${MINICONDA3_PATH}
-   ${SUDO} /tmp/miniconda-installer.sh -b -u -p ${MINICONDA3_PATH}
+   ${SUDO} "${MINICONDA_INSTALLER}" -b -u -p ${MINICONDA3_PATH}
    export PATH="${MINICONDA3_PATH}/bin:${PATH}"
    conda config --set always_yes yes --set changeps1 no
    # conda update -c defaults -n base conda
@@ -144,7 +151,7 @@ else
    ${MINICONDA3_PATH}/envs/py3.${PYTHON_VERSION}/bin/python -m pip install numpy perfetto dataclasses
    conda clean -a -y
    ${SUDO} chown -R root:root ${MINICONDA3_PATH}/*
-   rm -f /tmp/miniconda-installer.sh
+   # trap handles cleanup of ${MINICONDA_BUILD_ROOT}
 
    # Create a module file for miniconda3
    if [ -d "$MODULE_PATH" ]; then

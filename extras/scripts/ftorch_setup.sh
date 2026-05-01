@@ -162,7 +162,12 @@ if [ "${BUILD_FTORCH}" = "0" ]; then
    exit
 
 else
-   cd /tmp
+   # Per-job throwaway build dir; replaces a fixed `cd /tmp` (with a
+   # later `rm -rf FTorch`) that would race with any other concurrent
+   # ftorch build on the same node.
+   FTORCH_BUILD_ROOT=$(mktemp -d -t ftorch-build.XXXXXX)
+   trap '[ -n "${FTORCH_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${FTORCH_BUILD_ROOT}"' EXIT
+   cd "${FTORCH_BUILD_ROOT}"
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
@@ -228,9 +233,8 @@ else
          ${SUDO} chmod go-w $FTORCH_PATH
       fi
 
-      # cleanup
-      cd ../..
-      rm -rf FTorch
+      # cleanup: trap handles ${FTORCH_BUILD_ROOT}/FTorch
+      cd /
       module unload rocm/${ROCM_VERSION}
       module unload ${PYTORCH_MODULE}
    fi
