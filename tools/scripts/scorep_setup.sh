@@ -245,6 +245,23 @@ else
          echo "PDT_PATH ${PDT_PATH} already exists and is non-empty, skipping PDT install"
          PDT_PATH_ORIGINAL=$PDT_PATH
       else
+         # Spack user-scope isolation: redirect ~/.spack to per-job
+         # throwaway dirs under /tmp so that (a) `spack external find
+         # --all` writes its packages.yaml into the throwaway dir
+         # instead of polluting ~/.spack/packages.yaml across rocm
+         # versions, and (b) any pre-existing ~/.spack/config.yaml
+         # (e.g. an install_tree.root left by a prior rocm-version
+         # build) is invisible to this spack invocation. Without this,
+         # spack's user scope OUT-RANKS the per-clone defaults file
+         # we sed below, and `spack location -i pdt` returns an
+         # install dir from another rocm tree (observed: 7.0.1 module
+         # pointed at /nfsapps/opt/rocmplus-7.0.2/pdt/...). The temp
+         # dirs are cleaned up by the SCOREP_BUILD_DIR EXIT trap set
+         # below (the trap covers all three).
+         SPACK_USER_CONFIG_PATH=$(mktemp -d -t spack-user-config.XXXXXX)
+         SPACK_USER_CACHE_PATH=$(mktemp -d -t spack-user-cache.XXXXXX)
+         export SPACK_USER_CONFIG_PATH SPACK_USER_CACHE_PATH
+
          git clone --depth 1 https://github.com/spack/spack.git
 
          # load spack environment
@@ -297,7 +314,10 @@ else
       # temp build dir is cleaned up even on a build failure (we have
       # set -e). Audited as S6.C in slurm-7934-rocmplus-7.0.2.out.
       SCOREP_BUILD_DIR=$(mktemp -d -t scorep-build.XXXXXX)
-      trap '[ -n "${SCOREP_BUILD_DIR:-}" ] && rm -rf "${SCOREP_BUILD_DIR}"' EXIT
+      # Combined cleanup: scorep build dir + spack user-scope isolation
+      # dirs (set above in the PDT install branch; may be unset if PDT
+      # was cached, which is why we use :-/nonexistent fallbacks).
+      trap 'rm -rf "${SCOREP_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
       cd "${SCOREP_BUILD_DIR}"
 
       # S6.E: -q to drop ~440 lines of dot-progress noise for a 21MB

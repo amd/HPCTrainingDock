@@ -154,6 +154,17 @@ else
 
       # spack install
       if [[ ${USE_SPACK} == "1" ]]; then
+         # Spack user-scope isolation: see scorep_setup.sh for full
+         # rationale. Per-job throwaway dirs keep `spack compiler
+         # find` / `spack external find --all` from polluting
+         # ~/.spack/{packages,compilers}.yaml across rocm versions
+         # and prevent any stale user-scope install_tree.root from
+         # over-riding the defaults edit below.
+         SPACK_USER_CONFIG_PATH=$(mktemp -d -t spack-user-config.XXXXXX)
+         SPACK_USER_CACHE_PATH=$(mktemp -d -t spack-user-cache.XXXXXX)
+         export SPACK_USER_CONFIG_PATH SPACK_USER_CACHE_PATH
+         trap 'rm -rf "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+
          git clone --branch=v0.23.1 https://github.com/spack/spack
          # change spack install dir for Hypre
          source spack/share/spack/setup-env.sh

@@ -245,6 +245,20 @@ else
       ${SUDO} mkdir -p ${TAU_PATH}
       ${SUDO} mkdir -p ${PDT_PATH}
 
+      # Spack user-scope isolation: redirect ~/.spack to per-job
+      # throwaway dirs so `spack external find --all` and the
+      # `spack config add "config:install_tree:root:..."` below
+      # write to those throwaway dirs instead of polluting
+      # ~/.spack/{packages,config}.yaml across rocm versions. Without
+      # this, the user-scope install_tree.root from a prior build
+      # makes `spack location -i pdt` return another rocm tree's path
+      # (observed cross-contamination in rocmplus-7.0.1 scorep
+      # modulefile pointing at /nfsapps/opt/rocmplus-7.0.2/pdt/...).
+      SPACK_USER_CONFIG_PATH=$(mktemp -d -t spack-user-config.XXXXXX)
+      SPACK_USER_CACHE_PATH=$(mktemp -d -t spack-user-cache.XXXXXX)
+      export SPACK_USER_CONFIG_PATH SPACK_USER_CACHE_PATH
+      trap 'rm -rf "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+
       git clone --depth 1 https://github.com/spack/spack.git
 
       # load spack environment
@@ -254,8 +268,8 @@ else
       spack external find --all
 
       # change spack install dir for PDT
-      # Use spack config add to set user-scope config, which takes precedence
-      # over any stale ~/.spack/config.yaml left by other spack-based builds
+      # With SPACK_USER_CONFIG_PATH set above, this writes to the
+      # per-job throwaway user config dir, isolated from other builds.
       spack config add "config:install_tree:root:${PDT_PATH}"
 
       # open permissions to use spack to install PDT

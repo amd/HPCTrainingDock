@@ -9,6 +9,21 @@ MODULE_PATH=/etc/lmod/modules/ROCm
 
 cd /tmp
 rm -rf spack
+
+# Spack user-scope isolation: per-job throwaway dirs for
+# SPACK_USER_CONFIG_PATH and SPACK_USER_CACHE_PATH so that
+# `spack compiler find`, `spack external find --all`, and the
+# `spack config add` calls below write to throwaway dirs instead
+# of polluting ~/.spack/{packages,compilers,config}.yaml across
+# rocm-version sweeps. Without this, a user-scope install_tree.root
+# from a prior build silently redirects spack's install dir away
+# from ${INSTALL_PATH} (observed cross-contamination in
+# rocmplus-7.0.1 scorep modulefile pointing at rocmplus-7.0.2 pdt).
+SPACK_USER_CONFIG_PATH=$(mktemp -d -t spack-user-config.XXXXXX)
+SPACK_USER_CACHE_PATH=$(mktemp -d -t spack-user-cache.XXXXXX)
+export SPACK_USER_CONFIG_PATH SPACK_USER_CACHE_PATH
+trap 'rm -rf "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+
 git clone https://github.com/spack/spack.git
 source spack/share/spack/setup-env.sh
 
