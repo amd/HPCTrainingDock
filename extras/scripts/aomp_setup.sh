@@ -15,6 +15,11 @@ if [  -f /.singularity.d/Singularity ]; then
    DEB_FRONTEND=""
 fi
 
+# PKG_SUDO is independent of the install-path-derived SUDO: apt operates
+# on root-owned /var/lib/{apt,dpkg} regardless of where the package files
+# end up. See openmpi_setup.sh / audit_2026_05_01.md Issue 2.
+PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+
 # Autodetect defaults
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -145,8 +150,8 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
       cd aomp_tmp_install_dir
       export AOMP=$PWD/aomp
 
-      ${SUDO} apt-get update
-      ${SUDO} ${DEB_FRONTEND} apt-get install -y gawk ninja-build generate-ninja ccache libssl-dev \
+      ${PKG_SUDO} apt-get update
+      ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y gawk ninja-build generate-ninja ccache libssl-dev \
 	      libgmp-dev libmpfr-dev libbabeltrace-dev liblzma-dev libdrm-dev libelf-dev
       pip3 install CppHeaderParser
 

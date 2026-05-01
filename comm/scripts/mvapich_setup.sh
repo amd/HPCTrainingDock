@@ -18,6 +18,11 @@ if [  -f /.singularity.d/Singularity ]; then
    DEB_FRONTEND=""
 fi
 
+# PKG_SUDO is independent of the install-path-derived SUDO: apt operates
+# on root-owned /var/lib/{apt,dpkg} regardless of where the package files
+# end up. See openmpi_setup.sh / audit_2026_05_01.md Issue 2.
+PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+
 
 # Autodetect defaults
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -131,13 +136,13 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    # classify this as SKIPPED(no-op), not FAILED. Kept in sync by
    # convention with bare_system/main_setup.sh.
    exit 43
-   ${SUDO} ${DEB_FRONTEND} apt-get -qqy install alien
+   ${PKG_SUDO} ${DEB_FRONTEND} apt-get -qqy install alien
    ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/mvapich
 
    # install the GPU aware version of mvapich using an rpm (MVPlus3.0)
    ${SUDO} wget -q ${MVAPICH_DOWNLOAD_URL}/${MVAPICH_RPM_NAME}
    ls -l ${MVAPICH_RPM_NAME}
-   ${SUDO} ${DEB_FRONTEND} apt-get install -y alien ${MVAPICH_RPM_NAME}
+   ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y alien ${MVAPICH_RPM_NAME}
    /opt/rocmplus-${ROCM_VERSION}/mvapich/bin/mpicc --show
    rm -rf ${MVAPICH_RPM_NAME}
 elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then

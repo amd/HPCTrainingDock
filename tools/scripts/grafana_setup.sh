@@ -6,6 +6,11 @@ if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
 fi
 
+# PKG_SUDO is independent of the install-path-derived SUDO: apt operates
+# on root-owned /var/lib/{apt,dpkg} regardless of where the package files
+# end up. See openmpi_setup.sh / audit_2026_05_01.md Issue 2.
+PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+
 INSTALL_GRAFANA=0
 
 usage()
@@ -68,40 +73,40 @@ fi
 pushd /etc/apt/sources.list.d
 ls -lsa
 rm -f  nodesource.list
-${SUDO} apt-get --fix-broken install
-${SUDO} apt-get update
-${SUDO} apt-get remove nodejs
-${SUDO} apt-get remove nodejs-doc
+${PKG_SUDO} apt-get --fix-broken install
+${PKG_SUDO} apt-get update
+${PKG_SUDO} apt-get remove nodejs
+${PKG_SUDO} apt-get remove nodejs-doc
 popd
 
-${SUDO} apt-get update
-${SUDO} apt-get install -y apt-transport-https software-properties-common  adduser libfontconfig1 wget curl
+${PKG_SUDO} apt-get update
+${PKG_SUDO} apt-get install -y apt-transport-https software-properties-common  adduser libfontconfig1 wget curl
 wget -q https://dl.grafana.com/enterprise/release/grafana-enterprise_8.3.4_amd64.deb
 ${SUDO} dpkg -i grafana-enterprise_8.3.4_amd64.deb
 echo "deb https://packages.grafana.com/enterprise/deb stable main" | tee -a /etc/apt/sources.list.d/grafana.list
 echo "deb [signed-by=/usr/share/keyrings/yarnkey.gpg] https://dl.yarnpkg.com/debian stable main" | tee /etc/apt/sources.list.d/yarn.list
-${SUDO} apt-get install gnupg
+${PKG_SUDO} apt-get install gnupg
 wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc -O server-6.0.asc
-${SUDO} apt-key add server-6.0.asc
+${PKG_SUDO} apt-key add server-6.0.asc
 echo "deb [trusted=yes arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/6.0 multiverse" | tee /etc/apt/sources.list.d/mongodb-org.list
 wget -q -O - https://packages.grafana.com/gpg.key | apt-key add -
 curl -sL https://dl.yarnpkg.com/debian/pubkey.gpg | gpg --dearmor | tee /usr/share/keyrings/yarnkey.gpg > /dev/null
-${SUDO} apt-get update
-${SUDO} apt-get install -y mongodb-org
-${SUDO} apt-get install -y tzdata systemd apt-utils npm vim net-tools
+${PKG_SUDO} apt-get update
+${PKG_SUDO} apt-get install -y mongodb-org
+${PKG_SUDO} apt-get install -y tzdata systemd apt-utils npm vim net-tools
 ${SUDO} mkdir -p /nonexistent
 /usr/sbin/grafana-cli plugins install michaeldmoore-multistat-panel
 /usr/sbin/grafana-cli plugins install ae3e-plotly-panel
 /usr/sbin/grafana-cli plugins install natel-plotly-panel
 /usr/sbin/grafana-cli plugins install grafana-image-renderer
-${SUDO} apt-get autoremove -y
+${PKG_SUDO} apt-get autoremove -y
 ${SUDO} chown root:grafana /etc/grafana
 pushd /var/lib/grafana/plugins/omniperfData_plugin
 npm install
 npm run build
 curl --compressed -o- -L https://yarnpkg.com/install.sh | bash
-${SUDO} apt-get autoremove -y
-${SUDO} apt-get autoclean -y
+${PKG_SUDO} apt-get autoremove -y
+${PKG_SUDO} apt-get autoclean -y
 popd
 pushd /var/lib/grafana/plugins/custom-svg
 ${SUDO} sed -i "s/  bindIp.*/  bindIp: 0.0.0.0/" /etc/mongod.conf

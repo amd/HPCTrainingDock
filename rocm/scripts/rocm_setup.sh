@@ -27,6 +27,12 @@ if [  -f /.singularity.d/Singularity ]; then
    DEB_FRONTEND=""
 fi
 
+# PKG_SUDO is independent of the install-path-derived SUDO: apt/dnf
+# operate on root-owned /var/lib/{apt,dpkg,rpm} regardless of where the
+# package files end up. See openmpi_setup.sh / audit_2026_05_01.md
+# Issue 2.
+PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+
 
 usage()
 {
@@ -298,8 +304,8 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
       fi
 
       if [ "${DISTRO}" == "ubuntu" ]; then
-         ${SUDO} apt-get update
-         ${SUDO} ${DEB_FRONTEND} apt-get install -y libdrm-dev logrotate
+         ${PKG_SUDO} apt-get update
+         ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y libdrm-dev logrotate
 
          #mkdir --parents --mode=0755 /etc/apt/keyrings
          #${SUDO} mkdir --parents --mode=0755 /etc/apt/keyrings
@@ -314,18 +320,18 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
          fi
 
          # Update package list
-         ${SUDO} apt-get update
+         ${PKG_SUDO} apt-get update
 
          # Get the amdgpu-install script
          wget -q https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/${DISTRO}/${ROCM_REPO_DIST}/amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
 
          # Run the amdgpu-install script. We have already installed the kernel driver, so use we use --no-dkms
-         ${SUDO} ${DEB_FRONTEND} apt-get install -q -y --allow-downgrades ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+         ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -q -y --allow-downgrades ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
       elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
-	 ${SUDO} dnf config-manager --set-enabled crb
-         ${SUDO} dnf install -y python3-setuptools python3-wheel python3-devel
-#	 ${SUDO} dnf --enablerepo=crb install python3-wheel -y
-#	 ${SUDO} dnf install python3-setuptools python3-wheel -y
+	 ${PKG_SUDO} dnf config-manager --set-enabled crb
+         ${PKG_SUDO} dnf install -y python3-setuptools python3-wheel python3-devel
+#	 ${PKG_SUDO} dnf --enablerepo=crb install python3-wheel -y
+#	 ${PKG_SUDO} dnf install python3-setuptools python3-wheel -y
 
 	 ${SUDO} touch /etc/yum.repos.d/rocm.repo
 	 ${SUDO} chmod a+w /etc/yum.repos.d/rocm.repo
@@ -341,8 +347,8 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
 EOF
          cat /etc/yum.repos.d/rocm.repo
 
-	 echo "${SUDO} dnf install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${DISTRO_VERSION}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm"
-	 ${SUDO} dnf install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${DISTRO_VERSION}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
+	 echo "${PKG_SUDO} dnf install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${DISTRO_VERSION}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm"
+	 ${PKG_SUDO} dnf install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${DISTRO_VERSION}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
       fi
 # if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
 # if ROCM_VERSION is less than or equal to 6.1.2, the awk command result will be blank
@@ -356,13 +362,13 @@ EOF
             # removing asan to reduce image size
             #amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,lrt,openclsdk,openmpsdk,mlsdk,asan --no-dkms
             amdgpu-install -q -y --usecase=hiplibsdk,rocmdev,rocmdevtools,lrt,openclsdk,openmpsdk,mlsdk --no-dkms --rocmrelease=${ROCM_VERSION}
-            #${SUDO} apt-get install rocm_bandwidth_test
+            #${PKG_SUDO} apt-get install rocm_bandwidth_test
 	 fi
          if [ "${DISTRO}" == "ubuntu" ]; then
-            ${SUDO} apt-get install -y rocm-llvm-dev${ROCM_VERSION} rocm-device-libs${ROCM_VERSION} rocm-core${ROCM_VERSION} rocm-llvm${ROCM_VERSION}
+            ${PKG_SUDO} apt-get install -y rocm-llvm-dev${ROCM_VERSION} rocm-device-libs${ROCM_VERSION} rocm-core${ROCM_VERSION} rocm-llvm${ROCM_VERSION}
          #elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
             # error message that rocm-llvm-dev does not exist
-            #${SUDO} dnf install -y rocm-llvm-dev
+            #${PKG_SUDO} dnf install -y rocm-llvm-dev
 	 fi
       else # ROCM_VERSION < 6.2
          amdgpu-install -q -y --usecase=hiplibsdk,rocm --no-dkms --rocmrelease=${ROCM_VERSION}
@@ -597,7 +603,7 @@ if [ "${INCLUDE_TOOLS}" = "1" ]; then
          echo "ROCm built-in ${TOOL_NAME_MC} already installed"
       else
          if [ "${DISTRO}" == "ubuntu" ]; then
-            ${SUDO} ${DEB_FRONTEND} apt-get install -q -y ${TOOL_NAME}
+            ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -q -y ${TOOL_NAME}
          fi
       fi
 
@@ -886,7 +892,7 @@ EOF
          echo "ROCm built-in ${TOOL_NAME_MC} already installed"
       else
          if [ "${DISTRO}" == "ubuntu" ]; then
-            ${SUDO} ${DEB_FRONTEND} apt-get install -q -y ${TOOL_NAME}
+            ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -q -y ${TOOL_NAME}
          fi
       fi
 

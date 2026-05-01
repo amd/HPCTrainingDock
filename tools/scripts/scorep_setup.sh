@@ -306,15 +306,17 @@ else
 #----- end PDT install
       export PATH=$PDT_PATH/bin:$PATH
 
-      # install OpenMPI if not in the system already
+      # install OpenMPI if not in the system already.
+      # The previous `if [[ ${SUDO} != "" ]]` guard skipped libopenmpi-dev
+      # whenever the install path was admin-writable -- a separate
+      # concern from apt sudo authority. PKG_SUDO routes apt through
+      # sudo unless we're already root. See openmpi_setup.sh /
+      # audit_2026_05_01.md Issue 2.
       module load ${MPI_MODULE}
       if [[ `which mpicc | wc -l` -eq 0 ]]; then
-         if [[ ${SUDO} != "" ]]; then
-            ${SUDO} apt-get update
-            ${SUDO} ${DEB_FRONTEND} apt-get install -q -y libopenmpi-dev
-         else
-            echo "WARNING: module for ${MPI_MODULE} not found, and did not install libopenmpi-dev due to not having sudo"
-         fi
+         PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+         ${PKG_SUDO} apt-get update
+         ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -q -y libopenmpi-dev
       fi
 
       if [[ $MPI_CONFIG == "" ]]; then

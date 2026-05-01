@@ -11,6 +11,11 @@ if [  -f /.singularity.d/Singularity ]; then
    DEB_FRONTEND=""
 fi
 
+# PKG_SUDO is independent of the install-path-derived SUDO: apt operates
+# on root-owned /var/lib/{apt,dpkg} regardless of where the package files
+# end up. See openmpi_setup.sh / audit_2026_05_01.md Issue 2.
+PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+
 
 usage()
 {
@@ -98,7 +103,7 @@ if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
    echo "ROCm built-in ${TOOL_NAME_MC} already installed"
 else
    if [ "${DISTRO}" == "ubuntu" ]; then
-      ${SUDO} ${DEB_FRONTEND} apt-get install -q -y ${TOOL_NAME}
+      ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -q -y ${TOOL_NAME}
    fi
 fi
 

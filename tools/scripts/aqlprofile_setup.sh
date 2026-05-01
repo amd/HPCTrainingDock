@@ -18,6 +18,11 @@ if [  -f /.singularity.d/Singularity ]; then
    DEB_FRONTEND=""
 fi
 
+# PKG_SUDO is independent of the install-path-derived SUDO: apt operates
+# on root-owned /var/lib/{apt,dpkg} regardless of where the package files
+# end up. See openmpi_setup.sh / audit_2026_05_01.md Issue 2.
+PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+
 
 usage()
 {
@@ -120,8 +125,8 @@ echo "GITHUB_BRANCH: $GITHUB_BRANCH"
 echo "=================================="
 echo ""
 
-${SUDO} apt-get update
-${SUDO} apt-get -y install libdw-dev
+${PKG_SUDO} apt-get update
+${PKG_SUDO} apt-get -y install libdw-dev
 
 ${SUDO} mkdir -p $INSTALL_PATH
 

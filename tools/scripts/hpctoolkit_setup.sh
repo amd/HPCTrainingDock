@@ -208,8 +208,11 @@ else
          echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
-      # openmpi library being installed as dependency of libboost-all-dev
-      ${SUDO} ${DEB_FRONTEND} apt-get install -q -y pipx libboost-all-dev liblzma-dev libgtk-3-dev
+      # openmpi library being installed as dependency of libboost-all-dev.
+      # PKG_SUDO: apt needs root regardless of the install-path-derived
+      # SUDO. See openmpi_setup.sh / audit_2026_05_01.md Issue 2.
+      PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+      ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -q -y pipx libboost-all-dev liblzma-dev libgtk-3-dev
 
       # Per-job throwaway build dir for the hpctoolkit clone.
       # Replaces a fixed `cd /tmp; rm -rf /tmp/hpctoolkit` pattern

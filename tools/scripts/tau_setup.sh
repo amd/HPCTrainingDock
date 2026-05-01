@@ -320,16 +320,24 @@ else
 
       tar zxf ext.tgz
 
+      # PKG_SUDO: apt needs root regardless of the install-path-derived
+      # SUDO. The previous code passed ${SUDO} to apt directly, so a
+      # build to an admin-writable install path (SUDO='') would have
+      # tried `apt-get update` without sudo and failed with
+      # /var/lib/apt/lists/lock Permission denied. See openmpi_setup.sh
+      # / audit_2026_05_01.md Issue 2 for the original case.
+      PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+
       # install OpenMPI if not in the system already
       # openmpi already loaded by preflight_modules above.
       if [[ `which mpicc | wc -l` -eq 0 ]]; then
-         ${SUDO} apt-get update
-         ${SUDO} apt-get install -q -y libopenmpi-dev
+         ${PKG_SUDO} apt-get update
+         ${PKG_SUDO} apt-get install -q -y libopenmpi-dev
       fi
 
       # install java to use paraprof
-      ${SUDO} apt-get update
-      ${SUDO} apt install -q -y default-jre
+      ${PKG_SUDO} apt-get update
+      ${PKG_SUDO} apt install -q -y default-jre
 
       ROCM_FLAGS="-rocm=${ROCM_PATH} -hip=${ROCM_PATH} -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -rocprofiler=${ROCM_PATH}"
       result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result

@@ -7,8 +7,13 @@ if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
 fi
 
-${SUDO} apt-get update
-${SUDO} apt-get install -y \
+# PKG_SUDO is independent of the install-path-derived SUDO: apt operates
+# on root-owned /var/lib/{apt,dpkg} regardless of where the package files
+# end up. See openmpi_setup.sh / audit_2026_05_01.md Issue 2.
+PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+
+${PKG_SUDO} apt-get update
+${PKG_SUDO} apt-get install -y \
                          libgmp-dev \
                          libgsl-dev \
                          kcachegrind kcachegrind-converters \
@@ -28,7 +33,7 @@ ${SUDO} apt-get install -y \
 # note that installing emacs will break hipcc unless libstdc++-14 is added 
 # modifying rocm module so that it forces use of the base libstdc++ version
 
-#${SUDO} apt-get install --no-install-recommends -y \
+#${PKG_SUDO} apt-get install --no-install-recommends -y \
 #                       emacs \
 #                       libstdc++-14-dev
 	

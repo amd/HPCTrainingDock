@@ -11,6 +11,11 @@ if [  -f /.singularity.d/Singularity ]; then
    DEB_FRONTEND=""
 fi
 
+# PKG_SUDO is independent of the install-path-derived SUDO: apt operates
+# on root-owned /var/lib/{apt,dpkg} regardless of where the package files
+# end up. See openmpi_setup.sh / audit_2026_05_01.md Issue 2.
+PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+
 usage()
 {
     echo "Usage:"
@@ -55,8 +60,8 @@ do
    shift
 done
 
-${SUDO} apt-get update
-${SUDO} ${DEB_FRONTEND} apt-get install -y xserver-xorg-video-dummy \
+${PKG_SUDO} apt-get update
+${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y xserver-xorg-video-dummy \
         lxde \
         x11-xserver-utils xdotool \
         xterm \

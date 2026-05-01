@@ -12,6 +12,12 @@ if [  -f /.singularity.d/Singularity ]; then
    DEB_FRONTEND=""
 fi
 
+# PKG_SUDO is independent of the install-path-derived SUDO: apt/yum
+# operate on root-owned /var/lib/{apt,dpkg,rpm} regardless of where the
+# package files end up. See openmpi_setup.sh / audit_2026_05_01.md
+# Issue 2.
+PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+
 RHEL_COMPATIBLE=0
 if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
    RHEL_COMPATIBLE=1
@@ -36,26 +42,26 @@ if [ "${DISTRO}" = "ubuntu" ]; then
       apt-get -q -y update
       apt-get -q -y install ${SUDO}
    fi
-   ${SUDO} apt-get -q -y update
-   ${SUDO} apt-get dist-upgrade -y
-   ${SUDO} ${DEB_FRONTEND} apt-get install -q -y build-essential cmake libnuma1 wget gnupg2 m4 bash-completion git-core autoconf libtool autotools-dev \
+   ${PKG_SUDO} apt-get -q -y update
+   ${PKG_SUDO} apt-get dist-upgrade -y
+   ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -q -y build-essential cmake libnuma1 wget gnupg2 m4 bash-completion git-core autoconf libtool autotools-dev \
       lsb-release libpapi-dev libpfm4-dev libudev1 rpm librpm-dev curl apt-utils vim tmux rsync ${SUDO} \
       bison flex texinfo libnuma-dev pkg-config libibverbs-dev rdmacm-utils ssh locales gpg ca-certificates \
       gcc g++ gfortran ninja-build libtbb-dev nano ccache
 
 # Install python packages
-   ${SUDO} ${DEB_FRONTEND} apt-get install -q -y python3-pip python3-dev python3-venv
+   ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -q -y python3-pip python3-dev python3-venv
 
    ${SUDO} localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
 elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    if [[ `type sudo |& grep "not found" | wc -l` == "1" ]]; then
       yum install -y which sudo
    fi
-   ${SUDO} yum groupinstall -y "Development Tools"
-   #${SUDO} yum install -y ${SUDO}
-   ${SUDO} yum install -y epel-release
-   ${SUDO} yum install -y --allowerasing curl dpkg-devel numactl-devel openmpi-devel papi-devel python3-pip wget zlib-devel 
-   ${SUDO} yum clean all
+   ${PKG_SUDO} yum groupinstall -y "Development Tools"
+   #${PKG_SUDO} yum install -y ${SUDO}
+   ${PKG_SUDO} yum install -y epel-release
+   ${PKG_SUDO} yum install -y --allowerasing curl dpkg-devel numactl-devel openmpi-devel papi-devel python3-pip wget zlib-devel 
+   ${PKG_SUDO} yum clean all
 elif [ "${DISTRO}" = "opensuse leap" ]; then
    ${SUDO} zypper update -y && \
    ${SUDO} zypper dist-upgrade -y && \
@@ -69,11 +75,11 @@ fi
 #if [[ "${DISTRO}" == "ubuntu" ]]; then
 #   # Instructions from https://apt.kitware.com/
 #   # Remove standard version installed with ubuntu packages
-#   ${SUDO} apt-get purge --auto-remove -y cmake
+#   ${PKG_SUDO} apt-get purge --auto-remove -y cmake
 #
 #   # Step 1
-#   ${SUDO} apt-get -y update
-#   ${SUDO} ${DEB_FRONTEND} apt-get install -y ca-certificates gpg wget
+#   ${PKG_SUDO} apt-get -y update
+#   ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y ca-certificates gpg wget
 #   # Step 2
 #   test -f /usr/share/doc/kitware-archive-keyring/copyright || \
 #      wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
@@ -82,13 +88,13 @@ fi
 #   echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ ${DISTRO_CODENAME} main" | \
 #      ${SUDO} tee /etc/apt/sources.list.d/kitware.list >/dev/null
 #   # Step 4
-#   ${SUDO} apt-get -y update
+#   ${PKG_SUDO} apt-get -y update
 #   test -f /usr/share/doc/kitware-archive-keyring/copyright || \
 #      ${SUDO} rm /usr/share/keyrings/kitware-archive-keyring.gpg
 #   # Step 5
-#   ${SUDO} ${DEB_FRONTEND} apt-get install -y kitware-archive-keyring
+#   ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y kitware-archive-keyring
 #
-#   ${SUDO} ${DEB_FRONTEND} apt-get install -y cmake=3.31.6-0kitware1ubuntu22.04.1
+#   ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y cmake=3.31.6-0kitware1ubuntu22.04.1
 #   CMAKE_VERSION=`cmake --version`
 #   echo "Installed latest version of cmake ($CMAKE_VERSION)"
 #else
