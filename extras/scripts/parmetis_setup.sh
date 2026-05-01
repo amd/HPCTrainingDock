@@ -174,37 +174,35 @@ else
       mkdir parmetis
       cd parmetis
 
+      # Two-line build/install pattern: build as user (no sudo) so the
+      # compiler emits user-owned .o/.a in the build dir, then sudo only
+      # the install step (file copies into ${INSTALL_PATH}).  The previous
+      # `${SUDO} make install -j16` form ran the implicit parallel BUILD
+      # under root, leaving root-owned object files in
+      # ${PWD}/parmetis/{gklib,metis,parmetis}/ that the non-sudo
+      # `rm -rf gklib metis parmetis` below could not clean up.
       git clone https://github.com/KarypisLab/GKlib.git gklib
       cd gklib
       git checkout 8bd6bad750b2b0d908
       git apply ../../gklib_force_fpic.patch
       make config cc=${CC} prefix=$INSTALL_PATH
-      if [ -n "${SUDO}" ]; then
-         ${SUDO} -E env "PATH=$PATH" make install -j16
-      else
-         make install -j16
-      fi
+      make -j16
+      ${SUDO} make install
       cd ..
 
       git clone https://github.com/KarypisLab/METIS.git metis
       cd metis
       make config shared=1 cc=${CC} prefix=$INSTALL_PATH gklib_path=$INSTALL_PATH i64=1
-      if [ -n "${SUDO}" ]; then
-         ${SUDO} -E env "PATH=$PATH" make install -j16
-      else
-         make install -j16
-      fi
+      make -j16
+      ${SUDO} make install
       cd ..
 
       export CC=$MPI_PATH/bin/mpicc
       git clone https://github.com/KarypisLab/ParMETIS.git parmetis
       cd parmetis
       make config shared=1 cc=${CC} prefix=$INSTALL_PATH gklib_path=$INSTALL_PATH metis_path=$INSTALL_PATH
-      if [ -n "${SUDO}" ]; then
-         ${SUDO} -E env "PATH=$PATH" make install -j16
-      else
-         make install -j16
-      fi
+      make -j16
+      ${SUDO} make install
       cd ..
 
       cd ..

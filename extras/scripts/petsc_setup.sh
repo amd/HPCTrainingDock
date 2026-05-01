@@ -447,6 +447,16 @@ print('ScaLAPACK.py patched successfully')
             echo "ERROR: Eigen cmake configuration failed"
             exit 1
          fi
+         # Build as user; sudo only the install (file copies).  Eigen is
+         # mostly headers but the CMake-generated install target may
+         # trigger codegen / build steps -- if those run under sudo
+         # they leave root-owned files in ${PETSC_BUILD_DIR}/eigen_to_install/build/
+         # that would race the EXIT trap on cleanup.
+         make -j $(nproc)
+         if [ $? -ne 0 ]; then
+            echo "ERROR: Eigen build failed"
+            exit 1
+         fi
          ${SUDO} make install
          if [ $? -ne 0 ]; then
             echo "ERROR: Eigen install failed"
