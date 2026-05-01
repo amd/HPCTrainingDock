@@ -255,6 +255,30 @@ else
          ${SUDO} chmod -R a+w ${INSTALL_PATH}
       fi
 
+      # ---------------------------------------------------------------------
+      # Per-job throwaway build dir on local disk for BOTH branches
+      # (audit_2026_05_01.md Issue 6).
+      #
+      # Original layout had the mktemp+trap inside the USE_SPACK==1 branch
+      # only.  The non-spack branch then cloned petsc_to_install/,
+      # slepc_to_install/, eigen_to_install/ directly into the script's CWD
+      # -- which on the build hosts is ${HOME}/repos/HPCTrainingDock (NFS).
+      # PETSc's `make install` uses Python `shutil.copy2` to copy ~600
+      # headers, and copying NFS-mount-A -> NFS-mount-B trips
+      # `[Errno 524] ENOTSUPP` for xattrs/timestamp metadata, aborting
+      # the install (verified in
+      # logs_05_01_2026/rocm-7.2.1_7959/log_petsc_05_01_2026.txt).
+      #
+      # Hoisting the build dir to /tmp turns the install copy into
+      # local-disk -> NFS, which `shutil.copy2` handles cleanly.
+      # The EXIT trap also covers the spack user-scope dirs (set further
+      # down in the spack branch), with `:-/nonexistent` guards so the
+      # trap is harmless when those vars are unset (non-spack runs).
+      # ---------------------------------------------------------------------
+      PETSC_BUILD_DIR=$(mktemp -d -t petsc-build.XXXXXX)
+      trap '${SUDO:-sudo} rm -rf "${PETSC_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+      cd "${PETSC_BUILD_DIR}"
+
       if [[ $USE_SPACK == 1 ]]; then
 
          # ------------ Installing PETSC
@@ -276,17 +300,11 @@ else
          # find --all` from polluting ~/.spack/packages.yaml across
          # rocm versions and prevent any stale user-scope
          # install_tree.root from over-riding the defaults edit below.
+         # The EXIT trap installed above already covers cleanup of
+         # these two paths.
          SPACK_USER_CONFIG_PATH=$(mktemp -d -t spack-user-config.XXXXXX)
          SPACK_USER_CACHE_PATH=$(mktemp -d -t spack-user-cache.XXXXXX)
          export SPACK_USER_CONFIG_PATH SPACK_USER_CACHE_PATH
-
-         # Spack clone goes under /tmp (compute-node local disk) so
-         # concurrent rocm-version builds don't race on ${PWD}/spack
-         # in the shared HPCTrainingDock checkout. EXIT trap covers
-         # the build dir + the two spack user-scope dirs above.
-         PETSC_BUILD_DIR=$(mktemp -d -t petsc-build.XXXXXX)
-         trap '${SUDO:-sudo} rm -rf "${PETSC_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
-         cd "${PETSC_BUILD_DIR}"
 
          git clone https://github.com/spack/spack.git
 
@@ -436,7 +454,11 @@ print('ScaLAPACK.py patched successfully')
          fi
 
          cd ../..
-         ${SUDO} rm -rf petsc_to_install slepc_to_install eigen_to_install
+         # petsc_to_install/, slepc_to_install/, eigen_to_install/ all
+         # live under ${PETSC_BUILD_DIR} (under /tmp) and are removed by
+         # the EXIT trap installed before the USE_SPACK fork. No
+         # explicit rm needed (and the explicit rm here would race with
+         # the trap on `set -e` aborts).
 
       fi
 
