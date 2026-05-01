@@ -245,7 +245,7 @@ else
       ${SUDO} mkdir -p ${TAU_PATH}
       ${SUDO} mkdir -p ${PDT_PATH}
 
-      git clone https://github.com/spack/spack.git
+      git clone --depth 1 https://github.com/spack/spack.git
 
       # load spack environment
       source spack/share/spack/setup-env.sh
@@ -279,7 +279,10 @@ else
       git checkout $GIT_COMMIT || { echo "ERROR: git checkout $GIT_COMMIT failed"; exit 1; }
 
       # install third party dependencies
-      wget http://tau.uoregon.edu/ext.tgz
+      # -q to drop wget dot-progress noise from the per-package log,
+      # matching the precedent in comm/scripts/openmpi_setup.sh and the
+      # S6.E fix in tools/scripts/scorep_setup.sh.
+      wget -q http://tau.uoregon.edu/ext.tgz
 
       tar zxf ext.tgz
 
