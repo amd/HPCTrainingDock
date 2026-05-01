@@ -239,9 +239,43 @@ else
          sed -i '$a build:rocm --copt=-Wno-error=c23-extensions' .bazelrc
       fi
 
-      export TF_ROCM_AMDGPU_TARGETS=${AMDGPU_GFXMODEL}
+      # AMDGPU_GFXMODEL is auto-detected from `rocminfo` (line 7) and on
+      # multi-GPU nodes can be a `;`-separated list, e.g. "gfx942;gfx90a".
+      # TensorFlow's MLIR `hlo_to_kernel` (the kernel-gen tool fed
+      # --rocm_amdgpu_targets) only accepts a SINGLE chipset; passing the
+      # list yields:
+      #   <unknown>:0: error: Invalid chipset name: gfx942;gfx90a
+      #   INTERNAL: Lowering to low-level device IR failed.
+      # which then propagates to "Build did NOT complete successfully"
+      # and the wheel target may or may not produce an artifact (race-y;
+      # observed both outcomes in jobs 7959 and 7973). Reduce to the
+      # FIRST gfx model in the list -- the most common deployment is
+      # gfx942-primary (MI300) with gfx90a as a secondary device used
+      # only for compatibility.
+      #
+      # The substitution `${AMDGPU_GFXMODEL%%;*}` strips the longest
+      # match of `;*` from the tail. With no `;` it leaves the input
+      # unchanged, so a plain "gfx942" is handled correctly without a
+      # branch.
+      #
+      # TODO(audit_2026_05_01.md): Kokkos handles the same multi-arch
+      # rejection by retrying single-arch on cmake failure
+      # (kokkos_setup.sh "Falling back to single-arch"). For TF a
+      # cleaner long-term fix is to BUILD ONCE PER ARCH and ship a
+      # separate modulefile per gfx model (e.g. tensorflow/2.20-gfx942,
+      # tensorflow/2.20-gfx90a) so a user `module load tensorflow/...
+      # -gfx90a` selects the right wheel for their target device.
+      # That is deferred -- it requires (a) iterating the build with
+      # AMDGPU_GFXMODEL_SINGLE pinned to each entry, (b) installing
+      # each wheel under a distinct ${TENSORFLOW_PATH}-<arch> prefix,
+      # and (c) emitting per-arch modulefiles. For now we build a
+      # single-arch wheel against the primary device only.
+      AMDGPU_GFXMODEL_SINGLE="${AMDGPU_GFXMODEL%%;*}"
+      echo "tensorflow: AMDGPU_GFXMODEL='${AMDGPU_GFXMODEL}' -> AMDGPU_GFXMODEL_SINGLE='${AMDGPU_GFXMODEL_SINGLE}' (TF MLIR kernel-gen requires single arch)"
+
+      export TF_ROCM_AMDGPU_TARGETS=${AMDGPU_GFXMODEL_SINGLE}
       # configure tensorflow
-      yes "" | TF_NEED_CLANG=1 ROCM_PATH=$ROCM_PATH TF_NEED_ROCM=1 PYTHON_BIN_PATH=/usr/bin/python3 TF_ROCM_AMDGPU_TARGETS=${AMDGPU_GFXMODEL} ./configure
+      yes "" | TF_NEED_CLANG=1 ROCM_PATH=$ROCM_PATH TF_NEED_ROCM=1 PYTHON_BIN_PATH=/usr/bin/python3 TF_ROCM_AMDGPU_TARGETS=${AMDGPU_GFXMODEL_SINGLE} ./configure
 
       # build and install tensorflow
       #
