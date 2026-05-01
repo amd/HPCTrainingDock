@@ -250,6 +250,17 @@ else
          ENABLE_MPI="--enable-mpi"
       fi
 
+      # Build under /tmp (compute-node local disk) so the three
+      # full builds (double, single, long-double) don't round-trip
+      # through NFS for every .o, .a, .so. Only `make install`
+      # writes hit NFS via the absolute --prefix=${FFTW_PATH}.
+      # EXIT trap guarantees cleanup even on build failure (we have
+      # set -e). Audit basis: 7950 fftw took ~7m14s with build under
+      # /home/admin/repos/HPCTrainingDock/fftw-3.3.10/...
+      FFTW_BUILD_DIR=$(mktemp -d -t fftw-build.XXXXXX)
+      trap '[ -n "${FFTW_BUILD_DIR:-}" ] && rm -rf "${FFTW_BUILD_DIR}"' EXIT
+      cd "${FFTW_BUILD_DIR}"
+
       wget -q https://www.fftw.org/fftw-${FFTW_VERSION}.tar.gz
       tar zxf fftw-${FFTW_VERSION}.tar.gz
       cd fftw-${FFTW_VERSION}
@@ -290,8 +301,8 @@ else
       make -j ${MAKE_JOBS}
       make install
 
-      cd ..
-      rm -rf fftw-${FFTW_VERSION} fftw-${FFTW_VERSION}.tar.gz
+      # FFTW_BUILD_DIR (under /tmp) is removed by the EXIT trap
+      # above; no need to rm the tarball or extracted source dir.
 
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find ${FFTW_PATH} -type f -execdir chown root:root "{}" +

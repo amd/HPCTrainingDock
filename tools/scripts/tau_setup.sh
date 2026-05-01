@@ -245,6 +245,17 @@ else
       ${SUDO} mkdir -p ${TAU_PATH}
       ${SUDO} mkdir -p ${PDT_PATH}
 
+      # Build everything (spack clone + PDT install scratch +
+      # tau2 source + 8 build flavors of compile artifacts) under
+      # /tmp on compute-node local disk to avoid NFS round-trips.
+      # Only `spack install pdt` and `make install` writes hit NFS,
+      # via the absolute install paths in --prefix / install_tree.
+      # Combined EXIT trap covers TAU_BUILD_DIR plus the two spack
+      # user-scope isolation dirs created below. Audit basis: 7950
+      # tau took 39m11s with build under
+      # /home/admin/repos/HPCTrainingDock/tau2/...
+      TAU_BUILD_DIR=$(mktemp -d -t tau-build.XXXXXX)
+
       # Spack user-scope isolation: redirect ~/.spack to per-job
       # throwaway dirs so `spack external find --all` and the
       # `spack config add "config:install_tree:root:..."` below
@@ -257,8 +268,9 @@ else
       SPACK_USER_CONFIG_PATH=$(mktemp -d -t spack-user-config.XXXXXX)
       SPACK_USER_CACHE_PATH=$(mktemp -d -t spack-user-cache.XXXXXX)
       export SPACK_USER_CONFIG_PATH SPACK_USER_CACHE_PATH
-      trap 'rm -rf "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+      trap 'rm -rf "${TAU_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
 
+      cd "${TAU_BUILD_DIR}"
       git clone --depth 1 https://github.com/spack/spack.git
 
       # load spack environment
@@ -286,9 +298,17 @@ else
       PDT_PATH=$(spack location -i pdt)
       export PDTDIR=$PDT_PATH
 
-      # cloning the latest version of TAU as of Feb 27th 2026
-      ${SUDO} rm -rf tau2
-      git clone https://github.com/UO-OACISS/tau2.git || { echo "ERROR: git clone of tau2 failed"; exit 1; }
+      # We are already in ${TAU_BUILD_DIR} from the spack section
+      # above; tau2 will be cloned into ${TAU_BUILD_DIR}/tau2.
+      #
+      # Partial clone (--filter=blob:none) skips downloading blobs
+      # for history we don't need; the subsequent `git checkout
+      # $GIT_COMMIT` lazily fetches just the blobs for that commit.
+      # Reduces clone wall-time and disk by ~5-10x vs full clone
+      # while still supporting checkout of any specific commit
+      # (unlike --depth 1, which only gives the tip of the default
+      # branch).
+      git clone --filter=blob:none https://github.com/UO-OACISS/tau2.git || { echo "ERROR: git clone of tau2 failed"; exit 1; }
       cd tau2
       git checkout $GIT_COMMIT || { echo "ERROR: git checkout $GIT_COMMIT failed"; exit 1; }
 
@@ -320,41 +340,49 @@ else
       # configure with: MPI OMPT OPENMP PDT ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -pdt=${PDT_PATH} -iowrapper
 
+      make -j $(nproc)
       ${SUDO} env PATH=$PATH make install
 
       # configure with: MPI PDT ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -pdt=${PDT_PATH} -iowrapper
 
+      make -j $(nproc)
       ${SUDO} env PATH=$PATH make install
 
       # configure with: OMPT OPENMP PDT ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -pdt=${PDT_PATH} -iowrapper
 
+      make -j $(nproc)
       ${SUDO} env PATH=$PATH make install
 
       # configure with: PDT ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -pdt=${PDT_PATH} -iowrapper
 
+      make -j $(nproc)
       ${SUDO} env PATH=$PATH make install
 
       # configure with: ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -iowrapper
 
+      make -j $(nproc)
       ${SUDO} env PATH=$PATH make install
 
       # configure with: OMPT OPENMP ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -iowrapper
 
+      make -j $(nproc)
       ${SUDO} env PATH=$PATH make install
 
       # configure with: MPI ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -mpi -iowrapper
 
+      make -j $(nproc)
       ${SUDO} env PATH=$PATH make install
 
       # configure with: MPI OMPT OPENMP ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -iowrapper
 
+      make -j $(nproc)
       ${SUDO} env PATH=$PATH make install
 
       # the configure flag -no_pthread_create
@@ -362,9 +390,9 @@ else
       # that are breaking the instrumentation tests in C and C++
       ${SUDO} rm ${TAU_PATH}/x86_64/lib/wrappers/pthread_wrapper/link_options.tau
 
-      cd ..
-      ${SUDO} rm -rf tau2
-      rm -rf spack
+      # TAU_BUILD_DIR (under /tmp, contains tau2/ and the spack clone)
+      # is removed by the EXIT trap above. No need to rm -rf tau2 or
+      # spack explicitly here.
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find $PDT_PATH_ORIGINAL -type f -execdir chown root:root "{}" +
