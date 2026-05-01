@@ -17,14 +17,20 @@ if [  -f /.singularity.d/Singularity ]; then
    DEB_FRONTEND=""
 fi
 
+# PKG_SUDO is independent of the install-path-derived SUDO: apt/yum/dnf
+# operate on root-owned /var/lib/{apt,dpkg,rpm} regardless of where the
+# package files end up. See openmpi_setup.sh / audit_2026_05_01.md
+# Issue 2.
+PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+
 
 echo ""
 echo "############# Lmod Setup script ################"
 echo ""
 
 if [ "${DISTRO}" = "ubuntu" ]; then
-   ${SUDO} apt-get -qq update
-   ${SUDO} ${DEB_FRONTEND} apt-get -qqy install lmod
+   ${PKG_SUDO} apt-get -qq update
+   ${PKG_SUDO} ${DEB_FRONTEND} apt-get -qqy install lmod
    ${SUDO}  sed -i -e '1,$s!/etc/lmod/modules!#/etc/lmod/modules!' -e '1,$s/!/usr/share/lmod/lmod/modulesfiles/!' /etc/lmod/modulespath
    cat <<-EOF | ${SUDO} tee -a /etc/lmod/modulespath >> /dev/null
 	/etc/lmod/modules/Linux
@@ -56,11 +62,11 @@ fi
 echo "DISTRO is ${DISTRO}"
 
 if [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
-   ${SUDO} yum -y install epel-release
-   ${SUDO} yum repolist
-   ${SUDO} yum update -y
-   ${SUDO} yum upgrade -y
-   ${SUDO} dnf -y install Lmod
+   ${PKG_SUDO} yum -y install epel-release
+   ${PKG_SUDO} yum repolist
+   ${PKG_SUDO} yum update -y
+   ${PKG_SUDO} yum upgrade -y
+   ${PKG_SUDO} dnf -y install Lmod
    export BASH_INIT_FILE=/etc/bashrc
 fi
 if [ "${DISTRO}" = "opensuse leap" ]; then
@@ -108,5 +114,5 @@ else
 fi
 
 if [ "${DISTRO}" = "ubuntu" ]; then
-   ${SUDO} apt-get -q clean && ${SUDO} rm -rf /var/lib/apt/lists/*
+   ${PKG_SUDO} apt-get -q clean && ${SUDO} rm -rf /var/lib/apt/lists/*
 fi

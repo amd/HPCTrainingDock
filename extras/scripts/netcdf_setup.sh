@@ -272,22 +272,19 @@ else
          echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
-      # install libcurl
+      # install libcurl. PKG_SUDO: apt/yum need root regardless of the
+      # install-path-derived SUDO. The previous `[[ ${SUDO} == "" ]]`
+      # guards skipped libcurl whenever the install path was
+      # admin-writable, which would silently produce a netcdf without
+      # curl support. See openmpi_setup.sh / audit_2026_05_01.md Issue 2.
+      PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
       if [ "${DISTRO}" = "ubuntu" ]; then
-         if [[ ${SUDO} == "" ]]; then
-            echo " WARNING: not installing libcurl since we are not using sudo"
-         else
-            echo "...installing libcurl using sudo..."
-            ${SUDO} apt-get update
-            ${SUDO} apt-get install -y libcurl4-gnutls-dev
-         fi
+         echo "...installing libcurl..."
+         ${PKG_SUDO} apt-get update
+         ${PKG_SUDO} apt-get install -y libcurl4-gnutls-dev
       elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
-         if [[ ${SUDO} == "" ]]; then
-            echo " WARNING: not installing libcurl since we are not using sudo"
-         else
-            echo "...installing libcurl using sudo..."
-            ${SUDO} yum install -y libcurl-devel
-         fi
+         echo "...installing libcurl..."
+         ${PKG_SUDO} yum install -y libcurl-devel
       elif [ "${DISTRO}" = "opensuse" ]; then
 	 echo "opensuse is not tested yet, not installing libcurl"
       fi

@@ -380,16 +380,26 @@ else
          echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
+      # PKG_SUDO: apt/dnf need root regardless of the install-path-derived
+      # SUDO. The original `if [[ ${SUDO} != "" ]]` guard conflated
+      # "install path needs sudo to write" with "I have sudo authority
+      # for apt", which broke any build to an admin-writable install
+      # path. We change the guard to a sudo-availability check
+      # (root or passwordless sudo); the no-sudo branch -- pip-install
+      # mkl as a userspace fallback -- is preserved for environments
+      # that genuinely lack sudo. See openmpi_setup.sh /
+      # audit_2026_05_01.md Issue 2.
+      PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
       if [[ "${DISTRO}" == "ubuntu" ]]; then
-         if [[ ${SUDO} != "" ]]; then
-            ${SUDO} apt-get update
-            ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3 liblzma-dev libzstd-dev git-lfs
+         if [ "${EUID:-$(id -u)}" -eq 0 ] || sudo -n true 2>/dev/null; then
+            ${PKG_SUDO} apt-get update
+            ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3 liblzma-dev libzstd-dev git-lfs
             module load ${MPI_MODULE}
             if [[ `which mpicc | wc -l` -eq 0 ]]; then
-               ${SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
+               ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
             fi
             wget -q https://registrationcenter-download.intel.com/akdlm/IRC_NAS/79153e0f-74d7-45af-b8c2-258941adf58a/intel-onemkl-2025.0.0.940.sh
-            ${SUDO} sh ./intel-onemkl-2025.0.0.940.sh -a -s --eula accept
+            ${PKG_SUDO} sh ./intel-onemkl-2025.0.0.940.sh -a -s --eula accept
             export PATH=/opt/intel/oneapi:$PATH
          else
             ln -s $(which python3) ~/bin/python
@@ -400,11 +410,11 @@ else
             export PYTHONPATH=$PYTHONPATH:${INSTALL_PATH}/mkl
          fi
       elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
-         if [[ ${SUDO} != "" ]]; then
-            ${SUDO} dnf install -y ninja-build
+         if [ "${EUID:-$(id -u)}" -eq 0 ] || sudo -n true 2>/dev/null; then
+            ${PKG_SUDO} dnf install -y ninja-build
             module load ${MPI_MODULE}
             wget -q https://registrationcenter-download.intel.com/akdlm/IRC_NAS/79153e0f-74d7-45af-b8c2-258941adf58a/intel-onemkl-2025.0.0.940.sh
-            ${SUDO} sh ./intel-onemkl-2025.0.0.940.sh -a -s --eula accept
+            ${PKG_SUDO} sh ./intel-onemkl-2025.0.0.940.sh -a -s --eula accept
             export PATH=/opt/intel/oneapi:$PATH
          else
             dnf install -y ninja-build

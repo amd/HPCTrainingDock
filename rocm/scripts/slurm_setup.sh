@@ -33,6 +33,12 @@ if [  -f /.singularity.d/Singularity ]; then
    unset DEB_FRONTEND
 fi
 
+# PKG_SUDO is independent of the install-path-derived SUDO: apt/yum
+# operate on root-owned /var/lib/{apt,dpkg,rpm} regardless of where the
+# package files end up. See openmpi_setup.sh / audit_2026_05_01.md
+# Issue 2.
+PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+
 n=0
 while [[ $# -gt 0 ]]
 do
@@ -59,15 +65,15 @@ echo ""
 
 if [ "${DISTRO}" = "ubuntu" ]; then
    # these are for slurm   :  libpmi2-0-dev 
-   ${SUDO} apt-get update -y
-   ${SUDO} apt-cache search libpmi*
-   ${SUDO} ${DEB_FRONTEND} apt-get install -y libpmi2-0-dev \
+   ${PKG_SUDO} apt-get update -y
+   ${PKG_SUDO} apt-cache search libpmi*
+   ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y libpmi2-0-dev \
                            slurmd slurmctld
 
    apt-get -q clean && ${SUDO} rm -rf /var/lib/apt/lists/*
 elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
-   ${SUDO} yum install -y munge munge-devel
-   ${SUDO} yum install -y slurm-slurmd slurm-slurmctld
+   ${PKG_SUDO} yum install -y munge munge-devel
+   ${PKG_SUDO} yum install -y slurm-slurmd slurm-slurmctld
    ${SUDO} groupadd -g 900 slurm
    ${SUDO} useradd -m -c "SLURM workload manager" -d /var/lib/slurm -u 900 -g slurm -s /bin/bash slurm
 else

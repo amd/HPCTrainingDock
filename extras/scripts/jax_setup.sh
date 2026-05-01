@@ -219,14 +219,24 @@ else
          ROCM_VERSION_BAZEL="${ROCM_VERSION_BAZEL}0"
       fi
 
+      # PKG_SUDO: apt needs root regardless of the install-path-derived
+      # SUDO. The original `if [[ ${SUDO} != "" ]]` guard conflated
+      # "install path needs sudo to write" with "I have sudo authority
+      # for apt", which broke any build to an admin-writable install
+      # path. We change the guard to a sudo-availability check
+      # (root or passwordless sudo); the no-sudo branch -- the
+      # ~/bin/python symlink workaround -- is preserved for
+      # environments that genuinely lack sudo. See openmpi_setup.sh /
+      # audit_2026_05_01.md Issue 2.
+      PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
       if [[ `which python | wc -l` -eq 0 ]]; then
-         if [[ ${SUDO} != "" ]]; then
+         if [ "${EUID:-$(id -u)}" -eq 0 ] || sudo -n true 2>/dev/null; then
             echo "============================"
    	    echo "WARNING: python needs to be linked to python3 for the build to work"
 	    echo ".....Installing python-is-python3 with sudo......"
             echo "============================"
-    	    ${SUDO} apt-get update
-            ${SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
+    	    ${PKG_SUDO} apt-get update
+            ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
          else
             ln -s $(which python3) ~/bin/python
             export PATH="$HOME/bin:$PATH"

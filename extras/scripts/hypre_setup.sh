@@ -230,12 +230,15 @@ else
 
          echo " WARNING: installing hypre with spack: the build is a work in progress, fails can happen..."
 
-         if [[ ${SUDO} != "" ]]; then
-            ${SUDO} apt-get update
-            ${SUDO} apt-get install -y libssl-dev unzip
-         else
-            echo " WARNING: not using sudo, the spack build might fail if libevent does not find openssl "
-         fi
+         # PKG_SUDO: apt needs root regardless of install-path SUDO.
+         # The previous `[[ ${SUDO} != "" ]]` guard skipped libssl-dev
+         # whenever the install path was admin-writable, leading to a
+         # spack build that silently failed when libevent couldn't
+         # find openssl. See openmpi_setup.sh / audit_2026_05_01.md
+         # Issue 2.
+         PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+         ${PKG_SUDO} apt-get update
+         ${PKG_SUDO} apt-get install -y libssl-dev unzip
 
          # Spack user-scope isolation: see scorep_setup.sh for full
          # rationale. Per-job throwaway dirs keep `spack external

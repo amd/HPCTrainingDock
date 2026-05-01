@@ -10,6 +10,11 @@ if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
 fi
 
+# PKG_SUDO is independent of the install-path-derived SUDO: apt operates
+# on root-owned /var/lib/{apt,dpkg} regardless of where the package files
+# end up. See openmpi_setup.sh / audit_2026_05_01.md Issue 2.
+PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+
 RHEL_COMPATIBLE=0
 if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" == *"rocky"* || "${DISTRO}" == "almalinux" ]]; then
    RHEL_COMPATIBLE=1
@@ -18,7 +23,7 @@ fi
 if [ "${DISTRO}" = "ubuntu" ]; then
    result=`which adduser |& grep -v "not found" | wc -l`
    if [[ "${result}" == "0" ]]; then
-      ${SUDO} apt-get update
+      ${PKG_SUDO} apt-get update
       ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y adduser
    fi
    adduser --home /home/sysadmin --uid 20000 --shell /bin/bash --disabled-password --gecos '' sysadmin

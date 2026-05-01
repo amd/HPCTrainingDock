@@ -186,9 +186,12 @@ else
          ${SUDO} chmod a+w $TF_PATH
       fi
 
-      # get tensorflow dependencies
-      ${SUDO} apt-get update
-      ${SUDO} apt-get install -y python3-dev python3-pip openjdk-8-jdk openjdk-8-jre unzip wget git python-is-python3 patchelf 'argcomplete>=1.9.4'
+      # get tensorflow dependencies. PKG_SUDO: apt needs root regardless
+      # of the install-path-derived SUDO. See openmpi_setup.sh /
+      # audit_2026_05_01.md Issue 2.
+      PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+      ${PKG_SUDO} apt-get update
+      ${PKG_SUDO} apt-get install -y python3-dev python3-pip openjdk-8-jdk openjdk-8-jre unzip wget git python-is-python3 patchelf 'argcomplete>=1.9.4'
 
       pip3 install -v --target=$TF_PATH numpy wheel mock future pyyaml setuptools requests keras_preprocessing keras_applications jupyter
 
