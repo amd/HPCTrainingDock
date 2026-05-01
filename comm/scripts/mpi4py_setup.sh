@@ -220,7 +220,7 @@ else
       # writes hit NFS. EXIT trap cleans up the build dir and the
       # mpi4py_build_venv it contains.
       MPI4PY_BUILD_DIR=$(mktemp -d -t mpi4py-build.XXXXXX)
-      trap '[ -n "${MPI4PY_BUILD_DIR:-}" ] && rm -rf "${MPI4PY_BUILD_DIR}"' EXIT
+      trap '[ -n "${MPI4PY_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${MPI4PY_BUILD_DIR}"' EXIT
       cd "${MPI4PY_BUILD_DIR}"
 
       git clone --branch $MPI4PY_VERSION https://github.com/mpi4py/mpi4py.git

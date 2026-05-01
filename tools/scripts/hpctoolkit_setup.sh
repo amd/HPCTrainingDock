@@ -276,7 +276,7 @@ else
       HPCVIEWER_BUILD_DIR=$(mktemp -d -t hpcviewer-build.XXXXXX)
       # Combined trap: HPCTOOLKIT_BUILD_DIR (set above), this
       # HPCVIEWER_BUILD_DIR, and the two spack user-scope dirs.
-      trap 'rm -rf "${HPCTOOLKIT_BUILD_DIR:-/nonexistent}" "${HPCVIEWER_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+      trap '${SUDO:-sudo} rm -rf "${HPCTOOLKIT_BUILD_DIR:-/nonexistent}" "${HPCVIEWER_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
       cd "${HPCVIEWER_BUILD_DIR}"
 
       git clone --depth 1 https://github.com/spack/spack.git

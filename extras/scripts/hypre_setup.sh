@@ -254,7 +254,7 @@ else
          # EXIT trap covers the build dir + the two spack user-scope
          # dirs above.
          HYPRE_BUILD_DIR=$(mktemp -d -t hypre-build.XXXXXX)
-         trap 'rm -rf "${HYPRE_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+         trap '${SUDO:-sudo} rm -rf "${HYPRE_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
          cd "${HYPRE_BUILD_DIR}"
 
          git clone https://github.com/spack/spack.git

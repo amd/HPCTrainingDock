@@ -224,13 +224,25 @@ else
       # cheaply. Mirrors the scorep S6.C / openmpi S7.B pattern. EXIT
       # trap covers cleanup even on `set -e` aborts.
       KOKKOS_BUILD_ROOT=$(mktemp -d -t kokkos-build.XXXXXX)
-      trap '[ -n "${KOKKOS_BUILD_ROOT:-}" ] && rm -rf "${KOKKOS_BUILD_ROOT}"' EXIT
+      trap '[ -n "${KOKKOS_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${KOKKOS_BUILD_ROOT}"' EXIT
       cd "${KOKKOS_BUILD_ROOT}"
 
       git clone --branch ${KOKKOS_VERSION} https://github.com/kokkos/kokkos
       cd kokkos
 
-      ${SUDO} mkdir build
+      # Build dir under ${KOKKOS_BUILD_ROOT} (per-job /tmp). Owned by
+      # the script user (admin) -- NOT sudo'd. See audit_2026_05_01.md
+      # Issue 1: previously this was `${SUDO} mkdir build` and the
+      # subsequent ${SUDO} make produced root-owned object files in
+      # an admin-owned ${KOKKOS_BUILD_ROOT}, which the EXIT trap
+      # (running as admin) couldn't clean up. The trap then exited
+      # rc=1, the script propagated rc=1 via `set -eo pipefail`,
+      # main_setup.sh marked kokkos FAILED, and KEEP_FAILED_INSTALLS=0
+      # wiped the just-installed /nfsapps/.../kokkos -- a false-positive
+      # failure that deleted a perfectly good install. Fixed by building
+      # as admin under /tmp; only `make install` is sudo'd to write the
+      # install path. Mirrors the fftw / hdf5 pattern.
+      mkdir build
       cd build
 
       HIP_MALLOC_ASYNC_OFF=""
@@ -247,7 +259,13 @@ else
       # into KokkosTargets.cmake.  It also prevented FindOpenMP from setting
       # link libraries.  amdclang++ avoids all of these issues.
       #
-      # sudo strips LD_LIBRARY_PATH even with -E, so pass it explicitly.
+      # cmake / make are run WITHOUT sudo -- the build tree is under
+      # /tmp owned by admin (see Issue 1 in audit_2026_05_01.md).
+      # SUDO_ENV is still computed for the install step below: sudo
+      # strips LD_LIBRARY_PATH even with -E, so when we sudo for the
+      # install (writing to /nfsapps or /shared/apps) we have to pass
+      # PATH+LD_LIBRARY_PATH explicitly so the install-time link of
+      # any plugins still finds the rocm runtime libs.
       SUDO_ENV=""
       if [ -n "${SUDO}" ]; then
          SUDO_ENV="${SUDO} -E env PATH=$PATH LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
@@ -259,7 +277,7 @@ else
       # path below ensures the second attempt sees a virgin tree.
       kokkos_cmake_configure() {
          local gpu_targets="$1"
-         ${SUDO_ENV} cmake -DCMAKE_INSTALL_PREFIX=${KOKKOS_PATH} \
+         cmake -DCMAKE_INSTALL_PREFIX=${KOKKOS_PATH} \
                        -DCMAKE_PREFIX_PATH=${ROCM_PATH} \
                        -DKokkos_ENABLE_SERIAL=ON \
                        -DKokkos_ENABLE_HIP=ON \
@@ -301,15 +319,16 @@ else
          esac
          # Wipe the failed-configure build dir for a clean retry. cd-out,
          # rm-rf, mkdir, cd-back so cmake sees a virgin tree (CMakeCache
-         # in particular taints retries if left in place).
+         # in particular taints retries if left in place). No sudo:
+         # build dir is admin-owned (see "Build dir under" comment above).
          cd ..
-         ${SUDO} rm -rf build
-         ${SUDO} mkdir build
+         rm -rf build
+         mkdir build
          cd build
          kokkos_cmake_configure "${FIRST_ARCH}"
       fi
 
-      ${SUDO_ENV} make -j
+      make -j
       ${SUDO_ENV} make install
 
       # Cleanup of ${KOKKOS_BUILD_ROOT} (source clone + build tree) is

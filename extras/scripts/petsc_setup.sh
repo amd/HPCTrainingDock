@@ -282,7 +282,7 @@ else
          # in the shared HPCTrainingDock checkout. EXIT trap covers
          # the build dir + the two spack user-scope dirs above.
          PETSC_BUILD_DIR=$(mktemp -d -t petsc-build.XXXXXX)
-         trap 'rm -rf "${PETSC_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+         trap '${SUDO:-sudo} rm -rf "${PETSC_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
          cd "${PETSC_BUILD_DIR}"
 
          git clone https://github.com/spack/spack.git

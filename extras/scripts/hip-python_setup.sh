@@ -163,7 +163,7 @@ else
    # pip install). Only `pip install --target=$HIP_PYTHON_PATH`
    # writes hit NFS. EXIT trap handles cleanup of the build venv.
    HIP_PYTHON_BUILD_DIR=$(mktemp -d -t hip-python-build.XXXXXX)
-   trap '[ -n "${HIP_PYTHON_BUILD_DIR:-}" ] && rm -rf "${HIP_PYTHON_BUILD_DIR}"' EXIT
+   trap '[ -n "${HIP_PYTHON_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${HIP_PYTHON_BUILD_DIR}"' EXIT
    cd "${HIP_PYTHON_BUILD_DIR}"
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`

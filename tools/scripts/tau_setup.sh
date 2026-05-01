@@ -268,7 +268,7 @@ else
       SPACK_USER_CONFIG_PATH=$(mktemp -d -t spack-user-config.XXXXXX)
       SPACK_USER_CACHE_PATH=$(mktemp -d -t spack-user-cache.XXXXXX)
       export SPACK_USER_CONFIG_PATH SPACK_USER_CACHE_PATH
-      trap 'rm -rf "${TAU_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+      trap '${SUDO:-sudo} rm -rf "${TAU_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
 
       cd "${TAU_BUILD_DIR}"
       git clone --depth 1 https://github.com/spack/spack.git

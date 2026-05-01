@@ -258,7 +258,7 @@ else
       # set -e). Audit basis: 7950 fftw took ~7m14s with build under
       # /home/admin/repos/HPCTrainingDock/fftw-3.3.10/...
       FFTW_BUILD_DIR=$(mktemp -d -t fftw-build.XXXXXX)
-      trap '[ -n "${FFTW_BUILD_DIR:-}" ] && rm -rf "${FFTW_BUILD_DIR}"' EXIT
+      trap '[ -n "${FFTW_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${FFTW_BUILD_DIR}"' EXIT
       cd "${FFTW_BUILD_DIR}"
 
       wget -q https://www.fftw.org/fftw-${FFTW_VERSION}.tar.gz
