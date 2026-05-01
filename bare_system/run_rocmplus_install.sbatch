@@ -25,7 +25,9 @@
 # Required env (passed via sbatch --export=ALL,...):
 #   ROCM_VERSION         single ROCm version this job targets (e.g. 7.0.2)
 # Optional env (with defaults):
-#   AMDGPU_GFXMODEL      gfx90a;gfx942
+#   AMDGPU_GFXMODEL      gfx942;gfx90a  (order matters: first arch is the
+#                                        kokkos fallback target; see the
+#                                        comment in run_rocmplus_install_sweep.sh)
 #   TOP_INSTALL_PATH     /nfsapps/opt
 #   TOP_MODULE_PATH      /nfsapps/modules
 #   ROCM_INSTALLPATH     /nfsapps/opt
@@ -42,7 +44,7 @@ set -uo pipefail
 cd "${SLURM_SUBMIT_DIR}"
 
 ROCM_VERSION="${ROCM_VERSION:?ROCM_VERSION must be set via --export=ALL,ROCM_VERSION=...}"
-AMDGPU_GFXMODEL="${AMDGPU_GFXMODEL:-gfx90a;gfx942}"
+AMDGPU_GFXMODEL="${AMDGPU_GFXMODEL:-gfx942;gfx90a}"
 TOP_INSTALL_PATH="${TOP_INSTALL_PATH:-/nfsapps/opt}"
 TOP_MODULE_PATH="${TOP_MODULE_PATH:-/nfsapps/modules}"
 ROCM_INSTALLPATH="${ROCM_INSTALLPATH:-/nfsapps/opt}"

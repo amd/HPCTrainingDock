@@ -31,7 +31,7 @@ FORCE_EXTRACT="${FORCE_EXTRACT:-0}"
 KEEP_TARBALLS="${KEEP_TARBALLS:-3}"
 DISTRO="${DISTRO:-ubuntu}"
 DISTRO_VERSION="${DISTRO_VERSION:-24.04}"
-AMDGPU_GFXMODEL="${AMDGPU_GFXMODEL:-gfx90a;gfx942}"
+AMDGPU_GFXMODEL="${AMDGPU_GFXMODEL:-gfx942;gfx90a}"
 NFSAPPS_OPT="${NFSAPPS_OPT:-/nfsapps/opt}"
 
 # Defensive remount of /nfsapps as rw on this compute node. The login node

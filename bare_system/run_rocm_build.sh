@@ -42,7 +42,7 @@ usage() {
    echo "  --rocm-version [ ROCM_VERSION ]:        default $ROCM_VERSION"
    echo "  --rocm-install-path [ PATH ]:           default $ROCM_INSTALLPATH"
    echo "  --python-version [ N ]:                 python3 minor release (default $PYTHON_VERSION)"
-   echo "  --amdgpu-gfxmodel [ GFX ]:              autodetected via rocminfo; can use 'gfx90a;gfx942'"
+   echo "  --amdgpu-gfxmodel [ GFX ]:              autodetected via rocminfo; can use 'gfx942;gfx90a' (order matters for kokkos fallback; first arch wins)"
    echo "  --distro [DISTRO]:                      default $DISTRO"
    echo "  --distro-version [VER]:                 default $DISTRO_VERSION"
    echo "  --image-name [NAME]:                    default bare-rocm-\${ROCM_VERSION}"
