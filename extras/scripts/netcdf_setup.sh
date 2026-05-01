@@ -362,7 +362,57 @@ else
          git clone --branch checkpoint.1.14.0 https://github.com/Parallel-NetCDF/PnetCDF.git
          cd PnetCDF
          autoreconf -i
-         ./configure --prefix=${NETCDF_PATH}/pnetcdf MPICC=`which mpicc` MPIF90=`which mpifort`
+
+         # ---------------------------------------------------------------------
+         # PnetCDF Fortran-runtime fix (audit_2026_05_01.md Issue 4):
+         #
+         # MPIF90 wraps amdflang (per the openmpi build), so PnetCDF's *.f90
+         # objects emit references to LLVM-flang runtime symbols
+         # (Fortran::runtime::*, _FortranA*).  libtool then drives the final
+         # link of libpnetcdf.so with gcc, which does NOT auto-link flang's
+         # runtime, leaving those symbols UNDEFINED in libpnetcdf.so.  When
+         # netcdf-c later links ncdump/ncgen against -lpnetcdf, the runtime
+         # symbols cannot be resolved (collect2: ld returned 1) and the whole
+         # netcdf install aborts.  Verified failing log:
+         #   logs_04_30_2026/rocm-7.0.2_7957/log_netcdf_04_30_2026.txt
+         # vs. passing log:
+         #   logs_05_01_2026/rocm-7.2.1_7959/log_netcdf_05_01_2026.txt
+         #
+         # Fix: discover the amdflang runtime archive(s) and pass them via LIBS
+         # so libtool/ld bakes the symbols into libpnetcdf.so itself.  ROCm
+         # relocated the runtime between 7.0.x and 7.2.x:
+         #   * 7.0.x / 7.1.x : ${ROCM_PATH}/llvm/lib/libFortranRuntime.a
+         #                     ${ROCM_PATH}/llvm/lib/libFortranDecimal.a
+         #   * 7.2.x+        : ${ROCM_PATH}/lib/llvm/lib/clang/<ver>/lib/<triple>/libflang_rt.runtime.a
+         # ---------------------------------------------------------------------
+         PNETCDF_FORTRAN_LIBS=""
+         if [ -n "${ROCM_PATH:-}" ]; then
+            # 7.2.x+ : single combined runtime archive in clang resource dir
+            for f in "${ROCM_PATH}"/lib/llvm/lib/clang/*/lib/*/libflang_rt.runtime.a \
+                     "${ROCM_PATH}"/llvm/lib/clang/*/lib/*/libflang_rt.runtime.a; do
+               if [ -f "${f}" ]; then
+                  PNETCDF_FORTRAN_LIBS="${f}"
+                  break
+               fi
+            done
+            # 7.0.x / 7.1.x : split FortranRuntime + FortranDecimal archives
+            if [ -z "${PNETCDF_FORTRAN_LIBS}" ] && [ -f "${ROCM_PATH}/llvm/lib/libFortranRuntime.a" ]; then
+               PNETCDF_FORTRAN_LIBS="${ROCM_PATH}/llvm/lib/libFortranRuntime.a"
+               if [ -f "${ROCM_PATH}/llvm/lib/libFortranDecimal.a" ]; then
+                  PNETCDF_FORTRAN_LIBS="${PNETCDF_FORTRAN_LIBS} ${ROCM_PATH}/llvm/lib/libFortranDecimal.a"
+               fi
+            fi
+         fi
+         if [ -n "${PNETCDF_FORTRAN_LIBS}" ]; then
+            echo "PnetCDF: linking amdflang Fortran runtime: ${PNETCDF_FORTRAN_LIBS}"
+            ./configure --prefix=${NETCDF_PATH}/pnetcdf MPICC=`which mpicc` MPIF90=`which mpifort` \
+                        LIBS="${PNETCDF_FORTRAN_LIBS}"
+         else
+            echo "WARNING: could not locate amdflang Fortran runtime under ROCM_PATH=${ROCM_PATH:-<unset>};"
+            echo "         libpnetcdf.so may have unresolved Fortran::runtime::* / _FortranA* symbols"
+            echo "         and the subsequent netcdf-c utility link will fail."
+            ./configure --prefix=${NETCDF_PATH}/pnetcdf MPICC=`which mpicc` MPIF90=`which mpifort`
+         fi
          make -j ${MAKE_JOBS}
          make install
          cd ..
