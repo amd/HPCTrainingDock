@@ -338,6 +338,20 @@ else
       # combined on sh5); with -j$(nproc) it drops to a couple of minutes.
       MAKE_JOBS=$(nproc 2>/dev/null || echo 16)
 
+      # Build all three sources (PnetCDF, netcdf-c, netcdf-fortran) under
+      # a fresh /tmp dir so failed builds don't leave a PnetCDF/,
+      # netcdf-c/, or netcdf-fortran/ tree polluting the HPCTrainingDock
+      # checkout. Audited as the netcdf rc=128 cause in
+      # slurm-7950-rocmplus-7.0.2.out (log_netcdf line 36):
+      #   "fatal: destination path 'PnetCDF' already exists"
+      # came from a leftover PnetCDF/ in the repo root from a prior
+      # aborted run; git clone refused to overwrite. Mirrors the scorep
+      # S6.C / openmpi S7.B / kokkos /tmp-build patterns. EXIT trap
+      # guarantees cleanup even on `set -e` aborts.
+      NETCDF_BUILD_DIR=$(mktemp -d -t netcdf-build.XXXXXX)
+      trap '[ -n "${NETCDF_BUILD_DIR:-}" ] && rm -rf "${NETCDF_BUILD_DIR}"' EXIT
+      cd "${NETCDF_BUILD_DIR}"
+
       if [ "${HDF5_ENABLE_PARALLEL}" = "ON" ]; then
          ENABLE_PNETCDF="ON"
          # HDF5_MPI_MODULE was historically referenced here but never set
