@@ -211,6 +211,18 @@ else
          ${SUDO} chmod a+w ${MPI4PY_PATH}
       fi
 
+      # Per-job throwaway build dir under /tmp (or $TMPDIR if Slurm
+      # set one, e.g. /tmp/admin/<jobid>/). Replaces a clone into
+      # ${PWD}/mpi4py which is the shared NFS HPCTrainingDock
+      # checkout — concurrent rocm-version jobs would race on that
+      # path (matches the spack-clone collision pattern fixed in
+      # commit 688fa43). Only `pip install --target=${MPI4PY_PATH}`
+      # writes hit NFS. EXIT trap cleans up the build dir and the
+      # mpi4py_build_venv it contains.
+      MPI4PY_BUILD_DIR=$(mktemp -d -t mpi4py-build.XXXXXX)
+      trap '[ -n "${MPI4PY_BUILD_DIR:-}" ] && rm -rf "${MPI4PY_BUILD_DIR}"' EXIT
+      cd "${MPI4PY_BUILD_DIR}"
+
       git clone --branch $MPI4PY_VERSION https://github.com/mpi4py/mpi4py.git
       cd mpi4py
 
@@ -239,9 +251,8 @@ else
 	 ${SUDO} chmod go-w ${MPI4PY_PATH}
       fi
 
-      # cleanup
-      cd ..
-      ${SUDO} rm -rf mpi4py
+      # MPI4PY_BUILD_DIR (under /tmp, contains the mpi4py clone and
+      # the build venv) is removed by the EXIT trap above.
       module unload rocm/${ROCM_VERSION}
       module unload ${MPI_MODULE}
 
