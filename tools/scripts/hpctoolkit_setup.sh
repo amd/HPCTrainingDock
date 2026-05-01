@@ -253,6 +253,16 @@ else
 
       # ------------ Installing HPCViewer
 
+      # Spack user-scope isolation: see scorep_setup.sh for the full
+      # rationale. Per-job throwaway dirs prevent ~/.spack/{packages,
+      # config}.yaml from accumulating state across rocm versions and
+      # prevent a stale user-scope install_tree.root from over-riding
+      # the per-clone defaults edit below.
+      SPACK_USER_CONFIG_PATH=$(mktemp -d -t spack-user-config.XXXXXX)
+      SPACK_USER_CACHE_PATH=$(mktemp -d -t spack-user-cache.XXXXXX)
+      export SPACK_USER_CONFIG_PATH SPACK_USER_CACHE_PATH
+      trap 'rm -rf "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+
       git clone --depth 1 https://github.com/spack/spack.git
 
       # load spack environment
