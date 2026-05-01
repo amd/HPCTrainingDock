@@ -163,7 +163,14 @@ else
          SPACK_USER_CONFIG_PATH=$(mktemp -d -t spack-user-config.XXXXXX)
          SPACK_USER_CACHE_PATH=$(mktemp -d -t spack-user-cache.XXXXXX)
          export SPACK_USER_CONFIG_PATH SPACK_USER_CACHE_PATH
-         trap 'rm -rf "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+
+         # Spack clone goes under /tmp (compute-node local disk) so
+         # concurrent rocm-version builds don't race on ${PWD}/spack
+         # in the shared HPCTrainingDock checkout. EXIT trap covers
+         # the build dir + the two spack user-scope dirs above.
+         LAMMPS_BUILD_DIR=$(mktemp -d -t lammps-build.XXXXXX)
+         trap 'rm -rf "${LAMMPS_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+         cd "${LAMMPS_BUILD_DIR}"
 
          git clone --branch=v0.23.1 https://github.com/spack/spack
          # change spack install dir for Hypre
@@ -173,7 +180,8 @@ else
          sed -i 's|$spack/opt/spack|'"${INSTALL_PATH}"'|g' spack/etc/spack/defaults/base/config.yaml
          spack install lammps +rocm amdgpu_target=${AMDGPU_GFXMODEL}
 
-         rm -rf spack .spack
+         # LAMMPS_BUILD_DIR (under /tmp, contains the spack clone)
+         # is removed by the EXIT trap above.
       else
 	 git clone -b patch_27Jun2024 https://github.com/lammps/lammps.git
          #wget https://github.com/lammps/lammps/releases/download/stable_22Jul2025/lammps-linux-x86_64-22Jul2025.tar.gz

@@ -245,7 +245,17 @@ else
          SPACK_USER_CONFIG_PATH=$(mktemp -d -t spack-user-config.XXXXXX)
          SPACK_USER_CACHE_PATH=$(mktemp -d -t spack-user-cache.XXXXXX)
          export SPACK_USER_CONFIG_PATH SPACK_USER_CACHE_PATH
-         trap 'rm -rf "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+
+         # Spack clone goes under /tmp (compute-node local disk) so
+         # concurrent rocm-version builds don't race on ${PWD}/spack
+         # in the shared HPCTrainingDock checkout (observed
+         # 2026-04-30: 7952's scorep_setup.sh hit "destination path
+         # 'spack' already exists" because 7954 created it earlier).
+         # EXIT trap covers the build dir + the two spack user-scope
+         # dirs above.
+         HYPRE_BUILD_DIR=$(mktemp -d -t hypre-build.XXXXXX)
+         trap 'rm -rf "${HYPRE_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+         cd "${HYPRE_BUILD_DIR}"
 
          git clone https://github.com/spack/spack.git
 
@@ -267,7 +277,8 @@ else
          # get hypre install dir created by spack
          HYPRE_PATH=$(spack location -i hypre)
 
-         ${SUDO} rm -rf spack
+         # HYPRE_BUILD_DIR (under /tmp, contains the spack clone) is
+         # removed by the EXIT trap above.
 
       else
 

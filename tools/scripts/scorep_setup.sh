@@ -240,6 +240,25 @@ else
 	 ${SUDO} chmod -R a+rwX ${SCOREP_PATH}
       fi
 
+      # Build everything (spack clone for PDT install, scorep tarball,
+      # ~4500 .o intermediates, configure scratch) under /tmp on
+      # compute-node local disk. This avoids two problems:
+      #   1. NFS round-trip cost on every write (S6.C audit basis).
+      #   2. Concurrent rocm-version builds (e.g. one job for
+      #      /nfsapps/opt/rocmplus-7.0.2 and another for
+      #      /shared/apps/ubuntu/rocmplus-7.2.1) racing on
+      #      ${PWD}/spack and breaking with "fatal: destination
+      #      path 'spack' already exists" when the second one starts.
+      # Only `spack install pdt` and `make install` writes hit NFS,
+      # via the absolute install_tree.root and --prefix paths.
+      # Combined EXIT trap covers SCOREP_BUILD_DIR + the two spack
+      # user-scope isolation dirs created below in the PDT branch
+      # (the :-/nonexistent fallbacks make the trap safe even when
+      # PDT was cached and the spack vars were never set).
+      SCOREP_BUILD_DIR=$(mktemp -d -t scorep-build.XXXXXX)
+      trap 'rm -rf "${SCOREP_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+      cd "${SCOREP_BUILD_DIR}"
+
 #----- begin PDT install
       if [ -d "${PDT_PATH}" ] && [ "$(ls -A ${PDT_PATH})" ]; then
          echo "PDT_PATH ${PDT_PATH} already exists and is non-empty, skipping PDT install"
@@ -255,13 +274,17 @@ else
          # spack's user scope OUT-RANKS the per-clone defaults file
          # we sed below, and `spack location -i pdt` returns an
          # install dir from another rocm tree (observed: 7.0.1 module
-         # pointed at /nfsapps/opt/rocmplus-7.0.2/pdt/...). The temp
-         # dirs are cleaned up by the SCOREP_BUILD_DIR EXIT trap set
-         # below (the trap covers all three).
+         # pointed at /nfsapps/opt/rocmplus-7.0.2/pdt/...).
          SPACK_USER_CONFIG_PATH=$(mktemp -d -t spack-user-config.XXXXXX)
          SPACK_USER_CACHE_PATH=$(mktemp -d -t spack-user-cache.XXXXXX)
          export SPACK_USER_CONFIG_PATH SPACK_USER_CACHE_PATH
 
+         # We are already in ${SCOREP_BUILD_DIR} (under /tmp) per the
+         # mktemp + cd above, so the spack clone lands there and is
+         # cleaned up by the EXIT trap. This also avoids the
+         # "destination path 'spack' already exists" collision when
+         # multiple concurrent rocm-version builds race on the shared
+         # HPCTrainingDock checkout.
          git clone --depth 1 https://github.com/spack/spack.git
 
          # load spack environment
@@ -307,17 +330,10 @@ else
          fi
       fi
 
-      # S6.C: Build under /tmp (compute-node local disk) so the ~4500
-      # .o intermediates and the build-dir write traffic don't all
-      # round-trip through NFS. Only `make install` writes hit NFS via
-      # the absolute --prefix=${SCOREP_PATH}. EXIT trap guarantees the
-      # temp build dir is cleaned up even on a build failure (we have
-      # set -e). Audited as S6.C in slurm-7934-rocmplus-7.0.2.out.
-      SCOREP_BUILD_DIR=$(mktemp -d -t scorep-build.XXXXXX)
-      # Combined cleanup: scorep build dir + spack user-scope isolation
-      # dirs (set above in the PDT install branch; may be unset if PDT
-      # was cached, which is why we use :-/nonexistent fallbacks).
-      trap 'rm -rf "${SCOREP_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+      # SCOREP_BUILD_DIR was created and cd'd into ABOVE the PDT
+      # install branch (so the spack clone also lands under /tmp).
+      # We may currently be inside ${SCOREP_BUILD_DIR}/spack from
+      # the PDT install path; cd back to the top of the build dir.
       cd "${SCOREP_BUILD_DIR}"
 
       # S6.E: -q to drop ~440 lines of dot-progress noise for a 21MB
@@ -343,11 +359,10 @@ else
       ${SUDO} make install
 
       cd ${CUR_DIR}
-      # SCOREP_BUILD_DIR (under /tmp) is removed by the EXIT trap. The
-      # rm of any stale scorep-${SCOREP_VERSION}* in CUR_DIR is kept for
-      # defense in depth (e.g., debris from a pre-S6.C run on NFS).
-      rm -rf scorep-${SCOREP_VERSION}*
-      rm -rf spack
+      # SCOREP_BUILD_DIR (under /tmp, contains the spack clone AND
+      # the scorep build tree) is removed by the EXIT trap. No need
+      # to rm -rf spack or scorep-* in CUR_DIR — they were never
+      # created there (post-/tmp-build refactor).
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find $PDT_PATH_ORIGINAL -type f -execdir chown root:root "{}" +

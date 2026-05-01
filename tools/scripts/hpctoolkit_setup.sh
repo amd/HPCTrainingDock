@@ -261,7 +261,14 @@ else
       SPACK_USER_CONFIG_PATH=$(mktemp -d -t spack-user-config.XXXXXX)
       SPACK_USER_CACHE_PATH=$(mktemp -d -t spack-user-cache.XXXXXX)
       export SPACK_USER_CONFIG_PATH SPACK_USER_CACHE_PATH
-      trap 'rm -rf "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+
+      # Spack clone goes under /tmp (compute-node local disk) so
+      # concurrent rocm-version builds don't race on ${PWD}/spack
+      # in the shared HPCTrainingDock checkout. EXIT trap covers
+      # the build dir + the two spack user-scope dirs above.
+      HPCVIEWER_BUILD_DIR=$(mktemp -d -t hpcviewer-build.XXXXXX)
+      trap 'rm -rf "${HPCVIEWER_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+      cd "${HPCVIEWER_BUILD_DIR}"
 
       git clone --depth 1 https://github.com/spack/spack.git
 
@@ -285,7 +292,8 @@ else
       # get hpcviewer install dir created by spack
       HPCVIEWER_PATH=$(spack location -i hpcviewer)
 
-      ${SUDO} rm -rf spack
+      # HPCVIEWER_BUILD_DIR (under /tmp, contains the spack clone)
+      # is removed by the EXIT trap above.
 
       if [[ "${USER}" != "root" ]]; then
          ${SUDO} find ${HPCVIEWER_PATH} -type f -execdir chown root:root "{}" +
