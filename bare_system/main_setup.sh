@@ -742,16 +742,31 @@ if [[ "${BUILD_JAX}" == "1" ]] && [[ ! -d ${ROCMPLUS}/jax ]]; then
       $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--jax-install-path ${ROCMPLUS}/jax --jaxlib-install-path ${ROCMPLUS}/jaxlib --module-path ${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/jax")
 fi
 
+# pytorch MUST precede ftorch: ftorch_setup.sh has a preflight that
+# requires the `pytorch` Lmod module (created by pytorch_setup.sh's
+# install). In job 7973 the original order had ftorch first, so its
+# preflight failed with "module 'pytorch' could not be loaded" before
+# pytorch had ever run. Audit basis: log_ftorch_05_01_2026.txt (715 B,
+# preflight error) + log_pytorch_05_01_2026.txt in
+# logs_05_01_2026/rocm-7.2.1_7973/.
+#
+# pytorch_setup.sh option spelling is `--python-version` (dash). The
+# previous `--python_version` (underscore) fell through the case
+# statement to the catch-all in pytorch_setup.sh:124 ("*) last ${1}"),
+# which printed usage() and exit 1 -- pytorch never built, which then
+# also broke ftorch (see above). Other call sites in this file (lines
+# 679, 685) already use `--python-version`; this was a typo at the
+# pytorch invocation only.
+replace_pkg BUILD_PYTORCH "${ROCMPLUS}/pytorch" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/pytorch"
+if [[ "${BUILD_PYTORCH}" == "1" ]] && [[ ! -d ${ROCMPLUS}/pytorch ]]; then
+   run_and_log pytorch extras/scripts/pytorch_setup.sh ${COMMON_OPTIONS} --build-pytorch ${BUILD_PYTORCH} --python-version ${PYTHON_VERSION} \
+      $(path_args pytorch rocmplus-${ROCM_VERSION}/pytorch)
+fi
+
 replace_pkg BUILD_FTORCH "${ROCMPLUS}/ftorch" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/ftorch"
 if [[ "${BUILD_FTORCH}" == "1" ]] && [[ ! -d ${ROCMPLUS}/ftorch ]]; then
    run_and_log ftorch extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} --build-ftorch ${BUILD_FTORCH} \
       $(path_args ftorch rocmplus-${ROCM_VERSION}/ftorch)
-fi
-
-replace_pkg BUILD_PYTORCH "${ROCMPLUS}/pytorch" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/pytorch"
-if [[ "${BUILD_PYTORCH}" == "1" ]] && [[ ! -d ${ROCMPLUS}/pytorch ]]; then
-   run_and_log pytorch extras/scripts/pytorch_setup.sh ${COMMON_OPTIONS} --build-pytorch ${BUILD_PYTORCH} --python_version ${PYTHON_VERSION} \
-      $(path_args pytorch rocmplus-${ROCM_VERSION}/pytorch)
 fi
 
 replace_pkg BUILD_MAGMA "${ROCMPLUS}/magma" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/magma"
