@@ -220,7 +220,25 @@ else
       cd FTorch
 
       mkdir build && cd build
-      cmake -DCMAKE_INSTALL_PREFIX=$FTORCH_PATH  -DGPU_DEVICE=HIP ..
+
+      # PyTorch bundles its own cmake/ctest/cpack/etc. under
+      # ${PYTORCH_PATH}/bin whose shebangs point at the build venv
+      # (#!/home/admin/pytorch_build/bin/python3). That venv is deleted
+      # at the end of pytorch_setup.sh, so execve returns ENOENT on
+      # the interpreter ("bad interpreter" -> exit 126). The pytorch
+      # module load above prepends ${PYTORCH_PATH}/bin to PATH, so a
+      # bare `cmake` would resolve to that broken script. Resolve a
+      # system cmake explicitly by stripping any pytorch bin dir from
+      # PATH for this lookup. Tracks audit_2026_05_01.md Issue 5; the
+      # root cause is the unconditional shebang rewrite that should be
+      # applied in pytorch_setup.sh (deferred fix).
+      CMAKE_BIN=$(PATH=$(echo "$PATH" | tr ':' '\n' | grep -v '/pytorch/.*/bin$' | paste -sd:) command -v cmake)
+      if [ ! -x "${CMAKE_BIN}" ]; then
+         CMAKE_BIN=/usr/bin/cmake
+      fi
+      echo "ftorch: using cmake at ${CMAKE_BIN} (head -1: $(head -1 "${CMAKE_BIN}" 2>/dev/null))"
+
+      "${CMAKE_BIN}" -DCMAKE_INSTALL_PREFIX=$FTORCH_PATH  -DGPU_DEVICE=HIP ..
       make -j
       ${SUDO} make install
 
