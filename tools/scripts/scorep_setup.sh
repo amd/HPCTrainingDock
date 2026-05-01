@@ -383,10 +383,26 @@ else
 #include <llvm/TargetParser/Triple.h>
 SHIM_EOF
 
+      # CPPFLAGS gets the shim so configure-time feature tests resolve
+      # <llvm/ADT/Triple.h> through it. CXXFLAGS gets the shim too because
+      # ScoreP 9.4's build-llvm-plugin/Makefile (vendored, no Score-P-side
+      # patching point) defines its own per-target AM_CPPFLAGS that does
+      # NOT inherit configure-level CPPFLAGS for source compiles -- it
+      # builds llvm-plugin .cpp files with a clean -I list derived from
+      # llvm-config, so /usr/include/llvm/ADT/Triple.h (placed there by
+      # the system llvm-dev installed for tau) wins the lookup over our
+      # shim. Verified in job 7974 log_scorep_05_01_2026.txt: the shim's
+      # CPPFLAGS shows up in every configure invocation (line 160, 1320,
+      # ...) and in config.log (line 3692), but the plugin still fails at
+      # /usr/include/llvm/ADT/Triple.h:44 redefinition (line 5056) --
+      # i.e. CPPFLAGS alone never reached the actual scorep_llvm_plugin.cpp
+      # compile. CXXFLAGS IS substituted into per-target compile rules
+      # (autotools convention), so adding the shim there too gets it onto
+      # the actual g++/clang++ command line ahead of /usr/include.
       ../configure --with-rocm=$ROCM_PATH  --with-mpi=$MPI_CONFIG  --prefix=$SCOREP_PATH  --with-librocm_smi64-include=$ROCM_PATH/include/rocm_smi \
                    --with-librocm_smi64-lib=$ROCM_PATH/lib --with-libunwind=download --enable-shared --with-libbfd=download --without-shmem  \
 		   --with-libgotcha=download CC=$CC CXX=$CXX FC=$FC CFLAGS=-fPIE \
-		   CPPFLAGS="-I${LLVM_SHIM_DIR}"
+		   CPPFLAGS="-I${LLVM_SHIM_DIR}" CXXFLAGS="-I${LLVM_SHIM_DIR}"
 
       # Parallel build over all allocated cores; install left serial since
       # `make install` is mostly file copies and rarely benefits from -j.

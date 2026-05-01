@@ -312,6 +312,36 @@ else
       cd tau2
       git checkout $GIT_COMMIT || { echo "ERROR: git checkout $GIT_COMMIT failed"; exit 1; }
 
+      # Split tau's vendored plugins/llvm/Makefile rule that runs
+      #   cd build && cmake .. <flags> && make VERBOSE=1 -j install
+      # into a configure / build / install triple so the install pass is
+      # NOT a "make install" that also re-checks build dependencies.
+      #
+      # Background (audit_2026_05_01.md, job 7974 log_tau_05_01_2026.txt):
+      # The first compile at log line 3301 succeeds with the correct
+      #   -I${ROCM_PATH}/lib/llvm/include
+      # and reports "[100%] Built target TAU_Profiling" (line 3313).
+      # Then `make install` re-enters the build dir, cmake reports
+      #   "Dependencies file ... is newer than depends file ..." (line 3441)
+      # and triggers a rebuild whose g++ command line at line 3453 is
+      # MISSING the -I flag, so the recompile of the same Instrument.cpp
+      # fails with "clang/Basic/SourceManager.h: No such file" at line 3459.
+      # The clang headers DO exist at
+      #   ${ROCM_PATH}/lib/llvm/include/clang/Basic/SourceManager.h
+      # for both rocm-7.2.0 and rocm-7.2.1 -- they just aren't on the
+      # second compile's -I list because cmake's compiler_depend re-stat
+      # invalidated the cached LLVM_INCLUDE_DIRS for the rebuild.
+      #
+      # Using `cmake --build` then `cmake --install` keeps the build
+      # phase fully resolved before the install pass runs, and the
+      # install pass copies artifacts only -- it doesn't re-trigger the
+      # depends-stale rebuild. cmake-3.15+ provides `--install`, which is
+      # available in the bundled /usr/local/bin/cmake (Python pip cmake)
+      # that tau's plugins/llvm/Makefile invokes (log line 3215).
+      if [ -f plugins/llvm/Makefile ]; then
+         sed -i 's|&& make VERBOSE=1 -j install|\&\& cmake --build . --parallel \&\& cmake --install .|' plugins/llvm/Makefile
+      fi
+
       # install third party dependencies
       # -q to drop wget dot-progress noise from the per-package log,
       # matching the precedent in comm/scripts/openmpi_setup.sh and the
