@@ -214,6 +214,15 @@ else
 
          ${SUDO} mkdir -p ${HIPFORT_PATH}
 
+         # Per-job throwaway build dir under /tmp (or $TMPDIR if
+         # Slurm set one). Replaces a clone into ${PWD}/hipfort
+         # which is the shared NFS HPCTrainingDock checkout —
+         # concurrent rocm-version jobs would race on that path.
+         # Only `make install` writes hit NFS via -DHIPFORT_INSTALL_DIR.
+         HIPFORT_BUILD_DIR=$(mktemp -d -t hipfort-build.XXXXXX)
+         trap '[ -n "${HIPFORT_BUILD_DIR:-}" ] && rm -rf "${HIPFORT_BUILD_DIR}"' EXIT
+         cd "${HIPFORT_BUILD_DIR}"
+
          HIPFORT_BRANCH="${HIPFORT_VERSION:-rocm-${ROCM_VERSION}}"
          echo "Cloning hipfort branch/tag: ${HIPFORT_BRANCH}"
          git clone --branch "${HIPFORT_BRANCH}" https://github.com/ROCm/hipfort.git
@@ -243,8 +252,8 @@ else
          ${SUDO} make -j ${MAKE_JOBS}
          ${SUDO} make install
 
-         cd ../..
-         ${SUDO} rm -rf hipfort
+         # HIPFORT_BUILD_DIR (under /tmp, contains the hipfort
+         # source clone) is removed by the EXIT trap above.
 
       fi
 

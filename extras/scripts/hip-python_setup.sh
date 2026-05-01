@@ -155,7 +155,16 @@ if [ "${BUILD_HIP_PYTHON}" = "0" ]; then
    exit
 
 else
-   cd /tmp
+   # Per-job throwaway scratch dir under /tmp (or $TMPDIR if Slurm
+   # set one). Replaces a bare `cd /tmp` followed by a fixed
+   # `hip-python-build` venv path — concurrent rocm-version jobs
+   # would race on /tmp/hip-python-build (deactivate of one and
+   # `rm -rf hip-python-build` of the other could nuke an in-flight
+   # pip install). Only `pip install --target=$HIP_PYTHON_PATH`
+   # writes hit NFS. EXIT trap handles cleanup of the build venv.
+   HIP_PYTHON_BUILD_DIR=$(mktemp -d -t hip-python-build.XXXXXX)
+   trap '[ -n "${HIP_PYTHON_BUILD_DIR:-}" ] && rm -rf "${HIP_PYTHON_BUILD_DIR}"' EXIT
+   cd "${HIP_PYTHON_BUILD_DIR}"
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
@@ -218,7 +227,8 @@ else
       python3 -m pip config set global.extra-index-url https://test.pypi.org/simple
       python3 -m pip install --target=$HIP_PYTHON_PATH/numba-hip "numba-hip[rocm-${ROCM_VERSION}] @ git+https://github.com/ROCm/numba-hip.git" --force-reinstall --no-cache
       deactivate
-      rm -rf hip-python-build
+      # hip-python-build venv lives under HIP_PYTHON_BUILD_DIR
+      # (under /tmp) and is removed by the EXIT trap above.
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find $HIP_PYTHON_PATH -type f -execdir chown root:root "{}" +
          ${SUDO} find $HIP_PYTHON_PATH -type d -execdir chown root:root "{}" +

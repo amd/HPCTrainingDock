@@ -132,9 +132,18 @@ else
       fi
 
       ${SUDO} mkdir -p ${HIPIFLY_PATH}
-      wget https://raw.githubusercontent.com/amd/HPCTrainingDock/main/extras/sources/hipifly/hipifly.h
+      # Per-job throwaway scratch dir under /tmp (or $TMPDIR if Slurm
+      # set one). Replaces a wget into ${PWD}/hipifly.h which is the
+      # shared NFS HPCTrainingDock checkout — concurrent rocm-version
+      # jobs would both download to the same path and the second's
+      # `rm ./hipifly.h` could remove the first's file mid-flight.
+      # Only the `cp` to ${HIPIFLY_PATH} writes hit NFS.
+      HIPIFLY_BUILD_DIR=$(mktemp -d -t hipifly-build.XXXXXX)
+      trap '[ -n "${HIPIFLY_BUILD_DIR:-}" ] && rm -rf "${HIPIFLY_BUILD_DIR}"' EXIT
+      cd "${HIPIFLY_BUILD_DIR}"
+      wget -q https://raw.githubusercontent.com/amd/HPCTrainingDock/main/extras/sources/hipifly/hipifly.h
       ${SUDO} cp ./hipifly.h ${HIPIFLY_PATH}
-      rm ./hipifly.h
+      # HIPIFLY_BUILD_DIR (under /tmp) is removed by the EXIT trap.
 
       if [ -d "$MODULE_PATH" ]; then
          # use sudo if user does not have write access to module path
