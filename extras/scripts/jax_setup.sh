@@ -280,6 +280,32 @@ else
 
       export JAX_PLATFORMS="rocm,cpu"
 
+      # Bazel output_base off NFS, per-job. By default bazel writes its
+      # server state and external/ tree under ${HOME}/.cache/bazel which
+      # on this cluster is NFS (/home/admin), producing the warning
+      #   WARNING: Output base '/home/admin/.cache/bazel/_bazel_admin/...'
+      #     is on NFS. This may lead to surprising failures and undetermined
+      #     behavior.
+      # observed in the tensorflow run of job 7974 and equally applicable
+      # to jax (same bazel server, different workspace). Putting it under
+      # the per-job mktemp ${JAX_BUILD_ROOT} keeps each build independent
+      # AND off NFS. Cleaned up by the EXIT trap on JAX_BUILD_ROOT.
+      # Used below in every `python3 build/build.py` invocation as
+      #   --bazel_startup_options=--output_base="${BAZEL_OUTPUT_BASE}"
+      BAZEL_OUTPUT_BASE="${JAX_BUILD_ROOT}/bazel-output"
+      mkdir -p "${BAZEL_OUTPUT_BASE}"
+      echo "jax: bazel --output_base=${BAZEL_OUTPUT_BASE} (off NFS, per-job)"
+
+      # Pin HERMETIC_PYTHON_VERSION to the system python3's MAJOR.MINOR.
+      # JAX's hermetic_python rule defaults to a hardcoded version that
+      # may not match the python3 used to drive build/build.py and the
+      # final pip3 install --target=${JAX_PATH} step, leading to silent
+      # ABI / extension-module mismatches. Same pattern as
+      # tensorflow_setup.sh.
+      HERMETIC_PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+      export HERMETIC_PYTHON_VERSION
+      echo "jax: HERMETIC_PYTHON_VERSION=${HERMETIC_PYTHON_VERSION}"
+
       AMDGPU_GFXMODEL=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/,/g'`
 
       git clone --depth 1 --branch rocm-jaxlib-v0.${JAX_VERSION} https://github.com/ROCm/xla.git
@@ -336,6 +362,7 @@ else
                                          --wheels=jaxlib \
                                          --bazel_options=--jobs=128 \
                                          --bazel_options=--noexperimental_check_external_repository_files \
+                                         --bazel_startup_options=--output_base="${BAZEL_OUTPUT_BASE}" \
                                          --bazel_startup_options=--host_jvm_args=-Xmx16g \
                                          --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC \
                                          --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
@@ -361,6 +388,7 @@ else
                                          --wheels=jax-rocm-plugin,jax-rocm-pjrt \
                                          --bazel_options=--jobs=128 \
                                          --bazel_options=--noexperimental_check_external_repository_files \
+                                         --bazel_startup_options=--output_base="${BAZEL_OUTPUT_BASE}" \
                                          --bazel_startup_options=--host_jvm_args=-Xmx16g \
                                          --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC \
                                          --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
@@ -387,6 +415,7 @@ else
                                       --build_gpu_plugin --gpu_plugin_rocm_version=$ROCM_VERSION_BAZEL --build_gpu_kernel_plugin=rocm \
                                       --bazel_options=--jobs=128 \
                                       --bazel_options=--noexperimental_check_external_repository_files \
+                                      --bazel_startup_options=--output_base="${BAZEL_OUTPUT_BASE}" \
                                       --bazel_startup_options=--host_jvm_args=-Xmx16g \
                                       --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC \
                                       --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
@@ -422,6 +451,7 @@ else
                                             --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
                                             --bazel_options=--jobs=128 \
                                             --bazel_options=--noexperimental_check_external_repository_files \
+                                            --bazel_startup_options=--output_base="${BAZEL_OUTPUT_BASE}" \
                                             --bazel_startup_options=--host_jvm_args=-Xmx16g \
                                             --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC \
                                             --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
@@ -462,6 +492,7 @@ else
                                             --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
                                             --bazel_options=--jobs=128 \
                                             --bazel_options=--noexperimental_check_external_repository_files \
+                                            --bazel_startup_options=--output_base="${BAZEL_OUTPUT_BASE}" \
                                             --bazel_startup_options=--host_jvm_args=-Xmx16g \
                                             --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC \
                                             --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
@@ -482,6 +513,7 @@ else
                                       --build_gpu_plugin --gpu_plugin_rocm_version=$ROCM_VERSION_BAZEL --build_gpu_kernel_plugin=rocm \
                                       --bazel_options=--jobs=128 \
                                       --bazel_options=--noexperimental_check_external_repository_files \
+                                      --bazel_startup_options=--output_base="${BAZEL_OUTPUT_BASE}" \
                                       --bazel_startup_options=--host_jvm_args=-Xmx16g \
                                       --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC \
                                       --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch

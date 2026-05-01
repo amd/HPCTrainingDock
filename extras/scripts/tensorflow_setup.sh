@@ -274,8 +274,23 @@ else
       echo "tensorflow: AMDGPU_GFXMODEL='${AMDGPU_GFXMODEL}' -> AMDGPU_GFXMODEL_SINGLE='${AMDGPU_GFXMODEL_SINGLE}' (TF MLIR kernel-gen requires single arch)"
 
       export TF_ROCM_AMDGPU_TARGETS=${AMDGPU_GFXMODEL_SINGLE}
+
+      # Pin HERMETIC_PYTHON_VERSION to the system python3's MAJOR.MINOR.
+      # Without this, TF's configure / bazel startup logs the warning
+      #   HERMETIC_PYTHON_VERSION variable was not set correctly,
+      #   using default version.
+      # which lets TF pick its hardcoded default (currently 3.11) and
+      # then bazel's hermetic_python rule downloads + builds an
+      # interpreter that doesn't match PYTHON_BIN_PATH=/usr/bin/python3
+      # used in ./configure -- silent ABI / extension-module mismatches
+      # can sneak in. Audited from job 7974 log_tensorflow_05_01_2026.txt.
+      # The system python3 on the Warewulf ubuntu-22.04 image is 3.10.
+      HERMETIC_PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+      export HERMETIC_PYTHON_VERSION
+      echo "tensorflow: HERMETIC_PYTHON_VERSION=${HERMETIC_PYTHON_VERSION}"
+
       # configure tensorflow
-      yes "" | TF_NEED_CLANG=1 ROCM_PATH=$ROCM_PATH TF_NEED_ROCM=1 PYTHON_BIN_PATH=/usr/bin/python3 TF_ROCM_AMDGPU_TARGETS=${AMDGPU_GFXMODEL_SINGLE} ./configure
+      yes "" | TF_NEED_CLANG=1 ROCM_PATH=$ROCM_PATH TF_NEED_ROCM=1 PYTHON_BIN_PATH=/usr/bin/python3 TF_ROCM_AMDGPU_TARGETS=${AMDGPU_GFXMODEL_SINGLE} HERMETIC_PYTHON_VERSION=${HERMETIC_PYTHON_VERSION} ./configure
 
       # build and install tensorflow
       #
@@ -305,7 +320,26 @@ else
       #     script run extracts externals fresh into the per-job mktemp
       #     workspace -- there is no opportunity for drift between
       #     extraction and analysis. Saves ~5-15 min on TF wall time.
+      # Force bazel's output_base off NFS. By default bazel uses
+      #   ${HOME}/.cache/bazel/_bazel_${USER}/<workspace-hash>
+      # and on this cluster ${HOME} = /home/admin is an NFS mount, which
+      # produces the explicit warning in job 7974:
+      #   WARNING: Output base '/home/admin/.cache/bazel/_bazel_admin/...'
+      #     is on NFS. This may lead to surprising failures and undetermined
+      #     behavior.
+      # NFS for the bazel server's working state hurts both correctness
+      # (file locks, mtime granularity, shutil.copy2 over NFS-to-NFS) and
+      # performance (millions of action-cache stat()s). Putting it under
+      # the per-job mktemp ${TF_BUILD_ROOT} keeps each build fully
+      # independent (no shared state between concurrent or back-to-back
+      # jobs) AND off NFS. Cleaned up by the EXIT trap on TF_BUILD_ROOT
+      # alongside the workspace.
+      BAZEL_OUTPUT_BASE="${TF_BUILD_ROOT}/bazel-output"
+      mkdir -p "${BAZEL_OUTPUT_BASE}"
+      echo "tensorflow: bazel --output_base=${BAZEL_OUTPUT_BASE} (off NFS, per-job)"
+
       bazel \
+         --output_base="${BAZEL_OUTPUT_BASE}" \
          --host_jvm_args=-Xmx16g \
          --host_jvm_args=-XX:+UseG1GC \
          --host_jvm_args=-XX:+AlwaysPreTouch \
