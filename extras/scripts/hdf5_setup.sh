@@ -253,7 +253,7 @@ else
       # 7950 hdf5 took ~11m50s with build under
       # /home/admin/repos/HPCTrainingDock/hdf5/...
       HDF5_BUILD_DIR=$(mktemp -d -t hdf5-build.XXXXXX)
-      trap '[ -n "${HDF5_BUILD_DIR:-}" ] && rm -rf "${HDF5_BUILD_DIR}"' EXIT
+      trap '[ -n "${HDF5_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${HDF5_BUILD_DIR}"' EXIT
       cd "${HDF5_BUILD_DIR}"
 
       # --depth=1 to skip ~10 years of history we don't need; the

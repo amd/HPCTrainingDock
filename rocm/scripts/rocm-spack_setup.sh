@@ -28,7 +28,7 @@ export SPACK_USER_CONFIG_PATH SPACK_USER_CACHE_PATH
 # other (matches the pattern in the 6 rocmplus setup scripts:
 # scorep, tau, hpctoolkit, hypre, petsc, lammps).
 ROCM_SPACK_BUILD_DIR=$(mktemp -d -t rocm-spack-build.XXXXXX)
-trap 'rm -rf "${ROCM_SPACK_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+trap '${SUDO:-sudo} rm -rf "${ROCM_SPACK_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
 cd "${ROCM_SPACK_BUILD_DIR}"
 
 git clone https://github.com/spack/spack.git

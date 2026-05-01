@@ -220,7 +220,7 @@ else
          # concurrent rocm-version jobs would race on that path.
          # Only `make install` writes hit NFS via -DHIPFORT_INSTALL_DIR.
          HIPFORT_BUILD_DIR=$(mktemp -d -t hipfort-build.XXXXXX)
-         trap '[ -n "${HIPFORT_BUILD_DIR:-}" ] && rm -rf "${HIPFORT_BUILD_DIR}"' EXIT
+         trap '[ -n "${HIPFORT_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${HIPFORT_BUILD_DIR}"' EXIT
          cd "${HIPFORT_BUILD_DIR}"
 
          HIPFORT_BRANCH="${HIPFORT_VERSION:-rocm-${ROCM_VERSION}}"
@@ -248,8 +248,19 @@ else
          # out across cores. (S6 audit follow-up: hipfort was building
          # one Fortran source at a time, ~4 minutes wall, when nproc
          # cores were idle.)
+         #
+         # Build runs WITHOUT sudo: the build tree is under /tmp owned
+         # by admin. The previous `${SUDO} make -j` produced root-owned
+         # files in admin-owned ${HIPFORT_BUILD_DIR}, the EXIT trap
+         # (admin) couldn't clean them, the trap exited rc=1, the
+         # script propagated rc=1, main_setup.sh marked hipfort FAILED,
+         # and KEEP_FAILED_INSTALLS=0 then wiped /nfsapps/.../hipfort/
+         # despite the install having succeeded -- a false-positive
+         # failure in every job in the 2026-04-30 chain (Issue 1 in
+         # audit_2026_05_01.md). Mirrors the fftw / hdf5 pattern:
+         # build as user, sudo only the install.
          MAKE_JOBS=$(nproc)
-         ${SUDO} make -j ${MAKE_JOBS}
+         make -j ${MAKE_JOBS}
          ${SUDO} make install
 
          # HIPFORT_BUILD_DIR (under /tmp, contains the hipfort

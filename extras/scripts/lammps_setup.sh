@@ -169,7 +169,7 @@ else
          # in the shared HPCTrainingDock checkout. EXIT trap covers
          # the build dir + the two spack user-scope dirs above.
          LAMMPS_BUILD_DIR=$(mktemp -d -t lammps-build.XXXXXX)
-         trap 'rm -rf "${LAMMPS_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+         trap '${SUDO:-sudo} rm -rf "${LAMMPS_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
          cd "${LAMMPS_BUILD_DIR}"
 
          git clone --branch=v0.23.1 https://github.com/spack/spack

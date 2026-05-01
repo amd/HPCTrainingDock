@@ -256,7 +256,7 @@ else
       # (the :-/nonexistent fallbacks make the trap safe even when
       # PDT was cached and the spack vars were never set).
       SCOREP_BUILD_DIR=$(mktemp -d -t scorep-build.XXXXXX)
-      trap 'rm -rf "${SCOREP_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+      trap '${SUDO:-sudo} rm -rf "${SCOREP_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
       cd "${SCOREP_BUILD_DIR}"
 
 #----- begin PDT install

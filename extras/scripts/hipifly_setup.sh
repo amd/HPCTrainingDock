@@ -139,7 +139,7 @@ else
       # `rm ./hipifly.h` could remove the first's file mid-flight.
       # Only the `cp` to ${HIPIFLY_PATH} writes hit NFS.
       HIPIFLY_BUILD_DIR=$(mktemp -d -t hipifly-build.XXXXXX)
-      trap '[ -n "${HIPIFLY_BUILD_DIR:-}" ] && rm -rf "${HIPIFLY_BUILD_DIR}"' EXIT
+      trap '[ -n "${HIPIFLY_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${HIPIFLY_BUILD_DIR}"' EXIT
       cd "${HIPIFLY_BUILD_DIR}"
       wget -q https://raw.githubusercontent.com/amd/HPCTrainingDock/main/extras/sources/hipifly/hipifly.h
       ${SUDO} cp ./hipifly.h ${HIPIFLY_PATH}
