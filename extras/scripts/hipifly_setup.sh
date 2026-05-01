@@ -56,6 +56,20 @@ do
           HIPIFLY_PATH_INPUT=${1}
           reset-last
           ;;
+      "--install-path")
+          # Alias for --hipifly-path. bare_system/main_setup.sh's
+          # path_args helper (see L613-618) emits --install-path for every
+          # package; sister scripts (hdf5_setup.sh, kokkos_setup.sh, etc.)
+          # already accept it. Without this alias the parser fell through
+          # to the catch-all *) -> last -> send-error -> usage path, which
+          # exited 1 with only the usage banner in the log (the Error
+          # message was silently swallowed because usage exits 1 before
+          # send-error's echo runs). Audited as the hipifly rc=1 cause in
+          # slurm-7950-rocmplus-7.0.2.out.
+          shift
+          HIPIFLY_PATH_INPUT=${1}
+          reset-last
+          ;;
       "--help")
           usage
           ;;
