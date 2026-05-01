@@ -211,7 +211,15 @@ else
       # openmpi library being installed as dependency of libboost-all-dev
       ${SUDO} ${DEB_FRONTEND} apt-get install -q -y pipx libboost-all-dev liblzma-dev libgtk-3-dev
 
-      cd /tmp
+      # Per-job throwaway build dir for the hpctoolkit clone.
+      # Replaces a fixed `cd /tmp; rm -rf /tmp/hpctoolkit` pattern
+      # that would race between two concurrent rocm-version jobs on
+      # the same compute node. The hpcviewer spack section below
+      # creates its own HPCVIEWER_BUILD_DIR (kept separate so the
+      # spack clone can be cleaned independently of the hpctoolkit
+      # source tree).
+      HPCTOOLKIT_BUILD_DIR=$(mktemp -d -t hpctoolkit-build.XXXXXX)
+      cd "${HPCTOOLKIT_BUILD_DIR}"
 
       ${SUDO} mkdir -p ${HPCTOOLKIT_PATH}
       ${SUDO} mkdir -p ${HPCVIEWER_PATH}
@@ -225,7 +233,6 @@ else
 
       pipx install 'meson>=1.3.2'
       export PATH=$HOME/.local/bin:$PATH
-      rm -rf /tmp/hpctoolkit
       git clone -b ${HPCTOOLKIT_VERSION} https://gitlab.com/hpctoolkit/hpctoolkit.git
       cd hpctoolkit
       export CMAKE_PREFIX_PATH=$ROCM_PATH:$CMAKE_PREFIX_PATH
@@ -267,7 +274,9 @@ else
       # in the shared HPCTrainingDock checkout. EXIT trap covers
       # the build dir + the two spack user-scope dirs above.
       HPCVIEWER_BUILD_DIR=$(mktemp -d -t hpcviewer-build.XXXXXX)
-      trap 'rm -rf "${HPCVIEWER_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+      # Combined trap: HPCTOOLKIT_BUILD_DIR (set above), this
+      # HPCVIEWER_BUILD_DIR, and the two spack user-scope dirs.
+      trap 'rm -rf "${HPCTOOLKIT_BUILD_DIR:-/nonexistent}" "${HPCVIEWER_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
       cd "${HPCVIEWER_BUILD_DIR}"
 
       git clone --depth 1 https://github.com/spack/spack.git
