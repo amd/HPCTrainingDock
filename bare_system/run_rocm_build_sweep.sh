@@ -21,7 +21,7 @@ set -uo pipefail
 : ${KEEP_TARBALLS:="3"}
 : ${DISTRO:="ubuntu"}
 : ${DISTRO_VERSION:="24.04"}
-: ${AMDGPU_GFXMODEL:="gfx90a;gfx942"}
+: ${AMDGPU_GFXMODEL:="gfx942;gfx90a"}
 
 ROCM_VERSIONS_RAW=""
 

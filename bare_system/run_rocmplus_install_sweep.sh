@@ -15,7 +15,16 @@ set -uo pipefail
 : ${PARTITION:="sh5_cpx_admin_long"}
 : ${TIME_PER_JOB:="24:00:00"}        # walltime per version
 : ${MAX_TIME_MIN:="2880"}            # MaxTime of sh5_cpx_admin_long = 48h
-: ${AMDGPU_GFXMODEL:="gfx90a;gfx942"}
+# Order matters: kokkos_setup.sh's multi-arch->single-arch fallback uses
+# the FIRST gfx model in the list when cmake configure fails. This cluster's
+# build node is MI300A (gfx942), so gfx942 must come first to ensure the
+# fallback produces a binary that runs on the build hardware. The list as
+# a whole is also passed verbatim to GPU_TARGETS / --offload-arch in other
+# packages (openmpi, ucx, ucc, scorep), where order is irrelevant.
+# Cross-compiling note: if you change the build host or target a different
+# cluster, set AMDGPU_GFXMODEL explicitly via --amdgpu-gfxmodel; do NOT
+# autodetect from rocminfo (the build node may not have the target hardware).
+: ${AMDGPU_GFXMODEL:="gfx942;gfx90a"}
 : ${TOP_INSTALL_PATH:="/nfsapps/opt"}
 : ${TOP_MODULE_PATH:="/nfsapps/modules"}
 : ${ROCM_INSTALLPATH:="/nfsapps/opt"}
