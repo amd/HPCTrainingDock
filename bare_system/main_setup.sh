@@ -730,44 +730,11 @@ if [[ "${BUILD_HIP_PYTHON}" == "1" ]] && [[ ! -d ${ROCMPLUS}/hip-python ]]; then
       $(path_args hip-python rocmplus-${ROCM_VERSION}/hip-python)
 fi
 
-replace_pkg BUILD_TENSORFLOW "${ROCMPLUS}/tensorflow" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/tensorflow"
-if [[ "${BUILD_TENSORFLOW}" == "1" ]] && [[ ! -d ${ROCMPLUS}/tensorflow ]]; then
-   run_and_log tensorflow extras/scripts/tensorflow_setup.sh ${COMMON_OPTIONS} --build-tensorflow ${BUILD_TENSORFLOW} \
-      $(path_args tensorflow rocmplus-${ROCM_VERSION}/tensorflow)
-fi
-
-replace_pkg BUILD_JAX "${ROCMPLUS}/jax" "${ROCMPLUS}/jaxlib" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/jax"
-if [[ "${BUILD_JAX}" == "1" ]] && [[ ! -d ${ROCMPLUS}/jax ]]; then
-   run_and_log jax extras/scripts/jax_setup.sh ${COMMON_OPTIONS} --build-jax ${BUILD_JAX} \
-      $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--jax-install-path ${ROCMPLUS}/jax --jaxlib-install-path ${ROCMPLUS}/jaxlib --module-path ${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/jax")
-fi
-
-# pytorch MUST precede ftorch: ftorch_setup.sh has a preflight that
-# requires the `pytorch` Lmod module (created by pytorch_setup.sh's
-# install). In job 7973 the original order had ftorch first, so its
-# preflight failed with "module 'pytorch' could not be loaded" before
-# pytorch had ever run. Audit basis: log_ftorch_05_01_2026.txt (715 B,
-# preflight error) + log_pytorch_05_01_2026.txt in
-# logs_05_01_2026/rocm-7.2.1_7973/.
-#
-# pytorch_setup.sh option spelling is `--python-version` (dash). The
-# previous `--python_version` (underscore) fell through the case
-# statement to the catch-all in pytorch_setup.sh:124 ("*) last ${1}"),
-# which printed usage() and exit 1 -- pytorch never built, which then
-# also broke ftorch (see above). Other call sites in this file (lines
-# 679, 685) already use `--python-version`; this was a typo at the
-# pytorch invocation only.
-replace_pkg BUILD_PYTORCH "${ROCMPLUS}/pytorch" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/pytorch"
-if [[ "${BUILD_PYTORCH}" == "1" ]] && [[ ! -d ${ROCMPLUS}/pytorch ]]; then
-   run_and_log pytorch extras/scripts/pytorch_setup.sh ${COMMON_OPTIONS} --build-pytorch ${BUILD_PYTORCH} --python-version ${PYTHON_VERSION} \
-      $(path_args pytorch rocmplus-${ROCM_VERSION}/pytorch)
-fi
-
-replace_pkg BUILD_FTORCH "${ROCMPLUS}/ftorch" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/ftorch"
-if [[ "${BUILD_FTORCH}" == "1" ]] && [[ ! -d ${ROCMPLUS}/ftorch ]]; then
-   run_and_log ftorch extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} --build-ftorch ${BUILD_FTORCH} \
-      $(path_args ftorch rocmplus-${ROCM_VERSION}/ftorch)
-fi
+# tensorflow / jax / pytorch / ftorch are the long-pole builds (each
+# 30-90 min on a cold workspace) and have been moved to the END of the
+# sweep so the short builds (magma, kokkos, hipfort, hipifly, hdf5,
+# netcdf, fftw, petsc, hypre) finish first and surface fast in the
+# logs. See the block after `hypre` below for the reordered ML group.
 
 replace_pkg BUILD_MAGMA "${ROCMPLUS}/magma" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/magma"
 if [[ "${BUILD_MAGMA}" == "1" ]] && [[ ! -d ${ROCMPLUS}/magma ]]; then
@@ -775,7 +742,13 @@ if [[ "${BUILD_MAGMA}" == "1" ]] && [[ ! -d ${ROCMPLUS}/magma ]]; then
       $(path_args magma rocmplus-${ROCM_VERSION}/magma)
 fi
 
-run_and_log apps extras/scripts/apps_setup.sh
+# apps_setup.sh is intentionally disabled. It is not gated by --packages
+# (no BUILD_APPS flag), runs unconditionally on every sweep pass, and
+# has been the source of 0-byte-log noise in failed runs (job 7974
+# logs_05_01_2026/rocm-7.2.0_7974/log_apps_05_01_2026.txt). Re-enable
+# only when its output is actually needed; in that case prefer adding a
+# BUILD_APPS gate first so it can be selected by --packages.
+#run_and_log apps extras/scripts/apps_setup.sh
 
 replace_pkg BUILD_KOKKOS "${ROCMPLUS}/kokkos" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/kokkos"
 if [[ "${BUILD_KOKKOS}" == "1" ]] && [[ ! -d ${ROCMPLUS}/kokkos ]]; then
@@ -847,6 +820,55 @@ replace_pkg BUILD_HYPRE "${ROCMPLUS}/hypre" -- "${TOP_MODULE_PATH}/rocmplus-${RO
 if [[ "${BUILD_HYPRE}" == "1" ]] && [[ ! -d ${ROCMPLUS}/hypre ]]; then
    run_and_log hypre extras/scripts/hypre_setup.sh ${COMMON_OPTIONS} --build-hypre ${BUILD_HYPRE} \
       $(path_args hypre rocmplus-${ROCM_VERSION}/hypre)
+fi
+
+# ─── Long-pole ML builds (jax, tensorflow, pytorch, ftorch) ───────────
+#
+# Moved here from the post-hip-python position to push the multi-hour
+# bazel/cmake builds to the end of the sweep, so the cheap builds above
+# (magma, kokkos, hipfort, hipifly, hdf5, netcdf, fftw, petsc, hypre)
+# finish first and an operator monitoring `tail -f slurm-<id>-*.out`
+# sees rapid progress rather than a 30-90 min silent stretch.
+#
+# Within this group:
+#   jax BEFORE tensorflow -- jax is the shorter of the two bazel builds,
+#     finishing it first lands a working install before TF starts.
+#   pytorch BEFORE ftorch -- ftorch_setup.sh has a preflight that
+#     `module load pytorch`s; in job 7973 the original order had ftorch
+#     first, so its preflight failed before pytorch had ever built. Audit:
+#     log_ftorch_05_01_2026.txt (715 B preflight error) +
+#     log_pytorch_05_01_2026.txt in logs_05_01_2026/rocm-7.2.1_7973/.
+#
+# pytorch_setup.sh option spelling is `--python-version` (dash). The
+# previous `--python_version` (underscore) fell through the case
+# statement to the catch-all in pytorch_setup.sh:124 ("*) last ${1}"),
+# which printed usage() and exit 1 -- pytorch never built, which then
+# also broke ftorch (see above). Other call sites in this file (the
+# rocprof-sys / rocprof-compute invocations earlier) already use
+# `--python-version`; this was a typo at the pytorch invocation only.
+
+replace_pkg BUILD_JAX "${ROCMPLUS}/jax" "${ROCMPLUS}/jaxlib" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/jax"
+if [[ "${BUILD_JAX}" == "1" ]] && [[ ! -d ${ROCMPLUS}/jax ]]; then
+   run_and_log jax extras/scripts/jax_setup.sh ${COMMON_OPTIONS} --build-jax ${BUILD_JAX} \
+      $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--jax-install-path ${ROCMPLUS}/jax --jaxlib-install-path ${ROCMPLUS}/jaxlib --module-path ${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/jax")
+fi
+
+replace_pkg BUILD_TENSORFLOW "${ROCMPLUS}/tensorflow" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/tensorflow"
+if [[ "${BUILD_TENSORFLOW}" == "1" ]] && [[ ! -d ${ROCMPLUS}/tensorflow ]]; then
+   run_and_log tensorflow extras/scripts/tensorflow_setup.sh ${COMMON_OPTIONS} --build-tensorflow ${BUILD_TENSORFLOW} \
+      $(path_args tensorflow rocmplus-${ROCM_VERSION}/tensorflow)
+fi
+
+replace_pkg BUILD_PYTORCH "${ROCMPLUS}/pytorch" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/pytorch"
+if [[ "${BUILD_PYTORCH}" == "1" ]] && [[ ! -d ${ROCMPLUS}/pytorch ]]; then
+   run_and_log pytorch extras/scripts/pytorch_setup.sh ${COMMON_OPTIONS} --build-pytorch ${BUILD_PYTORCH} --python-version ${PYTHON_VERSION} \
+      $(path_args pytorch rocmplus-${ROCM_VERSION}/pytorch)
+fi
+
+replace_pkg BUILD_FTORCH "${ROCMPLUS}/ftorch" -- "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/ftorch"
+if [[ "${BUILD_FTORCH}" == "1" ]] && [[ ! -d ${ROCMPLUS}/ftorch ]]; then
+   run_and_log ftorch extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} --build-ftorch ${BUILD_FTORCH} \
+      $(path_args ftorch rocmplus-${ROCM_VERSION}/ftorch)
 fi
 
 #If ROCm should be installed in a different location
