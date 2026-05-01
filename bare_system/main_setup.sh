@@ -81,7 +81,7 @@ usage()
    echo "  --install-rocprof-sys-from-source [0 or 1]:  default is $INSTALL_ROCPROF_SYS_FROM_SOURCE (false)"
    echo "  --use-makefile [0 or 1]:  default is 0 (false)"
    echo "  --quick-installs [0 or 1]:  skip long-pole (>~1h) packages: pytorch, tensorflow, jax, ftorch, julia, magma, petsc, hpctoolkit, flang-new, cupy. Default $QUICK_INSTALLS"
-   echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Default $REPLACE_EXISTING"
+   echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf \${TOP_INSTALL_PATH}/miniconda3 (or miniforge3). Default $REPLACE_EXISTING"
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
    echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, kokkos, miniconda3, miniforge3, hipfort, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs)."
    echo "  --help: prints this message"
@@ -768,13 +768,23 @@ if [[ "${BUILD_KOKKOS}" == "1" ]] && [[ ! -d ${ROCMPLUS}/kokkos ]]; then
       $(path_args kokkos rocmplus-${ROCM_VERSION}/kokkos)
 fi
 
-replace_pkg BUILD_MINICONDA3 "${TOP_INSTALL_PATH}/miniconda3" -- "${TOP_MODULE_PATH}/LinuxPlus/miniconda3"
+# miniconda3 / miniforge3 are intentionally exempt from --replace-existing.
+# Their install paths (${TOP_INSTALL_PATH}/miniconda3, ${TOP_INSTALL_PATH}/
+# miniforge3) and module dirs (${TOP_MODULE_PATH}/LinuxPlus/...) are SHARED
+# across ROCm versions -- they don't depend on which ROCm release the
+# orchestrator is currently iterating. With multi-version sweeps invoked
+# under --replace-existing 1, calling replace_pkg here would delete the
+# install at the start of every ROCm-version pass and force a full rebuild
+# of conda/forge per version, which is pure waste (the result is identical).
+# The downstream `[[ ! -d ... ]]` guard below already short-circuits when
+# the install survives, so this is the only change needed. To force a
+# rebuild, the operator removes ${TOP_INSTALL_PATH}/miniconda3 (or
+# miniforge3) by hand.
 if [[ "${BUILD_MINICONDA3}" == "1" ]] && [[ ! -d ${TOP_INSTALL_PATH}/miniconda3 ]]; then
    run_and_log miniconda3 extras/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniconda3 ${BUILD_MINICONDA3} --python-version ${PYTHON_VERSION} \
       $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH}/miniconda3 --module-path ${TOP_MODULE_PATH}/LinuxPlus/miniconda3")
 fi
 
-replace_pkg BUILD_MINIFORGE3 "${TOP_INSTALL_PATH}/miniforge3" -- "${TOP_MODULE_PATH}/LinuxPlus/miniforge3"
 if [[ "${BUILD_MINIFORGE3}" == "1" ]] && [[ ! -d ${TOP_INSTALL_PATH}/miniforge3 ]]; then
    run_and_log miniforge3 extras/scripts/miniforge3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniforge3 ${BUILD_MINIFORGE3} \
       $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH}/miniforge3 --module-path ${TOP_MODULE_PATH}/LinuxPlus/miniforge3")
