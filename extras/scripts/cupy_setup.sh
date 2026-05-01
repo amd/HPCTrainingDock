@@ -205,7 +205,17 @@ else
           OFFLOAD_ARCH_FLAGS+=" --offload-arch=${arch}"
       done
       export HIPCC_COMPILE_FLAGS_APPEND="${OFFLOAD_ARCH_FLAGS} ${HIPCC_COMPILE_FLAGS_APPEND}"
-      UV_LOC=`which uv`
+      # Detect a system `uv` if present, but make the lookup non-fatal
+      # under set -eo pipefail (line 5).  The previous form
+      #   UV_LOC=`which uv`
+      # silently aborted the entire script whenever `uv` was not
+      # installed (Debian `which` exits 1 with no diagnostic on either
+      # stream), so the `if [ "x$UV_LOC" == "x" ]` fallback below was
+      # dead code -- the script terminated before reaching it. Audit
+      # ref: 7973 cupy rc=1 with log truncated at the "Building CuPy"
+      # banner. `command -v` is a POSIX builtin (no external `which`
+      # dep); `2>/dev/null || true` keeps set -e quiet on a miss.
+      UV_LOC=$(command -v uv 2>/dev/null || true)
       python3 -m venv cupy_build
       source cupy_build/bin/activate
       if [ "x$UV_LOC" == "x" ]; then
