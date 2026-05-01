@@ -155,6 +155,23 @@ if [ "${BUILD_PYTORCH}" = "0" ]; then
 
 else
 
+   # Per-job triton/torchinductor scratch dirs so concurrent pytorch
+   # builds on the same node do not race on -- or clobber -- each
+   # other's compiled kernel cache. The previous code allowed triton
+   # to drop kernels at its default location (/tmp/amd_triton_kernel_*
+   # and friends) and then ran a blanket `${SUDO} rm -rf
+   # /tmp/amd_triton_kernel* /tmp/can*` at end-of-build, which would
+   # nuke any concurrent job's in-flight triton cache (and, in the
+   # `/tmp/can*` case, anything else under /tmp starting with "can").
+   # Redirecting the cache up front + cleaning via the EXIT trap is
+   # both safer and collision-free. See audit_2026_05_01.md follow-up
+   # to commit fc21433 (mktemp build dirs sweep).
+   TRITON_BUILD_ROOT=$(mktemp -d -t pytorch-triton-cache.XXXXXX)
+   trap '[ -n "${TRITON_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${TRITON_BUILD_ROOT}"' EXIT
+   export TRITON_CACHE_DIR="${TRITON_BUILD_ROOT}/triton"
+   export TORCHINDUCTOR_CACHE_DIR="${TRITON_BUILD_ROOT}/torchinductor"
+   mkdir -p "${TRITON_CACHE_DIR}" "${TORCHINDUCTOR_CACHE_DIR}"
+
    if [[ "${AMDGPU_GFXMODEL}" == "gfx90a" ]]; then
       TARGET_GPUS="MI200"
    elif [[ "${AMDGPU_GFXMODEL}" == "gfx942" ]]; then
@@ -729,9 +746,13 @@ else
          ${SUDO} chmod go-w ${INSTALL_PATH}
       fi
 
-      # cleanup
+      # cleanup: the EXIT trap on TRITON_BUILD_ROOT (set at the start
+      # of the BUILD_PYTORCH=1 branch) handles triton/torchinductor
+      # cache removal. The previous blanket
+      #   ${SUDO} rm -rf /tmp/amd_triton_kernel* /tmp/can*
+      # was unsafe (`/tmp/can*` matches arbitrary unrelated files
+      # under /tmp) and racy with concurrent pytorch builds.
       rm -f intel-onemkl-2025.0.0.940.sh
-      ${SUDO} rm -rf /tmp/amd_triton_kernel* /tmp/can*
 
    fi
 fi
