@@ -41,9 +41,14 @@ AMDGPU_GFXMODEL_INPUT=""
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/kokkos
 BUILD_KOKKOS=0
 ROCM_VERSION=6.2.0
-KOKKOS_ARCH_AMD_GFX942="OFF"
+# Kokkos AMD GPU arch flags. Defaults are OFF; turned ON per-arch below
+# from semicolon-separated AMDGPU_GFXMODEL. This cluster's gfx942 nodes
+# are MI300A (APU mode), hence the _APU variant; on MI300X dGPU clusters
+# this should be Kokkos_ARCH_AMD_GFX942 (no _APU). The legacy gfx900 /
+# Kokkos_ARCH_VEGA90A path was removed (not present on this cluster, and
+# the variable was never plumbed into the cmake call anyway).
 KOKKOS_ARCH_AMD_GFX90A="OFF"
-KOKKOS_ARCH_VEGA90A="OFF"
+KOKKOS_ARCH_AMD_GFX942_APU="OFF"
 KOKKOS_VERSION="4.7.02"
 KOKKOS_PATH=/opt/rocmplus-${ROCM_VERSION}/kokkos
 KOKKOS_PATH_INPUT=""
@@ -194,16 +199,33 @@ else
 
       ${SUDO} mkdir -p ${KOKKOS_PATH}
 
-      if [ "${AMDGPU_GFXMODEL}" = "gfx90a" ]; then
-         KOKKOS_ARCH_AMD_GFX90A="ON"
-      elif [ "${AMDGPU_GFXMODEL}" = "gfx942" ]; then
-	 KOKKOS_ARCH_AMD_GFX942_APU="ON"
-      elif [ "${AMDGPU_GFXMODEL}" = "gfx900" ]; then
-         KOKKOS_ARCH_VEGA90A="ON"
-      fi
+      # Parse semicolon-separated AMDGPU_GFXMODEL. main_setup.sh passes
+      # multi-arch values like "gfx90a;gfx942" by design (see
+      # bare_system/main_setup.sh:79); the prior strict-equality chain
+      # matched none of them on this cluster and left every Kokkos_ARCH_*
+      # empty, which made Kokkos 4.7's check_amd_apu() autodetection
+      # fire and fail. Audited as the kokkos rc=1 cause in
+      # slurm-7950-rocmplus-7.0.2.out (log_kokkos line 53). Multi-arch
+      # builds are supported by Kokkos 4.5+.
+      case ";${AMDGPU_GFXMODEL};" in
+         *";gfx90a;"*) KOKKOS_ARCH_AMD_GFX90A="ON" ;;
+      esac
+      case ";${AMDGPU_GFXMODEL};" in
+         *";gfx942;"*) KOKKOS_ARCH_AMD_GFX942_APU="ON" ;;
+      esac
 
       REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
+
+      # Build everything (source clone + build tree) under /tmp on the
+      # compute node's local disk so failed configures don't leave a
+      # kokkos/ tree polluting the HPCTrainingDock checkout, and so the
+      # multi-arch -> single-arch fallback below can wipe the build dir
+      # cheaply. Mirrors the scorep S6.C / openmpi S7.B pattern. EXIT
+      # trap covers cleanup even on `set -e` aborts.
+      KOKKOS_BUILD_ROOT=$(mktemp -d -t kokkos-build.XXXXXX)
+      trap '[ -n "${KOKKOS_BUILD_ROOT:-}" ] && rm -rf "${KOKKOS_BUILD_ROOT}"' EXIT
+      cd "${KOKKOS_BUILD_ROOT}"
 
       git clone --branch ${KOKKOS_VERSION} https://github.com/kokkos/kokkos
       cd kokkos
@@ -231,21 +253,70 @@ else
          SUDO_ENV="${SUDO} -E env PATH=$PATH LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
       fi
 
-      ${SUDO_ENV} cmake -DCMAKE_INSTALL_PREFIX=${KOKKOS_PATH} \
-                    -DCMAKE_PREFIX_PATH=${ROCM_PATH} \
-                    -DKokkos_ENABLE_SERIAL=ON \
-                    -DKokkos_ENABLE_HIP=ON \
-                    ${HIP_MALLOC_ASYNC_OFF} \
-                    -DKokkos_ENABLE_OPENMP=ON \
-                    -DKokkos_ARCH_AMD_GFX942_APU=${KOKKOS_ARCH_AMD_GFX942_APU} \
-                    -DKokkos_ARCH_ZEN4=ON \
-		    -DGPU_TARGETS=${AMDGPU_GFXMODEL} \
-                    -DCMAKE_CXX_COMPILER=${ROCM_PATH}/llvm/bin/amdclang++ ..
+      # Wrap cmake configure in a function so we can retry with reduced
+      # flags if multi-arch fails. Only configure is retried -- a partial
+      # build from a failed configure isn't reusable; the wipe-and-retry
+      # path below ensures the second attempt sees a virgin tree.
+      kokkos_cmake_configure() {
+         local gpu_targets="$1"
+         ${SUDO_ENV} cmake -DCMAKE_INSTALL_PREFIX=${KOKKOS_PATH} \
+                       -DCMAKE_PREFIX_PATH=${ROCM_PATH} \
+                       -DKokkos_ENABLE_SERIAL=ON \
+                       -DKokkos_ENABLE_HIP=ON \
+                       ${HIP_MALLOC_ASYNC_OFF} \
+                       -DKokkos_ENABLE_OPENMP=ON \
+                       -DKokkos_ARCH_AMD_GFX90A=${KOKKOS_ARCH_AMD_GFX90A} \
+                       -DKokkos_ARCH_AMD_GFX942_APU=${KOKKOS_ARCH_AMD_GFX942_APU} \
+                       -DKokkos_ARCH_ZEN4=ON \
+                       -DGPU_TARGETS="${gpu_targets}" \
+                       -DCMAKE_CXX_COMPILER=${ROCM_PATH}/llvm/bin/amdclang++ ..
+      }
+
+      # Attempt 1: multi-arch. Some Kokkos / CMake combinations reject
+      # combos that worked in prior versions; the fallback below retries
+      # with only the first model from AMDGPU_GFXMODEL.
+      set +e
+      kokkos_cmake_configure "${AMDGPU_GFXMODEL}"
+      cmake_rc=$?
+      set -e
+
+      if [ ${cmake_rc} -ne 0 ]; then
+         FIRST_ARCH="${AMDGPU_GFXMODEL%%;*}"
+         echo ""
+         echo "============================"
+         echo " Multi-arch cmake FAILED (rc=${cmake_rc})"
+         echo " Falling back to single-arch: ${FIRST_ARCH}"
+         echo "============================"
+         echo ""
+         KOKKOS_ARCH_AMD_GFX90A="OFF"
+         KOKKOS_ARCH_AMD_GFX942_APU="OFF"
+         case "${FIRST_ARCH}" in
+            gfx90a) KOKKOS_ARCH_AMD_GFX90A="ON" ;;
+            gfx942) KOKKOS_ARCH_AMD_GFX942_APU="ON" ;;
+            *)
+               echo "ERROR: Unrecognized first arch '${FIRST_ARCH}' in" >&2
+               echo "       AMDGPU_GFXMODEL='${AMDGPU_GFXMODEL}'." >&2
+               exit 1
+               ;;
+         esac
+         # Wipe the failed-configure build dir for a clean retry. cd-out,
+         # rm-rf, mkdir, cd-back so cmake sees a virgin tree (CMakeCache
+         # in particular taints retries if left in place).
+         cd ..
+         ${SUDO} rm -rf build
+         ${SUDO} mkdir build
+         cd build
+         kokkos_cmake_configure "${FIRST_ARCH}"
+      fi
+
       ${SUDO_ENV} make -j
       ${SUDO_ENV} make install
 
-      cd ../..
-      ${SUDO} rm -rf kokkos
+      # Cleanup of ${KOKKOS_BUILD_ROOT} (source clone + build tree) is
+      # handled by the EXIT trap registered above. cd to / so subsequent
+      # module-file generation isn't running from a dir about to be
+      # removed.
+      cd /
 
       module unload rocm/${ROCM_VERSION}
 
