@@ -49,6 +49,14 @@ CXX_COMPILER=amdclang++
 F_COMPILER=amdflang
 PDT_PATH_INPUT=""
 GIT_COMMIT="fb4abfffa6683dd82a2b6ffddbfc497e6e1f5d60"
+# TAU's modulefile is currently named dev.lua (no version baked in).
+# PDT is a build-time-only dep shared with scorep, so we expose a
+# separate --replace-pdt flag (analogous to scorep_setup.sh).
+# --replace cleans tau + dev.lua; --replace-pdt cleans the shared PDT.
+# --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
+REPLACE=0
+REPLACE_PDT=0
+KEEP_FAILED_INSTALLS=0
 SUDO="sudo"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -73,6 +81,9 @@ usage()
    echo "  --git-commit [ GIT_COMMIT ] specify what commit hash you want to build from, default is $GIT_COMMIT"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL_INPUT ] default autodetected"
+   echo "  --replace [ 0|1 ] remove prior tau install + modulefile before building, default $REPLACE (PDT NOT removed)"
+   echo "  --replace-pdt [ 0|1 ] also remove and rebuild the shared PDT install, default $REPLACE_PDT"
+   echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
    echo "  --help: print this usage information"
    exit 1
 }
@@ -146,6 +157,21 @@ do
           ROCM_VERSION=${1}
           reset-last
           ;;
+      "--replace")
+          shift
+          REPLACE=${1}
+          reset-last
+          ;;
+      "--replace-pdt")
+          shift
+          REPLACE_PDT=${1}
+          reset-last
+          ;;
+      "--keep-failed-installs")
+          shift
+          KEEP_FAILED_INSTALLS=${1}
+          reset-last
+          ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
@@ -172,6 +198,55 @@ if [[ "$AMDGPU_GFXMODEL_INPUT" != "" ]]; then
 else
    AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 fi
+
+# ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
+# TAU modulefile is dev.lua; PDT is shared (see scorep_setup.sh).
+# ── BUILD_TAU=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
+NOOP_RC=43
+if [ "${BUILD_TAU}" = "0" ]; then
+   echo "[tau BUILD_TAU=0] operator opt-out; skipping (no source build, no cache restore)."
+   exit ${NOOP_RC}
+fi
+
+if [ "${REPLACE}" = "1" ]; then
+   echo "[tau --replace 1] removing prior tau install + modulefile if present"
+   echo "  install dir: ${TAU_PATH}"
+   echo "  modulefile:  ${MODULE_PATH}/dev.lua"
+   ${SUDO} rm -rf "${TAU_PATH}"
+   ${SUDO} rm -f  "${MODULE_PATH}/dev.lua"
+fi
+if [ "${REPLACE_PDT}" = "1" ]; then
+   echo "[tau --replace-pdt 1] removing prior PDT install"
+   echo "  install dir: ${PDT_PATH}"
+   ${SUDO} rm -rf "${PDT_PATH}"
+fi
+
+# ── Existence guard (see hypre_setup.sh) ─────────────────────────────
+# Only the tau half is checked. PDT is shared with scorep and is
+# intentionally preserved across re-installs; see scorep_setup.sh's
+# existence-check comment block for the full rationale.
+NOOP_RC=43
+if [ -d "${TAU_PATH}" ]; then
+   echo ""
+   echo "[tau existence-check] ${TAU_PATH} already installed; skipping."
+   echo "                      pass --replace 1 to force a clean rebuild."
+   echo "                      (PDT existence not part of this check; see tau_setup.sh comments.)"
+   echo ""
+   exit ${NOOP_RC}
+fi
+
+_tau_on_exit() {
+   local rc=$?
+   if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
+      echo "[tau fail-cleanup] rc=${rc}: removing partial tau install + modulefile (PDT preserved)"
+      ${SUDO:-sudo} rm -rf "${TAU_PATH}"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/dev.lua"
+   elif [ ${rc} -ne 0 ]; then
+      echo "[tau fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
+   fi
+   return ${rc}
+}
+trap _tau_on_exit EXIT
 
 echo ""
 echo "==================================="
@@ -312,34 +387,48 @@ else
       cd tau2
       git checkout $GIT_COMMIT || { echo "ERROR: git checkout $GIT_COMMIT failed"; exit 1; }
 
-      # Split tau's vendored plugins/llvm/Makefile rule that runs
-      #   cd build && cmake .. <flags> && make VERBOSE=1 -j install
-      # into a configure / build / install triple so the install pass is
-      # NOT a "make install" that also re-checks build dependencies.
+      # Patch tau's vendored plugins/llvm/Makefile to (a) embed the
+      # ROCm LLVM include dir into CMAKE_CXX_FLAGS, and (b) split
+      # `make install` into separate build/install passes via cmake.
       #
-      # Background (audit_2026_05_01.md, job 7974 log_tau_05_01_2026.txt):
-      # The first compile at log line 3301 succeeds with the correct
-      #   -I${ROCM_PATH}/lib/llvm/include
-      # and reports "[100%] Built target TAU_Profiling" (line 3313).
-      # Then `make install` re-enters the build dir, cmake reports
-      #   "Dependencies file ... is newer than depends file ..." (line 3441)
-      # and triggers a rebuild whose g++ command line at line 3453 is
-      # MISSING the -I flag, so the recompile of the same Instrument.cpp
-      # fails with "clang/Basic/SourceManager.h: No such file" at line 3459.
-      # The clang headers DO exist at
+      # Background (audit_2026_05_01.md, jobs 7974 and 7975
+      # log_tau_05_01_2026.txt):
+      # The TAU plugins/llvm CMake setup is intermittent about how it
+      # computes LLVM_INCLUDE_DIRS. In job 7974 the first compile pass
+      # succeeded with -I${ROCM_PATH}/lib/llvm/include on the command
+      # line, then `make install` triggered a cmake re-stat that
+      # rebuilt with that -I dropped, failing at "clang/Basic/
+      # SourceManager.h: No such file" at log line 3459. The first
+      # mitigation (commit 8ff591b's tau_setup.sh) replaced
+      #   && make VERBOSE=1 -j install
+      # with
+      #   && cmake --build . --parallel && cmake --install .
+      # but in job 7975 the FIRST compile pass already drops the -I
+      # (log:3457) before the install pass even runs, so the cmake-
+      # split alone is insufficient.
+      #
+      # The robust fix is to embed -I${ROCM_PATH}/lib/llvm/include into
+      # CMAKE_CXX_FLAGS via the cmake invocation itself. CMAKE_CXX_FLAGS
+      # is appended to every g++ compile by cmake's generated rules and
+      # SURVIVES any reconfigure (it's stored in CMakeCache.txt and
+      # regenerated identically), unlike LLVM_INCLUDE_DIRS which is
+      # auto-detected per cmake run from -DLLVM_DIR's CMake config and
+      # CAN be lost on a re-stat. The clang headers exist at
       #   ${ROCM_PATH}/lib/llvm/include/clang/Basic/SourceManager.h
-      # for both rocm-7.2.0 and rocm-7.2.1 -- they just aren't on the
-      # second compile's -I list because cmake's compiler_depend re-stat
-      # invalidated the cached LLVM_INCLUDE_DIRS for the rebuild.
+      # for every ROCm 7.x; making the include path part of the compile
+      # flag itself bypasses the LLVM_INCLUDE_DIRS code path entirely.
       #
-      # Using `cmake --build` then `cmake --install` keeps the build
-      # phase fully resolved before the install pass runs, and the
-      # install pass copies artifacts only -- it doesn't re-trigger the
-      # depends-stale rebuild. cmake-3.15+ provides `--install`, which is
-      # available in the bundled /usr/local/bin/cmake (Python pip cmake)
-      # that tau's plugins/llvm/Makefile invokes (log line 3215).
+      # Single sed replacing the trailing
+      #   -DCMAKE_BUILD_TYPE=Debug && make VERBOSE=1 -j install
+      # with
+      #   -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS=-I${ROCM_PATH}/lib/llvm/include
+      #     && cmake --build . --parallel && cmake --install .
+      # Double-quoted so ${ROCM_PATH} expands at sed time; cmake-3.15+
+      # provides --install, which is available in the bundled
+      # /usr/local/bin/cmake (Python pip cmake) that tau's
+      # plugins/llvm/Makefile invokes (job 7974/7975 log line 3215/3433).
       if [ -f plugins/llvm/Makefile ]; then
-         sed -i 's|&& make VERBOSE=1 -j install|\&\& cmake --build . --parallel \&\& cmake --install .|' plugins/llvm/Makefile
+         sed -i "s|-DCMAKE_BUILD_TYPE=Debug && make VERBOSE=1 -j install|-DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS=-I${ROCM_PATH}/lib/llvm/include \\&\\& cmake --build . --parallel \\&\\& cmake --install .|" plugins/llvm/Makefile
       fi
 
       # install third party dependencies
@@ -448,23 +537,14 @@ else
    fi
 
    # Create a module file for TAU
-   if [ -d "$MODULE_PATH" ]; then
-      # use sudo if user does not have write access to module path
-      if [ ! -w ${MODULE_PATH} ]; then
-         SUDO="sudo"
-      else
-         echo "WARNING: not using sudo since user has write access to module path"
-      fi
-   else
-      # if module path dir does not exist yet, the check on write access will fail
-      SUDO="sudo"
-      echo "WARNING: using sudo, make sure you have sudo privileges"
-   fi
-
-   ${SUDO} mkdir -p ${MODULE_PATH}
+   #
+   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
+   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
+   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/dev.lua
+   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/dev.lua
 	whatis(" TAU - portable profiling and tracing toolkit ")
 
 	prereq("rocm/${ROCM_VERSION}")

@@ -9,6 +9,10 @@ TF_PATH=/opt/rocmplus-${ROCM_VERSION}/tensorflow
 TF_PATH_INPUT=""
 TENSORFLOW_VERSION="r2.20-rocm-enhanced"
 GIT_BRANCH="${TENSORFLOW_VERSION}"
+# --replace 1: rm -rf prior install dir + ${GIT_BRANCH}.lua before build.
+# --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
+REPLACE=0
+KEEP_FAILED_INSTALLS=0
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -32,6 +36,8 @@ usage()
    echo "  --tensorflow-version [ TENSORFLOW_VERSION ] git branch/tag of the upstream TensorFlow tree to build (synonym for --git-branch), default $TENSORFLOW_VERSION"
    echo "  --git-branch [ GIT_BRANCH ] specify what commit git branch you want to build, default is $GIT_BRANCH"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
+   echo "  --replace [ 0|1 ] remove prior install + modulefile before building, default $REPLACE"
+   echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
    echo "  --help: print this usage information"
    exit 1
 }
@@ -91,6 +97,16 @@ do
           ROCM_VERSION=${1}
 	  reset-last
           ;;
+      "--replace")
+          shift
+          REPLACE=${1}
+          reset-last
+          ;;
+      "--keep-failed-installs")
+          shift
+          KEEP_FAILED_INSTALLS=${1}
+          reset-last
+          ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
@@ -108,6 +124,54 @@ else
    # override path in case ROCM_VERSION has been supplied as input
    TF_PATH=/opt/rocmplus-${ROCM_VERSION}/tensorflow
 fi
+
+# ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
+# Modulefile name is ${GIT_BRANCH}.lua to match the
+# `tee ${MODULE_PATH}/${GIT_BRANCH}.lua` write below.
+# ── BUILD_TF=0 short-circuit: operator opt-out (see hypre_setup.sh) ──
+# Note: the in-script variable is BUILD_TF (--build-tensorflow); the
+# corresponding main_setup.sh variable is BUILD_TENSORFLOW. They are
+# threaded by main_setup.sh as `--build-tensorflow ${BUILD_TENSORFLOW}`.
+NOOP_RC=43
+if [ "${BUILD_TF}" = "0" ]; then
+   echo "[tensorflow BUILD_TF=0] operator opt-out; skipping (no source build, no cache restore)."
+   exit ${NOOP_RC}
+fi
+
+if [ "${REPLACE}" = "1" ]; then
+   echo "[tensorflow --replace 1] removing prior install + modulefile if present"
+   echo "  install dir: ${TF_PATH}"
+   echo "  modulefile:  ${MODULE_PATH}/${GIT_BRANCH}.lua"
+   ${SUDO} rm -rf "${TF_PATH}"
+   ${SUDO} rm -f  "${MODULE_PATH}/${GIT_BRANCH}.lua"
+fi
+
+# ── Existence guard: skip if already installed (see hypre_setup.sh) ──
+NOOP_RC=43
+if [ -d "${TF_PATH}" ]; then
+   echo ""
+   echo "[tensorflow existence-check] ${TF_PATH} already installed; skipping."
+   echo "                             pass --replace 1 to force a clean rebuild."
+   echo ""
+   exit ${NOOP_RC}
+fi
+
+# Consolidated EXIT trap: build-dir cleanup (TF_BUILD_ROOT, set later
+# under BUILD_TF=1) + fail-cleanup. Replaces inline
+# `trap '... rm TF_BUILD_ROOT ...' EXIT`.
+_tensorflow_on_exit() {
+   local rc=$?
+   [ -n "${TF_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${TF_BUILD_ROOT}"
+   if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
+      echo "[tensorflow fail-cleanup] rc=${rc}: removing partial install + modulefile"
+      ${SUDO:-sudo} rm -rf "${TF_PATH}"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${GIT_BRANCH}.lua"
+   elif [ ${rc} -ne 0 ]; then
+      echo "[tensorflow fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
+   fi
+   return ${rc}
+}
+trap _tensorflow_on_exit EXIT
 
 # Load the ROCm version for this TensorFlow build
 #source /etc/profile.d/lmod.sh
@@ -141,7 +205,9 @@ else
    # could clobber -- any other concurrent tensorflow build on the
    # same node.
    TF_BUILD_ROOT=$(mktemp -d -t tensorflow-build.XXXXXX)
-   trap '[ -n "${TF_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${TF_BUILD_ROOT}"' EXIT
+   # NOTE: build-dir cleanup is consolidated into _tensorflow_on_exit
+   # installed above (so the same EXIT handler also does fail-cleanup
+   # of any partial install / modulefile).
    cd "${TF_BUILD_ROOT}"
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
@@ -366,23 +432,14 @@ else
    fi
 
    # Create a module file for tensorflow
-   if [ -d "$MODULE_PATH" ]; then
-      # use sudo if user does not have write access to module path
-      if [ ! -w ${MODULE_PATH} ]; then
-         SUDO="sudo"
-      else
-         echo "WARNING: not using sudo since user has write access to module path"
-      fi
-   else
-      # if module path dir does not exist yet, the check on write access will fail
-      SUDO="sudo"
-      echo "WARNING: using sudo, make sure you have sudo privileges"
-   fi
-
-   ${SUDO} mkdir -p ${MODULE_PATH}
+   #
+   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
+   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
+   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GIT_BRANCH}.lua
+   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${GIT_BRANCH}.lua
 	whatis("Tensorflow with ROCm support")
 
 	prereq("rocm/${ROCM_VERSION}")

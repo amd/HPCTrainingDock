@@ -41,9 +41,20 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/petsc
 BUILD_PETSC=0
 ROCM_VERSION=6.2.0
-INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/petsc
-INSTALL_PATH_INPUT=""
 PETSC_VERSION="3.24.1"
+# Versioned install root: /opt/rocmplus-X/petsc-v${PETSC_VERSION}.
+# The petsc / slepc / eigen subdirs live under this (slepc is also
+# checked out at v$PETSC_VERSION, line ~438; eigen tracks 5.0.0).
+# Versioning the GROUP root lets multiple petsc releases coexist
+# without colliding on /opt/rocmplus-X/petsc.
+INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/petsc-v${PETSC_VERSION}
+INSTALL_PATH_INPUT=""
+# --replace 1: rm -rf prior install dir + ${PETSC_VERSION}.lua before build.
+# (When --use-amdflang 1, the suffix _amdflang is added to BOTH paths
+# so we always clean whatever the resolved INSTALL_PATH/MODULE_PATH is.)
+# --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
+REPLACE=0
+KEEP_FAILED_INSTALLS=0
 SUDO="sudo"
 USE_SPACK=0
 USE_AMDFLANG=0
@@ -75,6 +86,8 @@ usage()
    echo "  --use-spack [ USE_SPACK ] default $USE_SPACK"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --build-petsc [ BUILD_PETSC ] default is 0"
+   echo "  --replace [ 0|1 ] remove prior install + modulefile before building, default $REPLACE"
+   echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
    echo "  --help: this usage information"
    exit 1
 }
@@ -148,6 +161,16 @@ do
           ROCM_VERSION=${1}
           reset-last
           ;;
+      "--replace")
+          shift
+          REPLACE=${1}
+          reset-last
+          ;;
+      "--keep-failed-installs")
+          shift
+          KEEP_FAILED_INSTALLS=${1}
+          reset-last
+          ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
@@ -162,14 +185,57 @@ done
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 else
-   # override path in case ROCM_VERSION has been supplied as input
-   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/petsc
+   # override path in case ROCM_VERSION or PETSC_VERSION has been supplied as input
+   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/petsc-v${PETSC_VERSION}
 fi
 
 if [[ "${USE_AMDFLANG}" == 1 ]]; then
    INSTALL_PATH=${INSTALL_PATH}_amdflang
    MODULE_PATH=${MODULE_PATH}_amdflang
 fi
+
+# ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
+# Modulefile name is ${PETSC_VERSION}.lua. Note that when --use-amdflang 1
+# both INSTALL_PATH and MODULE_PATH already have _amdflang appended above.
+# ── BUILD_PETSC=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
+NOOP_RC=43
+if [ "${BUILD_PETSC}" = "0" ]; then
+   echo "[petsc BUILD_PETSC=0] operator opt-out; skipping (no source build, no cache restore)."
+   exit ${NOOP_RC}
+fi
+
+if [ "${REPLACE}" = "1" ]; then
+   echo "[petsc --replace 1] removing prior install + modulefile if present"
+   echo "  install dir: ${INSTALL_PATH}"
+   echo "  modulefile:  ${MODULE_PATH}/${PETSC_VERSION}.lua"
+   ${SUDO} rm -rf "${INSTALL_PATH}"
+   ${SUDO} rm -f  "${MODULE_PATH}/${PETSC_VERSION}.lua"
+fi
+
+# ── Existence guard: skip if already installed (see hypre_setup.sh) ──
+# Note: when --use-amdflang 1 was passed, INSTALL_PATH already had
+# _amdflang appended above, so this checks the toolchain-specific dir.
+NOOP_RC=43
+if [ -d "${INSTALL_PATH}" ]; then
+   echo ""
+   echo "[petsc existence-check] ${INSTALL_PATH} already installed; skipping."
+   echo "                        pass --replace 1 to force a clean rebuild of this version."
+   echo ""
+   exit ${NOOP_RC}
+fi
+
+_petsc_on_exit() {
+   local rc=$?
+   if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
+      echo "[petsc fail-cleanup] rc=${rc}: removing partial install + modulefile"
+      ${SUDO:-sudo} rm -rf "${INSTALL_PATH}"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${PETSC_VERSION}.lua"
+   elif [ ${rc} -ne 0 ]; then
+      echo "[petsc fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
+   fi
+   return ${rc}
+}
+trap _petsc_on_exit EXIT
 
 echo ""
 echo "==================================="
@@ -195,18 +261,21 @@ if [ "${BUILD_PETSC}" = "0" ]; then
    exit
 
 else
-   if [ -f ${CACHE_FILES}/petsc.tgz ]; then
+   if [ -f ${CACHE_FILES}/petsc-v${PETSC_VERSION}.tgz ]; then
       echo ""
       echo "============================"
-      echo " Installing Cached PETSC"
+      echo " Installing Cached PETSC v${PETSC_VERSION}"
       echo "============================"
       echo ""
 
-      #install the cached version
+      # install the cached version. Tarball top-level dir is
+      # petsc-v${PETSC_VERSION}/{petsc,slepc,eigen} -- matches the
+      # versioned INSTALL_PATH layout used by the from-source branch.
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xpzf ${CACHE_FILES}/petsc.tgz
+      ${SUDO} tar -xpzf ${CACHE_FILES}/petsc-v${PETSC_VERSION}.tgz
+      ${SUDO} chown -R root:root ${INSTALL_PATH}
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm ${CACHE_FILES}/petsc.tgz
+         ${SUDO} rm ${CACHE_FILES}/petsc-v${PETSC_VERSION}.tgz
       fi
 
    else
@@ -495,20 +564,11 @@ print('ScaLAPACK.py patched successfully')
    fi
 
    # Create a module file for petsc
-   if [ -d "$MODULE_PATH" ]; then
-      # use sudo if user does not have write access to module path
-      if [ ! -w ${MODULE_PATH} ]; then
-         SUDO="sudo"
-      else
-         echo "WARNING: not using sudo since user has write access to module path"
-      fi
-   else
-      # if module path dir does not exist yet, the check on write access will fail
-      SUDO="sudo"
-      echo "WARNING: using sudo, make sure you have sudo privileges"
-   fi
-
-   ${SUDO} mkdir -p ${MODULE_PATH}
+   #
+   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
+   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
+   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    ROCM_MODULE_LOAD=rocm/${ROCM_VERSION}
    if [[ "${USE_AMDFLANG}" == 1 ]]; then
@@ -517,7 +577,7 @@ print('ScaLAPACK.py patched successfully')
    fi
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/$PETSC_VERSION.lua
+   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/$PETSC_VERSION.lua
 	whatis("PETSC Version $PETSC_VERSION - solver package")
 
 	local base = "${PETSC_PATH}"

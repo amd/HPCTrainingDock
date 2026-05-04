@@ -50,6 +50,10 @@ FFTW_VERSION=3.3.10
 MPI_MODULE="openmpi"
 FFTW_PATH=/opt/rocmplus-${ROCM_VERSION}/fftw-v$FFTW_VERSION
 FFTW_PATH_INPUT=""
+# --replace 1: rm -rf prior install dir + ${FFTW_VERSION}.lua before building.
+# --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
+REPLACE=0
+KEEP_FAILED_INSTALLS=0
 
 SUDO="sudo"
 
@@ -75,6 +79,8 @@ usage()
    echo "  --c-compiler [ C_COMPILER ] default ${C_COMPILER}"
    echo "  --fc-compiler [ FC_COMPILER ] default ${FC_COMPILER}"
    echo "  --build-fftw [ BUILD_FFTW ], set to 1 to build FFTW, default is 0"
+   echo "  --replace [ 0|1 ] remove prior install + modulefile before building, default $REPLACE"
+   echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
    echo "  --help: print this usage information"
    exit 1
 }
@@ -153,6 +159,16 @@ do
           FFTW_VERSION=${1}
           reset-last
           ;;
+      "--replace")
+          shift
+          REPLACE=${1}
+          reset-last
+          ;;
+      "--keep-failed-installs")
+          shift
+          KEEP_FAILED_INSTALLS=${1}
+          reset-last
+          ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
@@ -170,6 +186,45 @@ else
    # override path in case FFTW_VERSION has been supplied as input
    FFTW_PATH=/opt/rocmplus-${ROCM_VERSION}/fftw-v${FFTW_VERSION}
 fi
+
+# ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
+# ── BUILD_FFTW=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
+NOOP_RC=43
+if [ "${BUILD_FFTW}" = "0" ]; then
+   echo "[fftw BUILD_FFTW=0] operator opt-out; skipping (no source build, no cache restore)."
+   exit ${NOOP_RC}
+fi
+
+if [ "${REPLACE}" = "1" ]; then
+   echo "[fftw --replace 1] removing prior install + modulefile if present"
+   echo "  install dir: ${FFTW_PATH}"
+   echo "  modulefile:  ${MODULE_PATH}/${FFTW_VERSION}.lua"
+   ${SUDO} rm -rf "${FFTW_PATH}"
+   ${SUDO} rm -f  "${MODULE_PATH}/${FFTW_VERSION}.lua"
+fi
+
+# ── Existence guard: skip if already installed (see hypre_setup.sh) ──
+NOOP_RC=43
+if [ -d "${FFTW_PATH}" ]; then
+   echo ""
+   echo "[fftw existence-check] ${FFTW_PATH} already installed; skipping."
+   echo "                       pass --replace 1 to force a clean rebuild of this version."
+   echo ""
+   exit ${NOOP_RC}
+fi
+
+_fftw_on_exit() {
+   local rc=$?
+   if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
+      echo "[fftw fail-cleanup] rc=${rc}: removing partial install + modulefile"
+      ${SUDO:-sudo} rm -rf "${FFTW_PATH}"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${FFTW_VERSION}.lua"
+   elif [ ${rc} -ne 0 ]; then
+      echo "[fftw fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
+   fi
+   return ${rc}
+}
+trap _fftw_on_exit EXIT
 
 
 if [ "${BUILD_FFTW}" = "0" ]; then
@@ -201,12 +256,18 @@ else
       echo "============================"
       echo ""
 
-      #install the cached version
-      cd /opt
-      tar -xzf  ${CACHE_FILES}/fftw-v${FFTW_VERSION}.tgz
-      chown -R root:root /opt/fftw-v${FFTW_VERSION}
+      # Install the cached version. Cache tar must be named
+      # fftw-v${FFTW_VERSION}.tgz and contain a top-level directory
+      # fftw-v${FFTW_VERSION}/ so it lands directly at ${FFTW_PATH}
+      # when extracted under /opt/rocmplus-X. (Previous code cd'd
+      # into /opt and chown'd /opt/fftw-v..., which left the install
+      # in the wrong place; corrected here as part of the multi-version
+      # pass.)
+      cd /opt/rocmplus-${ROCM_VERSION}
+      tar -xzf ${CACHE_FILES}/fftw-v${FFTW_VERSION}.tgz
+      chown -R root:root ${FFTW_PATH}
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm  ${CACHE_FILES}/fftw-v${FFTW_VERSION}.tgz
+         ${SUDO} rm ${CACHE_FILES}/fftw-v${FFTW_VERSION}.tgz
       fi
 
    else
@@ -316,23 +377,14 @@ else
    fi
 
    # Create a module file for fftw
-   if [ -d "$MODULE_PATH" ]; then
-      # use sudo if user does not have write access to module path
-      if [ ! -w ${MODULE_PATH} ]; then
-         SUDO="sudo"
-      else
-         echo "WARNING: not using sudo since user has write access to module path"
-      fi
-   else
-      # if module path dir does not exist yet, the check on write access will fail
-      SUDO="sudo"
-      echo "WARNING: using sudo, make sure you have sudo privileges"
-   fi
-
-   ${SUDO} mkdir -p ${MODULE_PATH}
+   #
+   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
+   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
+   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${FFTW_VERSION}.lua
+   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${FFTW_VERSION}.lua
 	whatis("FFTW: Fastest Fourier Transform in the West")
 
 	local base = "${FFTW_PATH}"

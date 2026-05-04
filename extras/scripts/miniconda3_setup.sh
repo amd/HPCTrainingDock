@@ -103,74 +103,98 @@ echo "Creating module file in: $MODULE_PATH"
 echo "============================"
 echo ""
 
-
+# ── BUILD_MINICONDA3=0 short-circuit: operator opt-out ───────────────
+# Same pattern as the 23 packages that went through the canonical
+# refactor (see extras/scripts/hypre_setup.sh for the long-form
+# rationale). Exits NOOP_RC=43 so main_setup.sh's run_and_log records
+# a SKIPPED(no-op) line in the per-package summary instead of silently
+# omitting the package -- makes "what was actually installed?" a
+# single-grep question.
+NOOP_RC=43
 if [ "${BUILD_MINICONDA3}" = "0" ]; then
+   echo "[miniconda3 BUILD_MINICONDA3=0] operator opt-out; skipping."
+   exit ${NOOP_RC}
+fi
 
-   echo "Miniconda3 will not be built, according to the specified value of BUILD_MINICONDA3"
-   echo "BUILD_MINICONDA3: $BUILD_MINICONDA3"
-   exit
+# ── Existence guard: skip if this version is already installed ───────
+# Replaces the broken `[[ ! -d ${TOP_INSTALL_PATH}/miniconda3 ]]`
+# clause that previously gated this script's invocation in
+# bare_system/main_setup.sh -- broken because the actual install dir
+# is ${TOP_INSTALL_PATH}/miniconda3-v${MINICONDA3_VERSION}, not the
+# unversioned path that guard inspected; result was that this script
+# ran every sweep and re-paid the wget + installer + conda-create cost
+# (the installer's -b -u flags merely tolerated the re-update). The
+# in-script guard checks the right (versioned) path, which means
+# multiple MINICONDA3_VERSION values can coexist in /opt and a re-run
+# of main_setup.sh against a settled install is now a true no-op.
+#
+# IMPORTANT: --replace is intentionally NOT threaded for miniconda3
+# (see comment block above its run_and_log call in main_setup.sh).
+# To force a rebuild of this version, the operator removes
+# ${MINICONDA3_PATH} by hand. We deliberately do NOT install an EXIT
+# trap fail-cleanup here either -- a partial install on disk will
+# trip this guard on the next sweep and require manual removal,
+# matching the same operator-driven workflow.
+if [ -d "${MINICONDA3_PATH}" ]; then
+   echo "[miniconda3 existence-check] ${MINICONDA3_PATH} already installed; skipping."
+   echo "                             remove ${MINICONDA3_PATH} by hand to force a rebuild"
+   echo "                             (--replace is intentionally not threaded; see main_setup.sh)."
+   exit ${NOOP_RC}
+fi
 
-else
-   echo ""
-   echo "============================"
-   echo " Building Miniconda3"
-   echo "============================"
-   echo ""
+echo ""
+echo "============================"
+echo " Building Miniconda3"
+echo "============================"
+echo ""
 
-
+# don't use sudo if user has write access to install path
+if [ -d "$MINICONDA3_PATH" ]; then
    # don't use sudo if user has write access to install path
-   if [ -d "$MINICONDA3_PATH" ]; then
-      # don't use sudo if user has write access to install path
-      if [ -w ${MINICONDA3_PATH} ]; then
-         SUDO=""
-      else
-         echo "WARNING: using an install path that requires sudo"
-      fi
+   if [ -w ${MINICONDA3_PATH} ]; then
+      SUDO=""
    else
-      # if install path does not exist yet, the check on write access will fail
-      echo "WARNING: using sudo, make sure you have sudo privileges"
+      echo "WARNING: using an install path that requires sudo"
    fi
+else
+   # if install path does not exist yet, the check on write access will fail
+   echo "WARNING: using sudo, make sure you have sudo privileges"
+fi
 
-   # Per-job throwaway dir for the installer; replaces a fixed
-   # /tmp/miniconda-installer.sh path that would race with -- and
-   # could clobber -- any other concurrent miniconda3 install on the
-   # same node.
-   MINICONDA_BUILD_ROOT=$(mktemp -d -t miniconda-build.XXXXXX)
-   trap '[ -n "${MINICONDA_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${MINICONDA_BUILD_ROOT}"' EXIT
-   MINICONDA_INSTALLER="${MINICONDA_BUILD_ROOT}/miniconda-installer.sh"
-   wget -q https://repo.anaconda.com/miniconda/Miniconda3-py3${PYTHON_VERSION}_${MINICONDA3_VERSION_DOWNLOAD}-$(uname)-$(uname -m).sh -O "${MINICONDA_INSTALLER}"
-   chmod +x "${MINICONDA_INSTALLER}"
-   ${SUDO} mkdir -p ${MINICONDA3_PATH}
-   ${SUDO} "${MINICONDA_INSTALLER}" -b -u -p ${MINICONDA3_PATH}
-   export PATH="${MINICONDA3_PATH}/bin:${PATH}"
-   conda config --set always_yes yes --set changeps1 no
-   # conda update -c defaults -n base conda
-   ${SUDO} mkdir -p ${MINICONDA3_PATH}/envs/py3.${PYTHON_VERSION}
-   ${SUDO} chown -R ${USER}:${USER} ${MINICONDA3_PATH}/*
-   conda create -p ${MINICONDA3_PATH}/envs/py3.${PYTHON_VERSION} -c defaults -c conda-forge python=3.${PYTHON_VERSION} pip
-   ${MINICONDA3_PATH}/envs/py3.${PYTHON_VERSION}/bin/python -m pip install numpy perfetto dataclasses
-   conda clean -a -y
-   ${SUDO} chown -R root:root ${MINICONDA3_PATH}/*
-   # trap handles cleanup of ${MINICONDA_BUILD_ROOT}
+# Per-job throwaway dir for the installer; replaces a fixed
+# /tmp/miniconda-installer.sh path that would race with -- and
+# could clobber -- any other concurrent miniconda3 install on the
+# same node.
+MINICONDA_BUILD_ROOT=$(mktemp -d -t miniconda-build.XXXXXX)
+trap '[ -n "${MINICONDA_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${MINICONDA_BUILD_ROOT}"' EXIT
+MINICONDA_INSTALLER="${MINICONDA_BUILD_ROOT}/miniconda-installer.sh"
+wget -q https://repo.anaconda.com/miniconda/Miniconda3-py3${PYTHON_VERSION}_${MINICONDA3_VERSION_DOWNLOAD}-$(uname)-$(uname -m).sh -O "${MINICONDA_INSTALLER}"
+chmod +x "${MINICONDA_INSTALLER}"
+${SUDO} mkdir -p ${MINICONDA3_PATH}
+${SUDO} "${MINICONDA_INSTALLER}" -b -u -p ${MINICONDA3_PATH}
+export PATH="${MINICONDA3_PATH}/bin:${PATH}"
+conda config --set always_yes yes --set changeps1 no
+# conda update -c defaults -n base conda
+${SUDO} mkdir -p ${MINICONDA3_PATH}/envs/py3.${PYTHON_VERSION}
+${SUDO} chown -R ${USER}:${USER} ${MINICONDA3_PATH}/*
+conda create -p ${MINICONDA3_PATH}/envs/py3.${PYTHON_VERSION} -c defaults -c conda-forge python=3.${PYTHON_VERSION} pip
+${MINICONDA3_PATH}/envs/py3.${PYTHON_VERSION}/bin/python -m pip install numpy perfetto dataclasses
+conda clean -a -y
+${SUDO} chown -R root:root ${MINICONDA3_PATH}/*
+# trap handles cleanup of ${MINICONDA_BUILD_ROOT}
 
-   # Create a module file for miniconda3
-   if [ -d "$MODULE_PATH" ]; then
-      # use sudo if user does not have write access to module path
-      if [ ! -w ${MODULE_PATH} ]; then
-         SUDO="sudo"
-      else
-         echo "WARNING: not using sudo since user has write access to module path"
-      fi
-   else
-      # if module path dir does not exist yet, the check on write access will fail
-      SUDO="sudo"
-      echo "WARNING: using sudo, make sure you have sudo privileges"
-   fi
+# Create a module file for miniconda3
+#
+# Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
+# see netcdf_setup.sh for the full lying-probe failure mode this
+# replaces). One source of truth: "no sudo if I'm root, sudo
+# otherwise" -- never lies about identity, never races with mid-build
+# chowns from sibling blocks.
+PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
-   ${SUDO} mkdir -p ${MODULE_PATH}
-
-   # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${MINICONDA3_VERSION}.lua
+# The - option suppresses tabs
+cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${MINICONDA3_VERSION}.lua
 	conflict("miniforge3")
 	local root = "${MINICONDA3_PATH}"
 	local python_version = capture(root .. "/bin/python -V | awk '{print $2}'")
@@ -212,5 +236,3 @@ else
 	end
 
 EOF
-
-fi

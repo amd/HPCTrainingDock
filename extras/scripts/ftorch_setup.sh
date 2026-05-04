@@ -45,6 +45,10 @@ FTORCH_PATH=/opt/rocmplus-${ROCM_VERSION}/ftorch
 FTORCH_PATH_INPUT=""
 PYTORCH_MODULE=pytorch
 FTORCH_VERSION=""    # empty -> default branch (main); else passed to git checkout after clone
+# --replace 1: rm -rf prior install dir + dev.lua before build.
+# --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
+REPLACE=0
+KEEP_FAILED_INSTALLS=0
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -68,6 +72,8 @@ usage()
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --ftorch-version [ FTORCH_VERSION ] git tag/branch/commit to check out after clone (default: repo HEAD)"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
+   echo "  --replace [ 0|1 ] remove prior install + modulefile before building, default $REPLACE"
+   echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
    echo "  --help: print this usage information"
    exit 1
 }
@@ -126,6 +132,16 @@ do
           FTORCH_VERSION=${1}
           reset-last
           ;;
+      "--replace")
+          shift
+          REPLACE=${1}
+          reset-last
+          ;;
+      "--keep-failed-installs")
+          shift
+          KEEP_FAILED_INSTALLS=${1}
+          reset-last
+          ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
@@ -143,6 +159,50 @@ else
    # override path in case ROCM_VERSION has been supplied as input
    FTORCH_PATH=/opt/rocmplus-${ROCM_VERSION}/ftorch
 fi
+
+# ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
+# Modulefile name is dev.lua (no version baked in).
+# ── BUILD_FTORCH=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
+NOOP_RC=43
+if [ "${BUILD_FTORCH}" = "0" ]; then
+   echo "[ftorch BUILD_FTORCH=0] operator opt-out; skipping (no source build, no cache restore)."
+   exit ${NOOP_RC}
+fi
+
+if [ "${REPLACE}" = "1" ]; then
+   echo "[ftorch --replace 1] removing prior install + modulefile if present"
+   echo "  install dir: ${FTORCH_PATH}"
+   echo "  modulefile:  ${MODULE_PATH}/dev.lua"
+   ${SUDO} rm -rf "${FTORCH_PATH}"
+   ${SUDO} rm -f  "${MODULE_PATH}/dev.lua"
+fi
+
+# ── Existence guard: skip if already installed (see hypre_setup.sh) ──
+NOOP_RC=43
+if [ -d "${FTORCH_PATH}" ]; then
+   echo ""
+   echo "[ftorch existence-check] ${FTORCH_PATH} already installed; skipping."
+   echo "                         pass --replace 1 to force a clean rebuild."
+   echo ""
+   exit ${NOOP_RC}
+fi
+
+# Consolidated EXIT trap: build-dir cleanup (FTORCH_BUILD_ROOT, set
+# under BUILD_FTORCH=1) PLUS fail-cleanup of partial install +
+# modulefile. Replaces inline `trap '... rm FTORCH_BUILD_ROOT ...' EXIT`.
+_ftorch_on_exit() {
+   local rc=$?
+   [ -n "${FTORCH_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${FTORCH_BUILD_ROOT}"
+   if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
+      echo "[ftorch fail-cleanup] rc=${rc}: removing partial install + modulefile"
+      ${SUDO:-sudo} rm -rf "${FTORCH_PATH}"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/dev.lua"
+   elif [ ${rc} -ne 0 ]; then
+      echo "[ftorch fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
+   fi
+   return ${rc}
+}
+trap _ftorch_on_exit EXIT
 
 echo ""
 echo "==================================="
@@ -166,7 +226,9 @@ else
    # later `rm -rf FTorch`) that would race with any other concurrent
    # ftorch build on the same node.
    FTORCH_BUILD_ROOT=$(mktemp -d -t ftorch-build.XXXXXX)
-   trap '[ -n "${FTORCH_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${FTORCH_BUILD_ROOT}"' EXIT
+   # NOTE: build-dir cleanup is consolidated into _ftorch_on_exit
+   # installed above (so the same EXIT handler also does fail-cleanup
+   # of any partial install / modulefile).
    cd "${FTORCH_BUILD_ROOT}"
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
@@ -232,7 +294,20 @@ else
       # PATH for this lookup. Tracks audit_2026_05_01.md Issue 5; the
       # root cause is the unconditional shebang rewrite that should be
       # applied in pytorch_setup.sh (deferred fix).
-      CMAKE_BIN=$(PATH=$(echo "$PATH" | tr ':' '\n' | grep -v '/pytorch/.*/bin$' | paste -sd:) command -v cmake)
+      #
+      # 8063 audit: the prior regex `/pytorch/.*/bin$` required at
+      # least one path component between `/pytorch/` and `/bin`, but
+      # pytorch_setup.sh installs to ${ROCMPLUS}/pytorch-v${VERSION}/
+      # pytorch/bin (no intermediate component) so the regex never
+      # matched and the broken cmake stayed first on PATH. Switch to
+      # filtering by the install-root naming convention `pytorch-v`
+      # (set in pytorch_setup.sh:61, INSTALL_PATH=...pytorch-v${VER})
+      # which uniquely identifies our install across versions and
+      # cannot be defeated by adding/removing intermediate path
+      # components in a future module layout. (Option B from the
+      # 8063 audit; PYTORCH_PATH isn't exported by the pytorch
+      # modulefile so we can't filter by absolute path here.)
+      CMAKE_BIN=$(PATH=$(echo "$PATH" | tr ':' '\n' | grep -v '/pytorch-v[^/]*/' | paste -sd:) command -v cmake)
       if [ ! -x "${CMAKE_BIN}" ]; then
          CMAKE_BIN=/usr/bin/cmake
       fi
@@ -258,23 +333,14 @@ else
    fi
 
    # Create a module file for cupy
-   if [ -d "$MODULE_PATH" ]; then
-      # use sudo if user does not have write access to module path
-      if [ ! -w ${MODULE_PATH} ]; then
-         SUDO="sudo"
-      else
-         echo "WARNING: not using sudo since user has write access to module path"
-      fi
-   else
-      # if module path dir does not exist yet, the check on write access will fail
-      SUDO="sudo"
-      echo "WARNING: using sudo, make sure you have sudo privileges"
-   fi
-
-   ${SUDO} mkdir -p ${MODULE_PATH}
+   #
+   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
+   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
+   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/dev.lua
+   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/dev.lua
 	whatis("FTorch: a library for directly calling PyTorch ML models from Fortran")
 
 	prereq("rocm/${ROCM_VERSION}")

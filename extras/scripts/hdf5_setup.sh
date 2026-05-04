@@ -52,6 +52,10 @@ HDF5_VERSION=1.14.6
 MPI_MODULE="openmpi"
 HDF5_PATH=/opt/rocmplus-${ROCM_VERSION}/hdf5-v${HDF5_VERSION}
 HDF5_PATH_INPUT=""
+# --replace 1: rm -rf prior install dir + ${HDF5_VERSION}.lua before building.
+# --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
+REPLACE=0
+KEEP_FAILED_INSTALLS=0
 
 SUDO="sudo"
 
@@ -78,6 +82,8 @@ usage()
    echo "  --cxx-compiler [ CXX_COMPILER ] default ${CXX_COMPILER}"
    echo "  --f-compiler [ F_COMPILER ] default ${F_COMPILER}"
    echo "  --build-hdf5 [ BUILD_HDF5 ], set to 1 to build HDF5, default is 0"
+   echo "  --replace [ 0|1 ] remove prior install + modulefile before building, default $REPLACE"
+   echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
    echo "  --help: print this usage information"
    exit 1
 }
@@ -161,6 +167,16 @@ do
           HDF5_VERSION=${1}
           reset-last
           ;;
+      "--replace")
+          shift
+          REPLACE=${1}
+          reset-last
+          ;;
+      "--keep-failed-installs")
+          shift
+          KEEP_FAILED_INSTALLS=${1}
+          reset-last
+          ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
@@ -178,6 +194,45 @@ else
    # override path in case HDF5_VERSION has been supplied as input
    HDF5_PATH=/opt/rocmplus-${ROCM_VERSION}/hdf5-v${HDF5_VERSION}
 fi
+
+# ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
+# ── BUILD_HDF5=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
+NOOP_RC=43
+if [ "${BUILD_HDF5}" = "0" ]; then
+   echo "[hdf5 BUILD_HDF5=0] operator opt-out; skipping (no source build, no cache restore)."
+   exit ${NOOP_RC}
+fi
+
+if [ "${REPLACE}" = "1" ]; then
+   echo "[hdf5 --replace 1] removing prior install + modulefile if present"
+   echo "  install dir: ${HDF5_PATH}"
+   echo "  modulefile:  ${MODULE_PATH}/${HDF5_VERSION}.lua"
+   ${SUDO} rm -rf "${HDF5_PATH}"
+   ${SUDO} rm -f  "${MODULE_PATH}/${HDF5_VERSION}.lua"
+fi
+
+# ── Existence guard: skip if already installed (see hypre_setup.sh) ──
+NOOP_RC=43
+if [ -d "${HDF5_PATH}" ]; then
+   echo ""
+   echo "[hdf5 existence-check] ${HDF5_PATH} already installed; skipping."
+   echo "                       pass --replace 1 to force a clean rebuild of this version."
+   echo ""
+   exit ${NOOP_RC}
+fi
+
+_hdf5_on_exit() {
+   local rc=$?
+   if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
+      echo "[hdf5 fail-cleanup] rc=${rc}: removing partial install + modulefile"
+      ${SUDO:-sudo} rm -rf "${HDF5_PATH}"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${HDF5_VERSION}.lua"
+   elif [ ${rc} -ne 0 ]; then
+      echo "[hdf5 fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
+   fi
+   return ${rc}
+}
+trap _hdf5_on_exit EXIT
 
 if [ "${BUILD_HDF5}" = "0" ]; then
 
@@ -207,10 +262,15 @@ else
       echo "============================"
       echo ""
 
-      #install the cached version
-      cd /opt
-      tar -xzf  ${CACHE_FILES}/hdf5-v${HDF5_VERSION}.tgz
-      chown -R root:root /opt/hdf5-v${HDF5_VERSION}
+      # Install the cached version. Cache tar must be named
+      # hdf5-v${HDF5_VERSION}.tgz and contain a top-level directory
+      # hdf5-v${HDF5_VERSION}/ so it lands directly at ${HDF5_PATH}
+      # when extracted under /opt/rocmplus-X. (Previous code cd'd into
+      # /opt and chown'd /opt/hdf5-v..., which left the install in the
+      # wrong place; corrected here as part of the multi-version pass.)
+      cd /opt/rocmplus-${ROCM_VERSION}
+      tar -xzf ${CACHE_FILES}/hdf5-v${HDF5_VERSION}.tgz
+      chown -R root:root ${HDF5_PATH}
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm -f ${CACHE_FILES}/hdf5-v${HDF5_VERSION}.tgz
       fi
@@ -351,23 +411,14 @@ else
    fi
 
    # Create a module file for hdf5
-   if [ -d "$MODULE_PATH" ]; then
-      # use sudo if user does not have write access to module path
-      if [ ! -w ${MODULE_PATH} ]; then
-         SUDO="sudo"
-      else
-         echo "WARNING: not using sudo since user has write access to module path"
-      fi
-   else
-      # if module path dir does not exist yet, the check on write access will fail
-      SUDO="sudo"
-      echo "WARNING: using sudo, make sure you have sudo privileges"
-   fi
-
-   ${SUDO} mkdir -p ${MODULE_PATH}
+   #
+   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
+   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
+   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${HDF5_VERSION}.lua
+   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${HDF5_VERSION}.lua
 	whatis("HDF5 Data Model")
 
 	local base = "${HDF5_PATH}/HDF_Group/HDF5/${HDF5_VERSION}"

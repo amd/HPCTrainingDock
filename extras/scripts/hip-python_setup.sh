@@ -44,6 +44,10 @@ AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g
 HIP_PYTHON_PATH=/opt/rocmplus-${ROCM_VERSION}/hip-python
 HIP_PYTHON_PATH_INPUT=""
 HIP_PYTHON_VERSION=""    # empty -> use "${ROCM_VERSION}.*" pip wildcard (legacy default)
+# --replace 1: rm -rf prior install dir + ${ROCM_VERSION}.lua before build.
+# --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
+REPLACE=0
+KEEP_FAILED_INSTALLS=0
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -66,6 +70,8 @@ usage()
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --hip-python-version [ HIP_PYTHON_VERSION ] PyPI version specifier (default: \${ROCM_VERSION}.*)"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
+   echo "  --replace [ 0|1 ] remove prior install + modulefile before building, default $REPLACE"
+   echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
    echo "  --help: print this usage information"
    exit 1
 }
@@ -119,6 +125,16 @@ do
           HIP_PYTHON_VERSION=${1}
           reset-last
           ;;
+      "--replace")
+          shift
+          REPLACE=${1}
+          reset-last
+          ;;
+      "--keep-failed-installs")
+          shift
+          KEEP_FAILED_INSTALLS=${1}
+          reset-last
+          ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
@@ -136,6 +152,51 @@ else
    # override path in case ROCM_VERSION has been supplied as input
    HIP_PYTHON_PATH=/opt/rocmplus-${ROCM_VERSION}/hip-python
 fi
+
+# ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
+# Modulefile name is ${ROCM_VERSION}.lua to match the
+# `tee ${MODULE_PATH}/${ROCM_VERSION}.lua` write below.
+# ── BUILD_HIP_PYTHON=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
+NOOP_RC=43
+if [ "${BUILD_HIP_PYTHON}" = "0" ]; then
+   echo "[hip-python BUILD_HIP_PYTHON=0] operator opt-out; skipping (no source build, no cache restore)."
+   exit ${NOOP_RC}
+fi
+
+if [ "${REPLACE}" = "1" ]; then
+   echo "[hip-python --replace 1] removing prior install + modulefile if present"
+   echo "  install dir: ${HIP_PYTHON_PATH}"
+   echo "  modulefile:  ${MODULE_PATH}/${ROCM_VERSION}.lua"
+   ${SUDO} rm -rf "${HIP_PYTHON_PATH}"
+   ${SUDO} rm -f  "${MODULE_PATH}/${ROCM_VERSION}.lua"
+fi
+
+# ── Existence guard: skip if already installed (see hypre_setup.sh) ──
+NOOP_RC=43
+if [ -d "${HIP_PYTHON_PATH}" ]; then
+   echo ""
+   echo "[hip-python existence-check] ${HIP_PYTHON_PATH} already installed; skipping."
+   echo "                             pass --replace 1 to force a clean rebuild."
+   echo ""
+   exit ${NOOP_RC}
+fi
+
+# Consolidated EXIT trap: build-dir cleanup (HIP_PYTHON_BUILD_DIR, set
+# under BUILD_HIP_PYTHON=1) + fail-cleanup. Replaces inline build-dir
+# `trap '... rm HIP_PYTHON_BUILD_DIR ...' EXIT` later in the script.
+_hip_python_on_exit() {
+   local rc=$?
+   [ -n "${HIP_PYTHON_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${HIP_PYTHON_BUILD_DIR}"
+   if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
+      echo "[hip-python fail-cleanup] rc=${rc}: removing partial install + modulefile"
+      ${SUDO:-sudo} rm -rf "${HIP_PYTHON_PATH}"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${ROCM_VERSION}.lua"
+   elif [ ${rc} -ne 0 ]; then
+      echo "[hip-python fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
+   fi
+   return ${rc}
+}
+trap _hip_python_on_exit EXIT
 
 echo ""
 echo "==================================="
@@ -163,7 +224,9 @@ else
    # pip install). Only `pip install --target=$HIP_PYTHON_PATH`
    # writes hit NFS. EXIT trap handles cleanup of the build venv.
    HIP_PYTHON_BUILD_DIR=$(mktemp -d -t hip-python-build.XXXXXX)
-   trap '[ -n "${HIP_PYTHON_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${HIP_PYTHON_BUILD_DIR}"' EXIT
+   # NOTE: build-dir cleanup is consolidated into _hip_python_on_exit
+   # installed above (so the same EXIT handler also does fail-cleanup
+   # of any partial install / modulefile).
    cd "${HIP_PYTHON_BUILD_DIR}"
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
@@ -240,23 +303,14 @@ else
    fi
 
    # Create a module file for hip-python
-   if [ -d "$MODULE_PATH" ]; then
-      # use sudo if user does not have write access to module path
-      if [ ! -w ${MODULE_PATH} ]; then
-         SUDO="sudo"
-      else
-         echo "WARNING: not using sudo since user has write access to module path"
-      fi
-   else
-      # if module path dir does not exist yet, the check on write access will fail
-      SUDO="sudo"
-      echo "WARNING: using sudo, make sure you have sudo privileges"
-   fi
-
-   ${SUDO} mkdir -p ${MODULE_PATH}
+   #
+   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
+   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
+   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
+   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
         whatis("HIP-Python with ROCm support")
 
         prereq("rocm/${ROCM_VERSION}")
