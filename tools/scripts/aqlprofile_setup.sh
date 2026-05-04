@@ -162,23 +162,14 @@ cd ../..
 #sudo rm -rf aqlprofile
 
 # Create a module file for rocprofiler-sdk
-if [ -d "$MODULE_PATH" ]; then
-   # use sudo if user does not have write access to module path
-   if [ ! -w ${MODULE_PATH} ]; then
-      SUDO="sudo"
-    else
-       echo "WARNING: not using sudo since user has write access to module path"
-    fi
-else
-    # if module path dir does not exist yet, the check on write access will fail
-    SUDO="sudo"
-    echo "WARNING: using sudo, make sure you have sudo privileges"
-fi
+#
+# Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
+# see netcdf_setup.sh for the lying-probe failure mode this replaces).
+PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
 
+#${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
-#${SUDO} mkdir -p ${MODULE_PATH}
-
-#cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
+#cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 #	whatis("Name: AQLprofile")
 #	whatis("ROCm Version: ${ROCM_VERSION}")
 #	whatis("Category: AMD")

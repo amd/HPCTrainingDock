@@ -102,65 +102,72 @@ echo "Creating module file in: $MODULE_PATH"
 echo "============================"
 echo ""
 
-
+# ── BUILD_MINIFORGE3=0 short-circuit: operator opt-out ───────────────
+# See miniconda3_setup.sh for the full rationale; same canonical
+# pattern as the 23 packages that went through the refactor.
+NOOP_RC=43
 if [ "${BUILD_MINIFORGE3}" = "0" ]; then
+   echo "[miniforge3 BUILD_MINIFORGE3=0] operator opt-out; skipping."
+   exit ${NOOP_RC}
+fi
 
-   echo "Miniforge3 will not be built, according to the specified value of BUILD_MINIFORGE3"
-   echo "BUILD_MINIFORGE3: $BUILD_MINIFORGE3"
-   exit
+# ── Existence guard: skip if this version is already installed ───────
+# See miniconda3_setup.sh for the full rationale (same broken
+# main_setup.sh `[[ ! -d ${TOP_INSTALL_PATH}/miniforge3 ]]` clause
+# that this replaces; same intentional non-threading of --replace;
+# same operator-driven `rm -rf` workflow on failure).
+if [ -d "${MINIFORGE3_PATH}" ]; then
+   echo "[miniforge3 existence-check] ${MINIFORGE3_PATH} already installed; skipping."
+   echo "                             remove ${MINIFORGE3_PATH} by hand to force a rebuild"
+   echo "                             (--replace is intentionally not threaded; see main_setup.sh)."
+   exit ${NOOP_RC}
+fi
 
-else
-   echo ""
-   echo "============================"
-   echo " Building Miniforge3"
-   echo "============================"
-   echo ""
+echo ""
+echo "============================"
+echo " Building Miniforge3"
+echo "============================"
+echo ""
 
+# don't use sudo if user has write access to install path
+if [ -d "$MINIFORGE3_PATH" ]; then
    # don't use sudo if user has write access to install path
-   if [ -d "$MINIFORGE3_PATH" ]; then
-      # don't use sudo if user has write access to install path
-      if [ -w ${MINIFORGE3_PATH} ]; then
-         SUDO=""
-      else
-         echo "WARNING: using an install path that requires sudo"
-      fi
+   if [ -w ${MINIFORGE3_PATH} ]; then
+      SUDO=""
    else
-      # if install path does not exist yet, the check on write access will fail
-      echo "WARNING: using sudo, make sure you have sudo privileges"
+      echo "WARNING: using an install path that requires sudo"
    fi
+else
+   # if install path does not exist yet, the check on write access will fail
+   echo "WARNING: using sudo, make sure you have sudo privileges"
+fi
 
-   # Per-job throwaway dir for the installer; replaces a fixed
-   # /tmp/Miniforge3-*.sh path / glob that would race with -- and
-   # could clobber -- any other concurrent miniforge3 install on the
-   # same node.
-   MINIFORGE_BUILD_ROOT=$(mktemp -d -t miniforge-build.XXXXXX)
-   trap '[ -n "${MINIFORGE_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${MINIFORGE_BUILD_ROOT}"' EXIT
-   MINIFORGE_INSTALLER="${MINIFORGE_BUILD_ROOT}/Miniforge3-$(uname)-$(uname -m).sh"
-   # getting Miniforge3 version 24.9.0
-   wget -q "https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE3_VERSION_DOWNLOAD}/Miniforge3-$(uname)-$(uname -m).sh" -O "${MINIFORGE_INSTALLER}"
-   chmod +x "${MINIFORGE_INSTALLER}"
-   ${SUDO} mkdir -p ${MINIFORGE3_PATH}
-   ${SUDO} "${MINIFORGE_INSTALLER}" -b -u -p ${MINIFORGE3_PATH}
-   # trap handles cleanup of ${MINIFORGE_BUILD_ROOT}
+# Per-job throwaway dir for the installer; replaces a fixed
+# /tmp/Miniforge3-*.sh path / glob that would race with -- and
+# could clobber -- any other concurrent miniforge3 install on the
+# same node.
+MINIFORGE_BUILD_ROOT=$(mktemp -d -t miniforge-build.XXXXXX)
+trap '[ -n "${MINIFORGE_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${MINIFORGE_BUILD_ROOT}"' EXIT
+MINIFORGE_INSTALLER="${MINIFORGE_BUILD_ROOT}/Miniforge3-$(uname)-$(uname -m).sh"
+wget -q "https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE3_VERSION_DOWNLOAD}/Miniforge3-$(uname)-$(uname -m).sh" -O "${MINIFORGE_INSTALLER}"
+chmod +x "${MINIFORGE_INSTALLER}"
+${SUDO} mkdir -p ${MINIFORGE3_PATH}
+${SUDO} "${MINIFORGE_INSTALLER}" -b -u -p ${MINIFORGE3_PATH}
+# trap handles cleanup of ${MINIFORGE_BUILD_ROOT}
 
-   # Create a module file for miniforge3
-   if [ -d "$MODULE_PATH" ]; then
-      # use sudo if user does not have write access to module path
-      if [ ! -w ${MODULE_PATH} ]; then
-         SUDO="sudo"
-      else
-         echo "WARNING: not using sudo since user has write access to module path"
-      fi
-   else
-      # if module path dir does not exist yet, the check on write access will fail
-      SUDO="sudo"
-      echo "WARNING: using sudo, make sure you have sudo privileges"
-   fi
+# Create a module file for miniforge3
+#
+# Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
+# see netcdf_setup.sh for the lying-probe failure mode this replaces).
+PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
-   ${SUDO} mkdir -p ${MODULE_PATH}
-
-   # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/24.9.0.lua
+# Modulefile name was previously hardcoded to 24.9.0.lua, which
+# silently ignored --miniforge3-version overrides (sister bug to
+# what miniconda3_setup.sh did right at line ${MINICONDA3_VERSION}.lua).
+# Now keyed on ${MINIFORGE3_VERSION} so multi-version coexistence
+# actually works.
+cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${MINIFORGE3_VERSION}.lua
 	conflict("miniconda3")
 	local root = "${MINIFORGE3_PATH}"
 	setenv("MINIFORGE3_ROOT", root)
@@ -211,5 +218,3 @@ else
 	end
 
 EOF
-
-fi

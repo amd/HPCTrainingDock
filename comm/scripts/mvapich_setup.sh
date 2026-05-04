@@ -8,7 +8,16 @@ set -eo pipefail
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/mvapich
 ROCM_VERSION=6.2.0
 ROCM_PATH=/opt/rocm-${ROCM_VERSION}
+# --replace 1: rm -rf prior install dir + mvapich modulefile before
+# install. NOTE: mvapich modulefile name is currently fixed (no
+# version), so the .lua to remove is mvapich.lua under MODULE_PATH.
+# --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
+# (Pre-existing REPLACE=0 was a flag-style stub that the script body
+# never actually used; promoted here to a value-style flag consistent
+# with the rest of the setup scripts so main_setup.sh can thread
+# --replace ${REPLACE_EXISTING}.)
 REPLACE=0
+KEEP_FAILED_INSTALLS=0
 DRY_RUN=0
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
@@ -39,7 +48,8 @@ usage()
    echo "  --dry-run default off"
    echo "  --install-path [ INSTALL_PATH ] default /opt/rocmplus-<ROCM_VERSION>/mvapich"
    echo "  --module-path [ MODULE_PATH ] default /etc/lmod/modules/ROCmPlus-MPI/mvapich"
-   echo "  --replace default off"
+   echo "  --replace [ 0|1 ] remove prior install + modulefile before installing, default $REPLACE"
+   echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --rocm-path [ ROCM_PATH ] default /opt/rocm-$ROCM_VERSION"
    echo "  --help: print this usage information"
@@ -80,7 +90,13 @@ do
           reset-last
           ;;
       "--replace")
-          REPLACE=1
+          shift
+          REPLACE=${1}
+          reset-last
+          ;;
+      "--keep-failed-installs")
+          shift
+          KEEP_FAILED_INSTALLS=${1}
           reset-last
           ;;
       "--rocm-path")
@@ -116,10 +132,40 @@ else
    INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/mvapich
 fi
 
+# ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
+# The mvapich modulefile is currently written as MODULE_PATH/mvapich.lua
+# (no version in the name). If a versioned modulefile scheme is added
+# later, update both branches below.
+if [ "${REPLACE}" = "1" ]; then
+   echo "[mvapich --replace 1] removing prior install + modulefile if present"
+   echo "  install dir: ${INSTALL_PATH}"
+   echo "  modulefile:  ${MODULE_PATH}/mvapich.lua"
+   ${SUDO} rm -rf "${INSTALL_PATH}"
+   ${SUDO} rm -f  "${MODULE_PATH}/mvapich.lua"
+fi
+# Consolidated EXIT trap: build-dir cleanup (MVAPICH_BUILD_ROOT, set
+# later under the rhel-compatible branch) AND fail-cleanup. Replaces
+# the inline `trap '... rm MVAPICH_BUILD_ROOT ...' EXIT`.
+_mvapich_on_exit() {
+   local rc=$?
+   [ -n "${MVAPICH_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${MVAPICH_BUILD_ROOT}"
+   if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
+      echo "[mvapich fail-cleanup] rc=${rc}: removing partial install + modulefile"
+      ${SUDO:-sudo} rm -rf "${INSTALL_PATH}"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/mvapich.lua"
+   elif [ ${rc} -ne 0 ]; then
+      echo "[mvapich fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
+   fi
+   return ${rc}
+}
+trap _mvapich_on_exit EXIT
+
 echo ""
 echo "============================"
 echo " Installing MVAPICH with:"
 echo "ROCM_VERSION is $ROCM_VERSION"
+echo "REPLACE: $REPLACE"
+echo "KEEP_FAILED_INSTALLS: $KEEP_FAILED_INSTALLS"
 echo "============================"
 echo ""
 
@@ -152,7 +198,9 @@ elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    # would race with any other concurrent mvapich build on the same
    # node. The trap cleans up the rpm download.
    MVAPICH_BUILD_ROOT=$(mktemp -d -t mvapich-build.XXXXXX)
-   trap '[ -n "${MVAPICH_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${MVAPICH_BUILD_ROOT}"' EXIT
+   # NOTE: build-dir cleanup is consolidated into _mvapich_on_exit
+   # installed above (so the same EXIT handler also does fail-cleanup
+   # of any partial install / modulefile).
    cd "${MVAPICH_BUILD_ROOT}"
    # install the GPU aware version of mvapich using an rpm (MVPlus3.0)
    wget -q ${MVAPICH_DOWNLOAD_URL}/${MVAPICH_RPM_NAME}

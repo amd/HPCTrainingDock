@@ -46,10 +46,19 @@ DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 MPI_MODULE="openmpi"
 MPI_CONFIG=""
 SCOREP_VERSION=9.4
-SCOREP_PATH=/opt/rocmplus-${ROCM_VERSION}/scorep
+SCOREP_PATH=/opt/rocmplus-${ROCM_VERSION}/scorep-v${SCOREP_VERSION}
 PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
 SCOREP_PATH_INPUT=""
 PDT_PATH_INPUT=""
+# --replace 1: rm -rf the prior scorep-v${SCOREP_VERSION} install dir
+# and its modulefile before building. PDT is intentionally NOT removed
+# (it's a build-time-only dep shared across scorep AND tau versions);
+# rebuild it explicitly with --replace-pdt 1 if needed.
+# --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See
+# hypre_setup.sh for the full design rationale.
+REPLACE=0
+REPLACE_PDT=0
+KEEP_FAILED_INSTALLS=0
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
@@ -73,6 +82,9 @@ usage()
    echo "  --mpi-config [ MPI_CONFIG ] what to pass to --with-mpi= when configuring score-p, default is $MPI_MODULE "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected "
+   echo "  --replace [ 0|1 ] remove prior scorep install + modulefile before building, default $REPLACE (PDT NOT removed)"
+   echo "  --replace-pdt [ 0|1 ] also remove and rebuild the shared PDT install, default $REPLACE_PDT"
+   echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
    echo "  --help: print this usage information"
    exit 1
 }
@@ -141,6 +153,21 @@ do
           ROCM_VERSION=${1}
           reset-last
           ;;
+      "--replace")
+          shift
+          REPLACE=${1}
+          reset-last
+          ;;
+      "--replace-pdt")
+          shift
+          REPLACE_PDT=${1}
+          reset-last
+          ;;
+      "--keep-failed-installs")
+          shift
+          KEEP_FAILED_INSTALLS=${1}
+          reset-last
+          ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
@@ -152,7 +179,7 @@ do
    shift
 done
 
-SCOREP_PATH=/opt/rocmplus-${ROCM_VERSION}/scorep
+SCOREP_PATH=/opt/rocmplus-${ROCM_VERSION}/scorep-v${SCOREP_VERSION}
 if [ "${SCOREP_PATH_INPUT}" != "" ]; then
    SCOREP_PATH=${SCOREP_PATH_INPUT}
 fi
@@ -162,6 +189,63 @@ if [ "${PDT_PATH_INPUT}" != "" ]; then
    PDT_PATH=${PDT_PATH_INPUT}
 fi
 
+# ── BUILD_SCOREP=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
+NOOP_RC=43
+if [ "${BUILD_SCOREP}" = "0" ]; then
+   echo "[scorep BUILD_SCOREP=0] operator opt-out; skipping (no source build, no cache restore)."
+   exit ${NOOP_RC}
+fi
+
+# ── --replace: remove prior install + modulefile BEFORE building ─────
+# Only this version's scorep-v${SCOREP_VERSION} dir + matching .lua are
+# removed. PDT (shared with TAU, build-only dep) stays unless
+# --replace-pdt 1 is also given.
+if [ "${REPLACE}" = "1" ]; then
+   echo "[scorep --replace 1] removing prior install + modulefile if present"
+   echo "  install dir: ${SCOREP_PATH}"
+   echo "  modulefile:  ${MODULE_PATH}/${SCOREP_VERSION}.lua"
+   ${SUDO} rm -rf "${SCOREP_PATH}"
+   ${SUDO} rm -f  "${MODULE_PATH}/${SCOREP_VERSION}.lua"
+fi
+if [ "${REPLACE_PDT}" = "1" ]; then
+   echo "[scorep --replace-pdt 1] removing prior PDT install"
+   echo "  install dir: ${PDT_PATH}"
+   ${SUDO} rm -rf "${PDT_PATH}"
+fi
+
+# ── Existence guard (see hypre_setup.sh) ─────────────────────────────
+# Only the scorep half is checked: PDT is a shared build-time dep also
+# used by tau and is intentionally preserved across re-installs (the
+# tau script will rebuild PDT for itself if needed). If scorep-v${VER}
+# is on disk we have nothing to do here — even if PDT is absent, that
+# is tau's problem, not ours.
+NOOP_RC=43
+if [ -d "${SCOREP_PATH}" ]; then
+   echo ""
+   echo "[scorep existence-check] ${SCOREP_PATH} already installed; skipping."
+   echo "                         pass --replace 1 to force a clean rebuild of this version."
+   echo "                         (PDT existence not part of this check; see scorep_setup.sh comments.)"
+   echo ""
+   exit ${NOOP_RC}
+fi
+
+# ── EXIT trap: fail-cleanup of partial scorep install + modulefile ───
+# PDT is intentionally NOT cleaned on failure: it's a shared
+# build-time dep across scorep+tau and a successful PDT build is
+# expensive to recreate. Replaces main_setup.sh PKG_CLEAN_*[scorep].
+_scorep_on_exit() {
+   local rc=$?
+   if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
+      echo "[scorep fail-cleanup] rc=${rc}: removing partial install + modulefile (PDT preserved)"
+      ${SUDO:-sudo} rm -rf "${SCOREP_PATH}"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${SCOREP_VERSION}.lua"
+   elif [ ${rc} -ne 0 ]; then
+      echo "[scorep fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
+   fi
+   return ${rc}
+}
+trap _scorep_on_exit EXIT
+
 echo ""
 echo "==================================="
 echo "Starting SCORE-P Install with"
@@ -169,6 +253,9 @@ echo "ROCM_VERSION: $ROCM_VERSION"
 echo "BUILD_SCOREP: $BUILD_SCOREP"
 echo "SCOREP_PATH: $SCOREP_PATH"
 echo "PDT_PATH: $PDT_PATH"
+echo "REPLACE: $REPLACE"
+echo "REPLACE_PDT: $REPLACE_PDT"
+echo "KEEP_FAILED_INSTALLS: $KEEP_FAILED_INSTALLS"
 echo "==================================="
 echo ""
 
@@ -182,18 +269,24 @@ if [ "${BUILD_SCOREP}" = "0" ]; then
    exit
 
 else
-   if [ -f ${CACHE_FILES}/scorep.tgz ]; then
+   if [ -f ${CACHE_FILES}/scorep-v${SCOREP_VERSION}.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached SCORE-P "
       echo "============================"
       echo ""
 
-      #install the cached version
+      # Install the cached version. Cache tar must be named
+      # scorep-v${SCOREP_VERSION}.tgz and contain a top-level
+      # directory scorep-v${SCOREP_VERSION}/ so it lands directly
+      # at ${SCOREP_PATH} when extracted under /opt/rocmplus-X.
+      # (PDT, the build-time-only dep, is NOT in this tar; if a
+      # scorep cache build needed PDT it should ship its own
+      # pdt.tgz alongside this one -- not currently supported.)
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xpzf ${CACHE_FILES}/scorep.tgz
+      tar -xpzf ${CACHE_FILES}/scorep-v${SCOREP_VERSION}.tgz
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm -f ${CACHE_FILES}/scorep.tgz
+         ${SUDO} rm -f ${CACHE_FILES}/scorep-v${SCOREP_VERSION}.tgz
       fi
 
    else
@@ -360,49 +453,38 @@ else
       # 22.04 ships LLVM 14) so tau's headers resolve; that side-effect
       # also placed /usr/include/llvm/ADT/Triple.h on the default
       # system include path, which now wins the `<llvm/ADT/Triple.h>`
-      # lookup. The transitive include of the modern Triple.h via
-      # ROCm's LLVM headers triggers a redefinition error:
-      #   /usr/include/llvm/ADT/Triple.h:44: error: redefinition of 'Triple'
-      #   note: previous definition in
-      #     ${ROCM_PATH}/lib/llvm/include/llvm/TargetParser/Triple.h:47
-      # The fix: place a tiny redirect at higher -I priority so the
-      # legacy include resolves to ROCm's modern Triple.h (idempotent
-      # via header guards). This keeps the LLVM plugin enabled and
-      # confines the build to ROCm's LLVM toolchain without touching
-      # /usr/include or removing the system llvm-dev (which tau still
-      # needs for its headers).
-      LLVM_SHIM_DIR="${SCOREP_BUILD_DIR}/llvm-shim"
-      mkdir -p "${LLVM_SHIM_DIR}/llvm/ADT"
-      cat > "${LLVM_SHIM_DIR}/llvm/ADT/Triple.h" <<'SHIM_EOF'
-/* Auto-generated by scorep_setup.sh. Redirects pre-LLVM-17
- * <llvm/ADT/Triple.h> to the modern location so ScoreP 9.4's LLVM
- * plugin builds against ROCm's LLVM 19+ even when an older system
- * llvm-dev (e.g. Ubuntu 22.04 ships LLVM 14) is also installed.
- */
-#pragma once
-#include <llvm/TargetParser/Triple.h>
-SHIM_EOF
-
-      # CPPFLAGS gets the shim so configure-time feature tests resolve
-      # <llvm/ADT/Triple.h> through it. CXXFLAGS gets the shim too because
-      # ScoreP 9.4's build-llvm-plugin/Makefile (vendored, no Score-P-side
-      # patching point) defines its own per-target AM_CPPFLAGS that does
-      # NOT inherit configure-level CPPFLAGS for source compiles -- it
-      # builds llvm-plugin .cpp files with a clean -I list derived from
-      # llvm-config, so /usr/include/llvm/ADT/Triple.h (placed there by
-      # the system llvm-dev installed for tau) wins the lookup over our
-      # shim. Verified in job 7974 log_scorep_05_01_2026.txt: the shim's
-      # CPPFLAGS shows up in every configure invocation (line 160, 1320,
-      # ...) and in config.log (line 3692), but the plugin still fails at
-      # /usr/include/llvm/ADT/Triple.h:44 redefinition (line 5056) --
-      # i.e. CPPFLAGS alone never reached the actual scorep_llvm_plugin.cpp
-      # compile. CXXFLAGS IS substituted into per-target compile rules
-      # (autotools convention), so adding the shim there too gets it onto
-      # the actual g++/clang++ command line ahead of /usr/include.
+      # lookup. ROCm's modern <llvm/Analysis/TargetLibraryInfo.h>
+      # (LLVM 19) ALSO references members like `isLoongArch` and
+      # `isRISCV64` that don't exist on /usr/include's LLVM-14
+      # `class Triple`, so any TU that pulls TargetLibraryInfo.h gets
+      # both a redefinition error AND missing-member errors.
+      #
+      # Two prior shim attempts (CPPFLAGS-only in commit 8ff591b's
+      # parent, then CPPFLAGS+CXXFLAGS in 8ff591b) both failed -- the
+      # CPPFLAGS variant never reached the per-target compile (ScoreP
+      # 9.4's build-llvm-plugin/Makefile uses its own AM_CPPFLAGS), and
+      # the CXXFLAGS variant did reach the compile (verified in job
+      # 7975 log:3871, 3895) but a transitive `<llvm/ADT/Triple.h>`
+      # pulled from ROCm's `<llvm/Analysis/TargetLibraryInfo.h>` still
+      # bypasses our shim and resolves to /usr/include directly,
+      # producing the same redefinition + isLoongArch/isRISCV64 errors
+      # at log:5063-5094.
+      #
+      # Final fix: stop fighting the include-search race -- pass
+      # `--without-llvm` to configure so the LLVM plugin is explicitly
+      # disabled. ScoreP autodetects llvm-config in $PATH; the system
+      # llvm-config (LLVM 14) gets picked up unless we either (a) hide
+      # it OR (b) explicitly disable. Per
+      # build-config/m4/scorep_llvm_config.m4 in upstream:
+      #   --without-llvm -> sets scorep_llvm_config_reason="explicitly
+      #     disabled via --without-llvm" and scorep_have_llvm_config=no
+      # The plugin's build-llvm-plugin/configure then short-circuits.
+      # We lose the LLVM-pass-based instrumentation backend; the GCC
+      # plugin, OPARI2, MPI wrap, and manual instrumentation backends
+      # all remain functional and cover the typical Score-P workflow.
       ../configure --with-rocm=$ROCM_PATH  --with-mpi=$MPI_CONFIG  --prefix=$SCOREP_PATH  --with-librocm_smi64-include=$ROCM_PATH/include/rocm_smi \
                    --with-librocm_smi64-lib=$ROCM_PATH/lib --with-libunwind=download --enable-shared --with-libbfd=download --without-shmem  \
-		   --with-libgotcha=download CC=$CC CXX=$CXX FC=$FC CFLAGS=-fPIE \
-		   CPPFLAGS="-I${LLVM_SHIM_DIR}" CXXFLAGS="-I${LLVM_SHIM_DIR}"
+		   --with-libgotcha=download --without-llvm CC=$CC CXX=$CXX FC=$FC CFLAGS=-fPIE
 
       # Parallel build over all allocated cores; install left serial since
       # `make install` is mostly file copies and rarely benefits from -j.
@@ -432,23 +514,14 @@ SHIM_EOF
    fi
 
    # Create a module file for SCORE-P
-   if [ -d "$MODULE_PATH" ]; then
-      # use sudo if user does not have write access to module path
-      if [ ! -w ${MODULE_PATH} ]; then
-         SUDO="sudo"
-      else
-         echo "WARNING: not using sudo since user has write access to module path"
-      fi
-   else
-      # if module path dir does not exist yet, the check on write access will fail
-      SUDO="sudo"
-      echo "WARNING: using sudo, make sure you have sudo privileges"
-   fi
-
-   ${SUDO} mkdir -p ${MODULE_PATH}
+   #
+   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
+   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
+   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${SCOREP_VERSION}.lua
+   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${SCOREP_VERSION}.lua
 	whatis(" Score-P Performance Analysis Tool ")
 
 	prereq("rocm/${ROCM_VERSION}")

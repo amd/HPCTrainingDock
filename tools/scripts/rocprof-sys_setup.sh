@@ -55,7 +55,20 @@ MODULE_PATH_INPUT=""
 INSTALL_PATH="/opt/rocmplus-${ROCM_VERSION}/${TOOL_NAME}"
 INSTALL_PATH_INPUT=""
 GITHUB_BRANCH="develop"
+# BUILD_ROCPROF_SYS is the master "do this script's work at all" gate.
+# Set to 0 to short-circuit early (after arg parsing, before --replace
+# and the existence check) with NOOP_RC=43, matching the prior wrapper
+# `if [[ "${BUILD_ROCPROF_SYS}" == "1" ]]; then run_and_log ...; fi`
+# that used to live in bare_system/main_setup.sh. Distinct from
+# INSTALL_ROCPROF_SYS_FROM_SOURCE: the latter is a *what* knob (build
+# vs. use the SDK's prebuilt binary, default = use prebuilt) whereas
+# BUILD_ROCPROF_SYS is the *whether* gate.
+BUILD_ROCPROF_SYS=1
 INSTALL_ROCPROF_SYS_FROM_SOURCE=0
+# --replace 1: rm -rf prior install dir + ${GITHUB_BRANCH}.lua before build.
+# --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
+REPLACE=0
+KEEP_FAILED_INSTALLS=0
 
 
 if [ -f /.singularity.d/Singularity ]; then
@@ -67,6 +80,7 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  --build-rocprof-sys [ BUILD_ROCPROF_SYS ] master gate; 0 = exit NOOP_RC, default $BUILD_ROCPROF_SYS"
    echo "  --module-path [ MODULE_PATH ] default is $MODULE_PATH "
    echo "  --github-branch [ GITHUB_BRANCH] default is $GITHUB_BRANCH "
    echo "  --mpi-module [ MPI_MODULE ] default is $MPI_MODULE "
@@ -75,6 +89,8 @@ usage()
    echo "  --install-rocprof-sys-from-source [ INSTALL_ROCPROF_SYS_FROM_SOURCE ] default is $INSTALL_ROCPROF_SYS_FROM_SOURCE "
    echo "  --rocm-version [ ROCM_VERSION ] default is $ROCM_VERSION "
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default is $AMDGPU_GFXMODEL "
+   echo "  --replace [ 0|1 ] remove prior install + modulefile before building, default $REPLACE"
+   echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
    echo "  --help: print this usage information"
    exit 1
 }
@@ -104,6 +120,11 @@ do
       "--help")
           usage
 	  ;;
+      "--build-rocprof-sys")
+          shift
+          BUILD_ROCPROF_SYS=${1}
+          reset-last
+          ;;
       "--install-rocprof-sys-from-source")
           shift
           INSTALL_ROCPROF_SYS_FROM_SOURCE=${1}
@@ -139,6 +160,16 @@ do
           ROCM_VERSION=${1}
           reset-last
           ;;
+      "--replace")
+          shift
+          REPLACE=${1}
+          reset-last
+          ;;
+      "--keep-failed-installs")
+          shift
+          KEEP_FAILED_INSTALLS=${1}
+          reset-last
+          ;;
        "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
@@ -172,6 +203,47 @@ else
    # override path with right ${TOOL_NAME}
    MODULE_PATH="/etc/lmod/modules/ROCmPlus-AMDResearchTools/${TOOL_NAME}"
 fi
+
+# ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
+# Modulefile name here is ${GITHUB_BRANCH}.lua (e.g. develop.lua),
+# matching the `tee ${MODULE_PATH}/${GITHUB_BRANCH}.lua` write below.
+# ── BUILD_ROCPROF_SYS=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
+NOOP_RC=43
+if [ "${BUILD_ROCPROF_SYS}" = "0" ]; then
+   echo "[rocprof-sys BUILD_ROCPROF_SYS=0] operator opt-out; skipping (no source build, no cache restore)."
+   exit ${NOOP_RC}
+fi
+
+if [ "${REPLACE}" = "1" ]; then
+   echo "[rocprof-sys --replace 1] removing prior install + modulefile if present"
+   echo "  install dir: ${INSTALL_PATH}"
+   echo "  modulefile:  ${MODULE_PATH}/${GITHUB_BRANCH}.lua"
+   ${SUDO_PACKAGE_INSTALL} rm -rf "${INSTALL_PATH}"
+   ${SUDO_MODULE_INSTALL}  rm -f  "${MODULE_PATH}/${GITHUB_BRANCH}.lua"
+fi
+
+# ── Existence guard: skip if already installed (see hypre_setup.sh) ──
+NOOP_RC=43
+if [ -d "${INSTALL_PATH}" ]; then
+   echo ""
+   echo "[rocprof-sys existence-check] ${INSTALL_PATH} already installed; skipping."
+   echo "                              pass --replace 1 to force a clean rebuild."
+   echo ""
+   exit ${NOOP_RC}
+fi
+
+_rocprof_sys_on_exit() {
+   local rc=$?
+   if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
+      echo "[rocprof-sys fail-cleanup] rc=${rc}: removing partial install + modulefile"
+      ${SUDO_PACKAGE_INSTALL:-sudo} rm -rf "${INSTALL_PATH}"
+      ${SUDO_MODULE_INSTALL:-sudo}  rm -f  "${MODULE_PATH}/${GITHUB_BRANCH}.lua"
+   elif [ ${rc} -ne 0 ]; then
+      echo "[rocprof-sys fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
+   fi
+   return ${rc}
+}
+trap _rocprof_sys_on_exit EXIT
 
 # don't use sudo if user has write access to install path
 if [ -d "$INSTALL_PATH" ]; then

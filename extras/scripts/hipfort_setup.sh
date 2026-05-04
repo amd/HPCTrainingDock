@@ -45,6 +45,10 @@ HIPFORT_PATH="/opt/rocmplus-${ROCM_VERSION}/hipfort"
 HIPFORT_PATH_INPUT=""
 FC_COMPILER=gfortran
 HIPFORT_VERSION=""    # empty -> use rocm-${ROCM_VERSION} branch (legacy default)
+# --replace 1: rm -rf prior install dir + ${ROCM_VERSION}.lua before build.
+# --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
+REPLACE=0
+KEEP_FAILED_INSTALLS=0
 
 SUDO="sudo"
 
@@ -66,6 +70,8 @@ usage()
    echo "  --build-hipfort [ BUILD_HIPFORT ], set to 1 to build hipfort, default is $BUILD_HIPFORT"
    echo "  --fc-compiler [FC_COMPILER: gfortran|amdflang-new|cray-ftn], default is $FC_COMPILER"
    echo "  --install-path [ HIPFORT_PATH ], default is $HIPFORT_PATH"
+   echo "  --replace [ 0|1 ] remove prior install + modulefile before building, default $REPLACE"
+   echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
    echo "  --help: this usage information"
    exit 1
 }
@@ -124,6 +130,16 @@ do
           HIPFORT_VERSION=${1}
           reset-last
           ;;
+      "--replace")
+          shift
+          REPLACE=${1}
+          reset-last
+          ;;
+      "--keep-failed-installs")
+          shift
+          KEEP_FAILED_INSTALLS=${1}
+          reset-last
+          ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
@@ -141,6 +157,47 @@ else
    # override path in case ROCM_VERSION has been supplied as input
    HIPFORT_PATH=/opt/rocmplus-${ROCM_VERSION}/hipfort
 fi
+
+# ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
+# Modulefile name is ${ROCM_VERSION}.lua to match the
+# `tee ${MODULE_PATH}/${ROCM_VERSION}.lua` write below.
+# ── BUILD_HIPFORT=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
+NOOP_RC=43
+if [ "${BUILD_HIPFORT}" = "0" ]; then
+   echo "[hipfort BUILD_HIPFORT=0] operator opt-out; skipping (no source build, no cache restore)."
+   exit ${NOOP_RC}
+fi
+
+if [ "${REPLACE}" = "1" ]; then
+   echo "[hipfort --replace 1] removing prior install + modulefile if present"
+   echo "  install dir: ${HIPFORT_PATH}"
+   echo "  modulefile:  ${MODULE_PATH}/${ROCM_VERSION}.lua"
+   ${SUDO} rm -rf "${HIPFORT_PATH}"
+   ${SUDO} rm -f  "${MODULE_PATH}/${ROCM_VERSION}.lua"
+fi
+
+# ── Existence guard: skip if already installed (see hypre_setup.sh) ──
+NOOP_RC=43
+if [ -d "${HIPFORT_PATH}" ]; then
+   echo ""
+   echo "[hipfort existence-check] ${HIPFORT_PATH} already installed; skipping."
+   echo "                          pass --replace 1 to force a clean rebuild."
+   echo ""
+   exit ${NOOP_RC}
+fi
+
+_hipfort_on_exit() {
+   local rc=$?
+   if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
+      echo "[hipfort fail-cleanup] rc=${rc}: removing partial install + modulefile"
+      ${SUDO:-sudo} rm -rf "${HIPFORT_PATH}"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${ROCM_VERSION}.lua"
+   elif [ ${rc} -ne 0 ]; then
+      echo "[hipfort fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
+   fi
+   return ${rc}
+}
+trap _hipfort_on_exit EXIT
 
 echo ""
 echo "==================================="
@@ -271,23 +328,14 @@ else
    fi
 
    # Create a module file for hipfort
-   if [ -d "$MODULE_PATH" ]; then
-      # use sudo if user does not have write access to module path
-      if [ ! -w ${MODULE_PATH} ]; then
-         SUDO="sudo"
-      else
-         echo "WARNING: not using sudo since user has write access to module path"
-      fi
-   else
-      # if module path dir does not exist yet, the check on write access will fail
-      SUDO="sudo"
-      echo "WARNING: using sudo, make sure you have sudo privileges"
-   fi
-
-   ${SUDO} mkdir -p ${MODULE_PATH}
+   #
+   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
+   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
+   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
+   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis(" hipfort module ")
 	whatis(" this hipfort build has been compiled with: $FC_COMPILER. ")
 	prereq("rocm/${ROCM_VERSION}")

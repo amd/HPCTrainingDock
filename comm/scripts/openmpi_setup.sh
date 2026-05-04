@@ -48,15 +48,32 @@ preflight_modules() {
 # Variables controlling setup process
 ROCM_VERSION=
 ROCM_PATH=
+# --replace / --replace-{xpmem,ucx,ucc,openmpi}: now value-style (0|1)
+# rather than the prior flag-style (presence == 1). Value-style lets
+# main_setup.sh thread `--replace ${REPLACE_EXISTING}` uniformly the
+# way it does for every other migrated package script (hypre, mpi4py,
+# kokkos, …). For an operator calling openmpi_setup.sh by hand this is
+# slightly more typing (`--replace 1` vs `--replace`) but matches the
+# rest of the codebase.
+# --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
 REPLACE=0
 REPLACE_XPMEM=0
 REPLACE_UCX=0
 REPLACE_UCC=0
 REPLACE_OPENMPI=0
+KEEP_FAILED_INSTALLS=0
 DRY_RUN=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/openmpi
 INSTALL_PATH_INPUT=""
 XPMEM_PATH_INPUT=""
+# BUILD_OPENMPI is the master "do this script's work at all" gate. Set
+# to 0 to short-circuit early (after arg parsing, before --replace and
+# the existence check) with NOOP_RC=43, matching the prior wrapper
+# `if [[ "${BUILD_OPENMPI}" == "1" ]]; then run_and_log ...; fi` that
+# used to live in bare_system/main_setup.sh. The four per-component
+# REPLACE flags above (REPLACE_XPMEM/UCX/UCC/OPENMPI) and BUILD_XPMEM
+# below remain intact and are still consulted within the build path.
+BUILD_OPENMPI="1"
 BUILD_XPMEM="1"
 UCX_PATH_INPUT=""
 UCC_PATH_INPUT=""
@@ -127,6 +144,7 @@ usage()
 {
     echo "Usage:"
     echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+    echo "  --build-openmpi [ BUILD_OPENMPI ] master gate; 0 = exit NOOP_RC, default $BUILD_OPENMPI"
     echo "  --build-xpmem [ BUILD_XPMEM ] default 1-yes"
     echo "  --c-compiler [ CC ] default $C_COMPILER"
     echo "  --cxx-compiler [ CXX ] default $CXX_COMPILER"
@@ -137,11 +155,12 @@ usage()
     echo "  --openmpi-path [OPENMPI_PATH] default $INSTALL_PATH/openmpi-$OPENMPI_VERSION-ucc-$UCC_VERSION-ucx-$UCX_VERSION-xpmem-$XPMEM_VERSION"
     echo "  --openmpi-version [VERSION] default $OPENMPI_VERSION"
     echo "  --openmpi-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
-    echo "  --replace default off"
-    echo "  --replace-xpmem default off"
-    echo "  --replace-ucx default off"
-    echo "  --replace-ucc default off"
-    echo "  --replace-openmpi default off"
+    echo "  --replace [ 0|1 ] convenience: same as --replace-xpmem 1 --replace-ucx 1 --replace-ucc 1 --replace-openmpi 1, default $REPLACE"
+    echo "  --replace-xpmem [ 0|1 ] remove prior xpmem install before building, default $REPLACE_XPMEM"
+    echo "  --replace-ucx [ 0|1 ] remove prior ucx install before building, default $REPLACE_UCX"
+    echo "  --replace-ucc [ 0|1 ] remove prior ucc install before building, default $REPLACE_UCC"
+    echo "  --replace-openmpi [ 0|1 ] remove prior openmpi install + modulefile before building, default $REPLACE_OPENMPI"
+    echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial installs on failure, default $KEEP_FAILED_INSTALLS"
     echo "  --rocm-version [ ROCM_VERSION ] default none"
     echo "  --rocm-path [ ROCM_PATH ] default none"
     echo "  --ucc-path default $INSTALL_PATH/ucc-$UCC_VERSION-ucx-$UCX_VERSION-xpmem-$XPMEM_VERSION"
@@ -176,6 +195,11 @@ do
       "--amdgpu-gfxmodel")
           shift
           AMDGPU_GFXMODEL=${1}
+          reset-last
+          ;;
+      "--build-openmpi")
+          shift
+          BUILD_OPENMPI=${1}
           reset-last
           ;;
       "--build-xpmem")
@@ -234,23 +258,33 @@ do
           reset-last
           ;;
       "--replace")
-          REPLACE=1
+          shift
+          REPLACE=${1}
           reset-last
           ;;
       "--replace-xpmem")
-          REPLACE_XPMEM=1
+          shift
+          REPLACE_XPMEM=${1}
           reset-last
           ;;
       "--replace-ucc")
-          REPLACE_UCC=1
+          shift
+          REPLACE_UCC=${1}
           reset-last
           ;;
       "--replace-ucx")
-          REPLACE_UCX=1
+          shift
+          REPLACE_UCX=${1}
           reset-last
           ;;
       "--replace-openmpi")
-          REPLACE_OPENMPI=1
+          shift
+          REPLACE_OPENMPI=${1}
+          reset-last
+          ;;
+      "--keep-failed-installs")
+          shift
+          KEEP_FAILED_INSTALLS=${1}
           reset-last
           ;;
       "--rocm-path")
@@ -387,6 +421,13 @@ else
    OPENMPI_PATH="${INSTALL_PATH}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}
 fi
 
+# ── BUILD_OPENMPI=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
+NOOP_RC=43
+if [ "${BUILD_OPENMPI}" = "0" ]; then
+   echo "[openmpi BUILD_OPENMPI=0] operator opt-out; skipping (no xpmem/ucx/ucc/openmpi build, no cache restore)."
+   exit ${NOOP_RC}
+fi
+
 if [ "${REPLACE}" == "1" ]; then
    REPLACE_XPMEM=1
    REPLACE_UCX=1
@@ -484,8 +525,57 @@ CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGP
 # node (different ROCm versions, sweeps, etc.). Also fixes a latent
 # bug where, if UCX was cached but UCC was built, UCC's wget would
 # inherit cwd=${INSTALL_PATH} from the cached-UCX branch.
+# ── Existence guard (see hypre_setup.sh) ─────────────────────────────
+# Multi-component: skip ONLY if the top-level OPENMPI_PATH exists. Its
+# directory name already encodes the ucc/ucx/xpmem versions it was
+# linked against, e.g.:
+#   openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}
+# so a name match implies the satellite installs (XPMEM_PATH, UCX_PATH,
+# UCC_PATH) were paired with this exact OpenMPI build at install time.
+# We do NOT separately re-check those satellite dirs because their
+# versions may have legitimately moved on under a different ROCm sweep
+# while this OpenMPI's runtime linkage is still intact (rpath was
+# baked in at link time). Matches the prior main_setup.sh
+# `compgen -G "${ROCMPLUS}/openmpi*"` glob behavior, but version-aware
+# (a new OPENMPI_VERSION/UCX_VERSION/etc. yields a distinct dir name
+# and falls through to a real build instead of being skipped). Placed
+# before the build-dir mktemp so a no-op exit does not leak /tmp.
+NOOP_RC=43
+if [ -d "${OPENMPI_PATH}" ]; then
+   echo ""
+   echo "[openmpi existence-check] ${OPENMPI_PATH} already installed; skipping."
+   echo "                          pass --replace 1 (or --replace-openmpi 1) to force rebuild."
+   echo ""
+   exit ${NOOP_RC}
+fi
+
 OPENMPI_DEPS_BUILD_DIR=$(mktemp -d -t openmpi-deps-build.XXXXXX)
-trap '[ -n "${OPENMPI_DEPS_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${OPENMPI_DEPS_BUILD_DIR}"' EXIT
+# Consolidated EXIT trap: build-dir cleanup (OPENMPI_DEPS_BUILD_DIR
+# and OPENMPI_BUILD_DIR — the latter set later under the openmpi
+# build branch) PLUS fail-cleanup of partial xpmem/ucx/ucc/openmpi
+# installs + openmpi modulefile. Replaces the previous two separate
+# inline `trap '... rm <dir>' EXIT` registrations (lines 508 and
+# pre-refactor ~914), only the LAST of which actually survived bash's
+# single-handler-per-signal model — so OPENMPI_DEPS_BUILD_DIR was
+# silently leaked once the build branch's trap overwrote it. The
+# consolidated handler also replaces the failed-install entries that
+# used to live in main_setup.sh's PKG_CLEAN_DIRS / PKG_CLEAN_MODS
+# tables for openmpi (drift-prone duplicate of the install layout
+# encoded here).
+_openmpi_on_exit() {
+   local rc=$?
+   [ -n "${OPENMPI_DEPS_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${OPENMPI_DEPS_BUILD_DIR}"
+   [ -n "${OPENMPI_BUILD_DIR:-}" ]      && ${SUDO:-sudo} rm -rf "${OPENMPI_BUILD_DIR}"
+   if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
+      echo "[openmpi fail-cleanup] rc=${rc}: removing partial xpmem/ucx/ucc/openmpi installs + modulefile"
+      ${SUDO:-sudo} rm -rf "${XPMEM_PATH}" "${UCX_PATH}" "${UCC_PATH}" "${OPENMPI_PATH}"
+      ${SUDO:-sudo} rm -rf "${MODULE_PATH}"
+   elif [ ${rc} -ne 0 ]; then
+      echo "[openmpi fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
+   fi
+   return ${rc}
+}
+trap _openmpi_on_exit EXIT
 
 #
 # Install XPMEM
@@ -891,7 +981,10 @@ else
       # ${SUDO:-sudo} for sudo-tolerance (some build artefacts may be
       # root-owned if a `${SUDO_*} make install` ran into the temp
       # tree -- see the kokkos / hipfort fix in commit 9b27089).
-      trap '[ -n "${OPENMPI_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${OPENMPI_BUILD_DIR}"; [ -n "${OPENMPI_DEPS_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${OPENMPI_DEPS_BUILD_DIR}"' EXIT
+      # NOTE: build-dir cleanup for both OPENMPI_BUILD_DIR and
+      # OPENMPI_DEPS_BUILD_DIR is consolidated into _openmpi_on_exit
+      # installed earlier (which also fail-cleans the per-component
+      # installs + the modulefile).
       cd "${OPENMPI_BUILD_DIR}"
 
       OPENMPI_SHORT_VERSION=`echo ${OPENMPI_VERSION} | cut -f1-2 -d'.' `
@@ -1003,26 +1096,16 @@ module unload rocm/${ROCM_VERSION}
 
 if [[ "${DRY_RUN}" == "0" ]]; then
 
-   if [ -d "$MODULE_PATH" ]; then
-      # use sudo if user does not have write access to module path
-      if [ ! -w ${MODULE_PATH} ]; then
-         SUDO="sudo"
-      else
-         echo "WARNING: not using sudo since user has write access to module path"
-      fi
-   else
-      # if module path dir does not exist yet, the check on write access will fail
-      SUDO="sudo"
-      echo "WARNING: using sudo, make sure you have sudo privileges"
-   fi
-
-   ${SUDO} mkdir -p ${MODULE_PATH}
+   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
+   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
+   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
    if [[ "${ROCM_VERSION}" == "7.1.0" ]]; then
      # Need the legacy mode enabled as a workaround for a bcast bug
 
-     cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}.lua
+     cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}.lua
 	whatis("Name: GPU-aware openmpi")
 	whatis("Version: openmpi-${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}")
 	whatis("Description: An open source Message Passing Interface implementation")
@@ -1045,7 +1128,7 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 EOF
    else
 
-     cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}.lua
+     cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}.lua
 	whatis("Name: GPU-aware openmpi")
 	whatis("Version: openmpi-${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}")
 	whatis("Description: An open source Message Passing Interface implementation")

@@ -6,11 +6,31 @@ BUILD_JAX=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/jax
 AMDGPU_GFXMODEL_INPUT=""
 JAX_VERSION=8.0
-JAX_PATH=/opt/rocmplus-${ROCM_VERSION}/jax
+# Tracked separately so the post-arg-parsing policy block (search
+# "JAX policy gate") can tell "user passed --jax-version" from "we
+# fell through to the default", and only override the default when
+# the user has not asked for a specific version.
+JAX_VERSION_USER_SET=0
+# Versioned install dirs: /opt/rocmplus-X/jax-v0.${JAX_VERSION},
+# /opt/rocmplus-X/jaxlib-v0.${JAX_VERSION}. Modulefile is
+# 0.${JAX_VERSION}.lua so the version naming matches across all three.
+JAX_PATH=/opt/rocmplus-${ROCM_VERSION}/jax-v0.${JAX_VERSION}
 JAX_PATH_INPUT=""
-JAXLIB_PATH=/opt/rocmplus-${ROCM_VERSION}/jaxlib
+JAXLIB_PATH=/opt/rocmplus-${ROCM_VERSION}/jaxlib-v0.${JAX_VERSION}
 JAXLIB_PATH_INPUT=""
 PATCHELF_VERSION=0.18.0
+# jax is multi-component (jax + jaxlib both written by this script).
+# Like openmpi_setup.sh's --replace-xpmem/--replace-ucx pattern:
+#   --replace-jax     removes jax + 0.${JAX_VERSION}.lua
+#   --replace-jaxlib  removes jaxlib (no separate modulefile of its own;
+#                     the jax modulefile prepends both into PYTHONPATH)
+# --replace is a convenience alias that flips both on and is what
+# main_setup.sh threads through from --replace-existing.
+# --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
+REPLACE=0
+REPLACE_JAX=0
+REPLACE_JAXLIB=0
+KEEP_FAILED_INSTALLS=0
 
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
@@ -22,10 +42,14 @@ fi
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-if [[ "${DISTRO_VERSION}" == "22.04" ]]; then
-   # JAX VERSION 8.0, 7.1 and 7.0 do not support python 3.10. Have not tried 6.2 or 6.1
-   JAX_VERSION=6.0
-fi
+# Compatibility-driven JAX_VERSION / BUILD_JAX selection lives in the
+# "JAX policy gate" block AFTER arg parsing (so we have the final
+# ROCM_VERSION + a flag indicating whether the user passed
+# --jax-version). The earlier per-distro fixup that lived here used
+# to force JAX_VERSION=6.0 on Ubuntu 22.04, but 6.0 is not in the
+# upstream ROCm/JAX compatibility matrix at all (job 8063 audit) so
+# every 22.04 build wedged on the Python-3.10 check; that fixup has
+# been removed in favor of the policy gate further down.
 
 usage()
 {
@@ -39,6 +63,10 @@ usage()
    echo "--help: this usage information"
    echo "--module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "--replace [ 0|1 ] convenience: same as --replace-jax 1 --replace-jaxlib 1, default $REPLACE"
+   echo "--replace-jax [ 0|1 ] remove prior jax install + modulefile before building, default $REPLACE_JAX"
+   echo "--replace-jaxlib [ 0|1 ] remove prior jaxlib install before building, default $REPLACE_JAXLIB"
+   echo "--keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial installs on failure, default $KEEP_FAILED_INSTALLS"
    echo "--help: print this usage information"
 }
 
@@ -88,6 +116,7 @@ do
       "--jax-version")
           shift
           JAX_VERSION=${1}
+          JAX_VERSION_USER_SET=1
 	  reset-last
           ;;
       "--jax-install-path")
@@ -114,6 +143,26 @@ do
           ROCM_VERSION=${1}
 	  reset-last
           ;;
+      "--replace")
+          shift
+          REPLACE=${1}
+          reset-last
+          ;;
+      "--replace-jax")
+          shift
+          REPLACE_JAX=${1}
+          reset-last
+          ;;
+      "--replace-jaxlib")
+          shift
+          REPLACE_JAXLIB=${1}
+          reset-last
+          ;;
+      "--keep-failed-installs")
+          shift
+          KEEP_FAILED_INSTALLS=${1}
+          reset-last
+          ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
@@ -125,19 +174,131 @@ do
    shift
 done
 
+# ── JAX policy gate ──────────────────────────────────────────────────
+# Compatibility table (per upstream ROCm/JAX release notes, also
+# echoed by compat_info() further down):
+#   JAX 8.0  -- ROCm >= 7.0,  Python > 3.10 (i.e. 3.11+)
+#   JAX 7.1  -- ROCm >= 7.0,  Python > 3.10
+#   JAX 5.0  -- ROCm 6.0.3 / 6.2.4 / 6.3.1, Python 3.10 supported
+#   (older JAX lines drop further into the 6.x series.)
+#
+# Two facts force the policy here:
+#   1. Ubuntu 22.04 ships Python 3.10 as system python; this driver
+#      auto-detects PYTHON_VERSION=3.10 (bare_system/main_setup.sh).
+#      No JAX line that supports ROCm 7.x supports Python 3.10 -- so
+#      JAX is unbuildable in that combination. (Job 8063: 9 s bail at
+#      the "Python 3.10 is not supported from JAX 7.1" check.)
+#   2. JAX 5.0 is the newest line that still supports Python 3.10
+#      and it requires ROCm 6.x; using it on ROCm 7.x throws compat
+#      errors immediately.
+#
+# Resulting policy (applied AFTER arg parsing so user CLI overrides
+# can defeat it deliberately):
+#   * ROCm major >= 7  AND  Ubuntu 22.04  ->  force BUILD_JAX=0
+#       (the existing BUILD_JAX=0 short-circuit a few lines down then
+#        records this as SKIPPED(no-op) in main_setup.sh's per-package
+#        summary; no source clone, no Bazel run, no fail-cleanup).
+#   * ROCm major == 6  AND  user did NOT pass --jax-version  ->
+#       default JAX_VERSION to 5.0 (the only line that still supports
+#       Python 3.10 on the 6.x series).
+#
+# Operator escape hatches:
+#   * To force-attempt JAX on ROCm 7+ / Ubuntu 22.04 anyway, pass
+#     --build-jax 1 AFTER setting BUILD_JAX=1 in main_setup.sh AND
+#     edit/remove this gate (it is a hard skip, not a warn-and-try).
+#     The historical evidence (8063) is that the build will fail
+#     within seconds; this gate just makes the failure cheap and
+#     legible instead of an opaque rc=1.
+#   * To use a non-5.0 JAX line on ROCm 6.x, pass --jax-version X.Y
+#     and JAX_VERSION_USER_SET will keep that override intact.
+ROCM_MAJOR=${ROCM_VERSION%%.*}
+if [ "${ROCM_MAJOR}" -ge 7 ] 2>/dev/null && [ "${DISTRO_VERSION}" = "22.04" ]; then
+   echo "[jax policy] ROCm ${ROCM_VERSION} on Ubuntu ${DISTRO_VERSION} (Python 3.10):"
+   echo "             no JAX line supports both ROCm 7+ and Python 3.10."
+   echo "             JAX 8.0 / 7.1 require Python > 3.10; JAX 5.0 requires ROCm 6.x."
+   echo "             Forcing BUILD_JAX=0 to skip cleanly."
+   echo "             (Override: bump system Python to 3.11+ or drop ROCm to 6.x.)"
+   BUILD_JAX=0
+elif [ "${ROCM_MAJOR}" = "6" ] && [ "${JAX_VERSION_USER_SET}" = "0" ]; then
+   echo "[jax policy] ROCm ${ROCM_VERSION} (6.x): defaulting JAX_VERSION to 5.0"
+   echo "             (the newest line that supports both ROCm 6.x and Python 3.10)."
+   echo "             Override with --jax-version X.Y if you want a different line."
+   JAX_VERSION=5.0
+fi
+unset ROCM_MAJOR
+
 if [ "${JAX_PATH_INPUT}" != "" ]; then
    JAX_PATH=${JAX_PATH_INPUT}
 else
-   # override jax path in case ROCM_VERSION has been supplied as input
-   JAX_PATH=/opt/rocmplus-${ROCM_VERSION}/jax
+   # override jax path in case ROCM_VERSION or JAX_VERSION has been supplied as input
+   JAX_PATH=/opt/rocmplus-${ROCM_VERSION}/jax-v0.${JAX_VERSION}
 fi
 
 if [ "${JAXLIB_PATH_INPUT}" != "" ]; then
    JAXLIB_PATH=${JAXLIB_PATH_INPUT}
 else
-   # override jaxlib path in case ROCM_VERSION has been supplied as input
-   JAXLIB_PATH=/opt/rocmplus-${ROCM_VERSION}/jaxlib
+   # override jaxlib path in case ROCM_VERSION or JAX_VERSION has been supplied as input
+   JAXLIB_PATH=/opt/rocmplus-${ROCM_VERSION}/jaxlib-v0.${JAX_VERSION}
 fi
+
+# ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
+# Modulefile name is 0.${JAX_VERSION}.lua to match the
+# `tee ${MODULE_PATH}/0.${JAX_VERSION}.lua` write below.
+# ── BUILD_JAX=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
+NOOP_RC=43
+if [ "${BUILD_JAX}" = "0" ]; then
+   echo "[jax BUILD_JAX=0] operator opt-out; skipping (no jax build, no jaxlib build, no cache restore)."
+   exit ${NOOP_RC}
+fi
+
+if [ "${REPLACE}" = "1" ]; then
+   REPLACE_JAX=1
+   REPLACE_JAXLIB=1
+fi
+if [ "${REPLACE_JAX}" = "1" ]; then
+   echo "[jax --replace-jax 1] removing prior jax install + modulefile if present"
+   echo "  install dir: ${JAX_PATH}"
+   echo "  modulefile:  ${MODULE_PATH}/0.${JAX_VERSION}.lua"
+   ${SUDO} rm -rf "${JAX_PATH}"
+   ${SUDO} rm -f  "${MODULE_PATH}/0.${JAX_VERSION}.lua"
+fi
+if [ "${REPLACE_JAXLIB}" = "1" ]; then
+   echo "[jax --replace-jaxlib 1] removing prior jaxlib install"
+   echo "  install dir: ${JAXLIB_PATH}"
+   ${SUDO} rm -rf "${JAXLIB_PATH}"
+fi
+
+# ── Existence guard (see hypre_setup.sh) ─────────────────────────────
+# Multi-component: skip ONLY if BOTH jax-v0.${VER} AND jaxlib-v0.${VER}
+# are present. Either alone is non-functional (jax python imports
+# jaxlib at runtime).
+NOOP_RC=43
+if [ -d "${JAX_PATH}" ] && [ -d "${JAXLIB_PATH}" ]; then
+   echo ""
+   echo "[jax existence-check] both components already installed; skipping."
+   echo "  jax:    ${JAX_PATH}"
+   echo "  jaxlib: ${JAXLIB_PATH}"
+   echo "  pass --replace 1 (or --replace-jax/--replace-jaxlib) to rebuild."
+   echo ""
+   exit ${NOOP_RC}
+fi
+
+# Consolidated EXIT trap: build-dir cleanup (JAX_BUILD_ROOT, set later
+# under BUILD_JAX=1) PLUS fail-cleanup of jax + jaxlib installs +
+# modulefile. Replaces inline `trap '... rm JAX_BUILD_ROOT ...' EXIT`.
+_jax_on_exit() {
+   local rc=$?
+   [ -n "${JAX_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${JAX_BUILD_ROOT}"
+   if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
+      echo "[jax fail-cleanup] rc=${rc}: removing partial jax + jaxlib installs + modulefile"
+      ${SUDO:-sudo} rm -rf "${JAX_PATH}" "${JAXLIB_PATH}"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/0.${JAX_VERSION}.lua"
+   elif [ ${rc} -ne 0 ]; then
+      echo "[jax fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
+   fi
+   return ${rc}
+}
+trap _jax_on_exit EXIT
 
 # Load the ROCm version for this JAX build
 #source /etc/profile.d/lmod.sh
@@ -172,29 +333,34 @@ else
    # with -- and clobber -- any other concurrent jax build on the
    # same node (different ROCm versions, sweeps, etc.).
    JAX_BUILD_ROOT=$(mktemp -d -t jax-build.XXXXXX)
-   trap '[ -n "${JAX_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${JAX_BUILD_ROOT}"' EXIT
+   # NOTE: build-dir cleanup is consolidated into _jax_on_exit
+   # installed above (so the same EXIT handler also does fail-cleanup
+   # of jax + jaxlib installs and the modulefile).
    cd "${JAX_BUILD_ROOT}"
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   if [ -f "${CACHE_FILES}/jax.tgz" ] && [ -f "${CACHE_FILES}/jaxlib.tgz" ]; then
+   if [ -f "${CACHE_FILES}/jax-v0.${JAX_VERSION}.tgz" ] && [ -f "${CACHE_FILES}/jaxlib-v0.${JAX_VERSION}.tgz" ]; then
       echo ""
       echo "==================================="
-      echo " Installing Cached JAXLIB and JAX"
+      echo " Installing Cached JAXLIB and JAX v0.${JAX_VERSION}"
       echo "==================================="
       echo ""
 
-      #install the cached version
-      ${SUDO} mkdir -p ${JAX_PATH}
+      # Install the cached version. Tarball top-level dirs are
+      # jax-v0.${JAX_VERSION}/ and jaxlib-v0.${JAX_VERSION}/ -- match the
+      # versioned JAX_PATH / JAXLIB_PATH layout the from-source branch
+      # writes to, so multiple jax releases coexist on disk.
       cd /opt/rocmplus-${ROCM_VERSION}
 
-      ${SUDO} tar -xzpf ${CACHE_FILES}/jax.tgz
+      ${SUDO} tar -xzpf ${CACHE_FILES}/jax-v0.${JAX_VERSION}.tgz
+      ${SUDO} chown -R root:root ${JAX_PATH}
 
-      ${SUDO} mkdir -p ${JAXLIB_PATH}
-      ${SUDO} tar -xzpf ${CACHE_FILES}/jaxlib.tgz
+      ${SUDO} tar -xzpf ${CACHE_FILES}/jaxlib-v0.${JAX_VERSION}.tgz
+      ${SUDO} chown -R root:root ${JAXLIB_PATH}
 
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm  ${CACHE_FILES}/jax.tgz ${CACHE_FILES}/jaxlib.tgz
+         ${SUDO} rm  ${CACHE_FILES}/jax-v0.${JAX_VERSION}.tgz ${CACHE_FILES}/jaxlib-v0.${JAX_VERSION}.tgz
       fi
    else
       echo ""
@@ -251,7 +417,13 @@ else
       fi
 
       source /etc/profile.d/lmod.sh
-      source /etc/profile.d/z01_lmod.sh
+      # /etc/profile.d/z01_lmod.sh removal (job 8063 audit): the file
+      # is part of an older Lmod packaging that does not exist on this
+      # distro (Ubuntu 22.04 + the system Lmod we use). Sourcing it
+      # produced a spurious "No such file or directory" line in every
+      # jax_setup.sh run; the real lmod.sh above is sufficient to
+      # bring `module` into scope. Restore only if a future Lmod
+      # repackaging actually ships z01_lmod.sh.
       module load rocm/${ROCM_VERSION}
 
       # ---------------------------------------------------------------------
@@ -551,23 +723,14 @@ else
    fi
 
    # Create a module file for jax
-   if [ -d "$MODULE_PATH" ]; then
-      # use sudo if user does not have write access to module path
-      if [ ! -w ${MODULE_PATH} ]; then
-         SUDO="sudo"
-      else
-         echo "WARNING: not using sudo since user has write access to module path"
-      fi
-   else
-      # if module path dir does not exist yet, the check on write access will fail
-      SUDO="sudo"
-      echo "WARNING: using sudo, make sure you have sudo privileges"
-   fi
-
-   ${SUDO} mkdir -p ${MODULE_PATH}
+   #
+   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
+   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
+   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/0.${JAX_VERSION}.lua
+   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/0.${JAX_VERSION}.lua
 	whatis("JAX version ${JAX_VERSION} with ROCm support")
 
 	prereq("rocm/${ROCM_VERSION}")

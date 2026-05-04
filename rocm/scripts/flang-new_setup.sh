@@ -13,6 +13,13 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 AFAR_NUMBER="8873"
 FLANG_RELEASE_NUMBER="22.2.0"
 MODULE_TYPE="lmod"
+# --replace 1: rm -rf prior install dir + ${ARCHIVE_DIR}.lua before build.
+# Install dir is ${UNTAR_DIR}/${ARCHIVE_DIR} where ARCHIVE_DIR is
+# rocm-afar-${FLANG_RELEASE_NUMBER}, so different release numbers
+# coexist as siblings under UNTAR_DIR.
+# --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
+REPLACE=0
+KEEP_FAILED_INSTALLS=0
 
 RHEL_COMPATIBLE=0
 if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
@@ -37,6 +44,8 @@ usage()
    echo "  --build-flang-new [ BUILD_FLANGNEW ] default $BUILD_FLANGNEW "
    echo "  --afar-number [ AFAR_NUMBER ] default $AFAR_NUMBER "
    echo "  --flang-release-number [ FLANG_RELEASE_NUMBER ] default $FLANG_RELEASE_NUMBER "
+   echo "  --replace [ 0|1 ] remove prior install + modulefile before installing, default $REPLACE"
+   echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
    echo "  --help: print this usage information"
    exit 1
 }
@@ -100,6 +109,16 @@ do
           ROCM_VERSION=${1}
           reset-last
           ;;
+      "--replace")
+          shift
+          REPLACE=${1}
+          reset-last
+          ;;
+      "--keep-failed-installs")
+          shift
+          KEEP_FAILED_INSTALLS=${1}
+          reset-last
+          ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
@@ -123,6 +142,55 @@ CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGP
 
 ARCHIVE_NAME="rocm-afar-${AFAR_NUMBER}-drop-${FLANG_RELEASE_NUMBER}"
 ARCHIVE_DIR="rocm-afar-${FLANG_RELEASE_NUMBER}"
+
+# ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
+# Install dir: ${UNTAR_DIR}/${ARCHIVE_DIR}; modulefile: ${MODULE_PATH}/${ARCHIVE_DIR}.lua
+# ── BUILD_FLANGNEW=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
+NOOP_RC=43
+if [ "${BUILD_FLANGNEW}" = "0" ]; then
+   echo "[flang-new BUILD_FLANGNEW=0] operator opt-out; skipping (no extract, no cache restore)."
+   exit ${NOOP_RC}
+fi
+
+if [ "${REPLACE}" = "1" ]; then
+   echo "[flang-new --replace 1] removing prior install + modulefile if present"
+   echo "  install dir: ${UNTAR_DIR}/${ARCHIVE_DIR}"
+   echo "  modulefile:  ${MODULE_PATH}/${ARCHIVE_DIR}.lua"
+   ${SUDO} rm -rf "${UNTAR_DIR}/${ARCHIVE_DIR}"
+   ${SUDO} rm -f  "${MODULE_PATH}/${ARCHIVE_DIR}.lua"
+fi
+
+# ── Existence guard (see hypre_setup.sh) ─────────────────────────────
+# Install dir is ${UNTAR_DIR}/rocm-afar-${FLANG_RELEASE_NUMBER}, which
+# was NOT what the old main_setup.sh `[[ ! -d ${ROCMPLUS}/flang-new ]]`
+# guard inspected (drift: it checked a path the script never writes).
+# That guard was OR'ed with `[ "${SKIP_ROCM_INSTALL}" == 0 ]` so on a
+# normal sweep it always fell through and the script ran unconditionally,
+# letting the wget+tar overwrite anything in place. We preserve that
+# unconditional-rerun behavior by keying the existence check on the
+# CORRECT install dir (${UNTAR_DIR}/${ARCHIVE_DIR}); if that exact
+# version is on disk we no-op, otherwise we proceed to extract.
+NOOP_RC=43
+if [ -d "${UNTAR_DIR}/${ARCHIVE_DIR}" ]; then
+   echo ""
+   echo "[flang-new existence-check] ${UNTAR_DIR}/${ARCHIVE_DIR} already installed; skipping."
+   echo "                            pass --replace 1 to force a clean re-extract of this release."
+   echo ""
+   exit ${NOOP_RC}
+fi
+
+_flang_new_on_exit() {
+   local rc=$?
+   if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
+      echo "[flang-new fail-cleanup] rc=${rc}: removing partial install + modulefile"
+      ${SUDO:-sudo} rm -rf "${UNTAR_DIR}/${ARCHIVE_DIR}"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${ARCHIVE_DIR}.lua"
+   elif [ ${rc} -ne 0 ]; then
+      echo "[flang-new fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
+   fi
+   return ${rc}
+}
+trap _flang_new_on_exit EXIT
 
 FULL_ARCHIVE_NAME="$ARCHIVE_NAME-$DISTRO"
 if [[ ${DISTRO} == "ubuntu" ]]; then
@@ -200,24 +268,15 @@ else
       fi
 
       # Create a module file for flang-new
-      if [ -d "$MODULE_PATH" ]; then
-         # use sudo if user does not have write access to module path
-         if [ ! -w ${MODULE_PATH} ]; then
-            SUDO="sudo"
-         else
-            echo "WARNING: not using sudo since user has write access to module path"
-         fi
-      else
-         # if module path dir does not exist yet, the check on write access will fail
-         SUDO="sudo"
-         echo "WARNING: using sudo, make sure you have sudo privileges"
-      fi
-
-      ${SUDO} mkdir -p ${MODULE_PATH}
+      #
+      # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
+      # see netcdf_setup.sh for the lying-probe failure mode this replaces).
+      PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+      ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
       if [[ $MODULE_TYPE == "lmod" ]]; then
            # - on next line suppresses tab in the following lines
-           cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ARCHIVE_DIR}.lua
+           cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${ARCHIVE_DIR}.lua
 
 	whatis("AMD AFAR drop #4.0 Beta Fortran OpenMP Compiler based on LLVM")
 	local help_message = [[
@@ -245,7 +304,7 @@ EOF
 
       elif [[ $MODULE_TYPE == "tcl" ]]; then
            # - on next line suppresses tab in the following lines
-           cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ARCHIVE_DIR}
+           cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${ARCHIVE_DIR}
 
 	#%Module
 

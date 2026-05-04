@@ -62,9 +62,30 @@ HDF5_MODULE="hdf5"
 # Loading the openmpi module up front fixes that and matches what
 # hdf5_setup.sh, hypre_setup.sh, petsc_setup.sh, etc. already do.
 MPI_MODULE="openmpi"
-NETCDF_PATH=/opt/rocmplus-${ROCM_VERSION}/netcdf
-NETCDF_PATH_INPUT=""
+# NETCDF_INSTALL_BASE is the rocmplus parent directory under which the
+# three netcdf components land at top level so multiple versions can
+# coexist:
+#   ${NETCDF_INSTALL_BASE}/netcdf-c-v${NETCDF_C_VERSION}
+#   ${NETCDF_INSTALL_BASE}/netcdf-fortran-v${NETCDF_F_VERSION}
+#   ${NETCDF_INSTALL_BASE}/pnetcdf       (build-time-only dep, unversioned)
+NETCDF_INSTALL_BASE=/opt/rocmplus-${ROCM_VERSION}
+NETCDF_INSTALL_BASE_INPUT=""
 ENABLE_PNETCDF="OFF"
+# Per-component --replace flags. netcdf is multi-component (similar in
+# spirit to openmpi_setup.sh's --replace-xpmem/--replace-ucx/...), so
+# rather than a single coarse --replace we expose one knob per
+# top-level install dir under ${NETCDF_INSTALL_BASE}:
+#   --replace-netcdf-c   removes netcdf-c-v${NETCDF_C_VERSION} + its .lua
+#   --replace-netcdf-f   removes netcdf-fortran-v${NETCDF_F_VERSION} + .lua
+#   --replace-pnetcdf    removes the (unversioned) pnetcdf build-only dep
+# --replace is kept as a convenience alias that flips ALL three on (and
+# is what main_setup.sh threads through from --replace-existing).
+# --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
+REPLACE=0
+REPLACE_NETCDF_C=0
+REPLACE_NETCDF_F=0
+REPLACE_PNETCDF=0
+KEEP_FAILED_INSTALLS=0
 
 # Autodetect defaults
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -95,11 +116,16 @@ usage()
    echo "  --netcdf-f-module-path [ NETCDF_F_MODULE_PATH ] default $NETCDF_F_MODULE_PATH"
    echo "  --hdf5-module [ HDF5_MODULE ] default $HDF5_MODULE"
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
-   echo "  --install-path [ NETCDF_PATH ] default $NETCDF_PATH"
+   echo "  --install-path [ NETCDF_INSTALL_BASE ] BASE dir; netcdf-c lands in <base>/netcdf-c-v\$NETCDF_C_VERSION, netcdf-fortran in <base>/netcdf-fortran-v\$NETCDF_F_VERSION, pnetcdf in <base>/pnetcdf; default $NETCDF_INSTALL_BASE"
    echo "  --c-compiler [ C_COMPILER ] default ${C_COMPILER}"
    echo "  --cxx-compiler [ CXX_COMPILER ] default ${CXX_COMPILER}"
    echo "  --f-compiler [ F_COMPILER ] default ${F_COMPILER}"
    echo "  --build-netcdf [ BUILD_NETCDF ], set to 1 to build netcdf-c and netcdf-fortran, default is 0"
+   echo "  --replace [ 0|1 ] convenience: same as --replace-netcdf-c 1 --replace-netcdf-f 1 --replace-pnetcdf 1, default $REPLACE"
+   echo "  --replace-netcdf-c [ 0|1 ] remove prior netcdf-c install + modulefile before building, default $REPLACE_NETCDF_C"
+   echo "  --replace-netcdf-f [ 0|1 ] remove prior netcdf-fortran install + modulefile before building, default $REPLACE_NETCDF_F"
+   echo "  --replace-pnetcdf  [ 0|1 ] remove prior pnetcdf install before building, default $REPLACE_PNETCDF"
+   echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial installs on failure, default $KEEP_FAILED_INSTALLS"
    echo "  --help: print this usage information"
    exit 1
 }
@@ -145,7 +171,7 @@ do
           ;;
       "--install-path")
           shift
-          NETCDF_PATH_INPUT=${1}
+          NETCDF_INSTALL_BASE_INPUT=${1}
           reset-last
           ;;
       "--hdf5-module")
@@ -193,6 +219,31 @@ do
           NETCDF_F_VERSION=${1}
           reset-last
           ;;
+      "--replace")
+          shift
+          REPLACE=${1}
+          reset-last
+          ;;
+      "--replace-netcdf-c")
+          shift
+          REPLACE_NETCDF_C=${1}
+          reset-last
+          ;;
+      "--replace-netcdf-f")
+          shift
+          REPLACE_NETCDF_F=${1}
+          reset-last
+          ;;
+      "--replace-pnetcdf")
+          shift
+          REPLACE_PNETCDF=${1}
+          reset-last
+          ;;
+      "--keep-failed-installs")
+          shift
+          KEEP_FAILED_INSTALLS=${1}
+          reset-last
+          ;;
       "--*")
           send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
           ;;
@@ -204,11 +255,96 @@ do
    shift
 done
 
-if [ "${NETCDF_PATH_INPUT}" != "" ]; then
-   NETCDF_PATH=${NETCDF_PATH_INPUT}
+if [ "${NETCDF_INSTALL_BASE_INPUT}" != "" ]; then
+   NETCDF_INSTALL_BASE=${NETCDF_INSTALL_BASE_INPUT}
 else
-   NETCDF_PATH=/opt/rocmplus-${ROCM_VERSION}/netcdf
+   # override base in case ROCM_VERSION has been supplied as input
+   NETCDF_INSTALL_BASE=/opt/rocmplus-${ROCM_VERSION}
 fi
+# Strip a trailing "/netcdf" for backward compatibility with callers
+# (e.g. older main_setup.sh) that pre-appended the leaf dir.
+NETCDF_INSTALL_BASE=${NETCDF_INSTALL_BASE%/}
+NETCDF_INSTALL_BASE=${NETCDF_INSTALL_BASE%/netcdf}
+
+NETCDF_C_PATH=${NETCDF_INSTALL_BASE}/netcdf-c-v${NETCDF_C_VERSION}
+NETCDF_F_PATH=${NETCDF_INSTALL_BASE}/netcdf-fortran-v${NETCDF_F_VERSION}
+PNETCDF_PATH=${NETCDF_INSTALL_BASE}/pnetcdf
+
+# ── BUILD_NETCDF=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
+NOOP_RC=43
+if [ "${BUILD_NETCDF}" = "0" ]; then
+   echo "[netcdf BUILD_NETCDF=0] operator opt-out; skipping (no source build, no cache restore for any of netcdf-c, netcdf-fortran, pnetcdf)."
+   exit ${NOOP_RC}
+fi
+
+# ── --replace: remove prior installs + modulefiles BEFORE building ────
+# --replace 1 acts as a convenience alias that flips all three
+# component knobs on. Individual --replace-netcdf-{c,f}/--replace-pnetcdf
+# flags still win if the operator wants finer-grained control.
+if [ "${REPLACE}" = "1" ]; then
+   REPLACE_NETCDF_C=1
+   REPLACE_NETCDF_F=1
+   REPLACE_PNETCDF=1
+fi
+if [ "${REPLACE_NETCDF_C}" = "1" ]; then
+   echo "[netcdf --replace-netcdf-c 1] removing prior netcdf-c install + modulefile if present"
+   echo "  install dir: ${NETCDF_C_PATH}"
+   echo "  modulefile:  ${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua"
+   ${SUDO} rm -rf "${NETCDF_C_PATH}"
+   ${SUDO} rm -f  "${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua"
+fi
+if [ "${REPLACE_NETCDF_F}" = "1" ]; then
+   echo "[netcdf --replace-netcdf-f 1] removing prior netcdf-fortran install + modulefile if present"
+   echo "  install dir: ${NETCDF_F_PATH}"
+   echo "  modulefile:  ${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua"
+   ${SUDO} rm -rf "${NETCDF_F_PATH}"
+   ${SUDO} rm -f  "${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua"
+fi
+if [ "${REPLACE_PNETCDF}" = "1" ]; then
+   echo "[netcdf --replace-pnetcdf 1] removing prior pnetcdf install"
+   echo "  install dir: ${PNETCDF_PATH}"
+   ${SUDO} rm -rf "${PNETCDF_PATH}"
+fi
+
+# ── Existence guard (see hypre_setup.sh) ─────────────────────────────
+# Multi-component: skip ONLY if all three components (netcdf-c-v${VER},
+# netcdf-fortran-v${VER}, pnetcdf) are already on disk. If any one is
+# missing we proceed -- the per-component build branches below
+# short-circuit on the components that are already present. This is
+# more correct than the old main_setup.sh `[[ ! -d netcdf-c-v${VER} ]]`
+# guard, which could leave netcdf-fortran or pnetcdf permanently
+# unbuilt if netcdf-c happened to land first.
+NOOP_RC=43
+if [ -d "${NETCDF_C_PATH}" ] && [ -d "${NETCDF_F_PATH}" ] && [ -d "${PNETCDF_PATH}" ]; then
+   echo ""
+   echo "[netcdf existence-check] all three components already installed; skipping."
+   echo "  netcdf-c:       ${NETCDF_C_PATH}"
+   echo "  netcdf-fortran: ${NETCDF_F_PATH}"
+   echo "  pnetcdf:        ${PNETCDF_PATH}"
+   echo "  pass --replace 1 (or per-component --replace-netcdf-{c,f}/--replace-pnetcdf) to rebuild."
+   echo ""
+   exit ${NOOP_RC}
+fi
+
+# ── EXIT trap: fail-cleanup of all three components ──────────────────
+# On non-zero exit, remove any partial install + modulefile this script
+# may have written for ANY of the three components, since we don't know
+# in advance which one was in flight. Replaces main_setup.sh
+# PKG_CLEAN_*[netcdf]/[netcdf-fortran]/[pnetcdf]. Skipped when
+# --keep-failed-installs 1.
+_netcdf_on_exit() {
+   local rc=$?
+   if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
+      echo "[netcdf fail-cleanup] rc=${rc}: removing partial netcdf-c/netcdf-fortran/pnetcdf installs + modulefiles"
+      ${SUDO:-sudo} rm -rf "${NETCDF_C_PATH}" "${NETCDF_F_PATH}" "${PNETCDF_PATH}"
+      ${SUDO:-sudo} rm -f  "${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua" \
+                           "${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua"
+   elif [ ${rc} -ne 0 ]; then
+      echo "[netcdf fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
+   fi
+   return ${rc}
+}
+trap _netcdf_on_exit EXIT
 
 if [ "${BUILD_NETCDF}" = "0" ]; then
 
@@ -222,11 +358,14 @@ else
    echo ""
    echo "==============================================="
    echo " Installing NETCDF"
-   echo " Install directory: $NETCDF_PATH"
+   echo " Install base directory: $NETCDF_INSTALL_BASE"
    echo " Netcdf-c Version: $NETCDF_C_VERSION"
+   echo " Netcdf-c Install Directory: $NETCDF_C_PATH"
    echo " Netcdf-c Module Directory: $NETCDF_C_MODULE_PATH"
    echo " Netcdf-fortran Version: $NETCDF_F_VERSION"
+   echo " Netcdf-fortran Install Directory: $NETCDF_F_PATH"
    echo " Netcdf-fortran Module Directory: $NETCDF_F_MODULE_PATH"
+   echo " PnetCDF Install Directory: $PNETCDF_PATH"
    echo " ROCm Version: $ROCM_VERSION"
    echo "==============================================="
    echo ""
@@ -234,19 +373,35 @@ else
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
-   if [ -f ${CACHE_FILES}/netcdf.tgz ]; then
+   NETCDF_C_TGZ=${CACHE_FILES}/netcdf-c-v${NETCDF_C_VERSION}.tgz
+   NETCDF_F_TGZ=${CACHE_FILES}/netcdf-fortran-v${NETCDF_F_VERSION}.tgz
+   PNETCDF_TGZ=${CACHE_FILES}/pnetcdf.tgz
+   if [ -f ${NETCDF_C_TGZ} ] && [ -f ${NETCDF_F_TGZ} ]; then
       echo ""
       echo "============================"
       echo " Installing Cached NETCDF"
       echo "============================"
       echo ""
 
-      #install the cached version
-      cd /opt
-      tar -xzf ${CACHE_FILES}/netcdf.tgz
-      chown -R root:root /opt/netcdf
+      # Install the cached version. Each cache tar must contain a single
+      # top-level directory matching its install path so it lands directly
+      # under ${NETCDF_INSTALL_BASE} when extracted there:
+      #   netcdf-c-v${NETCDF_C_VERSION}.tgz       -> netcdf-c-v.../
+      #   netcdf-fortran-v${NETCDF_F_VERSION}.tgz -> netcdf-fortran-v.../
+      #   pnetcdf.tgz (optional, build-time-only) -> pnetcdf/
+      # PnetCDF is shared across netcdf versions (like PDT for scorep),
+      # hence unversioned; only present when the cache build had
+      # HDF5_ENABLE_PARALLEL=ON.
+      cd ${NETCDF_INSTALL_BASE}
+      tar -xzf ${NETCDF_C_TGZ}
+      tar -xzf ${NETCDF_F_TGZ}
+      chown -R root:root ${NETCDF_C_PATH} ${NETCDF_F_PATH}
+      if [ -f ${PNETCDF_TGZ} ]; then
+         tar -xzf ${PNETCDF_TGZ}
+         chown -R root:root ${PNETCDF_PATH}
+      fi
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm -f ${CACHE_FILES}/netcdf.tgz
+         ${SUDO} rm -f ${NETCDF_C_TGZ} ${NETCDF_F_TGZ} ${PNETCDF_TGZ}
       fi
 
    else
@@ -259,10 +414,10 @@ else
       #source /etc/profile.d/lmod.sh
       #source /etc/profile.d/z00_lmod.sh
 
-      # don't use sudo if user has write access to install path
-      if [ -d "$NETCDF_PATH" ]; then
-         # don't use sudo if user has write access to install path
-         if [ -w ${NETCDF_PATH} ]; then
+      # don't use sudo if user has write access to install base
+      if [ -d "$NETCDF_INSTALL_BASE" ]; then
+         # don't use sudo if user has write access to install base
+         if [ -w ${NETCDF_INSTALL_BASE} ]; then
             SUDO=""
          else
             echo "WARNING: using an install path that requires sudo"
@@ -289,15 +444,12 @@ else
 	 echo "opensuse is not tested yet, not installing libcurl"
       fi
 
-      NETCDF_C_PATH=${NETCDF_PATH}/netcdf-c-v${NETCDF_C_VERSION}
-      NETCDF_F_PATH=${NETCDF_PATH}/netcdf-fortran-v${NETCDF_F_VERSION}
-      ${SUDO} mkdir -p ${NETCDF_PATH}
       ${SUDO} mkdir -p ${NETCDF_C_PATH}
       ${SUDO} mkdir -p ${NETCDF_F_PATH}
-      ${SUDO} mkdir -p ${NETCDF_PATH}/pnetcdf
+      ${SUDO} mkdir -p ${PNETCDF_PATH}
 
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} chmod -R a+w ${NETCDF_PATH}
+         ${SUDO} chmod -R a+w ${NETCDF_C_PATH} ${NETCDF_F_PATH} ${PNETCDF_PATH}
       fi
 
       # Order matters: ROCm first (extends MODULEPATH with rocmplus-<v>
@@ -405,13 +557,13 @@ else
          fi
          if [ -n "${PNETCDF_FORTRAN_LIBS}" ]; then
             echo "PnetCDF: linking amdflang Fortran runtime: ${PNETCDF_FORTRAN_LIBS}"
-            ./configure --prefix=${NETCDF_PATH}/pnetcdf MPICC=`which mpicc` MPIF90=`which mpifort` \
+            ./configure --prefix=${PNETCDF_PATH} MPICC=`which mpicc` MPIF90=`which mpifort` \
                         LIBS="${PNETCDF_FORTRAN_LIBS}"
          else
             echo "WARNING: could not locate amdflang Fortran runtime under ROCM_PATH=${ROCM_PATH:-<unset>};"
             echo "         libpnetcdf.so may have unresolved Fortran::runtime::* / _FortranA* symbols"
             echo "         and the subsequent netcdf-c utility link will fail."
-            ./configure --prefix=${NETCDF_PATH}/pnetcdf MPICC=`which mpicc` MPIF90=`which mpifort`
+            ./configure --prefix=${PNETCDF_PATH} MPICC=`which mpicc` MPIF90=`which mpifort`
          fi
          make -j ${MAKE_JOBS}
          make install
@@ -437,8 +589,8 @@ else
 	    -DCMAKE_C_FLAGS="-I ${HDF5_ROOT}/include/" \
 	    -DCMAKE_C_COMPILER=${C_COMPILER} \
 	    -DNETCDF_ENABLE_PNETCDF=${ENABLE_PNETCDF} \
-	    -DPNETCDF_LIBRARY=${NETCDF_PATH}/pnetcdf/lib/libpnetcdf.so \
-	    -DPNETCDF_INCLUDE_DIR=${NETCDF_PATH}/pnetcdf/include \
+	    -DPNETCDF_LIBRARY=${PNETCDF_PATH}/lib/libpnetcdf.so \
+	    -DPNETCDF_INCLUDE_DIR=${PNETCDF_PATH}/include \
 	    -DNETCDF_ENABLE_FILTER_SZIP=OFF -DNETCDF_ENABLE_NCZARR=OFF ..
 
       cmake --build . -j ${MAKE_JOBS}
@@ -472,12 +624,14 @@ else
       ${SUDO} rm -rf PnetCDF
 
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
-         ${SUDO} find ${NETCDF_PATH} -type f -execdir chown root:root "{}" +
-         ${SUDO} find ${NETCDF_PATH} -type d -execdir chown root:root "{}" +
+         for D in ${NETCDF_C_PATH} ${NETCDF_F_PATH} ${PNETCDF_PATH}; do
+            ${SUDO} find ${D} -type f -execdir chown root:root "{}" +
+            ${SUDO} find ${D} -type d -execdir chown root:root "{}" +
+         done
       fi
 
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} chmod go-w ${NETCDF_PATH}
+         ${SUDO} chmod go-w ${NETCDF_C_PATH} ${NETCDF_F_PATH} ${PNETCDF_PATH}
       fi
 
    fi
@@ -495,37 +649,36 @@ else
          exit 1
       fi
    done
-   if [ "${ENABLE_PNETCDF}" = "ON" ] && [ ! -f "${NETCDF_PATH}/pnetcdf/lib/libpnetcdf.so" ] \
-        && [ ! -f "${NETCDF_PATH}/pnetcdf/lib/libpnetcdf.a" ]; then
+   if [ "${ENABLE_PNETCDF}" = "ON" ] && [ ! -f "${PNETCDF_PATH}/lib/libpnetcdf.so" ] \
+        && [ ! -f "${PNETCDF_PATH}/lib/libpnetcdf.a" ]; then
       echo "ERROR: PnetCDF was requested (HDF5_ENABLE_PARALLEL=ON) but" >&2
-      echo "       ${NETCDF_PATH}/pnetcdf/lib/libpnetcdf.{so,a} is missing." >&2
+      echo "       ${PNETCDF_PATH}/lib/libpnetcdf.{so,a} is missing." >&2
       echo "       Refusing to write netcdf-c / netcdf-fortran modulefiles." >&2
       exit 1
    fi
 
    # Create a module file for netcdf-c
-   if [ -d "$NETCDF_C_MODULE_PATH" ]; then
-      # use sudo if user does not have write access to module path
-      if [ ! -w ${NETCDF_C_MODULE_PATH} ]; then
-         SUDO="sudo"
-      else
-         echo "WARNING: not using sudo since user has write access to netcdf-c module path"
-      fi
-   else
-      # if module path dir does not exist yet, the check on write access will fail
-      SUDO="sudo"
-      echo "WARNING: using sudo, make sure you have sudo privileges"
-   fi
-
-   ${SUDO} mkdir -p ${NETCDF_C_MODULE_PATH}
+   #
+   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit).
+   # The previous "if [ -d ] / if [ ! -w ] / else / SUDO=sudo / else
+   # / SUDO=sudo / echo / fi" block was a known-broken probe: in 8063
+   # the netcdf-c module dir was owned root:root mode 755, [ ! -w ]
+   # at probe time evaluated FALSE (printed "user has write access
+   # to netcdf-c module path"), then `tee` returned EACCES, and the
+   # whole script exited rc=1 -- failing AFTER a successful library
+   # build, the worst possible failure mode. Replaced with the same
+   # PKG_SUDO computation used at install-time elsewhere in this
+   # script (line 435): one source of truth, no probes that lie.
+   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   ${PKG_SUDO_MOD} mkdir -p ${NETCDF_C_MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua
+   cat <<-EOF | ${PKG_SUDO_MOD} tee ${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua
 	whatis("Netcdf-c Library")
 
         load("hdf5")
         local base = "${NETCDF_C_PATH}"
-        local base_pnetcdf = "${NETCDF_PATH}/pnetcdf"
+        local base_pnetcdf = "${PNETCDF_PATH}"
         prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
         prepend_path("LD_LIBRARY_PATH", pathJoin(base_pnetcdf, "lib"))
         prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
@@ -538,28 +691,20 @@ else
 EOF
 
    # Create a module file for netcdf-fortran
-   if [ -d "$NETCDF_F_MODULE_PATH" ]; then
-      # use sudo if user does not have write access to module path
-      if [ ! -w ${NETCDF_F_MODULE_PATH} ]; then
-         SUDO="sudo"
-      else
-         echo "WARNING: not using sudo since user has write access to netcdf-f module path"
-      fi
-   else
-      # if module path dir does not exist yet, the check on write access will fail
-      SUDO="sudo"
-      echo "WARNING: using sudo, make sure you have sudo privileges"
-   fi
-
-   ${SUDO} mkdir -p ${NETCDF_F_MODULE_PATH}
+   # See netcdf-c block above for the rationale on PKG_SUDO_MOD; the
+   # netcdf-fortran modulefile dir is a sibling of netcdf-c's and
+   # has the exact same lying-probe failure mode. Reusing the same
+   # PKG_SUDO_MOD value computed for netcdf-c (computed once per
+   # process, no race window).
+   ${PKG_SUDO_MOD} mkdir -p ${NETCDF_F_MODULE_PATH}
 
    # The - option suppresses tabs
-   cat <<-EOF | ${SUDO} tee ${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua
+   cat <<-EOF | ${PKG_SUDO_MOD} tee ${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua
 	whatis("Netcdf-fortran Library")
 
 	load("netcdf-c")
 	local base = "${NETCDF_F_PATH}"
-	local base_pnetcdf = "${NETCDF_PATH}/pnetcdf"
+	local base_pnetcdf = "${PNETCDF_PATH}"
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base_pnetcdf, "lib"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
