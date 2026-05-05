@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Capture this script's absolute path BEFORE any cd, so the inline
+# git-provenance block lower down can resolve the script in the repo
+# even after the build has cd'd into a temp dir. (BASH_SOURCE[0] is
+# whatever path was used to invoke the script -- often relative when
+# called from main_setup.sh -- so we absolutize it once, here.)
+LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+
 # Fail fast on errors and surface failures inside pipes. Not using -u
 # (nounset) because some conditional code paths rely on unset variables.
 set -eo pipefail
@@ -222,9 +229,45 @@ export MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/mvapich
 
 ${SUDO} mkdir -p ${MODULE_PATH}
 
+# Derive ROCM_MODULE_NAME from the actual ROCM_PATH basename so RC
+# trees (rocm-therock-*, rocm-afar-*) match their loaded module name
+# instead of the SDK numeric. Falls back to the rocm/<version> form
+# for direct standalone invocation where ROCM_PATH is unset.
+if [[ -n "${ROCM_PATH:-}" ]]; then
+   _rp_bn="${ROCM_PATH##*/}"
+   ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
+   unset _rp_bn
+else
+   ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+fi
+
+# Provenance: capture this leaf script's git state for the modulefile
+# whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
+# at the top of this script before any cd) so this works even after
+# the script has cd'd into a temp build dir. Self-contained: falls
+# back to "unknown" when run from a stripped-of-.git context (Docker
+# layer, release tarball, or git binary missing).
+LEAF_SCRIPT_NAME="$(basename "${LEAF_SCRIPT_PATH}")"
+LEAF_SCRIPT_COMMIT=unknown
+LEAF_SCRIPT_DIRTY=unknown
+_leaf_dir="$(dirname "${LEAF_SCRIPT_PATH}")"
+if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
+   && git -C "${_leaf_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+   _commit="$(git -C "${_leaf_dir}" log -n 1 --pretty=format:%H -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)"
+   [ -n "${_commit}" ] && LEAF_SCRIPT_COMMIT="${_commit}"
+   unset _commit
+   if [ -n "$(git -C "${_leaf_dir}" status --porcelain -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)" ]; then
+      LEAF_SCRIPT_DIRTY=dirty
+   else
+      LEAF_SCRIPT_DIRTY=clean
+   fi
+fi
+unset _leaf_dir
+
 # The - option suppresses tabs
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/3.0.lua
 	whatis("Name: GPU-aware mvapich")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("Version: 3.0.0")
 	whatis("Description: An open source Message Passing Interface implementation")
 	whatis(" This is a GPU-aware version of Mvapich3")
@@ -237,6 +280,6 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/3.0.lua
 	prepend_path("C_INCLUDE_PATH",pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH",pathJoin(base, "include"))
 	prepend_path("PATH",pathJoin(base, "bin"))
-	prereq("rocm/${ROCM_VERSION}")
+	prereq("${ROCM_MODULE_NAME}")
 	family("MPI")
 EOF

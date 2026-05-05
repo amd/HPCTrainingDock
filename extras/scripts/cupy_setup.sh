@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Capture this script's absolute path BEFORE any cd, so the inline
+# git-provenance block lower down can resolve the script in the repo
+# even after the build has cd'd into a temp dir. (BASH_SOURCE[0] is
+# whatever path was used to invoke the script -- often relative when
+# called from main_setup.sh -- so we absolutize it once, here.)
+LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+
 # Fail fast on errors and surface failures inside pipes. Not using -u
 # (nounset) because some conditional code paths rely on unset variables.
 set -eo pipefail
@@ -41,15 +48,35 @@ ROCM_VERSION=6.2.0
 BUILD_CUPY=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/cupy
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
-CUPY_PATH=""           # default derived after CUPY_VERSION auto-resolve below
+CUPY_PATH=""           # default derived below from CUPY_VERSION
 CUPY_PATH_INPUT=""
-# Sentinel default; resolved to a concrete version after the ROCm version
-# is parsed (see _resolve_cupy_version below).  ROCm-version-aware default
-# matrix:
-#   ROCm >= 7.0.0  ->  CUPY_VERSION=14.0.1   (upstream cupy v14)
-#   ROCm <  7.0.0  ->  CUPY_VERSION=13.6.0   (upstream cupy v13)
+# --install-path: parent dir; the script appends cupy-v${CUPY_VERSION}
+# itself. Used by main_setup.sh so the orchestrator never has to know
+# the version (which is itself ROCm-aware here).
+# --install-path-no-version (full leaf dir, no version appended) wins over
+# --install-path when both are set, for callers that need exact control of
+# the final install directory.
+ROCMPLUS_PATH_INPUT=""
+# Default version. Source selection is ROCm-version-aware (see source-
+# selection block below):
+#   ROCm >= 7.0.0  ->  AMD ROCm/cupy fork  (branch release/rocmds-25.10,
+#                      ships as amd-cupy 13.5.1).  Has the 64-bit
+#                      _shfl_xor_sync mask + HIP_DISABLE_WARP_SYNC_BUILTINS
+#                      backports that upstream cupy v14 lacks; without
+#                      them, NVRTC-compiled gt4py / dace_gpu kernels hit
+#                      hiprtc_runtime.h's "sizeof(unsigned int) == 8"
+#                      static_assert (icon4py reproducer 2026-05-03).
+#                      The user-supplied CUPY_VERSION is ignored on this
+#                      path -- the AMD fork ships whatever it ships, and
+#                      modulefile naming uses the dist-info detector
+#                      below, so the modulefile reflects the truth.
+#   ROCm <  7.0.0  ->  upstream cupy/cupy at tag v${CUPY_VERSION}
+#                      (default v13.6.0; last major series with
+#                       first-class ROCm 6.x support).
+# Opt-in: --cupy-version 14.x on ROCm >=7.0 forces upstream cupy v14
+# (known-broken on AMD as of 2026-05; warning printed at build time).
 # Use "--cupy-version ?" to print the available combinations and exit.
-CUPY_VERSION="auto"
+CUPY_VERSION="13.6.0"
 # --replace 1: rm -rf prior install dir + ${CUPY_VERSION}.lua before building.
 # --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
 REPLACE=0
@@ -69,13 +96,17 @@ fi
 usage()
 {
    echo "Usage:"
-   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  WARNING: when specifying --install-path-no-version and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --build-cupy [ BUILD_CUPY ] default $BUILD_CUPY "
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
-   echo "  --install-path [ CUPY_PATH ] default $CUPY_PATH"
+   echo "  --install-path-no-version [ CUPY_PATH ] default $CUPY_PATH"
+   echo "  --install-path [ ROCMPLUS_PATH_INPUT ] parent dir; if set (and --install-path-no-version is not), CUPY_PATH = ROCMPLUS_PATH/cupy-v\${CUPY_VERSION} (after auto-resolve)"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --cupy-version [ CUPY_VERSION ] specify the version of CuPy, default is $CUPY_VERSION"
-   echo "                                  (auto = 14.0.1 for ROCm >=7.0, 13.6.0 for ROCm <7.0;"
+   echo "                                  (default for ROCm >=7.0 is the AMD ROCm/cupy fork"
+   echo "                                   release/rocmds-25.10 regardless of CUPY_VERSION;"
+   echo "                                   pass --cupy-version 14.x to opt-in to upstream cupy v14"
+   echo "                                   on ROCm 7.x (known-broken, see --cupy-version ?);"
    echo "                                   pass '?' to list available combinations and exit)"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --replace [ 0|1 ] remove prior install + modulefile before building, default $REPLACE"
@@ -123,9 +154,14 @@ do
           MODULE_PATH=${1}
           reset-last
           ;;
-      "--install-path")
+      "--install-path-no-version")
           shift
           CUPY_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--install-path")
+          shift
+          ROCMPLUS_PATH_INPUT=${1}
           reset-last
           ;;
       "--rocm-version")
@@ -154,9 +190,10 @@ do
    shift
 done
 
-# NOTE: default CUPY_PATH is deferred to AFTER the auto-resolve block
-# below, because the install dir name is ${ROCMPLUS}/cupy-v${CUPY_VERSION}
-# and CUPY_VERSION may still be the literal string "auto" at this point.
+# NOTE: default CUPY_PATH is deferred to AFTER the version-resolve
+# block below, because the install dir name is
+# ${ROCMPLUS}/cupy-v${CUPY_VERSION} and CUPY_VERSION may still be the
+# legacy literal "auto" at this point.
 if [ "${CUPY_PATH_INPUT}" != "" ]; then
    CUPY_PATH=${CUPY_PATH_INPUT}
 fi
@@ -164,9 +201,9 @@ fi
 # ── CuPy version <-> ROCm version compatibility resolver ──────────────
 # Placed BEFORE preflight_modules so that `--cupy-version ?` works as a
 # pure documentation query without needing a real rocm/<ver> module to
-# exist on the current host.  Auto-default and the ROCm 6.x + cupy 14.x
-# rejection are also resolved here (only ROCM_VERSION is needed -- the
-# rocm module itself is not).
+# exist on the current host.  Legacy "auto" alias rewrite and the
+# ROCm 6.x + cupy 14.x rejection are also resolved here (only
+# ROCM_VERSION is needed -- the rocm module itself is not).
 #
 # Returns 0 (true) iff ROCM_VERSION >= "$1" (semver compare via sort -V).
 _rocm_ge() {
@@ -185,20 +222,26 @@ _print_cupy_options() {
       cat <<EOF
    ROCm 7.x detected.  Two source paths are supported:
 
-   --cupy-version 14.0.1   (RECOMMENDED, default)
-       Upstream CuPy v14 (https://github.com/cupy/cupy, tag v14.0.1).
-       CuPy v14 dropped official support for ROCm <= 6.x; ROCm 7.x is
-       the supported target.  Optimized for AMD Instinct MI300/MI350.
+   (DEFAULT, RECOMMENDED)   AMD ROCm/cupy fork (release/rocmds-25.10)
+       Cloned from https://github.com/ROCm/cupy on branch
+       release/rocmds-25.10, ships as amd-cupy 13.5.1.  This branch
+       carries the wave-64 _shfl_xor_sync mask + HIP_DISABLE_WARP_SYNC_BUILTINS
+       backports required for AMD's 64-thread warp shuffles.  Selected
+       automatically for ROCm >=7.0 unless --cupy-version 14.x is
+       explicitly requested.  The user-supplied --cupy-version (any
+       13.x tag) is *ignored* on this path -- the branch ships what it
+       ships, and the modulefile name is derived from the wheel's
+       dist-info (see version-detection block in this script).
 
-   --cupy-version 13.x     (LEGACY API, AMD ROCm fork)
-       e.g. --cupy-version 13.5.1 or 13.6.0.  Cloned from the AMD
-       fork at https://github.com/ROCm/cupy on branch
-       release/rocmds-25.10.  This branch backports the ROCm 7.x
-       support that was upstreamed in CuPy v14, so users who need
-       the v13 API surface can still run on ROCm 7.x.  The actual
-       installed package version is taken from the wheel's dist-info,
-       not from --cupy-version, so the modulefile name will reflect
-       whatever the AMD fork ships (currently amd-cupy 13.5.1).
+   --cupy-version 14.x     (OPT-IN, currently broken on AMD)
+       Upstream CuPy v14 (https://github.com/cupy/cupy, tag v\${CUPY_VERSION}).
+       As of 2026-05-03, v14.0.1 emits warp shuffles with a 32-bit
+       0xffffffff mask, which trips hiprtc_runtime.h's "The mask must
+       be a 64 bit integer" static_assert at NVRTC compile time on
+       any ROCm 7.x kernel using __shfl_xor_sync (e.g. gt4py /
+       dace_gpu stencils).  Builds, but kernels fail to compile at
+       runtime.  Use only if you intend to apply a runtime workaround
+       (e.g. -DHIP_DISABLE_WARP_SYNC_BUILTINS injection).
 EOF
    else
       cat <<EOF
@@ -225,14 +268,14 @@ if [ "${CUPY_VERSION}" = "?" ]; then
    exit 0
 fi
 
-# Resolve the auto default to a concrete version based on ROCm.
+# Back-compat: silently rewrite legacy CUPY_VERSION="auto" to the
+# concrete default. (Removed the ROCm-aware auto-resolver that used to
+# default ROCm 7.x to upstream v14.0.1 -- v14 trips the wave-64
+# static_assert; default for ROCm 7.x is now the AMD ROCm/cupy fork
+# regardless of CUPY_VERSION, see source-selection block below.)
 if [ "${CUPY_VERSION}" = "auto" ]; then
-   if _rocm_ge 7.0.0; then
-      CUPY_VERSION="14.0.1"
-   else
-      CUPY_VERSION="13.6.0"
-   fi
-   echo "CUPY_VERSION resolved from 'auto' -> ${CUPY_VERSION} (ROCm ${ROCM_VERSION})"
+   CUPY_VERSION="13.6.0"
+   echo "CUPY_VERSION 'auto' rewritten to ${CUPY_VERSION} (legacy alias; default route on ROCm >=7.0 is the AMD fork regardless)"
 fi
 
 # Reject the unsupported combination CuPy 14 + ROCm 6.x up front so the
@@ -248,10 +291,16 @@ if [ "${_cupy_major}" = "14" ] && ! _rocm_ge 7.0.0; then
 fi
 
 # Default install path now that CUPY_VERSION is concrete (not "auto").
-# Caller-supplied --install-path still wins (handled above as
-# CUPY_PATH=${CUPY_PATH_INPUT}).
+# Caller-supplied --install-path-no-version still wins (handled above as
+# CUPY_PATH=${CUPY_PATH_INPUT}).  --install-path is the orchestrator-
+# friendly middle ground: caller passes the rocmplus parent dir and we
+# append cupy-v${CUPY_VERSION} from the (now resolved) version.
 if [ -z "${CUPY_PATH}" ]; then
-   CUPY_PATH=/opt/rocmplus-${ROCM_VERSION}/cupy-v${CUPY_VERSION}
+   if [ "${ROCMPLUS_PATH_INPUT}" != "" ]; then
+      CUPY_PATH=${ROCMPLUS_PATH_INPUT}/cupy-v${CUPY_VERSION}
+   else
+      CUPY_PATH=/opt/rocmplus-${ROCM_VERSION}/cupy-v${CUPY_VERSION}
+   fi
 fi
 
 # ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
@@ -302,7 +351,18 @@ trap _cupy_on_exit EXIT
 # Now that we have a valid (CUPY_VERSION, ROCM_VERSION) combination,
 # require the rocm/<ver> module to actually be loadable.  This is the
 # point at which any further work touches a real ROCm install.
-REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" )
+# Derive ROCM_MODULE_NAME from the actual ROCM_PATH basename so RC
+# trees (rocm-therock-*, rocm-afar-*) match their loaded module name
+# instead of the SDK numeric. Falls back to the rocm/<version> form
+# for direct standalone invocation where ROCM_PATH is unset.
+if [[ -n "${ROCM_PATH:-}" ]]; then
+   _rp_bn="${ROCM_PATH##*/}"
+   ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
+   unset _rp_bn
+else
+   ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+fi
+REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" )
 preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 ROCM_HOME=${ROCM_PATH}
 
@@ -412,27 +472,45 @@ else
 
       # ── Source selection ─────────────────────────────────────────────
       # Decision matrix (ROCM_VERSION x CUPY_VERSION):
-      #   ROCm >=7.0  +  CuPy 14.x  ->  upstream cupy/cupy  v${CUPY_VERSION}    (default for 7.x)
-      #   ROCm >=7.0  +  CuPy 13.x  ->  AMD fork ROCm/cupy  release/rocmds-25.10
-      #   ROCm <7.0   +  CuPy 13.x  ->  upstream cupy/cupy  v${CUPY_VERSION}    (default for 6.x)
-      #   ROCm <7.0   +  CuPy 14.x  ->  REJECTED above (CuPy v14 dropped ROCm 6.x)
+      #   ROCm >=7.0  +  CuPy != 14.x  ->  AMD fork ROCm/cupy  release/rocmds-25.10  (DEFAULT for ROCm 7.x)
+      #   ROCm >=7.0  +  CuPy 14.x     ->  upstream cupy/cupy  v${CUPY_VERSION}      (OPT-IN, known-broken: see below)
+      #   ROCm <7.0   +  CuPy 13.x     ->  upstream cupy/cupy  v${CUPY_VERSION}      (default for 6.x)
+      #   ROCm <7.0   +  CuPy 14.x     ->  REJECTED above (CuPy v14 dropped ROCm 6.x)
+      #
+      # ROCm-7.x default is the AMD ROCm/cupy fork at release/rocmds-25.10
+      # (audit ref: icon4py / gt4py reproducer 2026-05-03 — upstream
+      # CuPy v14.0.1 emits warp shuffles with a 32-bit 0xffffffff mask
+      # which trips ROCm 7.2's hiprtc_runtime.h "sizeof(unsigned int)
+      # == 8" static_assert on AMD's 64-thread waves; the AMD fork
+      # carries the 64-bit-mask + HIP_DISABLE_WARP_SYNC_BUILTINS
+      # backports that fix it). Restores the 4038e0d behaviour.
+      #
       # The AMD fork pinning at release/rocmds-25.10 is intentional: it
       # is the branch the ROCm team maintains as the "v13 API on ROCm 7"
-      # backport, and it does not honor the user-supplied 13.x tag (the
-      # branch ships whatever version it ships -- currently amd-cupy
-      # 13.5.1).  Modulefile naming uses the actually-installed
-      # dist-info version (see _detect_installed_cupy_version below),
-      # so users see the truth.
-      if _rocm_ge 7.0.0 && [ "${_cupy_major}" = "13" ]; then
-         echo "Source selection: CuPy 13.x on ROCm >=7.0 -> AMD ROCm/cupy fork (release/rocmds-25.10)"
+      # backport, and it does not honor the user-supplied --cupy-version
+      # tag (the branch ships whatever version it ships -- currently
+      # amd-cupy 13.5.1).  Modulefile naming uses the actually-installed
+      # dist-info version (see version-detection block below), so users
+      # see the truth.
+      if _rocm_ge 7.0.0 && [ "${_cupy_major}" != "14" ]; then
+         echo "Source selection: ROCm >=7.0 default -> AMD ROCm/cupy fork (release/rocmds-25.10)"
+         echo "                  (carries 64-bit _shfl_xor_sync mask + HIP_DISABLE_WARP_SYNC_BUILTINS"
+         echo "                   backports that upstream cupy v14 lacks; see icon4py reproducer)"
          git clone -q --depth 1 -b release/rocmds-25.10 https://github.com/ROCm/cupy.git
          cd cupy
          git submodule update --init --recursive
+      elif _rocm_ge 7.0.0 && [ "${_cupy_major}" = "14" ]; then
+         echo "WARNING: --cupy-version ${CUPY_VERSION} on ROCm 7.x is known-broken"
+         echo "         (hiprtc_runtime.h \"sizeof(unsigned int) == 8\" static_assert"
+         echo "          fires at NVRTC compile time on any kernel using __shfl_xor_sync;"
+         echo "          icon4py / gt4py reproducer 2026-05-03)."
+         echo "         Building anyway because --cupy-version 14.x was explicitly requested."
+         echo "Source selection: upstream cupy/cupy tag v${CUPY_VERSION} (OPT-IN, broken on AMD)"
+         git clone -q --depth 1 -b v$CUPY_VERSION --recursive https://github.com/cupy/cupy.git
+         cd cupy
       else
-         # Upstream cupy at the requested tag.  Covers two cases:
-         #   - ROCm >=7.0 + CuPy 14.x (default for ROCm 7.x)
-         #   - ROCm <7.0  + CuPy 13.x (default for ROCm 6.x)
-         echo "Source selection: upstream cupy/cupy tag v${CUPY_VERSION}"
+         # ROCm <7.0 path: upstream cupy at the requested tag (default 13.6.0).
+         echo "Source selection: ROCm <7.0 -> upstream cupy/cupy tag v${CUPY_VERSION}"
          git clone -q --depth 1 -b v$CUPY_VERSION --recursive https://github.com/cupy/cupy.git
          cd cupy
       fi
@@ -452,7 +530,7 @@ else
       fi
 
       SAVED_ROCM_HOME=${ROCM_HOME}
-      module unload rocm/${ROCM_VERSION}
+      module unload ${ROCM_MODULE_NAME}
    fi
 
    # Determine the version label for the modulefile from what was
@@ -507,11 +585,35 @@ else
    PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
+   # Provenance: capture this leaf script's git state for the modulefile
+   # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
+   # at the top of this script before any cd) so this works even after
+   # the script has cd'd into a temp build dir. Self-contained: falls
+   # back to "unknown" when run from a stripped-of-.git context (Docker
+   # layer, release tarball, or git binary missing).
+   LEAF_SCRIPT_NAME="$(basename "${LEAF_SCRIPT_PATH}")"
+   LEAF_SCRIPT_COMMIT=unknown
+   LEAF_SCRIPT_DIRTY=unknown
+   _leaf_dir="$(dirname "${LEAF_SCRIPT_PATH}")"
+   if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
+      && git -C "${_leaf_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      _commit="$(git -C "${_leaf_dir}" log -n 1 --pretty=format:%H -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)"
+      [ -n "${_commit}" ] && LEAF_SCRIPT_COMMIT="${_commit}"
+      unset _commit
+      if [ -n "$(git -C "${_leaf_dir}" status --porcelain -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)" ]; then
+         LEAF_SCRIPT_DIRTY=dirty
+      else
+         LEAF_SCRIPT_DIRTY=clean
+      fi
+   fi
+   unset _leaf_dir
+
    # The - option suppresses tabs
    cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${INSTALLED_CUPY_VERSION}.lua
 	whatis("CuPy with ROCm support (installed package: ${INSTALLED_CUPY_VERSION})")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
-	prereq("rocm/${ROCM_VERSION}")
+	prereq("${ROCM_MODULE_NAME}")
 	prepend_path("PYTHONPATH","$CUPY_PATH")
 	prepend_path("CPATH","/usr/lib/gcc/x86_64-linux-gnu/12/include")
         setenv("ROCM_HOME","$SAVED_ROCM_HOME")

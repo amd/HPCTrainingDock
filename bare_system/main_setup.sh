@@ -45,65 +45,36 @@
 : ${REPLACE_EXISTING:="0"}   # 1 = remove prior rocmplus-<v> install + module dirs first
 : ${KEEP_FAILED_INSTALLS:="0"}  # 1 = keep partial install dirs/modulefiles when a package fails (for post-mortem)
 
-# ── Quick-install package versions (single source of truth) ──────────
-# Each per-package setup script keeps its own internal default for
-# standalone use, but main_setup.sh pins them here so the version
-# threaded into each per-package invocation matches the version that
-# script's `--replace` flag will use to clean the prior install dir +
-# <version>.lua modulefile. Bumping a version here is sufficient for
-# the next sweep; the older versioned install dir + .lua are left in
-# place so multiple versions can coexist.
-: ${FFTW_VERSION:=3.3.10}
-: ${HDF5_VERSION:=1.14.6}
-: ${HPCTOOLKIT_VERSION:=2025.1.2}
-# hpcviewer is built by hpctoolkit_setup.sh as a separate spack
-# install (different upstream release cadence than hpctoolkit). The
-# pin here matches the hpctoolkit_setup.sh default and is what the
-# spack `hpcviewer@${HPCVIEWER_VERSION}` invocation locks the build
-# to, so the cache tar name (hpcviewer-v${HPCVIEWER_VERSION}.tgz),
-# the on-disk install dir (hpcviewer-v${HPCVIEWER_VERSION}/), and
-# the modulefile's spack-hash subdir all agree (job 8063 audit).
-: ${HPCVIEWER_VERSION:=2026.0.0}
-: ${HYPRE_VERSION:=3.1.0}
-: ${JAX_VERSION:=8.0}
-: ${KOKKOS_VERSION:=4.7.04}
-: ${MAGMA_VERSION:=v2.10.0}
-# Miniconda3 / Miniforge3 are exempt from the --replace mechanism (see
-# the comment block above their run_and_log calls) but they are now
-# pinned here for the same reason as the rest of this block: so the
-# version threaded into each per-package invocation matches the
-# versioned install dir that miniconda3_setup.sh / miniforge3_setup.sh
-# create (/opt/miniconda3-v${MINICONDA3_VERSION}, /opt/miniforge3-v${
-# MINIFORGE3_VERSION}) and that the in-script existence guard checks.
-# Bumping a version here is sufficient for the next sweep; the older
-# versioned install dir + .lua are left in place so multiple versions
-# can coexist (intentional: these envs are shared across ROCm versions
-# so users may pin to a known-good Python / mamba release).
-: ${MINICONDA3_VERSION:=25.3.1}
-: ${MINIFORGE3_VERSION:=24.9.0}
-: ${MPI4PY_VERSION:=4.1.0}
-: ${NETCDF_C_VERSION:=4.9.3}
-: ${NETCDF_F_VERSION:=4.6.2}
-: ${OPENBLAS_VERSION:=0.3.33}
-: ${PETSC_VERSION:=3.24.1}
-: ${PYTORCH_VERSION:=2.9.1}
-: ${SCOREP_VERSION:=9.4}
-# CuPy default mirrors cupy_setup.sh's ROCm-aware auto-resolve so the
-# `--replace` rm path, the modulefile name, the cache tarball name, and
-# the in-script existence guard inside cupy_setup.sh all agree on the
-# same concrete version. (Without pinning here, cupy_setup.sh would see
-# "auto" and resolve internally; everything would still work, but the
-# pinned version makes the per-package summary log self-explanatory.)
-# Override with `CUPY_VERSION=14.x.y main_setup.sh ...`.
-if [ -z "${CUPY_VERSION:-}" ]; then
-   _rocm_major="${ROCM_VERSION%%.*}"
-   if [ "${_rocm_major}" -ge 7 ] 2>/dev/null; then
-      CUPY_VERSION=14.0.1
-   else
-      CUPY_VERSION=13.6.0
-   fi
-   unset _rocm_major
-fi
+# ── Per-package versions: leaf scripts own them ──────────────────────
+# Every per-package setup script under {extras,tools,comm,rocm}/scripts/
+# holds its own internal version default (PKG_VERSION declaration at
+# the top of the script). main_setup.sh threads only the parent install
+# directory via --install-path (which the migrated leaf scripts now
+# treat as a parent dir + auto-append their own pkg-v${PKG_VERSION}
+# subdir); --install-path-no-version is the leaf-side escape hatch for
+# direct-invocation callers who want exact control of the final path.
+# miniconda3 / miniforge3 use the same --install-path convention but
+# rooted at TOP_INSTALL_PATH (outside the rocmplus tree, since they
+# are ROCm-version-independent).
+#
+# Why: bumping a version is now a 1-line edit in the leaf script and
+# the next sweep picks it up automatically. The older versioned install
+# dir + .lua modulefile are left in place so multiple versions still
+# coexist on disk. cupy_setup.sh additionally resolves CUPY_VERSION
+# from a ROCm-aware default ("auto" -> 14.0.1 on ROCm >= 7.0, 13.6.0
+# otherwise); jax_setup.sh has a similar policy gate that downshifts
+# JAX_VERSION on ROCm 6.x.
+#
+# Operator escape hatches:
+#   * Direct invocation:  pkg_setup.sh --<pkg>-version X.Y.Z ...
+#   * Pin from main_setup.sh: edit the PKG_VERSION default in the leaf
+#     script (NOT this file). Searches across the tree for the variable
+#     name (e.g. `rg FFTW_VERSION extras/scripts/`) point at exactly
+#     one place.
+#
+# mpi4py was the trial migration; the same shape (single PKG_VERSION,
+# leaf appends version, orchestrator passes parent dir) applies to all
+# 14 leaf scripts touched by this pass.
 
 INSTALL_ROCPROF_SYS_FROM_SOURCE=0
 INSTALL_ROCPROF_COMPUTE_FROM_SOURCE=0
@@ -141,9 +112,10 @@ usage()
    echo "  --install-rocprof-sys-from-source [0 or 1]:  default is $INSTALL_ROCPROF_SYS_FROM_SOURCE (false)"
    echo "  --use-makefile [0 or 1]:  default is 0 (false)"
    echo "  --quick-installs [0 or 1]:  skip packages whose wall >= 20 min (measured from job 8065 sweep): pytorch (91m), tensorflow (70m), jax (34m, when policy gate allows). Also skips ftorch (transitive: needs pytorch) and julia (dormant: no install wired). Threshold raised from 15 -> 20 min after job 8065 audit moved petsc (17m) and scorep (17m) under the cutoff. Default $QUICK_INSTALLS"
-   echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf \${TOP_INSTALL_PATH}/miniconda3-v\${MINICONDA3_VERSION} (or miniforge3-v\${MINIFORGE3_VERSION}). Default $REPLACE_EXISTING"
+   echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf the versioned subdir under \${TOP_INSTALL_PATH} (the version itself lives in the leaf script). Default $REPLACE_EXISTING"
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
    echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, kokkos, miniconda3, miniforge3, hipfort, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs)."
+   echo "  --rocm-rc-prefix [ FAMILY ]:  release-candidate family name (e.g. 'therock', 'afar'). Auto-detected from \${ROCM_PATH} basename for rocm-{therock,afar}-* trees. Empty for regular releases. When non-empty, install/module dirs become rocmplus-\${FAMILY}-\${ROCM_VERSION}/ instead of rocmplus-\${ROCM_VERSION}/. Default: auto-detected (empty for regular releases)."
    echo "  --help: prints this message"
    exit 1
 }
@@ -217,6 +189,12 @@ do
           PACKAGES_INPUT=${1}
           reset-last
           ;;
+      "--rocm-rc-prefix")
+          shift
+          ROCM_RC_PREFIX=${1}
+          ROCM_RC_PREFIX_USER_SET=1
+          reset-last
+          ;;
       "--help")
           usage
           ;;
@@ -228,28 +206,42 @@ do
    shift
 done
 
-# ── Detect ROCm version from loaded module (if any) ──────────────────
-# Always check what's loaded so we can decide whether to skip the install.
+# ── Detect ROCm version + RC prefix from loaded module (if any) ──────
+# ROCM_MODULE_VERSION is the SDK numeric (from .info/version), used for
+# both the loaded-vs-requested cross-check below and (when --rocm-version
+# was not explicitly passed) as the fallback for ROCM_VERSION itself.
+#
+# ROCM_RC_PREFIX is empty for a regular release (rocm-7.2.1) and is the
+# release-candidate FAMILY NAME for tagged trees (e.g. 'therock' for
+# rocm-therock-23.2.0, 'afar' for rocm-afar-22.2.0). The dash separator
+# between prefix and ROCM_VERSION is added downstream by the
+# ${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-} expansion when constructing
+# install / module paths -- this keeps the regular-release path byte-
+# identical to the prior behavior (no prefix, no dash, no change).
+#
+# The --rocm-rc-prefix CLI override (parsed above) wins if explicitly
+# set; otherwise we auto-derive from the ROCM_PATH basename. The user-
+# set sentinel ROCM_RC_PREFIX_USER_SET is what distinguishes "operator
+# passed --rocm-rc-prefix '' to force regular semantics on a tagged
+# install dir" (don't auto-detect) from "operator didn't pass it at
+# all" (do auto-detect).
 ROCM_MODULE_VERSION=""
+: ${ROCM_RC_PREFIX:=""}
+: ${ROCM_RC_PREFIX_USER_SET:=0}
 
-if [ -n "${ROCM_PATH}" ] && [ -f "${ROCM_PATH}/.info/version" ]; then
-   ROCM_MODULE_VERSION=$(cat "${ROCM_PATH}/.info/version" | cut -f1 -d'-')
-   echo "Detected loaded ROCm module version ${ROCM_MODULE_VERSION} (ROCM_PATH=${ROCM_PATH})"
-fi
-
-if [ -z "${ROCM_MODULE_VERSION}" ]; then
-   ROCM_AFAR_LINE=$(module list 2>&1 | grep 'rocm/afar' || true)
-   if [[ $ROCM_AFAR_LINE =~ (rocm/afar-[0-9.]*) ]]; then
-      ROCM_MODULE_VERSION=$(echo "${BASH_REMATCH[1]}" | sed -e 's!rocm/!!')
-      echo "Detected loaded ROCm AFAR module: ${ROCM_MODULE_VERSION}"
+if [ -n "${ROCM_PATH}" ] && [ -d "${ROCM_PATH}" ]; then
+   if [ -f "${ROCM_PATH}/.info/version" ]; then
+      ROCM_MODULE_VERSION=$(cut -f1 -d'-' "${ROCM_PATH}/.info/version")
+      echo "Detected loaded ROCm module numeric version ${ROCM_MODULE_VERSION} (ROCM_PATH=${ROCM_PATH})"
    fi
-fi
-
-if [ -z "${ROCM_MODULE_VERSION}" ]; then
-   ROCM_THEROCK_LINE=$(module list 2>&1 | grep 'rocm/therock' || true)
-   if [[ $ROCM_THEROCK_LINE =~ (rocm/therock-[0-9.]*) ]]; then
-      ROCM_MODULE_VERSION=$(echo "${BASH_REMATCH[1]}" | sed -e 's!rocm/!!')
-      echo "Detected loaded ROCm TheRock module: ${ROCM_MODULE_VERSION}"
+   if [ "${ROCM_RC_PREFIX_USER_SET}" != "1" ]; then
+      _rocm_basename="${ROCM_PATH##*/}"          # rocm-therock-23.2.0 or rocm-7.2.1
+      _rocm_suffix="${_rocm_basename#rocm-}"      # therock-23.2.0 or 7.2.1
+      if [[ ! "${_rocm_suffix}" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+         ROCM_RC_PREFIX="${_rocm_suffix%%-*}"     # therock | afar (family name only, no trailing dash)
+         echo "Detected ROCm release-candidate prefix: '${ROCM_RC_PREFIX}' (RC tag suffix: '${_rocm_suffix#${ROCM_RC_PREFIX}-}')"
+      fi
+      unset _rocm_basename _rocm_suffix
    fi
 fi
 
@@ -571,6 +563,7 @@ echo "=============================================="
 echo "  TOP_INSTALL_PATH : ${TOP_INSTALL_PATH}"
 echo "  TOP_MODULE_PATH  : ${TOP_MODULE_PATH}"
 echo "  ROCM_VERSION     : ${ROCM_VERSION}"
+echo "  ROCM_RC_PREFIX   : '${ROCM_RC_PREFIX}'  (install dir suffix: rocmplus-${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCM_VERSION})"
 echo "  AMDGPU_GFXMODEL  : ${AMDGPU_GFXMODEL}"
 echo "  PYTHON_VERSION   : 3.${PYTHON_VERSION}"
 echo "  ROCM_INSTALLPATH : ${ROCM_INSTALLPATH}"
@@ -594,7 +587,17 @@ else
 fi
 
 # ── Derived paths ────────────────────────────────────────────────────
-ROCMPLUS="${TOP_INSTALL_PATH}/rocmplus-${ROCM_VERSION}"
+# ROCMPLUS_SUFFIX is the suffix used after `rocmplus-` for both install
+# dirs and module category dirs. For a regular release ROCM_RC_PREFIX
+# is empty and the ${VAR:+...} expansion contributes nothing, so the
+# suffix is just ${ROCM_VERSION} (byte-identical to prior behavior).
+# For a release-candidate (ROCM_RC_PREFIX='therock', say) it becomes
+# 'therock-${ROCM_VERSION}', e.g. 'therock-7.13.0'. This means therock
+# / afar installs cannot collide with a future official rocm release
+# of the same numeric version (no upstream release has a 'therock-' or
+# 'afar-' family prefix).
+ROCMPLUS_SUFFIX="${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCM_VERSION}"
+ROCMPLUS="${TOP_INSTALL_PATH}/rocmplus-${ROCMPLUS_SUFFIX}"
 
 # ── --replace-existing + --keep-failed-installs ──────────────────────
 #
@@ -644,10 +647,34 @@ REPLACE_OPTS="--replace ${REPLACE_EXISTING} --keep-failed-installs ${KEEP_FAILED
 
 # Helper: returns --install-path + --module-path flags for a given package.
 # Usage: $(path_args <install_subpath> <module_category/package>)
+# Used by the legacy scripts that have NOT been migrated to the
+# version-agnostic --install-path-as-parent pattern (flang-new, openmpi,
+# mvapich, rocprof-sys, rocprof-compute, hip-python, hipfort, hipifly,
+# tensorflow, ftorch). For these, --install-path is treated as a full
+# leaf dir (no version appended by the leaf script) -- effectively the
+# legacy semantic predating the new --install-path / --install-path-no-
+# version convention. main_setup.sh still constructs the full path
+# here, including any subpath under ROCMPLUS.
 path_args()
 {
    if [ "${USE_CUSTOM_PATHS}" == 1 ]; then
       echo "--install-path ${ROCMPLUS}/${1} --module-path ${TOP_MODULE_PATH}/${2}"
+   fi
+}
+
+# Helper: returns --install-path + --module-path flags for a MIGRATED
+# package. Migrated = leaf script accepts --install-path as a PARENT
+# directory and appends its own pkg-v${PKG_VERSION} subdir, so
+# main_setup.sh stays version-agnostic. Used by the 14 leaf scripts
+# that own their versions: fftw, hdf5, hypre, kokkos, petsc, pytorch,
+# cupy, hpctoolkit, jax, magma, netcdf, scorep, miniconda3 / miniforge3
+# (those last two get --install-path inline since their install lives
+# outside ROCMPLUS, under TOP_INSTALL_PATH).
+# Usage: $(rocmplus_args <module_category/package>)
+rocmplus_args()
+{
+   if [ "${USE_CUSTOM_PATHS}" == 1 ]; then
+      echo "--install-path ${ROCMPLUS} --module-path ${TOP_MODULE_PATH}/${1}"
    fi
 }
 
@@ -659,6 +686,23 @@ if [ -n "${ROCM_MODULE_VERSION}" ] && [ "${ROCM_MODULE_VERSION}" == "${ROCM_VERS
 elif [ -n "${ROCM_MODULE_VERSION}" ] && [ "${ROCM_MODULE_VERSION}" != "${ROCM_VERSION}" ]; then
    echo "ERROR: Loaded ROCm module (${ROCM_MODULE_VERSION}) does not match requested version (${ROCM_VERSION})."
    echo "       Please unload the current module or use --rocm-version ${ROCM_MODULE_VERSION}"
+   exit 1
+fi
+
+# ── Guard: amdgpu-install path cannot produce therock/afar trees ──────
+# rocm/scripts/rocm_setup.sh installs via amdgpu-install, which only
+# knows about official upstream ROCm releases (rocm-X.Y.Z). Trying to
+# materialize a release-candidate flavor (rocm-therock-X.Y.Z, rocm-
+# afar-X.Y.Z) through it cannot work; the operator must load the
+# corresponding pre-installed module first so SKIP_ROCM_INSTALL=1
+# above. If we got here with a non-empty ROCM_RC_PREFIX it means no
+# matching module was loaded -- abort cleanly with an actionable
+# message rather than letting amdgpu-install run and fail confusingly.
+if [ "${SKIP_ROCM_INSTALL}" == 0 ] && [ -n "${ROCM_RC_PREFIX}" ]; then
+   echo "ERROR: ROCM_RC_PREFIX='${ROCM_RC_PREFIX}' set but no matching rocm module is loaded." >&2
+   echo "       The amdgpu-install path cannot produce a ${ROCM_RC_PREFIX}-* tree;" >&2
+   echo "       load the appropriate rocm module first (e.g. module load rocm/${ROCM_RC_PREFIX}-<tag>)" >&2
+   echo "       so the SDK is provided externally and main_setup.sh proceeds with the rocmplus stack." >&2
    exit 1
 fi
 
@@ -713,39 +757,43 @@ fi
 # their installs are SHARED across ROCm versions and a multi-version
 # sweep should never silently nuke a working conda/mamba env. To
 # force a rebuild of those, the operator does `rm -rf
-# /opt/miniconda3-v${MINICONDA3_VERSION}` (or miniforge3 equivalent)
-# by hand.
+# ${TOP_INSTALL_PATH}/miniconda3-v<version>` (or miniforge3 equivalent)
+# by hand. The version is owned by the leaf script (MINICONDA3_VERSION
+# / MINIFORGE3_VERSION default at the top of each *_setup.sh).
 
 run_and_log flang-new rocm/scripts/flang-new_setup.sh ${COMMON_OPTIONS} --build-flang-new ${BUILD_FLANGNEW} ${REPLACE_OPTS} \
-   $(path_args " " rocmplus-${ROCM_VERSION}/amdflang-new)
+   $(path_args " " rocmplus-${ROCMPLUS_SUFFIX}/amdflang-new)
 
 # openmpi block also produces xpmem-*, ucx-*, ucc-* under ROCMPLUS.
 # BUILD_OPENMPI=0 opt-out and existence check both live in
 # openmpi_setup.sh; we just thread --build-openmpi through.
 run_and_log openmpi comm/scripts/openmpi_setup.sh ${COMMON_OPTIONS} --build-openmpi ${BUILD_OPENMPI} --build-xpmem 1 ${REPLACE_OPTS} \
-   $(path_args " " rocmplus-${ROCM_VERSION}/openmpi)
+   $(path_args " " rocmplus-${ROCMPLUS_SUFFIX}/openmpi)
 
-run_and_log mpi4py comm/scripts/mpi4py_setup.sh ${COMMON_OPTIONS} --build-mpi4py ${BUILD_MPI4PY} --mpi4py-version ${MPI4PY_VERSION} ${REPLACE_OPTS} \
-   $(path_args mpi4py-v${MPI4PY_VERSION} rocmplus-${ROCM_VERSION}/mpi4py)
+# mpi4py owns its own version (see comment block at the version pins
+# above). main_setup.sh passes only --install-path (the parent dir);
+# mpi4py_setup.sh appends mpi4py-v${MPI4PY_VERSION} itself.
+run_and_log mpi4py comm/scripts/mpi4py_setup.sh ${COMMON_OPTIONS} --build-mpi4py ${BUILD_MPI4PY} ${REPLACE_OPTS} \
+   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${ROCMPLUS} --module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/mpi4py")
 
 if [[ "${BUILD_MVAPICH}" == "1" ]] && [[ ! -d ${ROCMPLUS}/mvapich ]]; then
    run_and_log mvapich comm/scripts/mvapich_setup.sh ${COMMON_OPTIONS} ${REPLACE_OPTS} \
-      $(path_args mvapich rocmplus-${ROCM_VERSION}/mvapich)
+      $(path_args mvapich rocmplus-${ROCMPLUS_SUFFIX}/mvapich)
 fi
 
 run_and_log rocprof-sys tools/scripts/rocprof-sys_setup.sh ${COMMON_OPTIONS} --build-rocprof-sys ${BUILD_ROCPROF_SYS} --install-rocprof-sys-from-source ${INSTALL_ROCPROF_SYS_FROM_SOURCE} --python-version ${PYTHON_VERSION} ${REPLACE_OPTS} \
-   $(path_args rocprofiler-system rocmplus-${ROCM_VERSION}/rocprofiler-system)
+   $(path_args rocprofiler-system rocmplus-${ROCMPLUS_SUFFIX}/rocprofiler-system)
 
 run_and_log rocprof-compute tools/scripts/rocprof-compute_setup.sh ${COMMON_OPTIONS} --build-rocprof-compute ${BUILD_ROCPROF_COMPUTE} --install-rocprof-compute-from-source ${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE} --python-version ${PYTHON_VERSION} ${REPLACE_OPTS} \
-   $(path_args rocprofiler-compute rocmplus-${ROCM_VERSION}/rocprofiler-compute)
+   $(path_args rocprofiler-compute rocmplus-${ROCMPLUS_SUFFIX}/rocprofiler-compute)
 
 #if [[ ! -d ${ROCMPLUS}/rocprofiler-sdk ]]; then
 #   run_and_log rocprofiler-sdk tools/scripts/rocprofiler-sdk_setup.sh ${COMMON_OPTIONS} --build-rocprofiler-sdk ${BUILD_ROCPROFILER_SDK} --python-version ${PYTHON_VERSION} \
-#      $(path_args rocprofiler-sdk rocmplus-${ROCM_VERSION}/rocprofiler-sdk)
+#      $(path_args rocprofiler-sdk rocmplus-${ROCMPLUS_SUFFIX}/rocprofiler-sdk)
 #fi
 
-run_and_log hpctoolkit tools/scripts/hpctoolkit_setup.sh ${COMMON_OPTIONS} --build-hpctoolkit ${BUILD_HPCTOOLKIT} --hpctoolkit-version ${HPCTOOLKIT_VERSION} --hpcviewer-version ${HPCVIEWER_VERSION} ${REPLACE_OPTS} \
-   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--hpctoolkit-install-path ${ROCMPLUS}/hpctoolkit-v${HPCTOOLKIT_VERSION} --hpcviewer-install-path ${ROCMPLUS}/hpcviewer-v${HPCVIEWER_VERSION} --module-path ${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/hpctoolkit")
+run_and_log hpctoolkit tools/scripts/hpctoolkit_setup.sh ${COMMON_OPTIONS} --build-hpctoolkit ${BUILD_HPCTOOLKIT} ${REPLACE_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/hpctoolkit)
 
 # scorep + tau share ${ROCMPLUS}/pdt. Their setup scripts default to
 # leaving pdt in place across re-installs (it's a shared dep); only
@@ -759,21 +807,21 @@ if [[ "${REPLACE_EXISTING}" == "1" && "${BUILD_SCOREP}" == "1" && "${BUILD_TAU}"
    SCOREP_REPLACE_PDT="--replace-pdt 1"
    TAU_REPLACE_PDT="--replace-pdt 1"
 fi
-run_and_log scorep tools/scripts/scorep_setup.sh ${COMMON_OPTIONS} --build-scorep ${BUILD_SCOREP} --scorep-version ${SCOREP_VERSION} ${REPLACE_OPTS} ${SCOREP_REPLACE_PDT} \
-   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--scorep-install-path ${ROCMPLUS}/scorep-v${SCOREP_VERSION} --pdt-install-path ${ROCMPLUS}/pdt --module-path ${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/scorep")
+run_and_log scorep tools/scripts/scorep_setup.sh ${COMMON_OPTIONS} --build-scorep ${BUILD_SCOREP} ${REPLACE_OPTS} ${SCOREP_REPLACE_PDT} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/scorep)
 
 #run_and_log grafana tools/scripts/grafana_setup.sh
 
 run_and_log tau tools/scripts/tau_setup.sh ${COMMON_OPTIONS} --build-tau ${BUILD_TAU} ${REPLACE_OPTS} ${TAU_REPLACE_PDT} \
-   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--tau-install-path ${ROCMPLUS}/tau --pdt-install-path ${ROCMPLUS}/pdt --module-path ${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/tau")
+   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--tau-install-path ${ROCMPLUS}/tau --pdt-install-path ${ROCMPLUS}/pdt --module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/tau")
 
 #run_and_log compiler extras/scripts/compiler_setup.sh
 
-run_and_log cupy extras/scripts/cupy_setup.sh ${COMMON_OPTIONS} --build-cupy ${BUILD_CUPY} --cupy-version ${CUPY_VERSION} ${REPLACE_OPTS} \
-   $(path_args cupy-v${CUPY_VERSION} rocmplus-${ROCM_VERSION}/cupy)
+run_and_log cupy extras/scripts/cupy_setup.sh ${COMMON_OPTIONS} --build-cupy ${BUILD_CUPY} ${REPLACE_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/cupy)
 
 run_and_log hip-python extras/scripts/hip-python_setup.sh ${COMMON_OPTIONS} --build-hip-python ${BUILD_HIP_PYTHON} ${REPLACE_OPTS} \
-   $(path_args hip-python rocmplus-${ROCM_VERSION}/hip-python)
+   $(path_args hip-python rocmplus-${ROCMPLUS_SUFFIX}/hip-python)
 
 # tensorflow / jax / pytorch / ftorch are the long-pole builds (each
 # 30-90 min on a cold workspace) and have been moved to the END of the
@@ -781,8 +829,8 @@ run_and_log hip-python extras/scripts/hip-python_setup.sh ${COMMON_OPTIONS} --bu
 # netcdf, fftw, petsc, hypre) finish first and surface fast in the
 # logs. See the block after `hypre` below for the reordered ML group.
 
-run_and_log magma extras/scripts/magma_setup.sh ${COMMON_OPTIONS} --build-magma ${BUILD_MAGMA} --magma-version ${MAGMA_VERSION} --openblas-version ${OPENBLAS_VERSION} ${REPLACE_OPTS} \
-   $(path_args "" rocmplus-${ROCM_VERSION})
+run_and_log magma extras/scripts/magma_setup.sh ${COMMON_OPTIONS} --build-magma ${BUILD_MAGMA} ${REPLACE_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX})
 
 # apps_setup.sh is intentionally disabled. It is not gated by --packages
 # (no BUILD_APPS flag), runs unconditionally on every sweep pass, and
@@ -792,17 +840,18 @@ run_and_log magma extras/scripts/magma_setup.sh ${COMMON_OPTIONS} --build-magma 
 # BUILD_APPS gate first so it can be selected by --packages.
 #run_and_log apps extras/scripts/apps_setup.sh
 
-run_and_log kokkos extras/scripts/kokkos_setup.sh ${COMMON_OPTIONS} --build-kokkos ${BUILD_KOKKOS} --kokkos-version ${KOKKOS_VERSION} ${REPLACE_OPTS} \
-   $(path_args kokkos-v${KOKKOS_VERSION} rocmplus-${ROCM_VERSION}/kokkos)
+run_and_log kokkos extras/scripts/kokkos_setup.sh ${COMMON_OPTIONS} --build-kokkos ${BUILD_KOKKOS} ${REPLACE_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/kokkos)
 
 # miniconda3 / miniforge3 are intentionally exempt from --replace-existing.
-# Their install paths (/opt/miniconda3-v${MINICONDA3_VERSION}, /opt/miniforge3-
-# v${MINIFORGE3_VERSION}) and module dirs (${TOP_MODULE_PATH}/LinuxPlus/...)
-# are SHARED across ROCm versions -- they don't depend on which ROCm release
-# the orchestrator is currently iterating. With multi-version sweeps invoked
-# under --replace-existing 1, calling replace_pkg here would delete the
-# install at the start of every ROCm-version pass and force a full rebuild
-# of conda/forge per version, which is pure waste (the result is identical).
+# Their install paths (${TOP_INSTALL_PATH}/miniconda3-v<version>,
+# ${TOP_INSTALL_PATH}/miniforge3-v<version>) and module dirs
+# (${TOP_MODULE_PATH}/LinuxPlus/...) are SHARED across ROCm versions --
+# they don't depend on which ROCm release the orchestrator is currently
+# iterating. With multi-version sweeps invoked under --replace-existing
+# 1, calling replace_pkg here would delete the install at the start of
+# every ROCm-version pass and force a full rebuild of conda/forge per
+# version, which is pure waste (the result is identical).
 #
 # Architecture (matches the rest of the migrated packages, with two
 # deliberate exceptions):
@@ -814,45 +863,49 @@ run_and_log kokkos extras/scripts/kokkos_setup.sh ${COMMON_OPTIONS} --build-kokk
 #   * --replace is INTENTIONALLY NOT THREADED (the two exceptions): no
 #     ${REPLACE_OPTS} on these calls and no --replace argument parsing
 #     in either setup script. Forcing a rebuild is a manual operator
-#     action: `rm -rf /opt/miniconda3-v${MINICONDA3_VERSION}` (or the
-#     miniforge3 equivalent) followed by re-running main_setup.sh.
+#     action: `rm -rf ${TOP_INSTALL_PATH}/miniconda3-v<version>` (or
+#     the miniforge3 equivalent) followed by re-running main_setup.sh.
 #     This matches the SHARED-across-ROCm-versions intent: a multi-
 #     version sweep should never silently nuke a working conda/mamba
 #     env that other ROCm passes also depend on.
 # Multi-version coexistence works because the install path and the
-# .lua modulefile are both keyed on ${MINICONDA3_VERSION} / ${
-# MINIFORGE3_VERSION}: bumping the pin in the version block above
-# leaves the prior version's install + module in place; `module load
-# miniconda3` continues to load the default version per Lmod's usual
-# rules.
-run_and_log miniconda3 extras/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniconda3 ${BUILD_MINICONDA3} --miniconda3-version ${MINICONDA3_VERSION} --python-version ${PYTHON_VERSION} \
-   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH}/miniconda3-v${MINICONDA3_VERSION} --module-path ${TOP_MODULE_PATH}/LinuxPlus/miniconda3")
+# .lua modulefile are both keyed on the leaf script's MINICONDA3_VERSION
+# / MINIFORGE3_VERSION default; bumping the version inside the leaf
+# script leaves the prior version's install + module in place;
+# `module load miniconda3` continues to load the default version per
+# Lmod's usual rules. main_setup.sh threads only --install-path (the
+# parent dir, here ${TOP_INSTALL_PATH} since miniconda3 / miniforge3
+# live OUTSIDE the rocmplus tree) and the leaf scripts append the
+# versioned subdir themselves, matching the --install-path = parent +
+# version-append convention used by the migrated leaf scripts.
+run_and_log miniconda3 extras/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniconda3 ${BUILD_MINICONDA3} --python-version ${PYTHON_VERSION} \
+   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH} --module-path ${TOP_MODULE_PATH}/LinuxPlus/miniconda3")
 
-run_and_log miniforge3 extras/scripts/miniforge3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniforge3 ${BUILD_MINIFORGE3} --miniforge3-version ${MINIFORGE3_VERSION} \
-   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH}/miniforge3-v${MINIFORGE3_VERSION} --module-path ${TOP_MODULE_PATH}/LinuxPlus/miniforge3")
+run_and_log miniforge3 extras/scripts/miniforge3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniforge3 ${BUILD_MINIFORGE3} \
+   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH} --module-path ${TOP_MODULE_PATH}/LinuxPlus/miniforge3")
 
 run_and_log hipfort extras/scripts/hipfort_setup.sh ${COMMON_OPTIONS} --build-hipfort ${BUILD_HIPFORT} ${REPLACE_OPTS} \
-   $(path_args hipfort rocmplus-${ROCM_VERSION}/hipfort_from_source)
+   $(path_args hipfort rocmplus-${ROCMPLUS_SUFFIX}/hipfort_from_source)
 
 run_and_log hipifly extras/scripts/hipifly_setup.sh --rocm-version ${ROCM_VERSION} --build-hipifly ${BUILD_HIPIFLY} --hipifly-module ${HIPIFLY_MODULE} ${REPLACE_OPTS} \
-   $(path_args hipifly rocmplus-${ROCM_VERSION}/hipifly)
+   $(path_args hipifly rocmplus-${ROCMPLUS_SUFFIX}/hipifly)
 
-run_and_log hdf5 extras/scripts/hdf5_setup.sh ${COMMON_OPTIONS} --build-hdf5 ${BUILD_HDF5} --hdf5-version ${HDF5_VERSION} ${REPLACE_OPTS} \
-   $(path_args hdf5-v${HDF5_VERSION} rocmplus-${ROCM_VERSION}/hdf5)
+run_and_log hdf5 extras/scripts/hdf5_setup.sh ${COMMON_OPTIONS} --build-hdf5 ${BUILD_HDF5} ${REPLACE_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/hdf5)
 
-run_and_log netcdf extras/scripts/netcdf_setup.sh ${COMMON_OPTIONS} --build-netcdf ${BUILD_NETCDF} --netcdf-c-version ${NETCDF_C_VERSION} --netcdf-f-version ${NETCDF_F_VERSION} ${REPLACE_OPTS} \
-   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${ROCMPLUS} --netcdf-c-module-path ${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/netcdf-c --netcdf-f-module-path ${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/netcdf-fortran")
+run_and_log netcdf extras/scripts/netcdf_setup.sh ${COMMON_OPTIONS} --build-netcdf ${BUILD_NETCDF} ${REPLACE_OPTS} \
+   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${ROCMPLUS} --netcdf-c-module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/netcdf-c --netcdf-f-module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/netcdf-fortran")
 
-run_and_log fftw extras/scripts/fftw_setup.sh ${COMMON_OPTIONS} --build-fftw ${BUILD_FFTW} --fftw-version ${FFTW_VERSION} ${REPLACE_OPTS} \
-   $(path_args fftw-v${FFTW_VERSION} rocmplus-${ROCM_VERSION}/fftw)
+run_and_log fftw extras/scripts/fftw_setup.sh ${COMMON_OPTIONS} --build-fftw ${BUILD_FFTW} ${REPLACE_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/fftw)
 
 #run_and_log x11vnc extras/scripts/x11vnc_setup.sh --build-x11vnc ${BUILD_X11VNC}
 
-run_and_log petsc extras/scripts/petsc_setup.sh ${COMMON_OPTIONS} --build-petsc ${BUILD_PETSC} --petsc-version ${PETSC_VERSION} ${REPLACE_OPTS} \
-   $(path_args petsc-v${PETSC_VERSION} rocmplus-${ROCM_VERSION}/petsc)
+run_and_log petsc extras/scripts/petsc_setup.sh ${COMMON_OPTIONS} --build-petsc ${BUILD_PETSC} ${REPLACE_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/petsc)
 
-run_and_log hypre extras/scripts/hypre_setup.sh ${COMMON_OPTIONS} --build-hypre ${BUILD_HYPRE} --hypre-version ${HYPRE_VERSION} ${REPLACE_OPTS} \
-   $(path_args hypre-v${HYPRE_VERSION} rocmplus-${ROCM_VERSION}/hypre)
+run_and_log hypre extras/scripts/hypre_setup.sh ${COMMON_OPTIONS} --build-hypre ${BUILD_HYPRE} ${REPLACE_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/hypre)
 
 # ─── Long-pole ML builds (jax, tensorflow, pytorch, ftorch) ───────────
 #
@@ -862,22 +915,22 @@ run_and_log hypre extras/scripts/hypre_setup.sh ${COMMON_OPTIONS} --build-hypre 
 #   jax BEFORE tensorflow -- jax is the shorter of the two bazel builds,
 #   pytorch BEFORE ftorch -- ftorch_setup.sh has a preflight that
 
-run_and_log jax extras/scripts/jax_setup.sh ${COMMON_OPTIONS} --build-jax ${BUILD_JAX} --jax-version ${JAX_VERSION} ${REPLACE_OPTS} \
-   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--jax-install-path ${ROCMPLUS}/jax-v0.${JAX_VERSION} --jaxlib-install-path ${ROCMPLUS}/jaxlib-v0.${JAX_VERSION} --module-path ${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/jax")
+run_and_log jax extras/scripts/jax_setup.sh ${COMMON_OPTIONS} --build-jax ${BUILD_JAX} ${REPLACE_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/jax)
 
 run_and_log tensorflow extras/scripts/tensorflow_setup.sh ${COMMON_OPTIONS} --build-tensorflow ${BUILD_TENSORFLOW} ${REPLACE_OPTS} \
-   $(path_args tensorflow rocmplus-${ROCM_VERSION}/tensorflow)
+   $(path_args tensorflow rocmplus-${ROCMPLUS_SUFFIX}/tensorflow)
 
-run_and_log pytorch extras/scripts/pytorch_setup.sh ${COMMON_OPTIONS} --build-pytorch ${BUILD_PYTORCH} --python-version ${PYTHON_VERSION} --pytorch-version ${PYTORCH_VERSION} ${REPLACE_OPTS} \
-   $(path_args pytorch-v${PYTORCH_VERSION} rocmplus-${ROCM_VERSION}/pytorch)
+run_and_log pytorch extras/scripts/pytorch_setup.sh ${COMMON_OPTIONS} --build-pytorch ${BUILD_PYTORCH} --python-version ${PYTHON_VERSION} ${REPLACE_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/pytorch)
 
 run_and_log ftorch extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} --build-ftorch ${BUILD_FTORCH} ${REPLACE_OPTS} \
-   $(path_args ftorch rocmplus-${ROCM_VERSION}/ftorch)
+   $(path_args ftorch rocmplus-${ROCMPLUS_SUFFIX}/ftorch)
 
 #If ROCm should be installed in a different location
 #if [ "${ROCM_INSTALLPATH}" != "/opt/" ]; then
 #   ${SUDO} mv /opt/rocm-${ROCM_VERSION} ${ROCM_INSTALLPATH}
-#   ${SUDO} mv /opt/rocmplus-${ROCM_VERSION} ${ROCM_INSTALLPATH}
+#   ${SUDO} mv /opt/rocmplus-${ROCMPLUS_SUFFIX} ${ROCM_INSTALLPATH}
 #   ${SUDO} ln -sfn ${ROCM_INSTALLPATH}/rocm-${ROCM_VERSION} /etc/alternatives/rocm
 #   ${SUDO} sed -i "s|\/opt\/|${ROCM_INSTALLPATH}|" /etc/lmod/modules/ROCm/*/*.lua
 #fi

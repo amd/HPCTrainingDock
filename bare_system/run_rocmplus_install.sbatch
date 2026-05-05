@@ -13,6 +13,18 @@
 # 22.04) and runs bare_system/main_setup.sh, which lays down the
 # rocmplus-${ROCM_VERSION} install + module category on /nfsapps.
 #
+# ROCM_VERSION accepts both regular numeric tokens (e.g. '7.2.1') and
+# release-candidate flavor tokens (e.g. 'therock-23.2.0', 'afar-22.2.0',
+# 'afar-7.0.5'); whatever token is passed is what `module load
+# rocm/<token>` consumes. Post-load we derive two distinct values from
+# ${ROCM_PATH}: ROCM_NUMERIC (the SDK version from .info/version, used
+# as --rocm-version downstream so version-comparison logic in
+# rocm_setup.sh and friends keeps working) and ROCM_RC_PREFIX (empty
+# for regular releases, 'therock'/'afar' for RC trees, used by
+# main_setup.sh to construct rocmplus-<prefix>-<numeric>/ install dirs
+# that don't collide with future official releases of the same numeric
+# version).
+#
 # Why the system tree (not /nfsapps/modules/base/rocm)?  The /nfsapps SDKs
 # were built for Ubuntu 24.04 (GLIBC 2.38, libstdc++.so.6 GLIBCXX_3.4.32+)
 # and will not run on the current sh5 nodes, which are 22.04 (GLIBC 2.35).
@@ -161,6 +173,31 @@ case "${ROCM_PATH}" in
 esac
 echo "ROCm SDK in use: ${ROCM_PATH} (22.04-native)"
 
+# ── 3b. Derive ROCM_NUMERIC + ROCM_RC_PREFIX from ROCM_PATH ──────────
+# ROCM_NUMERIC: SDK version from .info/version (e.g. 7.2.1 for a
+#   regular release, 7.13.0 for rocm-therock-23.2.0). main_setup.sh
+#   gets this as --rocm-version so its loaded-vs-requested numeric
+#   cross-check below still works.
+# ROCM_RC_PREFIX: '' for a regular release, family name for an RC
+#   tree (e.g. 'therock' for rocm-therock-23.2.0). Drives the
+#   rocmplus-${PREFIX}-${NUMERIC}/ install-dir naming so RC trees
+#   never collide with a future official release of the same numeric.
+if [[ ! -f "${ROCM_PATH}/.info/version" ]]; then
+   echo "ERROR: ${ROCM_PATH}/.info/version missing; cannot derive ROCM_NUMERIC" >&2
+   exit 1
+fi
+ROCM_NUMERIC=$(cut -f1 -d- "${ROCM_PATH}/.info/version")
+ROCM_RC_PREFIX=""
+_bn="${ROCM_PATH##*/}"; _sx="${_bn#rocm-}"
+if [[ ! "${_sx}" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+   ROCM_RC_PREFIX="${_sx%%-*}"
+fi
+unset _bn _sx
+echo "  ROCM_VERSION (token):    ${ROCM_VERSION}"
+echo "  ROCM_NUMERIC:            ${ROCM_NUMERIC}"
+echo "  ROCM_RC_PREFIX:          '${ROCM_RC_PREFIX}'"
+echo "  rocmplus install suffix: rocmplus-${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCM_NUMERIC}"
+
 # ── 4. Run main_setup.sh ─────────────────────────────────────────────
 # Stdin from /dev/null so the 30-second confirm prompt times out cleanly
 # instead of blocking forever on a non-interactive sbatch.
@@ -177,14 +214,15 @@ if [[ -n "${PACKAGES_LIST}" ]]; then
 fi
 
 bare_system/main_setup.sh \
-   --rocm-version       "${ROCM_VERSION}" \
-   --rocm-install-path  "${ROCM_INSTALLPATH}" \
-   --top-install-path   "${TOP_INSTALL_PATH}" \
-   --top-module-path    "${TOP_MODULE_PATH}" \
-   --amdgpu-gfxmodel    "${AMDGPU_GFXMODEL}" \
-   --python-version     "${PYTHON_VERSION}" \
-   --quick-installs     "${QUICK_INSTALLS}" \
-   --replace-existing   "${REPLACE_EXISTING}" \
+   --rocm-version         "${ROCM_NUMERIC}" \
+   --rocm-rc-prefix       "${ROCM_RC_PREFIX}" \
+   --rocm-install-path    "${ROCM_INSTALLPATH}" \
+   --top-install-path     "${TOP_INSTALL_PATH}" \
+   --top-module-path      "${TOP_MODULE_PATH}" \
+   --amdgpu-gfxmodel      "${AMDGPU_GFXMODEL}" \
+   --python-version       "${PYTHON_VERSION}" \
+   --quick-installs       "${QUICK_INSTALLS}" \
+   --replace-existing     "${REPLACE_EXISTING}" \
    --keep-failed-installs "${KEEP_FAILED_INSTALLS}" \
    "${PACKAGES_ARGS[@]}" \
    </dev/null

@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Capture this script's absolute path BEFORE any cd, so the inline
+# git-provenance block lower down can resolve the script in the repo
+# even after the build has cd'd into a temp dir. (BASH_SOURCE[0] is
+# whatever path was used to invoke the script -- often relative when
+# called from main_setup.sh -- so we absolutize it once, here.)
+LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+
 # Fail fast on errors and surface failures inside pipes. Without this,
 # audited xpmem/ucx Permission-denied failures returned rc=0 to the
 # caller and main_setup.sh reported success. Not using -u (nounset)
@@ -47,7 +54,16 @@ preflight_modules() {
 
 # Variables controlling setup process
 ROCM_VERSION=
-ROCM_PATH=
+# ROCM_PATH: deliberately NOT reset here. The previous `ROCM_PATH=`
+# default clobbered any value inherited from a parent that had
+# already done `module load rocm/...` (the common case under
+# main_setup.sh / sbatch), which fed an empty ROCM_PATH into the
+# basename-derived ROCM_MODULE_NAME helper below and made it fall
+# back to `rocm/${ROCM_VERSION}` (the SDK numeric, e.g. rocm/7.13.0)
+# even though the loaded modulefile was rocm/therock-23.2.0 (slurm-
+# 8125 audit). Either inherit ROCM_PATH from the parent shell or set
+# it via --rocm-path; the script needs a real value anyway for the
+# downstream `--with-rocm=${ROCM_PATH}` configure flags.
 # --replace / --replace-{xpmem,ucx,ucc,openmpi}: now value-style (0|1)
 # rather than the prior flag-style (presence == 1). Value-style lets
 # main_setup.sh thread `--replace ${REPLACE_EXISTING}` uniformly the
@@ -363,12 +379,35 @@ do
    shift
 done
 
+# ROCM_MODULE_NAME: the actual rocm modulefile token to load / refer to.
+# For regular releases (rocm-7.2.1) this resolves to rocm/7.2.1, byte-
+# identical to the prior literal `rocm/${ROCM_VERSION}` it replaces.
+# For RC trees the loaded modulefile is rocm/therock-23.2.0 (or
+# rocm/afar-...) while ROCM_VERSION is the SDK numeric (e.g. 7.13.0)
+# -- using `rocm/${ROCM_VERSION}` would not resolve. We prefer the
+# basename of the ROCM_PATH that was loaded upstream (Lmod treats a
+# reload of the same modulefile as a no-op) and fall back to
+# rocm/${ROCM_VERSION} for direct standalone invocation where
+# ROCM_PATH may be unset. Mirrors the mpi4py_setup.sh fix shipped in
+# the previous trial (slurm-8099 audit). The single derivation is
+# used at four sites below: the preflight, the post-build module
+# unload, and both the Cache-branch and Build-branch heredoc-
+# templated openmpi modulefile prereq() lines (which would otherwise
+# bake `prereq("rocm/7.13.0")` into a persistent on-disk artifact).
+if [[ -n "${ROCM_PATH:-}" ]]; then
+   _rp_bn="${ROCM_PATH##*/}"
+   ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
+   unset _rp_bn
+else
+   ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+fi
+
 # Preflight + load required modules. preflight_modules exits the script
 # with rc=42 (MISSING_PREREQ) on the first module that doesn't resolve;
 # main_setup.sh's run_and_log treats that as SKIPPED rather than FAILED.
 # This is the SINGLE place where openmpi's module prerequisites are
 # declared -- no central PKG_DEPS table to keep in sync.
-REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" )
+REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" )
 preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
 echo ""
@@ -1090,7 +1129,7 @@ fi
 #   --slave   /usr/share/man/man1/mpif90.1.gz   mpif90.1.gz ${OPENMPI_PATH}/share/man/man1/mpif90.1.gz    \
 #   --slave   /usr/share/man/man1/mpifort.1.gz  mpifort.1.gz ${OPENMPI_PATH}/share/man/man1/mpifort.1.gz
 
-module unload rocm/${ROCM_VERSION}
+module unload "${ROCM_MODULE_NAME}"
 
 # In either case of Cache or Build from source, create a module file for OpenMPI
 
@@ -1101,12 +1140,36 @@ if [[ "${DRY_RUN}" == "0" ]]; then
    PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
+   # Provenance: capture this leaf script's git state for the modulefile
+   # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
+   # at the top of this script before any cd) so this works even after
+   # the script has cd'd into a temp build dir. Self-contained: falls
+   # back to "unknown" when run from a stripped-of-.git context (Docker
+   # layer, release tarball, or git binary missing).
+   LEAF_SCRIPT_NAME="$(basename "${LEAF_SCRIPT_PATH}")"
+   LEAF_SCRIPT_COMMIT=unknown
+   LEAF_SCRIPT_DIRTY=unknown
+   _leaf_dir="$(dirname "${LEAF_SCRIPT_PATH}")"
+   if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
+      && git -C "${_leaf_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      _commit="$(git -C "${_leaf_dir}" log -n 1 --pretty=format:%H -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)"
+      [ -n "${_commit}" ] && LEAF_SCRIPT_COMMIT="${_commit}"
+      unset _commit
+      if [ -n "$(git -C "${_leaf_dir}" status --porcelain -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)" ]; then
+         LEAF_SCRIPT_DIRTY=dirty
+      else
+         LEAF_SCRIPT_DIRTY=clean
+      fi
+   fi
+   unset _leaf_dir
+
 # The - option suppresses tabs
    if [[ "${ROCM_VERSION}" == "7.1.0" ]]; then
      # Need the legacy mode enabled as a workaround for a bcast bug
 
      cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}.lua
 	whatis("Name: GPU-aware openmpi")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("Version: openmpi-${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}")
 	whatis("Description: An open source Message Passing Interface implementation")
 	whatis(" This is a GPU-Aware version of OpenMPI")
@@ -1123,13 +1186,14 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 	setenv("MPICXX","${OPENMPI_PATH}/bin/mpicxx")
 	setenv("MPIFORT","${OPENMPI_PATH}/bin/mpifort")
 	setenv("HSA_ENABLE_IPC_MODE_LEGACY","1")
-	prereq("rocm/${ROCM_VERSION}")
+	prereq("${ROCM_MODULE_NAME}")
 	family("MPI")
 EOF
    else
 
      cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}.lua
 	whatis("Name: GPU-aware openmpi")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("Version: openmpi-${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}")
 	whatis("Description: An open source Message Passing Interface implementation")
 	whatis(" This is a GPU-Aware version of OpenMPI")
@@ -1145,7 +1209,7 @@ EOF
 	setenv("MPICC","${OPENMPI_PATH}/bin/mpicc")
 	setenv("MPICXX","${OPENMPI_PATH}/bin/mpicxx")
 	setenv("MPIFORT","${OPENMPI_PATH}/bin/mpifort")
-	prereq("rocm/${ROCM_VERSION}")
+	prereq("${ROCM_MODULE_NAME}")
 	family("MPI")
 EOF
 

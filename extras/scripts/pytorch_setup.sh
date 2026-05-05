@@ -60,6 +60,11 @@ MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/pytorch
 # pytorch releases coexist.
 INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch-v${PYTORCH_VERSION}
 INSTALL_PATH_INPUT=""
+# --install-path: parent dir; the script appends pytorch-v${PYTORCH_VERSION}
+# itself. Used by main_setup.sh so the orchestrator never has to know
+# the version. --install-path-no-version (full leaf dir) wins over --install-path
+# when both are set, for callers that need exact control of the final install directory.
+ROCMPLUS_PATH_INPUT=""
 MPI_MODULE="openmpi"
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
@@ -91,12 +96,13 @@ fi
 usage()
 {
    echo "Usage:"
-   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  WARNING: when specifying --install-path-no-version and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "--amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default is autodetected"
    echo "--build-pytorch [ BUILD_PYTORCH ] set to 1 to build jax default is 0"
    echo "--pytorch-version [ PYTORCH_VERSION ] version of PyTorch, default is $PYTORCH_VERSION"
    echo "--python-version [ PYTHON_VERSION ] version of Python, default is $PYTHON_VERSION"
-   echo "--install-path [ INSTALL_PATH ] directory where PyTorch, Torchaudio and Torchvision will be installed, default is $INSTALL_PATH"
+   echo "--install-path-no-version [ INSTALL_PATH ] directory where PyTorch, Torchaudio and Torchvision will be installed, default is $INSTALL_PATH"
+   echo "--install-path [ ROCMPLUS_PATH_INPUT ] parent dir; if set (and --install-path-no-version is not), INSTALL_PATH = ROCMPLUS_PATH/pytorch-v\${PYTORCH_VERSION}"
    echo "--mpi-module [ MPI_MODULE ] mpi module to build pytorch with, default is $MPI_MODULE"
    echo "--help: this usage information"
    echo "--module-path [ MODULE_PATH ] default $MODULE_PATH"
@@ -162,9 +168,14 @@ do
           MODULE_PATH=${1}
 	  reset-last
           ;;
-      "--install-path")
+      "--install-path-no-version")
           shift
           INSTALL_PATH_INPUT=${1}
+	  reset-last
+          ;;
+      "--install-path")
+          shift
+          ROCMPLUS_PATH_INPUT=${1}
 	  reset-last
           ;;
       "--use-wheel")
@@ -192,6 +203,11 @@ done
 
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
+elif [ "${ROCMPLUS_PATH_INPUT}" != "" ]; then
+   # Orchestrator-friendly: caller passes the rocmplus parent dir;
+   # this script appends pytorch-v${PYTORCH_VERSION} from its own default.
+   # Lets main_setup.sh stay version-agnostic for pytorch.
+   INSTALL_PATH=${ROCMPLUS_PATH_INPUT}/pytorch-v${PYTORCH_VERSION}
 else
    # override path in case ROCM_VERSION or PYTORCH_VERSION has been supplied as input
    INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch-v${PYTORCH_VERSION}
@@ -260,6 +276,38 @@ _pytorch_on_exit() {
    return ${rc}
 }
 trap _pytorch_on_exit EXIT
+
+# Derive ROCM_MODULE_NAME from the actual ROCM_PATH basename so RC
+# trees (rocm-therock-*, rocm-afar-*) match their loaded module
+# name instead of the SDK numeric. Falls back to the rocm/<version>
+# form for direct standalone invocation where ROCM_PATH is unset.
+if [[ -n "${ROCM_PATH:-}" ]]; then
+   _rp_bn="${ROCM_PATH##*/}"
+   ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
+   unset _rp_bn
+else
+   ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+fi
+
+# Provenance: capture this leaf script's git state for the modulefile
+# whatis() lines emitted by the pytorch + tunableop heredocs below.
+# Self-contained (no source dependency); falls back to "unknown" when
+# the install runs from a stripped-of-.git context (Docker layer,
+# release tarball, or git binary missing).
+LEAF_SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
+LEAF_SCRIPT_COMMIT=unknown
+LEAF_SCRIPT_DIRTY=unknown
+_leaf_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _leaf_dir=""
+if [ -n "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
+   && git -C "${_leaf_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+   LEAF_SCRIPT_COMMIT="$(git -C "${_leaf_dir}" log -n 1 --pretty=format:%H -- "${BASH_SOURCE[0]}" 2>/dev/null || echo unknown)"
+   if [ -n "$(git -C "${_leaf_dir}" status --porcelain -- "${BASH_SOURCE[0]}" 2>/dev/null)" ]; then
+      LEAF_SCRIPT_DIRTY=dirty
+   else
+      LEAF_SCRIPT_DIRTY=clean
+   fi
+fi
+unset _leaf_dir
 
 if [ "${BUILD_PYTORCH}" = "0" ]; then
 
@@ -557,34 +605,27 @@ else
       # matches the working 7.1.0/7.1.1/7.2.0/7.2.1 builds in the user
       # success study and produces SHORT-form const_data_ptr mangling
       # that matches the HIP-side references.
-      REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" "openmpi" "magma" )
+      REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "openmpi" "magma" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
-      # ── Firewall amdclang's CC/CXX exports (transitive via magma) ─────
-      # magma's modulefile contains `load("amdclang")`, which exports
-      # CC=amdclang, CXX=amdclang++ (plus FC, OMPI_CC/CXX/FC, F77, F90).
-      # That is correct for magma's OWN build (libmagma needs LLVM
-      # libomp), but POISONS PyTorch's CMake autodetect: PyTorch then
-      # builds libtorch_cpu with clang 22, which per LLVM #85656 emits
-      # long-form mangling of std::enable_if NTTP defaults
-      # (..Tn..enable_if..Li0EEE..) while HIP TUs emit short-form
-      # references (..Li0EEE..) -- libtorch_cpu.so / libtorch_hip.so
-      # disagree at link time, dlopen at "import torch" fails with:
-      #   ImportError: libtorch_hip.so: undefined symbol:
-      #   _ZNK2at10TensorBase14const_data_ptrIN3c104HalfELi0EEEPKT_v
-      # First diagnosed in slurm 8093 cycle 4 (2026-05-03 17:09): the
-      # fix of dropping "amdclang" from REQUIRED_MODULES at line 560
-      # was insufficient because magma's load() pulls amdclang in
-      # transitively (CMake config in 8093's log shows
-      # "C++ compiler : .../llvm/bin/amdclang++").
-      # The unset below restores the GCC-as-CC build path that
-      # produced the working 7.1.0 / 7.1.1 / 7.2.0 / 7.2.1 builds in
-      # the user success study (libtorch_cpu .comment = "GCC: 11.4").
-      # Magma's runtime libomp dependency is independent of this --
-      # the magma module's LD_LIBRARY_PATH update survives the unset.
-      unset CC CXX FC F77 F90 OMPI_CC OMPI_CXX OMPI_FC
-      echo "pytorch: cleared CC/CXX/FC/OMPI_* (amdclang firewall);"
-      echo "         CMake will auto-detect system GCC for CPU TUs."
+      # ── Toolchain: magma no longer poisons CC/CXX/FC ──────────────────
+      # The amdclang-firewall `unset CC CXX FC F77 F90 OMPI_CC OMPI_CXX
+      # OMPI_FC` block that used to live here was removed 2026-05-04
+      # after magma_setup.sh stopped doing `load("amdclang")` in its
+      # modulefile heredoc and switched to a direct prepend_path of the
+      # LLVM lib dir on LD_LIBRARY_PATH/LD_RUN_PATH (Option B). Magma
+      # still gets libomp.so resolved at runtime, but loading it no
+      # longer rewrites the toolchain env, so PyTorch's CMake autodetect
+      # picks system GCC for libtorch_cpu naturally -- matching the
+      # working 7.1.0/7.1.1/7.2.0/7.2.1 builds in the user success
+      # study (libtorch_cpu .comment = "GCC: 11.4"; SHORT-form mangling
+      # of std::enable_if NTTPs that matches HIP TU references).
+      #
+      # If "import torch" ever fails again with the const_data_ptr
+      # undefined-symbol signature, the most likely regression is that
+      # magma_setup.sh's modulefile heredoc reverted to load("amdclang");
+      # the C1 validation block below (search "C1 validation") catches
+      # it within seconds of the build finishing.
 
       # Preflight: detect system libmagma-dev. Ubuntu's libmagma-dev
       # ships /usr/include/magma_v2.h whose magma_types.h:63 includes
@@ -882,17 +923,18 @@ else
       export ROCM_SOURCE_DIR=${ROCM_PATH}
       export USE_ROCM=1
       export USE_CUDA=0
-      export MAX_JOBS=32
+      export MAX_JOBS=40
       export USE_MPI=1
 
       # ── Compiler selection: rely on system GCC (NOT amdclang) ─────────
-      # We deliberately do NOT load the amdclang module for the build
-      # (note the absence of "amdclang" from REQUIRED_MODULES above), so
-      # CC/CXX fall through to PyTorch's CMake autodetect, which picks
-      # the system GCC (Ubuntu 22.04: GCC 11.4). This matches the four
-      # ROCm versions in the user's success study (7.1.0 / 7.1.1 / 7.2.0
-      # / 7.2.1, all PyTorch 2.9.1, all built before "amdclang" was
-      # briefly added to REQUIRED_MODULES).
+      # We deliberately do NOT load the amdclang module for the build,
+      # AND magma's modulefile (post-2026-05-04 Option B fix) no longer
+      # transitively loads it either. So CC/CXX fall through to
+      # PyTorch's CMake autodetect, which picks the system GCC
+      # (Ubuntu 22.04: GCC 11.4). This matches the four ROCm versions
+      # in the user's success study (7.1.0 / 7.1.1 / 7.2.0 / 7.2.1, all
+      # PyTorch 2.9.1, all built before "amdclang" was briefly added to
+      # REQUIRED_MODULES).
       #
       # Why GCC and not amdclang: ROCm 7.x bundles clang 22, which per
       # LLVM #85656 mangles SFINAE-defaulted std::enable_if NTTPs with
@@ -911,6 +953,9 @@ else
       #   LLVM issue #85656 (mangling change clang>=18)
       #   slurm 8065 (rocm-7.2.1, amdclang build, FAILED at runtime)
       #   slurm 8066 (rocm-7.2.0, amdclang build, FAILED at runtime)
+      #   slurm 8093 (transitive amdclang via magma; needed CC/CXX firewall)
+      #   slurm 8096 (firewall worked, build OK; firewall now obsolete
+      #               after Option B moved the fix to magma's modulefile)
 
       # ── Disable Intel MKL detection on ROCm builds ────────────────────
       # When Intel oneAPI is visible on the build host (e.g. via
@@ -1192,9 +1237,14 @@ print('  torch.cuda.is_available() =', torch.cuda.is_available())
          echo "" >&2
          echo "Diagnostic next steps:" >&2
          echo "  1. readelf -p .comment libtorch_cpu.so | head" >&2
-         echo "     EXPECT 'GCC: ...'. If 'AMD clang version', then REQUIRED_MODULES" >&2
-         echo "     in pytorch_setup.sh accidentally pulls in 'amdclang' (which" >&2
-         echo "     exports CC=amdclang); restore the GCC-as-CC build path." >&2
+         echo "     EXPECT 'GCC: ...'. If 'AMD clang version', then magma's" >&2
+         echo "     modulefile probably reverted to load(\"amdclang\") -- check" >&2
+         echo "     extras/scripts/magma_setup.sh's heredoc (Option B comment" >&2
+         echo "     block) and the live .lua under" >&2
+         echo "     /shared/apps/modules/.../rocmplus-\${ROCM_VERSION}/magma/." >&2
+         echo "     The expected form is 'prepend_path(\"LD_LIBRARY_PATH\",..llvm/lib..)'" >&2
+         echo "     NOT 'load(\"amdclang\")'. Less likely: \"amdclang\" was added" >&2
+         echo "     back into pytorch_setup.sh's REQUIRED_MODULES." >&2
          echo "  2. nm -D libtorch_cpu.so | grep ' T ' | grep const_data_ptr | head" >&2
          echo "     EXPECT short-form (...Li0EEEPKT_v). Long-form (...Tn..enable_if..)" >&2
          echo "     means clang built libtorch_cpu and the ABI does not match HIP." >&2
@@ -1341,8 +1391,9 @@ ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 # the - option suppresses tabs
 cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	whatis("PyTorch version ${PYTORCH_VERSION} with ROCm Support")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
-	prereq("rocm/${ROCM_VERSION}")
+	prereq("${ROCM_MODULE_NAME}")
 	-- openmpi is required because libtorch_cpu links libmpi.so when
 	-- USE_MPI=1 was set at build time (which it is in pytorch_setup.sh).
 	load("${MPI_MODULE}")
@@ -1376,6 +1427,7 @@ EOF
 # An alternate module with tunable gemms
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}_tunableop_enabled.lua
 	whatis("PyTorch version ${PYTORCH_VERSION} with ROCm Support and Tunable GEMMS")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
 	load pytorch
 	setenv("PYTORCH_TUNABLEOP_ENABLED","1")

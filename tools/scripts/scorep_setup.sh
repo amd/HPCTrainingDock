@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Capture this script's absolute path BEFORE any cd, so the inline
+# git-provenance block lower down can resolve the script in the repo
+# even after the build has cd'd into a temp dir. (BASH_SOURCE[0] is
+# whatever path was used to invoke the script -- often relative when
+# called from main_setup.sh -- so we absolutize it once, here.)
+LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+
 # Fail fast on errors and surface failures inside pipes. Not using -u
 # (nounset) because some conditional code paths rely on unset variables.
 set -eo pipefail
@@ -50,6 +57,12 @@ SCOREP_PATH=/opt/rocmplus-${ROCM_VERSION}/scorep-v${SCOREP_VERSION}
 PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
 SCOREP_PATH_INPUT=""
 PDT_PATH_INPUT=""
+# --install-path: parent dir; the script appends both
+# scorep-v${SCOREP_VERSION} and pdt itself. Used by main_setup.sh so
+# the orchestrator never has to know the version. Per-component
+# --scorep-install-path-no-version / --pdt-install-path-no-version (full leaf dirs) still
+# win when set.
+ROCMPLUS_PATH_INPUT=""
 # --replace 1: rm -rf the prior scorep-v${SCOREP_VERSION} install dir
 # and its modulefile before building. PDT is intentionally NOT removed
 # (it's a build-time-only dep shared across scorep AND tau versions);
@@ -72,12 +85,13 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 usage()
 {
    echo "Usage:"
-   echo "  WARNING: when specifying --scorep-install-path, --pdt-install-path  and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  WARNING: when specifying --scorep-install-path-no-version, --pdt-install-path-no-version  and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --build-scorep: set to 1 to build Score-P, default is 0"
    echo "  --scorep-version [SCOREP_VERSION] default is $SCOREP_VERSION "
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
-   echo "  --scorep-install-path [ SCOREP_PATH_INPUT ] default $SCOREP_PATH "
-   echo "  --pdt-install-path [ PDT_PATH_INPUT ] default $PDT_PATH "
+   echo "  --scorep-install-path-no-version [ SCOREP_PATH_INPUT ] default $SCOREP_PATH "
+   echo "  --pdt-install-path-no-version [ PDT_PATH_INPUT ] default $PDT_PATH "
+   echo "  --install-path [ ROCMPLUS_PATH_INPUT ] parent dir; if set, fills both component install paths from \${ROCMPLUS_PATH}/{scorep-v\${SCOREP_VERSION},pdt}"
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE "
    echo "  --mpi-config [ MPI_CONFIG ] what to pass to --with-mpi= when configuring score-p, default is $MPI_MODULE "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
@@ -128,14 +142,19 @@ do
           MODULE_PATH=${1}
           reset-last
           ;;
-      "--scorep-install-path")
+      "--scorep-install-path-no-version")
           shift
           SCOREP_PATH_INPUT=${1}
           reset-last
           ;;
-      "--pdt-install-path")
+      "--pdt-install-path-no-version")
           shift
           PDT_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--install-path")
+          shift
+          ROCMPLUS_PATH_INPUT=${1}
           reset-last
           ;;
      "--mpi-module")
@@ -179,12 +198,21 @@ do
    shift
 done
 
+# Path resolution precedence: per-component --scorep-install-path-no-version /
+# --pdt-install-path-no-version (full leaf dirs) win, then --install-path (parent
+# dir; we append the version-suffixed leaf names from this script's
+# defaults), then the legacy /opt/rocmplus-X default. Lets main_setup.sh
+# stay version-agnostic for scorep while still allowing operators to
+# pin one component without rebuilding the other.
 SCOREP_PATH=/opt/rocmplus-${ROCM_VERSION}/scorep-v${SCOREP_VERSION}
+PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
+if [ "${ROCMPLUS_PATH_INPUT}" != "" ]; then
+   SCOREP_PATH=${ROCMPLUS_PATH_INPUT}/scorep-v${SCOREP_VERSION}
+   PDT_PATH=${ROCMPLUS_PATH_INPUT}/pdt
+fi
 if [ "${SCOREP_PATH_INPUT}" != "" ]; then
    SCOREP_PATH=${SCOREP_PATH_INPUT}
 fi
-
-PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
 if [ "${PDT_PATH_INPUT}" != "" ]; then
    PDT_PATH=${PDT_PATH_INPUT}
 fi
@@ -269,6 +297,18 @@ if [ "${BUILD_SCOREP}" = "0" ]; then
    exit
 
 else
+   # Derive ROCM_MODULE_NAME from the actual ROCM_PATH basename so RC
+   # trees (rocm-therock-*, rocm-afar-*) match their loaded module
+   # name instead of the SDK numeric. Falls back to the rocm/<version>
+   # form for direct standalone invocation where ROCM_PATH is unset.
+   if [[ -n "${ROCM_PATH:-}" ]]; then
+      _rp_bn="${ROCM_PATH##*/}"
+      ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
+      unset _rp_bn
+   else
+      ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+   fi
+
    if [ -f ${CACHE_FILES}/scorep-v${SCOREP_VERSION}.tgz ]; then
       echo ""
       echo "============================"
@@ -302,7 +342,7 @@ else
       # MPI is preflighted as a soft dep -- the script has an apt-get
       # fallback if the MPI_MODULE module isn't available, so we do not
       # gate on it here. rocm + amdclang are hard deps.
-      REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" "amdclang" )
+      REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "amdclang" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
 
@@ -506,7 +546,7 @@ else
          ${SUDO} chmod go-w $SCOREP_PATH
       fi
 
-      module unload rocm/${ROCM_VERSION}
+      module unload ${ROCM_MODULE_NAME}
       module unload amdclang
       module unload amdflang-new
       module unload ${MPI_MODULE}
@@ -520,11 +560,35 @@ else
    PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
+   # Provenance: capture this leaf script's git state for the modulefile
+   # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
+   # at the top of this script before any cd) so this works even after
+   # the script has cd'd into a temp build dir. Self-contained: falls
+   # back to "unknown" when run from a stripped-of-.git context (Docker
+   # layer, release tarball, or git binary missing).
+   LEAF_SCRIPT_NAME="$(basename "${LEAF_SCRIPT_PATH}")"
+   LEAF_SCRIPT_COMMIT=unknown
+   LEAF_SCRIPT_DIRTY=unknown
+   _leaf_dir="$(dirname "${LEAF_SCRIPT_PATH}")"
+   if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
+      && git -C "${_leaf_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      _commit="$(git -C "${_leaf_dir}" log -n 1 --pretty=format:%H -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)"
+      [ -n "${_commit}" ] && LEAF_SCRIPT_COMMIT="${_commit}"
+      unset _commit
+      if [ -n "$(git -C "${_leaf_dir}" status --porcelain -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)" ]; then
+         LEAF_SCRIPT_DIRTY=dirty
+      else
+         LEAF_SCRIPT_DIRTY=clean
+      fi
+   fi
+   unset _leaf_dir
+
    # The - option suppresses tabs
    cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${SCOREP_VERSION}.lua
 	whatis(" Score-P Performance Analysis Tool ")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
-	prereq("rocm/${ROCM_VERSION}")
+	prereq("${ROCM_MODULE_NAME}")
 	prepend_path("PATH","${SCOREP_PATH}/bin")
 	prepend_path("PATH","${PDT_PATH}/bin")
 EOF

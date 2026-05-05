@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Capture this script's absolute path BEFORE any cd, so the inline
+# git-provenance block lower down can resolve the script in the repo
+# even after the build has cd'd into a temp dir. (BASH_SOURCE[0] is
+# whatever path was used to invoke the script -- often relative when
+# called from main_setup.sh -- so we absolutize it once, here.)
+LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 SUDO="sudo"
@@ -10,6 +17,16 @@ MINIFORGE3_VERSION="24.9.0"
 MINIFORGE3_VERSION_DOWNLOAD=${MINIFORGE3_VERSION}-0
 MINIFORGE3_PATH=/opt/miniforge3-v${MINIFORGE3_VERSION}
 MINIFORGE3_PATH_INPUT=""
+# --install-path: parent dir; the script appends
+# miniforge3-v${MINIFORGE3_VERSION} itself. Used by main_setup.sh so
+# the orchestrator never has to know the version. miniforge3 lives
+# OUTSIDE the rocmplus tree (it is ROCm-version-independent); the
+# --install-path argument matches main_setup.sh's TOP_INSTALL_PATH
+# semantics (parent dir; script appends versioned subdir).
+# --install-path-no-version (full leaf dir, no version appended) wins
+# over --install-path when both are set, for callers that need exact
+# control of the final install directory.
+TOP_INSTALL_PATH_INPUT=""
 
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -19,11 +36,12 @@ fi
 usage()
 {
    echo "Usage:"
-   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  WARNING: when specifying --install-path-no-version and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --python-version [ PYTHON_VERSION ], python3 minor release, default $PYTHON_VERSION"
    echo "  --build-miniforge3 [ BUILD_MINIFORGE3 ], installs Miniforge3, default $BUILD_MINIFORGE3"
    echo "  --miniforge3-version [ MINIFORGE3_VERSION ], Miniforge3 version, default $MINIFORGE3_VERSION"
-   echo "  --install-path [ MINIFORGE3_PATH_INPUT ], default is $MINIFORGE3_PATH "
+   echo "  --install-path-no-version [ MINIFORGE3_PATH_INPUT ], default is $MINIFORGE3_PATH "
+   echo "  --install-path [ TOP_INSTALL_PATH_INPUT ] parent dir; if set (and --install-path-no-version is not), MINIFORGE3_PATH = TOP_INSTALL_PATH/miniforge3-v\${MINIFORGE3_VERSION}"
    echo "  --module-path [ MODULE_PATH ], default is $MODULE_PATH "
    echo "  --help: print this usage information"
    exit 1
@@ -55,9 +73,14 @@ do
           BUILD_MINIFORGE3=${1}
           reset-last
           ;;
-       "--install-path")
+       "--install-path-no-version")
           shift
           MINIFORGE3_PATH_INPUT=${1}
+          reset-last
+          ;;
+       "--install-path")
+          shift
+          TOP_INSTALL_PATH_INPUT=${1}
           reset-last
           ;;
        "--module-path")
@@ -86,6 +109,11 @@ done
 
 if [ "${MINIFORGE3_PATH_INPUT}" != "" ]; then
    MINIFORGE3_PATH=${MINIFORGE3_PATH_INPUT}
+elif [ "${TOP_INSTALL_PATH_INPUT}" != "" ]; then
+   # Orchestrator-friendly: caller passes the top-level parent dir;
+   # this script appends miniforge3-v${MINIFORGE3_VERSION} from its own
+   # default. Lets main_setup.sh stay version-agnostic for miniforge3.
+   MINIFORGE3_PATH=${TOP_INSTALL_PATH_INPUT}/miniforge3-v${MINIFORGE3_VERSION}
 else
    # override path in case MINIFORGE3_VERSION has been supplied as input
    MINIFORGE3_PATH=/opt/miniforge3-v${MINIFORGE3_VERSION}
@@ -162,12 +190,37 @@ ${SUDO} "${MINIFORGE_INSTALLER}" -b -u -p ${MINIFORGE3_PATH}
 PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
 ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
+# Provenance: capture this leaf script's git state for the modulefile
+# whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
+# at the top of this script before any cd) so this works even after
+# the script has cd'd into a temp build dir. Self-contained: falls
+# back to "unknown" when run from a stripped-of-.git context (Docker
+# layer, release tarball, or git binary missing).
+LEAF_SCRIPT_NAME="$(basename "${LEAF_SCRIPT_PATH}")"
+LEAF_SCRIPT_COMMIT=unknown
+LEAF_SCRIPT_DIRTY=unknown
+_leaf_dir="$(dirname "${LEAF_SCRIPT_PATH}")"
+if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
+   && git -C "${_leaf_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+   _commit="$(git -C "${_leaf_dir}" log -n 1 --pretty=format:%H -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)"
+   [ -n "${_commit}" ] && LEAF_SCRIPT_COMMIT="${_commit}"
+   unset _commit
+   if [ -n "$(git -C "${_leaf_dir}" status --porcelain -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)" ]; then
+      LEAF_SCRIPT_DIRTY=dirty
+   else
+      LEAF_SCRIPT_DIRTY=clean
+   fi
+fi
+unset _leaf_dir
+
 # Modulefile name was previously hardcoded to 24.9.0.lua, which
 # silently ignored --miniforge3-version overrides (sister bug to
 # what miniconda3_setup.sh did right at line ${MINICONDA3_VERSION}.lua).
 # Now keyed on ${MINIFORGE3_VERSION} so multi-version coexistence
 # actually works.
 cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${MINIFORGE3_VERSION}.lua
+	whatis("Miniforge3 - conda-forge installer with mamba")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	conflict("miniconda3")
 	local root = "${MINIFORGE3_PATH}"
 	setenv("MINIFORGE3_ROOT", root)

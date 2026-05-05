@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Capture this script's absolute path BEFORE any cd, so the inline
+# git-provenance block lower down can resolve the script in the repo
+# even after the build has cd'd into a temp dir. (BASH_SOURCE[0] is
+# whatever path was used to invoke the script -- often relative when
+# called from main_setup.sh -- so we absolutize it once, here.)
+LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+
 # Variables controlling setup process
 AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
 MODULE_PATH=/etc/lmod/modules/ROCm/amdflang-new
@@ -274,11 +281,35 @@ else
       PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
       ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
+      # Provenance: capture this leaf script's git state for the modulefile
+      # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
+      # at the top of this script before any cd) so this works even after
+      # the script has cd'd into a temp build dir. Self-contained: falls
+      # back to "unknown" when run from a stripped-of-.git context (Docker
+      # layer, release tarball, or git binary missing).
+      LEAF_SCRIPT_NAME="$(basename "${LEAF_SCRIPT_PATH}")"
+      LEAF_SCRIPT_COMMIT=unknown
+      LEAF_SCRIPT_DIRTY=unknown
+      _leaf_dir="$(dirname "${LEAF_SCRIPT_PATH}")"
+      if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
+         && git -C "${_leaf_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+         _commit="$(git -C "${_leaf_dir}" log -n 1 --pretty=format:%H -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)"
+         [ -n "${_commit}" ] && LEAF_SCRIPT_COMMIT="${_commit}"
+         unset _commit
+         if [ -n "$(git -C "${_leaf_dir}" status --porcelain -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)" ]; then
+            LEAF_SCRIPT_DIRTY=dirty
+         else
+            LEAF_SCRIPT_DIRTY=clean
+         fi
+      fi
+      unset _leaf_dir
+
       if [[ $MODULE_TYPE == "lmod" ]]; then
            # - on next line suppresses tab in the following lines
            cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${ARCHIVE_DIR}.lua
 
 	whatis("AMD AFAR drop #4.0 Beta Fortran OpenMP Compiler based on LLVM")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	local help_message = [[
 	   PRE-PRODUCTION SOFTWARE:  The software accessible on this page may be a pre-production version, intended to provide advance access to features that may or may not eventually be included into production version of the software.  Accordingly, pre-production software may not be fully functional, may contain errors, and may have reduced or different security, privacy, accessibility, availability, and reliability standards relative to production versions of the software. Use of pre-production software may result in unexpected results, loss of data, project delays or other unpredictable damage or loss.  Pre-production software is not intended for use in production, and your use of pre-production software is at your own risk.
 	]]

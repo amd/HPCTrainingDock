@@ -131,7 +131,18 @@ ${PKG_SUDO} apt-get -y install libdw-dev
 ${SUDO} mkdir -p $INSTALL_PATH
 
 source /etc/profile.d/lmod.sh
-module load rocm/${ROCM_VERSION}
+# Derive ROCM_MODULE_NAME from the actual ROCM_PATH basename so RC
+# trees (rocm-therock-*, rocm-afar-*) match their loaded module name
+# instead of the SDK numeric. Falls back to the rocm/<version> form
+# for direct standalone invocation where ROCM_PATH is unset.
+if [[ -n "${ROCM_PATH:-}" ]]; then
+   _rp_bn="${ROCM_PATH##*/}"
+   ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
+   unset _rp_bn
+else
+   ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+fi
+module load ${ROCM_MODULE_NAME}
 
 #cmake -DGPU_TARGETS="${AMDGPU_GFXMODEL}" -DCMAKE_PREFIX_PATH=/opt/${ROCM_VERSION}/lib:/opt/${ROCM_VERSION}/include/hsa -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH ..
 

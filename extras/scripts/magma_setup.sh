@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Capture this script's absolute path BEFORE any cd, so the inline
+# git-provenance block lower down can resolve the script in the repo
+# even after the build has cd'd into a temp dir. (BASH_SOURCE[0] is
+# whatever path was used to invoke the script -- often relative when
+# called from main_setup.sh -- so we absolutize it once, here.)
+LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+
 # Fail fast on errors and surface failures inside pipes. Not using -u
 # (nounset) because some conditional code paths rely on unset variables.
 set -eo pipefail
@@ -344,6 +351,41 @@ if [ "${BUILD_MAGMA}" = "0" ]; then
 
 else
 
+   # Derive ROCM_MODULE_NAME from the actual ROCM_PATH basename so RC
+   # trees (rocm-therock-*, rocm-afar-*) match their loaded module
+   # name instead of the SDK numeric. Falls back to the rocm/<version>
+   # form for direct standalone invocation where ROCM_PATH is unset.
+   if [[ -n "${ROCM_PATH:-}" ]]; then
+      _rp_bn="${ROCM_PATH##*/}"
+      ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
+      unset _rp_bn
+   else
+      ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+   fi
+
+   # Provenance: capture this leaf script's git state for the modulefile
+   # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
+   # at the top of this script before any cd) so this works even after
+   # the script has cd'd into a temp build dir. Self-contained: falls
+   # back to "unknown" when run from a stripped-of-.git context (Docker
+   # layer, release tarball, or git binary missing).
+   LEAF_SCRIPT_NAME="$(basename "${LEAF_SCRIPT_PATH}")"
+   LEAF_SCRIPT_COMMIT=unknown
+   LEAF_SCRIPT_DIRTY=unknown
+   _leaf_dir="$(dirname "${LEAF_SCRIPT_PATH}")"
+   if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
+      && git -C "${_leaf_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      _commit="$(git -C "${_leaf_dir}" log -n 1 --pretty=format:%H -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)"
+      [ -n "${_commit}" ] && LEAF_SCRIPT_COMMIT="${_commit}"
+      unset _commit
+      if [ -n "$(git -C "${_leaf_dir}" status --porcelain -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)" ]; then
+         LEAF_SCRIPT_DIRTY=dirty
+      else
+         LEAF_SCRIPT_DIRTY=clean
+      fi
+   fi
+   unset _leaf_dir
+
    # don't use sudo if user has write access to install path
    if [ -d "$MAGMA_PATH" ]; then
       if [ -w ${MAGMA_PATH} ]; then
@@ -355,7 +397,7 @@ else
       echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
 
-   REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" "amdclang" )
+   REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "amdclang" )
    preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
    ## OpenBLAS resolution.
@@ -485,8 +527,35 @@ else
       curl -LO https://github.com/OpenMathLib/OpenBLAS/archive/refs/tags/v${OPENBLAS_VERSION}.tar.gz
       tar xf v${OPENBLAS_VERSION}.tar.gz
       cd OpenBLAS-${OPENBLAS_VERSION}/
-      make -j MAKE_NB_JOBS=0 ARCH=x86_64 TARGET=ZEN USE_LOCKING=1 USE_OPENMP=1 USE_THREAD=1 RANLIB=ranlib libs netlib shared
-      make install PREFIX=${OPENBLAS_PATH} MAKE_NB_JOBS=0 ARCH=x86_64 TARGET=ZEN USE_LOCKING=1 USE_OPENMP=1 USE_THREAD=1 RANLIB=ranlib
+
+      # ── OpenBLAS toolchain: All-GNU (system gcc + gfortran) ───────────
+      # OpenBLAS has zero device code (pure CPU BLAS / netlib LAPACK)
+      # and ships no Fortran .mod files; consumers (magma's CBLAS
+      # interface, PyTorch's BLAS=OpenBLAS extern "C" calls) reach it
+      # only through C headers + name-mangled F77 symbols, which gcc
+      # and gfortran produce identically to amdclang/amdflang.
+      #
+      # Why force GCC instead of relying on the amdclang module env:
+      #   1. amdflang in ROCm 7.1.1 (and possibly other 7.x versions)
+      #      doesn't implement OpenMP-5.0 array sections in `task depend`
+      #      clauses, which OpenBLAS-0.3.33's
+      #      lapack-netlib/SRC/ssytrd_sb2st.F:492 uses. amdflang aborts
+      #      with "LLVM ERROR: aborting" mid-build (slurm 8067, rocm-7.1.1).
+      #   2. Mixed OMP runtime: if we keep CC=amdclang but force
+      #      FC=gfortran for (1), libopenblas.so links BOTH libomp
+      #      (amdclang's OpenMP) and libgomp (gfortran's). Two OpenMP
+      #      runtimes inside a single .so is undefined behavior --
+      #      crashes at exit, oversubscription, wrong reductions.
+      # All-GNU avoids both: gcc + gfortran with -fopenmp both link
+      # libgomp, libopenblas.so is internally consistent. The runtime
+      # mix in PyTorch processes (libtorch_cpu+libopenblas as libgomp,
+      # libtorch_hip+libmagma as libomp) is unchanged from the existing
+      # configuration -- this is the upstream-supported deployment.
+      GCC_BIN="$(command -v gcc      || echo gcc)"
+      GFORTRAN_BIN="$(command -v gfortran || echo gfortran)"
+      echo "openblas: forcing CC=${GCC_BIN}, FC=${GFORTRAN_BIN} (All-GNU; see comment block)"
+      make -j MAKE_NB_JOBS=0 ARCH=x86_64 TARGET=ZEN USE_LOCKING=1 USE_OPENMP=1 USE_THREAD=1 RANLIB=ranlib CC="${GCC_BIN}" FC="${GFORTRAN_BIN}" libs netlib shared
+      make install PREFIX=${OPENBLAS_PATH} MAKE_NB_JOBS=0 ARCH=x86_64 TARGET=ZEN USE_LOCKING=1 USE_OPENMP=1 USE_THREAD=1 RANLIB=ranlib CC="${GCC_BIN}" FC="${GFORTRAN_BIN}"
 
       # trap handles cleanup of ${MAGMA_BUILD_ROOT}/openblas_build
 
@@ -512,6 +581,7 @@ else
       ${SUDO} mkdir -p "${OPENBLAS_MODULE_DIR}"
       cat <<-EOF | ${SUDO} tee "${OPENBLAS_MODULE_DIR}/${OPENBLAS_VERSION}.lua"
 	whatis("OpenBLAS ${OPENBLAS_VERSION} (built from source as a magma dependency)")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	setenv("OPENBLAS_PATH","${OPENBLAS_PATH}")
 	setenv("OPENBLAS_HOME","${OPENBLAS_PATH}")
 	setenv("OPENBLAS_ROOT","${OPENBLAS_PATH}")
@@ -612,11 +682,38 @@ else
    # of truth for "where is magma installed", so downstream packages
    # (pytorch_setup.sh, future ginkgo, future user code) never have
    # to hardcode the path or re-export under a different name.
+   # Toolchain-isolation note (Option B, 2026-05-04):
+   # libmagma.so was built with amdclang++ for the HIP device kernels and
+   # therefore links libomp.so (LLVM OpenMP) at runtime. We expose ONLY
+   # the LLVM lib path -- not the amdclang module itself -- because
+   # `load("amdclang")` would also setenv CC=amdclang, CXX=amdclang++,
+   # FC=amdflang, OMPI_CC/CXX/FC, F77, F90, STDPAR_CXX (nine vars total;
+   # see /shared/apps/modules/.../amdclang/*.lua). That toolchain
+   # pollution previously poisoned downstream consumers:
+   #   - PyTorch's CMake autodetect picked amdclang++ for libtorch_cpu,
+   #     producing long-form std::enable_if NTTP mangling (LLVM #85656)
+   #     that did not match HIP TU references, dlopen failed at "import
+   #     torch" with the const_data_ptr undefined-symbol error
+   #     (slurm 8093, 8096; needed an explicit `unset CC CXX FC ...`
+   #     firewall in pytorch_setup.sh that this change makes obsolete).
+   #   - magma's own OpenBLAS subbuild inherited FC=amdflang, which
+   #     choked on OpenBLAS-0.3.33's OpenMP-5.0 array sections in
+   #     `task depend` (slurm 8067, rocm-7.1.1, "not yet implemented:
+   #     array sections not supported for task depend").
+   # Loading magma is a library dependency; it should not silently
+   # rewrite the user's compiler choice. The two prepend_path lines
+   # below give libomp.so to ldopen at runtime without touching CC/CXX/FC.
    cat <<-EOF | ${PKG_SUDO_MOD} tee ${MAGMA_MODULE_DIR}/${MAGMA_VERSION}.lua
 	whatis("Magma version ${MAGMA_VERSION} for AMD hardware")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
-	prereq("rocm/${ROCM_VERSION}")
-	load("amdclang")
+	prereq("${ROCM_MODULE_NAME}")
+	-- Expose libomp.so (LLVM OpenMP) directly, NOT via load("amdclang"),
+	-- which would also export CC/CXX/FC and poison downstream consumers.
+	-- See magma_setup.sh comment block above this heredoc for full
+	-- rationale (slurm 8067 / 8093 / 8096 references).
+	prepend_path("LD_LIBRARY_PATH","${ROCM_PATH}/llvm/lib")
+	prepend_path("LD_RUN_PATH",    "${ROCM_PATH}/llvm/lib")
 	setenv("MAGMA_PATH","${MAGMA_PATH}")
 	setenv("MAGMA_HOME","${MAGMA_PATH}")
 	setenv("MAGMA_ROOT","${MAGMA_PATH}")

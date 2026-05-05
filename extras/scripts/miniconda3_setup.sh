@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Capture this script's absolute path BEFORE any cd, so the inline
+# git-provenance block lower down can resolve the script in the repo
+# even after the build has cd'd into a temp dir. (BASH_SOURCE[0] is
+# whatever path was used to invoke the script -- often relative when
+# called from main_setup.sh -- so we absolutize it once, here.)
+LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 SUDO="sudo"
@@ -10,6 +17,16 @@ MINICONDA3_VERSION_DOWNLOAD=${MINICONDA3_VERSION}-1
 MODULE_PATH=/etc/lmod/modules/LinuxPlus/miniconda3/
 MINICONDA3_PATH=/opt/miniconda3-v${MINICONDA3_VERSION}
 MINICONDA3_PATH_INPUT=""
+# --install-path: parent dir; the script appends
+# miniconda3-v${MINICONDA3_VERSION} itself. Used by main_setup.sh so
+# the orchestrator never has to know the version. miniconda3 lives
+# OUTSIDE the rocmplus tree (it is ROCm-version-independent); the
+# --install-path argument matches main_setup.sh's TOP_INSTALL_PATH
+# semantics (parent dir; script appends versioned subdir).
+# --install-path-no-version (full leaf dir, no version appended) wins
+# over --install-path when both are set, for callers that need exact
+# control of the final install directory.
+TOP_INSTALL_PATH_INPUT=""
 
 
 
@@ -20,11 +37,12 @@ fi
 usage()
 {
    echo "Usage:"
-   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  WARNING: when specifying --install-path-no-version and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --python-version [ PYTHON_VERSION ], python3 minor release, default $PYTHON_VERSION"
    echo "  --build-miniconda3 [BUILD_MINICONDA3], installs Miniconda3, default $BUILD_MINICONDA3"
    echo "  --miniconda3-version [MINICONDA3_VERSION], Miniconda3 version, default $MINICONDA3_VERSION"
-   echo "  --install-path [ MINICONDA3_PATH_INPUT ], default is $MINICONDA3_PATH "
+   echo "  --install-path-no-version [ MINICONDA3_PATH_INPUT ], default is $MINICONDA3_PATH "
+   echo "  --install-path [ TOP_INSTALL_PATH_INPUT ] parent dir; if set (and --install-path-no-version is not), MINICONDA3_PATH = TOP_INSTALL_PATH/miniconda3-v\${MINICONDA3_VERSION}"
    echo "  --module-path [ MODULE_PATH ], default is $MODULE_PATH "
    echo "  --help: print this usage information"
    exit 1
@@ -54,9 +72,14 @@ do
       "--help")
           usage
           ;;
-       "--install-path")
+       "--install-path-no-version")
           shift
           MINICONDA3_PATH_INPUT=${1}
+          reset-last
+          ;;
+       "--install-path")
+          shift
+          TOP_INSTALL_PATH_INPUT=${1}
           reset-last
           ;;
        "--module-path")
@@ -87,6 +110,11 @@ done
 
 if [ "${MINICONDA3_PATH_INPUT}" != "" ]; then
    MINICONDA3_PATH=${MINICONDA3_PATH_INPUT}
+elif [ "${TOP_INSTALL_PATH_INPUT}" != "" ]; then
+   # Orchestrator-friendly: caller passes the top-level parent dir;
+   # this script appends miniconda3-v${MINICONDA3_VERSION} from its own
+   # default. Lets main_setup.sh stay version-agnostic for miniconda3.
+   MINICONDA3_PATH=${TOP_INSTALL_PATH_INPUT}/miniconda3-v${MINICONDA3_VERSION}
 else
    # override path in case MINICONDA3_VERSION has been supplied as input
    MINICONDA3_PATH=/opt/miniconda3-v${MINICONDA3_VERSION}
@@ -193,6 +221,29 @@ ${SUDO} chown -R root:root ${MINICONDA3_PATH}/*
 PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
 ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
+# Provenance: capture this leaf script's git state for the modulefile
+# whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
+# at the top of this script before any cd) so this works even after
+# the script has cd'd into a temp build dir. Self-contained: falls
+# back to "unknown" when run from a stripped-of-.git context (Docker
+# layer, release tarball, or git binary missing).
+LEAF_SCRIPT_NAME="$(basename "${LEAF_SCRIPT_PATH}")"
+LEAF_SCRIPT_COMMIT=unknown
+LEAF_SCRIPT_DIRTY=unknown
+_leaf_dir="$(dirname "${LEAF_SCRIPT_PATH}")"
+if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
+   && git -C "${_leaf_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+   _commit="$(git -C "${_leaf_dir}" log -n 1 --pretty=format:%H -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)"
+   [ -n "${_commit}" ] && LEAF_SCRIPT_COMMIT="${_commit}"
+   unset _commit
+   if [ -n "$(git -C "${_leaf_dir}" status --porcelain -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)" ]; then
+      LEAF_SCRIPT_DIRTY=dirty
+   else
+      LEAF_SCRIPT_DIRTY=clean
+   fi
+fi
+unset _leaf_dir
+
 # The - option suppresses tabs
 cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${MINICONDA3_VERSION}.lua
 	conflict("miniforge3")
@@ -205,6 +256,7 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${MINICONDA3_VERSION}.lua
 	conda_version = trim(conda_version)
 	help([[ Loads the Miniconda environment supporting Community-Collections. ]])
 	whatis("Sets the environment to use the Community-Collections Miniconda.")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
 	setenv("PYTHONPREFIX",root)
 	prepend_path("PATH",pathJoin(root,"bin"))

@@ -43,7 +43,16 @@ DRY_RUN=0
 usage() {
    cat <<EOF
 Usage: $0 [opts]
-   --rocm-versions "v1 v2 ..."   space- or comma-separated list of ROCm versions (REQUIRED)
+   --rocm-versions "v1 v2 ..."   space- or comma-separated list of ROCm modulefile tokens (REQUIRED).
+                                 Accepts BOTH regular numeric (e.g. 7.2.1) AND release-candidate
+                                 flavor (e.g. therock-23.2.0, afar-22.2.0, afar-7.0.5) tokens
+                                 in the same list. Each token must resolve to an existing
+                                 modulefile under /shared/apps/modules/ubuntu/lmodfiles/base/rocm
+                                 (the pre-flight check below enforces this). For RC tokens, the
+                                 sbatch derives ROCM_RC_PREFIX (e.g. 'therock') and the install
+                                 lands at \${TOP_INSTALL_PATH}/rocmplus-\${PREFIX}-\${NUMERIC}/
+                                 (e.g. /nfsapps/opt/rocmplus-therock-7.13.0/) so it cannot
+                                 collide with a future official rocm release of the same numeric.
    --partition NAME              Slurm partition (default ${PARTITION})
    --time HH:MM:SS               walltime per version (default ${TIME_PER_JOB})
    --amdgpu-gfxmodel GFX         default ${AMDGPU_GFXMODEL}
@@ -133,7 +142,7 @@ cat <<EOF
 ==================================================================
  Partition:         ${PARTITION}
  Time per version:  ${TIME_PER_JOB}
- Versions (${N}):     ${VERSIONS_ARR[*]}
+ Versions (${N}):     ${VERSIONS_ARR[*]}   (mixed numeric + RC-flavor tokens OK; RC trees install to rocmplus-<prefix>-<numeric>/)
  GFX:               ${AMDGPU_GFXMODEL}
  TOP_INSTALL_PATH:  ${TOP_INSTALL_PATH}
  TOP_MODULE_PATH:   ${TOP_MODULE_PATH}

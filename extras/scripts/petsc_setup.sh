@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Capture this script's absolute path BEFORE any cd, so the inline
+# git-provenance block lower down can resolve the script in the repo
+# even after the build has cd'd into a temp dir. (BASH_SOURCE[0] is
+# whatever path was used to invoke the script -- often relative when
+# called from main_setup.sh -- so we absolutize it once, here.)
+LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+
 # Fail fast on errors and surface failures inside pipes. Not using -u
 # (nounset) because some conditional code paths rely on unset variables.
 set -eo pipefail
@@ -49,6 +56,12 @@ PETSC_VERSION="3.24.1"
 # without colliding on /opt/rocmplus-X/petsc.
 INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/petsc-v${PETSC_VERSION}
 INSTALL_PATH_INPUT=""
+# --install-path: parent dir; the script appends petsc-v${PETSC_VERSION}
+# itself. Used by main_setup.sh so the orchestrator never has to know
+# the version. --install-path-no-version (full leaf dir) wins over --install-path
+# when both are set, for callers that need exact control of the final install directory.
+# Note: --use-amdflang 1 still appends _amdflang to whichever path wins.
+ROCMPLUS_PATH_INPUT=""
 # --replace 1: rm -rf prior install dir + ${PETSC_VERSION}.lua before build.
 # (When --use-amdflang 1, the suffix _amdflang is added to BOTH paths
 # so we always clean whatever the resolved INSTALL_PATH/MODULE_PATH is.)
@@ -74,11 +87,12 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 usage()
 {
    echo "Usage:"
-   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  WARNING: when specifying --install-path-no-version and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  WARNING: when selecting the module to supply to --mpi-module, make sure it sets the MPI_PATH environment variable"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "  --install-path [ INSTALL_PATH_INPUT ] default $INSTALL_PATH"
+   echo "  --install-path-no-version [ INSTALL_PATH_INPUT ] default $INSTALL_PATH"
+   echo "  --install-path [ ROCMPLUS_PATH_INPUT ] parent dir; if set (and --install-path-no-version is not), INSTALL_PATH = ROCMPLUS_PATH/petsc-v\${PETSC_VERSION}"
    echo "  --use-amdflang [ USE_AMDFLANG ] set to 1 to build petsc with the AMD next generation Fortran compiler, default $USE_AMDFLANG"
    echo "  --amdflang-release-number [ AMDFLANG_RELEASE_NUMBER ] default $AMDFLANG_RELEASE_NUMBER. Note: this flag is only used if --use-amdflang 1 is specified."
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
@@ -131,9 +145,14 @@ do
           MPI_MODULE=${1}
           reset-last
           ;;
-      "--install-path")
+      "--install-path-no-version")
           shift
           INSTALL_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--install-path")
+          shift
+          ROCMPLUS_PATH_INPUT=${1}
           reset-last
           ;;
       "--petsc-version")
@@ -184,6 +203,11 @@ done
 
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
+elif [ "${ROCMPLUS_PATH_INPUT}" != "" ]; then
+   # Orchestrator-friendly: caller passes the rocmplus parent dir;
+   # this script appends petsc-v${PETSC_VERSION} from its own default.
+   # Lets main_setup.sh stay version-agnostic for petsc.
+   INSTALL_PATH=${ROCMPLUS_PATH_INPUT}/petsc-v${PETSC_VERSION}
 else
    # override path in case ROCM_VERSION or PETSC_VERSION has been supplied as input
    INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/petsc-v${PETSC_VERSION}
@@ -261,6 +285,18 @@ if [ "${BUILD_PETSC}" = "0" ]; then
    exit
 
 else
+   # Derive ROCM_MODULE_NAME from the actual ROCM_PATH basename so RC
+   # trees (rocm-therock-*, rocm-afar-*) match their loaded module
+   # name instead of the SDK numeric. Falls back to the rocm/<version>
+   # form for direct standalone invocation where ROCM_PATH is unset.
+   if [[ -n "${ROCM_PATH:-}" ]]; then
+      _rp_bn="${ROCM_PATH##*/}"
+      ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
+      unset _rp_bn
+   else
+      ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+   fi
+
    if [ -f ${CACHE_FILES}/petsc-v${PETSC_VERSION}.tgz ]; then
       echo ""
       echo "============================"
@@ -285,7 +321,7 @@ else
       echo "============================"
       echo ""
 
-      REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" )
+      REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" )
       if [[ ${USE_AMDFLANG} == "1" ]]; then
          # AFAR amdflang-new wraps openmpi compilers; loaded BEFORE the
          # MPI module so the MPI module sees the right Fortran compiler.
@@ -554,7 +590,7 @@ print('ScaLAPACK.py patched successfully')
          ${SUDO} chmod go-w ${EIGEN_PATH}
       fi
 
-      module unload rocm/${ROCM_VERSION}
+      module unload ${ROCM_MODULE_NAME}
       module unload $MPI_MODULE
       module unload hdf5
       if [[ ${USE_AMDFLANG} == "1" ]]; then
@@ -570,15 +606,39 @@ print('ScaLAPACK.py patched successfully')
    PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
-   ROCM_MODULE_LOAD=rocm/${ROCM_VERSION}
+   ROCM_MODULE_LOAD=${ROCM_MODULE_NAME}
    if [[ "${USE_AMDFLANG}" == 1 ]]; then
       # the amdflang-new module also loads rocm
       ROCM_MODULE_LOAD=amdflang-new/rocm-afar-${AMDFLANG_RELEASE_NUMBER}
    fi
 
+   # Provenance: capture this leaf script's git state for the modulefile
+   # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
+   # at the top of this script before any cd) so this works even after
+   # the script has cd'd into a temp build dir. Self-contained: falls
+   # back to "unknown" when run from a stripped-of-.git context (Docker
+   # layer, release tarball, or git binary missing).
+   LEAF_SCRIPT_NAME="$(basename "${LEAF_SCRIPT_PATH}")"
+   LEAF_SCRIPT_COMMIT=unknown
+   LEAF_SCRIPT_DIRTY=unknown
+   _leaf_dir="$(dirname "${LEAF_SCRIPT_PATH}")"
+   if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
+      && git -C "${_leaf_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      _commit="$(git -C "${_leaf_dir}" log -n 1 --pretty=format:%H -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)"
+      [ -n "${_commit}" ] && LEAF_SCRIPT_COMMIT="${_commit}"
+      unset _commit
+      if [ -n "$(git -C "${_leaf_dir}" status --porcelain -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)" ]; then
+         LEAF_SCRIPT_DIRTY=dirty
+      else
+         LEAF_SCRIPT_DIRTY=clean
+      fi
+   fi
+   unset _leaf_dir
+
    # The - option suppresses tabs
    cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/$PETSC_VERSION.lua
 	whatis("PETSC Version $PETSC_VERSION - solver package")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
 	local base = "${PETSC_PATH}"
 

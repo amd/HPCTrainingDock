@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Capture this script's absolute path BEFORE any cd, so the inline
+# git-provenance block lower down can resolve the script in the repo
+# even after the build has cd'd into a temp dir. (BASH_SOURCE[0] is
+# whatever path was used to invoke the script -- often relative when
+# called from main_setup.sh -- so we absolutize it once, here.)
+LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+
 # Fail fast on errors and surface failures inside pipes. Not using -u
 # (nounset) because some conditional code paths rely on unset variables.
 set -eo pipefail
@@ -50,6 +57,11 @@ FFTW_VERSION=3.3.10
 MPI_MODULE="openmpi"
 FFTW_PATH=/opt/rocmplus-${ROCM_VERSION}/fftw-v$FFTW_VERSION
 FFTW_PATH_INPUT=""
+# --install-path: parent dir; the script appends fftw-v${FFTW_VERSION}
+# itself. Used by main_setup.sh so the orchestrator never has to know
+# the version. --install-path-no-version (full leaf dir) wins over --install-path
+# when both are set, for callers that need exact control of the final install directory.
+ROCMPLUS_PATH_INPUT=""
 # --replace 1: rm -rf prior install dir + ${FFTW_VERSION}.lua before building.
 # --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
 REPLACE=0
@@ -67,7 +79,7 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 usage()
 {
    echo "Usage:"
-   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  WARNING: when specifying --install-path-no-version and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --rocm-module [ ROCM_MODULE ] default $ROCM_MODULE"
@@ -75,7 +87,8 @@ usage()
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
    echo "  --enable-mpi [ ENABLE_MPI ], set to 1 to enable, enabled by default if MPI is installed"
-   echo "  --install-path [ FFTW_PATH ] default $FFTW_PATH"
+   echo "  --install-path-no-version [ FFTW_PATH ] default $FFTW_PATH"
+   echo "  --install-path [ ROCMPLUS_PATH_INPUT ] parent dir; if set (and --install-path-no-version is not), FFTW_PATH = ROCMPLUS_PATH/fftw-v\${FFTW_VERSION}"
    echo "  --c-compiler [ C_COMPILER ] default ${C_COMPILER}"
    echo "  --fc-compiler [ FC_COMPILER ] default ${FC_COMPILER}"
    echo "  --build-fftw [ BUILD_FFTW ], set to 1 to build FFTW, default is 0"
@@ -119,9 +132,14 @@ do
           MODULE_PATH=${1}
           reset-last
           ;;
-      "--install-path")
+      "--install-path-no-version")
           shift
           FFTW_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--install-path")
+          shift
+          ROCMPLUS_PATH_INPUT=${1}
           reset-last
           ;;
       "--mpi-module")
@@ -182,6 +200,11 @@ done
 
 if [ "${FFTW_PATH_INPUT}" != "" ]; then
    FFTW_PATH=${FFTW_PATH_INPUT}
+elif [ "${ROCMPLUS_PATH_INPUT}" != "" ]; then
+   # Orchestrator-friendly: caller passes the rocmplus parent dir;
+   # this script appends fftw-v${FFTW_VERSION} from its own default.
+   # Lets main_setup.sh stay version-agnostic for fftw.
+   FFTW_PATH=${ROCMPLUS_PATH_INPUT}/fftw-v${FFTW_VERSION}
 else
    # override path in case FFTW_VERSION has been supplied as input
    FFTW_PATH=/opt/rocmplus-${ROCM_VERSION}/fftw-v${FFTW_VERSION}
@@ -249,6 +272,19 @@ else
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
+   # Derive ROCM_MODULE_NAME from the actual ROCM_PATH basename so RC
+   # trees (rocm-therock-*, rocm-afar-*) match their loaded module
+   # name instead of the SDK numeric. Falls back to the
+   # ${ROCM_MODULE}/${ROCM_VERSION} form for direct standalone
+   # invocation where ROCM_PATH is unset.
+   if [[ -n "${ROCM_PATH:-}" ]]; then
+      _rp_bn="${ROCM_PATH##*/}"
+      ROCM_MODULE_NAME="${ROCM_MODULE}/${_rp_bn#rocm-}"
+      unset _rp_bn
+   else
+      ROCM_MODULE_NAME="${ROCM_MODULE}/${ROCM_VERSION}"
+   fi
+
    if [ -f ${CACHE_FILES}/fftw-v${FFTW_VERSION}.tgz ]; then
       echo ""
       echo "============================"
@@ -299,7 +335,7 @@ else
 
       # default build is without mpi
       ENABLE_MPI=""
-      REQUIRED_MODULES=( "${ROCM_MODULE}/${ROCM_VERSION}" "${MPI_MODULE}" )
+      REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${MPI_MODULE}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
       if [[ `which mpicc | wc -l` -eq 1 ]]; then
 	 # if mpi is found in the path, build fftw parallel
@@ -383,10 +419,35 @@ else
    PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
+   # Provenance: capture this leaf script's git state for the modulefile
+   # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
+   # at the top of this script before any cd) so this works even after
+   # the script has cd'd into a temp build dir. Self-contained: falls
+   # back to "unknown" when run from a stripped-of-.git context (Docker
+   # layer, release tarball, or git binary missing).
+   LEAF_SCRIPT_NAME="$(basename "${LEAF_SCRIPT_PATH}")"
+   LEAF_SCRIPT_COMMIT=unknown
+   LEAF_SCRIPT_DIRTY=unknown
+   _leaf_dir="$(dirname "${LEAF_SCRIPT_PATH}")"
+   if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
+      && git -C "${_leaf_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      _commit="$(git -C "${_leaf_dir}" log -n 1 --pretty=format:%H -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)"
+      [ -n "${_commit}" ] && LEAF_SCRIPT_COMMIT="${_commit}"
+      unset _commit
+      if [ -n "$(git -C "${_leaf_dir}" status --porcelain -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)" ]; then
+         LEAF_SCRIPT_DIRTY=dirty
+      else
+         LEAF_SCRIPT_DIRTY=clean
+      fi
+   fi
+   unset _leaf_dir
+
    # The - option suppresses tabs
    cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${FFTW_VERSION}.lua
 	whatis("FFTW: Fastest Fourier Transform in the West")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
+	prereq("${ROCM_MODULE_NAME}")
 	local base = "${FFTW_PATH}"
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 	setenv("FFTW_PATH", base)

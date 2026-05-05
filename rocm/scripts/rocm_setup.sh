@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Capture this script's absolute path BEFORE any cd, so the inline
+# git-provenance block lower down can resolve the script in the repo
+# even after the build has cd'd into a temp dir. (BASH_SOURCE[0] is
+# whatever path was used to invoke the script -- often relative when
+# called from main_setup.sh -- so we absolutize it once, here.)
+LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+
 # Variables controlling setup process
 : ${ROCM_VERSION:="6.0"}
 REPLACE=0
@@ -429,6 +436,42 @@ EOF
 #        apt-get autoclean; \
 #    fi
 
+# Derive ROCM_MODULE_NAME from the actual ROCM_PATH basename so RC
+# trees (rocm-therock-*, rocm-afar-*) match their loaded module name
+# instead of the SDK numeric. Falls back to the rocm/<version> form
+# (e.g. fresh-install path where ROCM_PATH is unset and this script
+# is the one materializing the modulefile being prereq'd).
+if [[ -n "${ROCM_PATH:-}" ]]; then
+   _rp_bn="${ROCM_PATH##*/}"
+   ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
+   unset _rp_bn
+else
+   ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+fi
+
+# Provenance: capture this leaf script's git state for the modulefile
+# whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
+# at the top of this script before any cd) so this works even after
+# the script has cd'd into a temp build dir. Self-contained: falls
+# back to "unknown" when run from a stripped-of-.git context (Docker
+# layer, release tarball, or git binary missing).
+LEAF_SCRIPT_NAME="$(basename "${LEAF_SCRIPT_PATH}")"
+LEAF_SCRIPT_COMMIT=unknown
+LEAF_SCRIPT_DIRTY=unknown
+_leaf_dir="$(dirname "${LEAF_SCRIPT_PATH}")"
+if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
+   && git -C "${_leaf_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+   _commit="$(git -C "${_leaf_dir}" log -n 1 --pretty=format:%H -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)"
+   [ -n "${_commit}" ] && LEAF_SCRIPT_COMMIT="${_commit}"
+   unset _commit
+   if [ -n "$(git -C "${_leaf_dir}" status --porcelain -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)" ]; then
+      LEAF_SCRIPT_DIRTY=dirty
+   else
+      LEAF_SCRIPT_DIRTY=clean
+   fi
+fi
+unset _leaf_dir
+
 # set up up module files
 
 # Create a module file for rocm sdk
@@ -443,6 +486,7 @@ if [ "${DISTRO}" == "ubuntu" ]; then
 # The - option suppresses tabs
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ROCm")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("Version: ${ROCM_VERSION}")
 	whatis("Category: AMD")
 	whatis("ROCm")
@@ -469,6 +513,7 @@ elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
 # The - option suppresses tabs
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ROCm")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("Version: ${ROCM_VERSION}")
 	whatis("Category: AMD")
 	whatis("ROCm")
@@ -499,6 +544,7 @@ AMDCLANG_VERSION=`/opt/rocm-${ROCM_VERSION}/llvm/bin/amdclang --version |head -1
 # The - option suppresses tabs
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${AMDCLANG_VERSION}-${ROCM_VERSION}.lua
 	whatis("Name: AMDCLANG")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("Version: ${ROCM_VERSION}")
 	whatis("Category: AMD")
 	whatis("AMDCLANG")
@@ -521,7 +567,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${AMDCLANG_VERSION}-${ROCM_VERSION}.lua
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("LD_RUN_PATH", pathJoin(base, "lib"))
 	prepend_path("CPATH", pathJoin(base, "include"))
-	prereq("rocm/${ROCM_VERSION}")
+	prereq("${ROCM_MODULE_NAME}")
 	family("compiler")
 EOF
 
@@ -533,6 +579,7 @@ ${SUDO} mkdir -p ${MODULE_PATH}
 # The - option suppresses tabs
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ROCm HIPFort")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("Version: ${ROCM_VERSION}")
 	load("amdclang")
 	local base = "/opt/rocm-${ROCM_VERSION}"
@@ -550,6 +597,7 @@ ${SUDO} mkdir -p ${MODULE_PATH}
 # The - option suppresses tabs
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ROCm OpenCL")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("Version: ${ROCM_VERSION}")
 	whatis("Category: AMD")
 	whatis("ROCm OpenCL")
@@ -615,6 +663,7 @@ if [ "${INCLUDE_TOOLS}" = "1" ]; then
             # The - option suppresses tabs
          cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ${TOOL_NAME}")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("Version: ${ROCM_VERSION}")
 	whatis("Category: AMD")
 	whatis("${TOOL_NAME}")
@@ -629,7 +678,7 @@ if [ "${INCLUDE_TOOLS}" = "1" ]; then
         setenv("${TOOL_NAME_UC}_SHARE",shareDir)
         prepend_path("PATH", pathJoin(shareDir, "bin"))
 
-	prereq("rocm/${ROCM_VERSION}")
+	prereq("${ROCM_MODULE_NAME}")
 	setenv("ROCP_METRICS", pathJoin(os.getenv("ROCM_PATH"), "/lib/rocprofiler/metrics.xml"))
 EOF
 
@@ -964,6 +1013,7 @@ EOF
 	help(help_message,"\n")
 
 	whatis("Name: ${TOOL_NAME}")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("Version: ${ROCM_VERSION}")
 	whatis("Keywords: Profiling, Performance, GPU")
 	whatis("Description: tool for GPU performance profiling")

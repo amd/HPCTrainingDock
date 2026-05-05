@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Capture this script's absolute path BEFORE any cd, so the inline
+# git-provenance block lower down can resolve the script in the repo
+# even after the build has cd'd into a temp dir. (BASH_SOURCE[0] is
+# whatever path was used to invoke the script -- often relative when
+# called from main_setup.sh -- so we absolutize it once, here.)
+LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+
 # Variables controlling setup process
 ROCM_VERSION=6.2.0
 BUILD_JAX=0
@@ -18,6 +25,13 @@ JAX_PATH=/opt/rocmplus-${ROCM_VERSION}/jax-v0.${JAX_VERSION}
 JAX_PATH_INPUT=""
 JAXLIB_PATH=/opt/rocmplus-${ROCM_VERSION}/jaxlib-v0.${JAX_VERSION}
 JAXLIB_PATH_INPUT=""
+# --install-path: parent dir; the script appends both
+# jax-v0.${JAX_VERSION} and jaxlib-v0.${JAX_VERSION} itself (after the
+# JAX policy gate has finalized JAX_VERSION). Used by main_setup.sh so
+# the orchestrator never has to know the version (which is itself ROCm-
+# aware here). Per-component --jax-install-path-no-version / --jaxlib-install-path-no-version
+# (full leaf dirs) still win when set.
+ROCMPLUS_PATH_INPUT=""
 PATCHELF_VERSION=0.18.0
 # jax is multi-component (jax + jaxlib both written by this script).
 # Like openmpi_setup.sh's --replace-xpmem/--replace-ucx pattern:
@@ -54,12 +68,13 @@ DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID=
 usage()
 {
    echo "Usage:"
-   echo "  WARNING: when specifying --jax-install-path, --jaxlib-install-path, and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  WARNING: when specifying --jax-install-path-no-version, --jaxlib-install-path-no-version, and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "--amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected, specify as a comma separated list"
    echo "--build-jax [ BUILD_JAX ] set to 1 to build jax default is 0"
    echo "--jax-version [ JAX_VERSION ] version of JAX, XLA, and JAXLIB, default is $JAX_VERSION"
-   echo "--jax-install-path [ JAX_PATH ] directory where JAX will be installed, default is $JAX_PATH"
-   echo "--jaxlib-install-path [ JAXLIB_PATH ] directory where JAX will be installed, default is $JAXLIB_PATH"
+   echo "--jax-install-path-no-version [ JAX_PATH ] directory where JAX will be installed, default is $JAX_PATH"
+   echo "--jaxlib-install-path-no-version [ JAXLIB_PATH ] directory where JAX will be installed, default is $JAXLIB_PATH"
+   echo "--install-path [ ROCMPLUS_PATH_INPUT ] parent dir; if set, fills both component install paths from \${ROCMPLUS_PATH}/{jax,jaxlib}-v0.\${JAX_VERSION}"
    echo "--help: this usage information"
    echo "--module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "--rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
@@ -119,14 +134,19 @@ do
           JAX_VERSION_USER_SET=1
 	  reset-last
           ;;
-      "--jax-install-path")
+      "--jax-install-path-no-version")
           shift
           JAX_PATH_INPUT=${1}
 	  reset-last
           ;;
-      "--jaxlib-install-path")
+      "--jaxlib-install-path-no-version")
           shift
           JAXLIB_PATH_INPUT=${1}
+	  reset-last
+          ;;
+      "--install-path")
+          shift
+          ROCMPLUS_PATH_INPUT=${1}
 	  reset-last
           ;;
       "--help")
@@ -229,6 +249,11 @@ unset ROCM_MAJOR
 
 if [ "${JAX_PATH_INPUT}" != "" ]; then
    JAX_PATH=${JAX_PATH_INPUT}
+elif [ "${ROCMPLUS_PATH_INPUT}" != "" ]; then
+   # Orchestrator-friendly: caller passes the rocmplus parent dir;
+   # this script appends jax-v0.${JAX_VERSION} from the (now
+   # policy-gate-resolved) JAX_VERSION.
+   JAX_PATH=${ROCMPLUS_PATH_INPUT}/jax-v0.${JAX_VERSION}
 else
    # override jax path in case ROCM_VERSION or JAX_VERSION has been supplied as input
    JAX_PATH=/opt/rocmplus-${ROCM_VERSION}/jax-v0.${JAX_VERSION}
@@ -236,6 +261,9 @@ fi
 
 if [ "${JAXLIB_PATH_INPUT}" != "" ]; then
    JAXLIB_PATH=${JAXLIB_PATH_INPUT}
+elif [ "${ROCMPLUS_PATH_INPUT}" != "" ]; then
+   # Same as JAX_PATH above but for the jaxlib companion.
+   JAXLIB_PATH=${ROCMPLUS_PATH_INPUT}/jaxlib-v0.${JAX_VERSION}
 else
    # override jaxlib path in case ROCM_VERSION or JAX_VERSION has been supplied as input
    JAXLIB_PATH=/opt/rocmplus-${ROCM_VERSION}/jaxlib-v0.${JAX_VERSION}
@@ -300,10 +328,22 @@ _jax_on_exit() {
 }
 trap _jax_on_exit EXIT
 
+# Derive ROCM_MODULE_NAME from the actual ROCM_PATH basename so RC
+# trees (rocm-therock-*, rocm-afar-*) match their loaded module name
+# instead of the SDK numeric. Falls back to the rocm/<version> form
+# for direct standalone invocation where ROCM_PATH is unset.
+if [[ -n "${ROCM_PATH:-}" ]]; then
+   _rp_bn="${ROCM_PATH##*/}"
+   ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
+   unset _rp_bn
+else
+   ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+fi
+
 # Load the ROCm version for this JAX build
 #source /etc/profile.d/lmod.sh
 #source /etc/profile.d/z00_lmod.sh
-module load rocm/${ROCM_VERSION}
+module load ${ROCM_MODULE_NAME}
 
 if [[ "$AMDGPU_GFXMODEL_INPUT" != "" ]]; then
    AMDGPU_GFXMODEL=$AMDGPU_GFXMODEL_INPUT
@@ -424,7 +464,7 @@ else
       # jax_setup.sh run; the real lmod.sh above is sufficient to
       # bring `module` into scope. Restore only if a future Lmod
       # repackaging actually ships z01_lmod.sh.
-      module load rocm/${ROCM_VERSION}
+      module load ${ROCM_MODULE_NAME}
 
       # ---------------------------------------------------------------------
       # Bazel performance tuning applied to every `python3 build/build.py`
@@ -719,7 +759,7 @@ else
          ${SUDO} chmod go-w ${JAX_PATH}
       fi
 
-      module unload rocm/${ROCM_VERSION}
+      module unload ${ROCM_MODULE_NAME}
    fi
 
    # Create a module file for jax
@@ -729,11 +769,35 @@ else
    PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
+   # Provenance: capture this leaf script's git state for the modulefile
+   # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
+   # at the top of this script before any cd) so this works even after
+   # the script has cd'd into a temp build dir. Self-contained: falls
+   # back to "unknown" when run from a stripped-of-.git context (Docker
+   # layer, release tarball, or git binary missing).
+   LEAF_SCRIPT_NAME="$(basename "${LEAF_SCRIPT_PATH}")"
+   LEAF_SCRIPT_COMMIT=unknown
+   LEAF_SCRIPT_DIRTY=unknown
+   _leaf_dir="$(dirname "${LEAF_SCRIPT_PATH}")"
+   if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
+      && git -C "${_leaf_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      _commit="$(git -C "${_leaf_dir}" log -n 1 --pretty=format:%H -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)"
+      [ -n "${_commit}" ] && LEAF_SCRIPT_COMMIT="${_commit}"
+      unset _commit
+      if [ -n "$(git -C "${_leaf_dir}" status --porcelain -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)" ]; then
+         LEAF_SCRIPT_DIRTY=dirty
+      else
+         LEAF_SCRIPT_DIRTY=clean
+      fi
+   fi
+   unset _leaf_dir
+
    # The - option suppresses tabs
    cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/0.${JAX_VERSION}.lua
 	whatis("JAX version ${JAX_VERSION} with ROCm support")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
-	prereq("rocm/${ROCM_VERSION}")
+	prereq("${ROCM_MODULE_NAME}")
 	setenv("XLA_FLAGS","--xla_gpu_enable_triton_gemm=False --xla_gpu_autotune_level=3")
 	setenv("JAX_PLATFORMS","rocm,cpu")
 	prepend_path("LD_PRELOAD","${ROCM_PATH}/lib/llvm/lib/libunwind.so.1")

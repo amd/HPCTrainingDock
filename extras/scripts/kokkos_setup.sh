@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Capture this script's absolute path BEFORE any cd, so the inline
+# git-provenance block lower down can resolve the script in the repo
+# even after the build has cd'd into a temp dir. (BASH_SOURCE[0] is
+# whatever path was used to invoke the script -- often relative when
+# called from main_setup.sh -- so we absolutize it once, here.)
+LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+
 # Fail fast on errors and surface failures inside pipes. Not using -u
 # (nounset) because some conditional code paths rely on unset variables.
 set -eo pipefail
@@ -52,6 +59,11 @@ KOKKOS_ARCH_AMD_GFX942_APU="OFF"
 KOKKOS_VERSION="4.7.04"
 KOKKOS_PATH=/opt/rocmplus-${ROCM_VERSION}/kokkos-v${KOKKOS_VERSION}
 KOKKOS_PATH_INPUT=""
+# --install-path: parent dir; the script appends kokkos-v${KOKKOS_VERSION}
+# itself. Used by main_setup.sh so the orchestrator never has to know
+# the version. --install-path-no-version (full leaf dir) wins over --install-path
+# when both are set, for callers that need exact control of the final install directory.
+ROCMPLUS_PATH_INPUT=""
 # --replace 1: rm -rf prior install dir + ${KOKKOS_VERSION}.lua before building.
 # --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
 REPLACE=0
@@ -66,9 +78,10 @@ fi
 usage()
 {
    echo "Usage:"
-   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  WARNING: when specifying --install-path-no-version and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
-   echo "  --install-path [ KOKKOS_PATH ] default $KOKKOS_PATH"
+   echo "  --install-path-no-version [ KOKKOS_PATH ] default $KOKKOS_PATH"
+   echo "  --install-path [ ROCMPLUS_PATH_INPUT ] parent dir; if set (and --install-path-no-version is not), KOKKOS_PATH = ROCMPLUS_PATH/kokkos-v\${KOKKOS_VERSION}"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL_INPUT ] default is autodetected "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --kokkos-version [ KOKKOS_VERSION ] default $KOKKOS_VERSION (used as git branch/tag)"
@@ -108,9 +121,14 @@ do
           MODULE_PATH=${1}
           reset-last
           ;;
-      "--install-path")
+      "--install-path-no-version")
           shift
           KOKKOS_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--install-path")
+          shift
+          ROCMPLUS_PATH_INPUT=${1}
           reset-last
           ;;
       "--amdgpu-gfxmodel")
@@ -151,6 +169,11 @@ done
 
 if [ "${KOKKOS_PATH_INPUT}" != "" ]; then
    KOKKOS_PATH=${KOKKOS_PATH_INPUT}
+elif [ "${ROCMPLUS_PATH_INPUT}" != "" ]; then
+   # Orchestrator-friendly: caller passes the rocmplus parent dir;
+   # this script appends kokkos-v${KOKKOS_VERSION} from its own default.
+   # Lets main_setup.sh stay version-agnostic for kokkos.
+   KOKKOS_PATH=${ROCMPLUS_PATH_INPUT}/kokkos-v${KOKKOS_VERSION}
 else
    # override path in case ROCM_VERSION or KOKKOS_VERSION has been supplied as input
    KOKKOS_PATH=/opt/rocmplus-${ROCM_VERSION}/kokkos-v${KOKKOS_VERSION}
@@ -221,6 +244,18 @@ if [ "${BUILD_KOKKOS}" = "0" ]; then
    exit
 
 else
+   # Derive ROCM_MODULE_NAME from the actual ROCM_PATH basename so RC
+   # trees (rocm-therock-*, rocm-afar-*) match their loaded module
+   # name instead of the SDK numeric. Falls back to the rocm/<version>
+   # form for direct standalone invocation where ROCM_PATH is unset.
+   if [[ -n "${ROCM_PATH:-}" ]]; then
+      _rp_bn="${ROCM_PATH##*/}"
+      ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
+      unset _rp_bn
+   else
+      ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+   fi
+
    if [ -f /opt/rocmplus-${ROCM_VERSION}/CacheFiles/kokkos-v${KOKKOS_VERSION}.tgz ]; then
       echo ""
       echo "============================"
@@ -274,7 +309,7 @@ else
          *";gfx942;"*) KOKKOS_ARCH_AMD_GFX942_APU="ON" ;;
       esac
 
-      REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" )
+      REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
       # Build everything (source clone + build tree) under /tmp on the
@@ -425,7 +460,7 @@ else
       # removed.
       cd /
 
-      module unload rocm/${ROCM_VERSION}
+      module unload ${ROCM_MODULE_NAME}
 
    fi
 
@@ -436,14 +471,38 @@ else
    PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
+   # Provenance: capture this leaf script's git state for the modulefile
+   # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
+   # at the top of this script before any cd) so this works even after
+   # the script has cd'd into a temp build dir. Self-contained: falls
+   # back to "unknown" when run from a stripped-of-.git context (Docker
+   # layer, release tarball, or git binary missing).
+   LEAF_SCRIPT_NAME="$(basename "${LEAF_SCRIPT_PATH}")"
+   LEAF_SCRIPT_COMMIT=unknown
+   LEAF_SCRIPT_DIRTY=unknown
+   _leaf_dir="$(dirname "${LEAF_SCRIPT_PATH}")"
+   if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
+      && git -C "${_leaf_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      _commit="$(git -C "${_leaf_dir}" log -n 1 --pretty=format:%H -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)"
+      [ -n "${_commit}" ] && LEAF_SCRIPT_COMMIT="${_commit}"
+      unset _commit
+      if [ -n "$(git -C "${_leaf_dir}" status --porcelain -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)" ]; then
+         LEAF_SCRIPT_DIRTY=dirty
+      else
+         LEAF_SCRIPT_DIRTY=clean
+      fi
+   fi
+   unset _leaf_dir
+
    # The - option suppresses tabs.
    # LD_LIBRARY_PATH is now required because we build BUILD_SHARED_LIBS=ON
    # (libkokkoscore.so etc).  Harmless on a static-only install (LD_LIBRARY_PATH
    # is not consulted for .a archives).
    cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${KOKKOS_VERSION}.lua
         whatis("Kokkos version ${KOKKOS_VERSION} - Performance Portability Language")
+        whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
-        prereq("rocm/${ROCM_VERSION}")
+        prereq("${ROCM_MODULE_NAME}")
         prepend_path("PATH","${KOKKOS_PATH}")
         prepend_path("LD_LIBRARY_PATH","${KOKKOS_PATH}/lib")
         setenv("Kokkos_ROOT","${KOKKOS_PATH}")

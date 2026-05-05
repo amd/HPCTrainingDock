@@ -222,6 +222,38 @@ if [ "${BUILD_FTORCH}" = "0" ]; then
    exit
 
 else
+   # Derive ROCM_MODULE_NAME from the actual ROCM_PATH basename so RC
+   # trees (rocm-therock-*, rocm-afar-*) match their loaded module
+   # name instead of the SDK numeric. Falls back to the rocm/<version>
+   # form for direct standalone invocation where ROCM_PATH is unset.
+   if [[ -n "${ROCM_PATH:-}" ]]; then
+      _rp_bn="${ROCM_PATH##*/}"
+      ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
+      unset _rp_bn
+   else
+      ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+   fi
+
+   # Provenance: capture this leaf script's git state for the modulefile
+   # whatis() line emitted by the heredoc below. Self-contained (no
+   # source dependency); falls back to "unknown" when the install runs
+   # from a stripped-of-.git context (Docker layer, release tarball, or
+   # git binary missing).
+   LEAF_SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
+   LEAF_SCRIPT_COMMIT=unknown
+   LEAF_SCRIPT_DIRTY=unknown
+   _leaf_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _leaf_dir=""
+   if [ -n "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
+      && git -C "${_leaf_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      LEAF_SCRIPT_COMMIT="$(git -C "${_leaf_dir}" log -n 1 --pretty=format:%H -- "${BASH_SOURCE[0]}" 2>/dev/null || echo unknown)"
+      if [ -n "$(git -C "${_leaf_dir}" status --porcelain -- "${BASH_SOURCE[0]}" 2>/dev/null)" ]; then
+         LEAF_SCRIPT_DIRTY=dirty
+      else
+         LEAF_SCRIPT_DIRTY=clean
+      fi
+   fi
+   unset _leaf_dir
+
    # Per-job throwaway build dir; replaces a fixed `cd /tmp` (with a
    # later `rm -rf FTorch`) that would race with any other concurrent
    # ftorch build on the same node.
@@ -254,7 +286,7 @@ else
       echo "============================"
       echo ""
 
-      REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" "${PYTORCH_MODULE}" )
+      REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${PYTORCH_MODULE}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
       if [ -d "$FTORCH_PATH" ]; then
@@ -328,7 +360,7 @@ else
 
       # cleanup: trap handles ${FTORCH_BUILD_ROOT}/FTorch
       cd /
-      module unload rocm/${ROCM_VERSION}
+      module unload ${ROCM_MODULE_NAME}
       module unload ${PYTORCH_MODULE}
    fi
 
@@ -342,8 +374,9 @@ else
    # The - option suppresses tabs
    cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/dev.lua
 	whatis("FTorch: a library for directly calling PyTorch ML models from Fortran")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
-	prereq("rocm/${ROCM_VERSION}")
+	prereq("${ROCM_MODULE_NAME}")
 	load("${PYTORCH_MODULE}")
 	prepend_path("LD_LIBRARY_PATH", pathJoin("${FTORCH_PATH}", "lib"))
 	setenv("FTORCH_HOME","${FTORCH_PATH}")

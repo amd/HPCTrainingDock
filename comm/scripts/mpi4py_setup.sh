@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Capture this script's absolute path BEFORE any cd, so the inline
+# git-provenance block lower down can resolve the script in the repo
+# even after the build has cd'd into a temp dir. (BASH_SOURCE[0] is
+# whatever path was used to invoke the script -- often relative when
+# called from main_setup.sh -- so we absolutize it once, here.)
+LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+
 # Fail fast on errors and surface failures inside pipes. Not using -u
 # (nounset) because some conditional code paths rely on unset variables.
 set -eo pipefail
@@ -44,6 +51,11 @@ BUILD_MPI4PY=0
 MPI4PY_VERSION=4.1.0
 MPI4PY_PATH=/opt/rocmplus-${ROCM_VERSION}/mpi4py-v${MPI4PY_VERSION}
 MPI4PY_PATH_INPUT=""
+# --install-path: parent dir; the script appends mpi4py-v${MPI4PY_VERSION}
+# itself. Used by main_setup.sh so the orchestrator never has to know
+# the version. --install-path-no-version (full leaf dir) wins over --install-path
+# when both are set, for callers that need exact control of the final install directory.
+ROCMPLUS_PATH_INPUT=""
 MPI_PATH="/usr"
 MPI_MODULE="openmpi"
 SUDO="sudo"
@@ -64,12 +76,13 @@ fi
 usage()
 {
    echo "Usage:"
-   echo "  WARNING: when specifying --install-path and --module-path, the directories have to already exist because the script checks for write permissions"
+   echo "  WARNING: when specifying --install-path-no-version and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --build-mpi4py [ BUILD_MPI4PY ] default is $BUILD_MPI4PY"
    echo "  --mpi-module [ MPI_MODULE ] default is $MPI_MODULE "
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
-   echo "  --install-path [ MPI4PY_PATH_INPUT ] default $MPI4PY_PATH "
+   echo "  --install-path-no-version [ MPI4PY_PATH_INPUT ] default $MPI4PY_PATH "
+   echo "  --install-path [ ROCMPLUS_PATH_INPUT ] parent dir; if set (and --install-path-no-version is not), MPI4PY_PATH = ROCMPLUS_PATH/mpi4py-v\${MPI4PY_VERSION}"
    echo "  --mpi4py-version [ MPI4PY_VERSION ] default is $MPI4PY_VERSION "
    echo "  --mpi-path [MPI_PATH] default is from MPI module"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
@@ -122,9 +135,14 @@ do
           MODULE_PATH=${1}
           reset-last
           ;;
-      "--install-path")
+      "--install-path-no-version")
           shift
           MPI4PY_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--install-path")
+          shift
+          ROCMPLUS_PATH_INPUT=${1}
           reset-last
           ;;
       "--rocm-version")
@@ -159,7 +177,13 @@ do
 done
 
 if [ "${MPI4PY_PATH_INPUT}" != "" ]; then
+   # Direct full leaf override (back-compat path; --install-path-no-version semantics unchanged).
    MPI4PY_PATH=${MPI4PY_PATH_INPUT}
+elif [ "${ROCMPLUS_PATH_INPUT}" != "" ]; then
+   # Orchestrator-friendly: caller passes the rocmplus parent dir;
+   # mpi4py_setup.sh appends mpi4py-v${MPI4PY_VERSION} from its own
+   # default. Lets main_setup.sh stay version-agnostic for mpi4py.
+   MPI4PY_PATH=${ROCMPLUS_PATH_INPUT}/mpi4py-v${MPI4PY_VERSION}
 else
    # override path in case ROCM_VERSION or MPI4PY_VERSION has been supplied as input
    MPI4PY_PATH=/opt/rocmplus-${ROCM_VERSION}/mpi4py-v${MPI4PY_VERSION}
@@ -273,7 +297,24 @@ else
       echo "============================"
       echo ""
 
-      REQUIRED_MODULES=( "rocm/${ROCM_VERSION}" "${MPI_MODULE}" )
+      # Derive the actual rocm modulefile token to (re-)load. For RC
+      # trees (rocm-therock-23.2.0, rocm-afar-22.2.0, ...) the
+      # modulefile name does NOT match `rocm/${ROCM_VERSION}` because
+      # the ROCM_VERSION here is the SDK numeric (e.g. 7.13.0 for
+      # therock-23.2.0). Trying `module load rocm/7.13.0` would fail
+      # with "no such file" even though the SDK is already loaded.
+      # Prefer the basename of the upstream-loaded ROCM_PATH (Lmod
+      # treats reload of an already-loaded module as a no-op); only
+      # fall back to the legacy `rocm/${ROCM_VERSION}` form for direct
+      # standalone invocation where ROCM_PATH may not be set yet.
+      if [[ -n "${ROCM_PATH:-}" ]]; then
+         _rp_bn="${ROCM_PATH##*/}"
+         ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
+         unset _rp_bn
+      else
+         ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+      fi
+      REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${MPI_MODULE}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
       if [ -d "$MPI4PY_PATH" ]; then
@@ -338,7 +379,7 @@ else
 
       # MPI4PY_BUILD_DIR (under /tmp, contains the mpi4py clone and
       # the build venv) is removed by the EXIT trap above.
-      module unload rocm/${ROCM_VERSION}
+      module unload ${ROCM_MODULE_NAME}
       module unload ${MPI_MODULE}
 
    fi
@@ -351,9 +392,33 @@ else
    PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
+   # Provenance: capture this leaf script's git state for the modulefile
+   # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
+   # at the top of this script before any cd) so this works even after
+   # the script has cd'd into a temp build dir. Self-contained: falls
+   # back to "unknown" when run from a stripped-of-.git context (Docker
+   # layer, release tarball, or git binary missing).
+   LEAF_SCRIPT_NAME="$(basename "${LEAF_SCRIPT_PATH}")"
+   LEAF_SCRIPT_COMMIT=unknown
+   LEAF_SCRIPT_DIRTY=unknown
+   _leaf_dir="$(dirname "${LEAF_SCRIPT_PATH}")"
+   if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
+      && git -C "${_leaf_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      _commit="$(git -C "${_leaf_dir}" log -n 1 --pretty=format:%H -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)"
+      [ -n "${_commit}" ] && LEAF_SCRIPT_COMMIT="${_commit}"
+      unset _commit
+      if [ -n "$(git -C "${_leaf_dir}" status --porcelain -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)" ]; then
+         LEAF_SCRIPT_DIRTY=dirty
+      else
+         LEAF_SCRIPT_DIRTY=clean
+      fi
+   fi
+   unset _leaf_dir
+
    # The - option suppresses tabs
    cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${MPI4PY_VERSION}.lua
 	whatis(" MPI4PY - provides Python bindings for MPI")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	
 	prepend_path("PYTHONPATH", "${MPI4PY_PATH}")
 	load("${MPI_MODULE}")
