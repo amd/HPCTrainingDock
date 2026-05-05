@@ -281,6 +281,25 @@ if [ "${USE_MAKEFILE}" == 1 ]; then
    exit
 fi
 
+# ── Operator-deselection bookkeeping ─────────────────────────────────
+# Tracks which packages were forced to BUILD_X=0 by an operator policy
+# (--packages whitelist or --quick-installs blacklist), and *why*. The
+# --quick-installs and --packages blocks below populate this; the
+# run_and_log wrapper consults it so a NOOP_RC=43 from a deselected
+# package gets bucketed as DESELECTED (not SKIPPED). Empty for default
+# full-sweep runs; in that case run_and_log still hits the SKIPPED(no-op)
+# path for any package whose BUILD_X defaulted to 0 (e.g. flang-new,
+# x11vnc) -- those genuinely declined themselves, they were not deselected.
+#
+# Key:   user-facing package name (matches PKG_FLAG keys + run_and_log
+#        first arg, e.g. 'pytorch', 'petsc').
+# Value: short reason printed in the per-package summary, one of
+#        'not-requested' (--packages excluded it) or 'quick-installs'
+#        (--quick-installs blacklisted it). When both gates would
+#        deselect the same package, --packages wins (it's the more
+#        specific user intent and runs last).
+declare -A DESELECTED_BY=()
+
 # ── --quick-installs: disable packages whose wall time is >= 20 min ──
 # Threshold raised from 15 -> 20 min after the job 8065 sweep (rocm-7.2.1)
 # measured petsc at 17:09 and scorep at 16:59, both clearly under the new
@@ -338,6 +357,20 @@ if [[ "${QUICK_INSTALLS}" == "1" ]]; then
    for v in "${QUICK_INSTALLS_PKGS[@]}"; do
       printf "  %-22s %s -> 0\n" "${v}" "${!v}"
       eval "${v}=0"
+      # Track which packages were deselected by this gate so the
+      # per-package summary can report DESELECTED(quick-installs)
+      # instead of SKIPPED(no-op). Mapping BUILD_X -> user-facing
+      # name is local here (PKG_FLAG isn't declared until below);
+      # a missing case (e.g. BUILD_JULIA) means there is no
+      # run_and_log call for that package, so it never reaches the
+      # summary anyway. Safe to leave unmapped.
+      case "${v}" in
+         BUILD_PYTORCH)    DESELECTED_BY[pytorch]="quick-installs" ;;
+         BUILD_TENSORFLOW) DESELECTED_BY[tensorflow]="quick-installs" ;;
+         BUILD_JAX)        DESELECTED_BY[jax]="quick-installs" ;;
+         BUILD_FTORCH)     DESELECTED_BY[ftorch]="quick-installs" ;;
+         BUILD_JULIA)      ;;  # dormant: no run_and_log call exists
+      esac
    done
    echo ""
 fi
@@ -401,11 +434,21 @@ if (( ${#PACKAGES_ARR[@]} > 0 )); then
    for flag in "${PKG_FLAG[@]}"; do
       eval "${flag}=0"
    done
+   # Mark every gated package as deselected (will be cleared below
+   # for the whitelisted ones). 'not-requested' overrides any earlier
+   # 'quick-installs' marker because --packages is the more specific
+   # user intent and runs second.
+   for p in "${!PKG_FLAG[@]}"; do
+      DESELECTED_BY[${p}]="not-requested"
+   done
    # Then enable the requested ones (overrides --quick-installs).
    for p in "${PACKAGES_ARR[@]}"; do
       flag="${PKG_FLAG[${p}]}"
       printf "  %-18s -> %s=1\n" "${p}" "${flag}"
       eval "${flag}=1"
+      # Clear the deselection marker for whitelisted packages so they
+      # land in OK / FAILED / SKIPPED depending on the actual outcome.
+      unset "DESELECTED_BY[${p}]"
    done
    echo ""
 fi
@@ -433,9 +476,23 @@ mkdir -p "${LOG_DIR}"
 # `tee` was the last command in the pipe), and main_setup.sh advertised
 # success even when xpmem / pnetcdf / openmpi etc. blew up. Audited as
 # P3 in slurm-7865-rocmplus-7.0.2.out.
+
+# 2026-05-05: split SKIPPED_PKGS into two distinct buckets so the
+# per-package summary tells the operator WHY a package wasn't built.
+# DESELECTED_PKGS captures the operator-policy cases (--packages
+# whitelist excluded the package, or --quick-installs blacklisted it),
+# leaving SKIPPED_PKGS for genuine "couldn't build" cases (preflight
+# missing, distro mismatch, --install-from-source 0). Without this
+# split, a single-package run like --packages petsc reported "SKIPPED
+# (24): pytorch(no-op) tensorflow(no-op) ..." which read like 24
+# things went wrong, when in fact the operator deliberately deselected
+# them. The associated DESELECTED_BY map (declared below) records the
+# reason ('not-requested' or 'quick-installs') so the bucket label is
+# specific. See run_and_log's NOOP_RC branch for the dispatch logic.
 FAILED_PKGS=()
 SUCCESS_PKGS=()
 SKIPPED_PKGS=()
+DESELECTED_PKGS=()
 
 # NOTE: the cleanup_pkg() helper, the PKG_CLEAN_DIRS / PKG_CLEAN_MODS
 # lookup tables, and the replace_pkg() pre-install helper that used to
@@ -490,15 +547,38 @@ run_and_log() {
       echo "### No artifacts created; nothing to clean up."
       echo ""
    elif [ "${rc}" -eq "${NOOP_RC}" ]; then
-      # The sub-script declined the install on purpose (unsupported
-      # distro, --install-from-source 0, etc.). Treat as SKIPPED, not
-      # FAILED. No cleanup -- the script never wrote anything.
-      SKIPPED_PKGS+=("${log_name}(no-op)")
-      echo ""
-      echo "### SKIP ${log_name}: setup script intentionally declined to install."
-      echo "### See ${LOG_DIR}/log_${log_name}_${TODAY}.txt for the reason."
-      echo "### No artifacts created; nothing to clean up."
-      echo ""
+      # The sub-script exited NOOP_RC (intentional no-op). Two distinct
+      # reasons share this rc; we use the DESELECTED_BY map (populated
+      # by the --packages / --quick-installs blocks above) to tell them
+      # apart so the per-package summary is precise:
+      #
+      # 1. DESELECTED -- operator policy: --packages whitelist excluded
+      #    this name, or --quick-installs blacklisted it as a long-pole
+      #    build. The leaf script's BUILD_X=0 short-circuit ran cleanly
+      #    and printed its own "[<pkg> BUILD_X=0] operator opt-out"
+      #    line; the verbose three-line ### SKIP banner below would be
+      #    redundant noise (24x for a single-package run), so we just
+      #    emit a one-line marker.
+      #
+      # 2. SKIPPED (no-op) -- script declined itself: unsupported
+      #    distro (e.g. mvapich on Ubuntu), --install-from-source 0
+      #    when the SDK already ships the tool (rocprof-sys/compute),
+      #    or BUILD_X defaulted to 0 in main_setup.sh (flang-new,
+      #    x11vnc) without any operator gate having flipped it. These
+      #    are non-obvious so the verbose banner is kept.
+      if [[ -n "${DESELECTED_BY[${log_name}]:-}" ]]; then
+         DESELECTED_PKGS+=("${log_name}(${DESELECTED_BY[${log_name}]})")
+         echo ""
+         echo "### deselected: ${log_name} (${DESELECTED_BY[${log_name}]})"
+         echo ""
+      else
+         SKIPPED_PKGS+=("${log_name}(no-op)")
+         echo ""
+         echo "### SKIP ${log_name}: setup script intentionally declined to install."
+         echo "### See ${LOG_DIR}/log_${log_name}_${TODAY}.txt for the reason."
+         echo "### No artifacts created; nothing to clean up."
+         echo ""
+      fi
    else
       FAILED_PKGS+=("${log_name}(rc=${rc})")
       echo ""
@@ -537,20 +617,42 @@ final_summary() {
    echo "  main_setup.sh per-package summary for rocm-${ROCM_VERSION:-?}"
    echo "=================================================================="
    if [ ${#SUCCESS_PKGS[@]} -gt 0 ]; then
-      echo "  OK       (${#SUCCESS_PKGS[@]}): ${SUCCESS_PKGS[*]}"
+      printf "  %-10s (%d): %s\n" "OK"         "${#SUCCESS_PKGS[@]}"    "${SUCCESS_PKGS[*]}"
+   fi
+   if [ ${#DESELECTED_PKGS[@]} -gt 0 ]; then
+      printf "  %-10s (%d): %s\n" "DESELECTED" "${#DESELECTED_PKGS[@]}" "${DESELECTED_PKGS[*]}"
    fi
    if [ ${#SKIPPED_PKGS[@]} -gt 0 ]; then
-      echo "  SKIPPED  (${#SKIPPED_PKGS[@]}): ${SKIPPED_PKGS[*]}"
+      printf "  %-10s (%d): %s\n" "SKIPPED"    "${#SKIPPED_PKGS[@]}"    "${SKIPPED_PKGS[*]}"
    fi
    if [ ${#FAILED_PKGS[@]} -gt 0 ]; then
-      echo "  FAILED   (${#FAILED_PKGS[@]}): ${FAILED_PKGS[*]}"
+      printf "  %-10s (%d): %s\n" "FAILED"     "${#FAILED_PKGS[@]}"     "${FAILED_PKGS[*]}"
       echo "=================================================================="
-      # If we got here on a normal path with zero saved_rc, force non-zero
-      # so callers (the slurm sbatch, sacct, the dependency chain logger)
-      # see this version as failed.
+      # Real failure: force non-zero exit so callers (the slurm sbatch,
+      # sacct, the dependency chain logger) see this version as failed.
+      # Preserve a non-zero saved_rc if there is one; only synthesize a 1
+      # if we somehow got here with rc=0 (shouldn't happen since
+      # run_and_log returns the leaf script's rc, but defensive).
       [ "${saved_rc}" -eq 0 ] && exit 1
+      # else: fall through and let the (already-non-zero) saved_rc propagate
    else
       echo "=================================================================="
+      # No real failures: every package landed in OK, DESELECTED, or
+      # SKIPPED. The orchestrator ran cleanly; force rc=0 so slurm
+      # reports COMPLETED instead of FAILED. Without this override,
+      # saved_rc is whatever the LAST run_and_log returned -- which is
+      # often NOOP_RC=43 (a deselected package processed last in the
+      # alphabetic call order) or MISSING_PREREQ_RC=42 (a transitively
+      # skipped package). Both got mis-reported as "FAILED 43:0" /
+      # "FAILED 42:0" by sacct, contradicting the per-package summary
+      # right above it. Single-package rebuilds (--packages petsc,
+      # job 8313 on therock-23.2.0) were the most visible victims:
+      # petsc itself succeeded but the job was tagged FAILED because
+      # ftorch (the last call in the chain) had BUILD_FTORCH=0.
+      # The per-package summary above is the source of truth for what
+      # was/wasn't built; the slurm exit code just answers "did the
+      # orchestrator finish without an internal error".
+      exit 0
    fi
 }
 trap final_summary EXIT

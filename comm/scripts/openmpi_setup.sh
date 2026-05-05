@@ -1211,6 +1211,39 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 	prereq("${ROCM_MODULE_NAME}")
 	family("MPI")
 EOF
+   elif [[ "${ROCM_VERSION}" == "7.13.0" && "${ROCM_PATH}" == *therock* ]]; then
+     # UCC 1.6.0's RCCL transport segfaults inside MPI_Init on TheRock 23.2.0
+     # (RCCL 2.28.3): ncclCommInitRank -> ncclInitKernelsForDevice ->
+     # hipFuncGetAttributes faults before any user device-bind has settled.
+     # RCCL itself works correctly when called directly; only UCC's pre-Init
+     # call sequence trips it. Disable just the rccl transport in UCC; the
+     # ucp transport (and the rest of UCC collectives) stays active. Scope
+     # narrowed to TheRock 7.13.0; broaden after testing therock-23.1.0
+     # (alias 7.12.0). Same precedent pattern as the 7.1.0 bcast workaround
+     # above.
+
+     cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}.lua
+	whatis("Name: GPU-aware openmpi")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
+	whatis("Version: openmpi-${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}")
+	whatis("Description: An open source Message Passing Interface implementation")
+	whatis(" This is a GPU-Aware version of OpenMPI")
+	whatis("URL: https://github.com/open-mpi/ompi.git")
+	
+	local base = "${OPENMPI_PATH}"
+	
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("PATH", pathJoin(base, "bin"))
+	setenv("MPI_PATH","${OPENMPI_PATH}")
+	setenv("MPICC","${OPENMPI_PATH}/bin/mpicc")
+	setenv("MPICXX","${OPENMPI_PATH}/bin/mpicxx")
+	setenv("MPIFORT","${OPENMPI_PATH}/bin/mpifort")
+	setenv("UCC_TLS","^rccl")
+	prereq("${ROCM_MODULE_NAME}")
+	family("MPI")
+EOF
    else
 
      cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}.lua

@@ -465,7 +465,29 @@ else
       # PATH / LD_LIBRARY_PATH (otherwise the hdf5 module's MPI hints
       # can be inconsistent with what PnetCDF / netcdf-c pick up via
       # `which mpicc`).
-      REQUIRED_MODULES=( "${ROCM_MODULE}/${ROCM_VERSION}" "${MPI_MODULE}" "${HDF5_MODULE}" )
+      #
+      # Derive the actual rocm modulefile token to (re-)load. For RC
+      # trees (rocm-therock-23.2.0, rocm-afar-22.2.0, ...) the
+      # modulefile name does NOT match `${ROCM_MODULE}/${ROCM_VERSION}`
+      # because ROCM_VERSION is the SDK numeric (e.g. 7.13.0 for
+      # therock-23.2.0). Trying `module load rocm/7.13.0` fails with
+      # "no such file" even though the SDK is already loaded. Prefer
+      # the basename of the upstream-loaded ROCM_PATH (Lmod treats
+      # reload of an already-loaded module as a no-op); only fall back
+      # to the legacy `${ROCM_MODULE}/${ROCM_VERSION}` form for direct
+      # standalone invocation where ROCM_PATH may not be set yet.
+      # Pattern ported from mpi4py_setup.sh:310-316 (slurm 8225,
+      # 2026-05-05: original form resolved to "rocm/7.13.0" for
+      # therock-23.2.0 and tripped preflight rc=42, taking down
+      # netcdf-c + netcdf-fortran + pnetcdf in one shot).
+      if [[ -n "${ROCM_PATH:-}" ]]; then
+         _rp_bn="${ROCM_PATH##*/}"
+         ROCM_MODULE_NAME="${ROCM_MODULE}/${_rp_bn#rocm-}"
+         unset _rp_bn
+      else
+         ROCM_MODULE_NAME="${ROCM_MODULE}/${ROCM_VERSION}"
+      fi
+      REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${MPI_MODULE}" "${HDF5_MODULE}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
       if [[ `which h5dump | wc -l` -eq 0 ]]; then
          echo "h5dump was not found in PATH after loading the hdf5 module"
@@ -546,9 +568,25 @@ else
          # ---------------------------------------------------------------------
          PNETCDF_FORTRAN_LIBS=""
          if [ -n "${ROCM_PATH:-}" ]; then
-            # 7.2.x+ : single combined runtime archive in clang resource dir
-            for f in "${ROCM_PATH}"/lib/llvm/lib/clang/*/lib/*/libflang_rt.runtime.a \
-                     "${ROCM_PATH}"/llvm/lib/clang/*/lib/*/libflang_rt.runtime.a; do
+            # 7.2.x+ : single combined runtime archive in clang resource dir.
+            # Constrain the lib/<triple>/ glob to the HOST triple
+            # (x86_64-unknown-linux-gnu) -- not a wildcard. ROCm 7.2.x
+            # ships only the host archive at this path, so a wildcard
+            # happens to work, but rocm-therock-23.2.0 (and presumably
+            # future rocm 7.3+) ships BOTH lib/x86_64-unknown-linux-gnu/
+            # AND lib/amdgcn-amd-amdhsa/. Bash glob expansion is
+            # alphabetical, so a wildcard returns amdgcn first. The
+            # amdgcn archive contains LLVM IR bitcode for GPU device
+            # code -- not linkable into libpnetcdf.so on x86_64 host.
+            # Linking PnetCDF's Fortran tests against the device archive
+            # produces undefined-symbol noise that PnetCDF's configure
+            # interprets as "no correspond data type in C" and aborts
+            # the integer*1 size-mapping check (slurm 8285, 2026-05-05,
+            # rocm-therock-23.2.0). The host triple `x86_64-unknown-
+            # linux-gnu` is the LLVM convention on Linux regardless of
+            # distro (Ubuntu/RHEL/SUSE all the same).
+            for f in "${ROCM_PATH}"/lib/llvm/lib/clang/*/lib/x86_64-unknown-linux-gnu/libflang_rt.runtime.a \
+                     "${ROCM_PATH}"/llvm/lib/clang/*/lib/x86_64-unknown-linux-gnu/libflang_rt.runtime.a; do
                if [ -f "${f}" ]; then
                   PNETCDF_FORTRAN_LIBS="${f}"
                   break

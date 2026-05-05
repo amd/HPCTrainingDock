@@ -472,6 +472,45 @@ open(f,'w').write(txt.replace(old, new))
 print('ScaLAPACK.py patched successfully')
 "
 
+         # Patch matdensecupmimpl.h: add <cuda/std/iterator> include for
+         # CCCL 3.0+ rocms (rocm-therock-23.2.0 today; presumably rocm 7.3+
+         # later). PETSc 3.24.1 line 310 uses cuda::std::iter_difference_t<T>
+         # under #if CCCL_VERSION >= 3000000 but never includes the header
+         # that actually defines it -- it relies on thrust transitively
+         # pulling in cuda::std symbols, which works on CCCL 2.x but not 3.x.
+         # Result on therock-23.2.0 (CCCL 3000002): 13 cascading compile
+         # errors in matmpidensehip.cpp / matseqdensehip.cpp -- iter_difference_t
+         # undeclared at line 310, then base_type / difference_type / iterator
+         # undeclared in MatrixIteratorBase / DiagonalIterator / SubMatrixIterator
+         # (slurm 8225, 2026-05-05).
+         #
+         # Shell-guarded on the CCCL header presence so the patch only runs
+         # on rocms that actually ship libcudacxx. Numbered 7.0.0 ... 7.2.1
+         # have no <cuda/std/...> headers (verified by inspection), so the
+         # source tree on those builds remains byte-identical to upstream
+         # PETSc 3.24.1. Easy to tell at a glance which build flavor a given
+         # install came from: grep cuda/std/iterator
+         # ${PETSC_PATH}/include/petsc/private/matdensecupmimpl.h.
+         if [ -n "${ROCM_PATH:-}" ] && [ -f "${ROCM_PATH}/include/cuda/std/__cccl/version.h" ]; then
+            echo "petsc: detected libcudacxx (CCCL) under ${ROCM_PATH}/include/cuda/std/ -- applying matdensecupmimpl.h cuda/std/iterator patch"
+            python3 -c "
+import os
+f = os.path.join('include','petsc','private','matdensecupmimpl.h')
+txt = open(f).read()
+old = '#include <thrust/copy.h>'
+new = '''#include <thrust/copy.h>
+  #if __has_include(<cuda/std/iterator>)
+    #include <cuda/std/iterator>
+  #endif'''
+assert old in txt, 'matdensecupmimpl.h thrust/copy.h anchor not found; the file may have changed'
+assert new not in txt, 'matdensecupmimpl.h cuda/std/iterator patch already applied'
+open(f,'w').write(txt.replace(old, new))
+print('matdensecupmimpl.h patched: added <cuda/std/iterator> for CCCL 3.0+')
+"
+         else
+            echo "petsc: no libcudacxx detected (no ${ROCM_PATH:-<unset>}/include/cuda/std/__cccl/version.h) -- skipping matdensecupmimpl.h cuda/std/iterator patch"
+         fi
+
          DOWNLOAD_HDF5=1
          module load hdf5
          if [[ "${HDF5_PATH}" != "" ]]; then
