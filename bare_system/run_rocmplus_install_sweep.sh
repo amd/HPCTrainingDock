@@ -35,6 +35,17 @@ set -uo pipefail
 : ${REPLACE_EXISTING:="0"}
 : ${KEEP_FAILED_INSTALLS:="0"}  # 1 = preserve partial install dirs / modulefiles for post-mortem
 : ${PACKAGES_LIST:=""}     # whitelist passed through to main_setup.sh --packages
+# MAX_PARALLEL: cap on simultaneously-RUNNING jobs across the chain.
+#   1 (default) = strict serial: each job depends on the previous one.
+#   N > 1       = sliding window: first N jobs all start concurrently (subject
+#                 to slurm node availability); each subsequent job depends
+#                 afterany on the jobid N positions earlier in submission
+#                 order, so at most N jobs are RUNNING at once.
+# Each per-version sbatch is --nodes=1 --exclusive (see run_rocmplus_install.sbatch),
+# so MAX_PARALLEL maps 1:1 to nodes occupied. Pick MAX_PARALLEL to leave
+# headroom on the partition for other users (e.g. 3 nodes available -> use 2
+# to keep one free; bump to 3 once a 4th node comes online).
+: ${MAX_PARALLEL:=1}
 
 ROCM_VERSIONS_RAW=""
 START_AFTER=""
@@ -64,12 +75,22 @@ Usage: $0 [opts]
    --replace-existing 0|1        replace existing rocmplus-<v> packages per-pkg (default ${REPLACE_EXISTING})
    --keep-failed-installs 0|1    on per-package failure, keep partial install dirs / modulefiles for post-mortem (default ${KEEP_FAILED_INSTALLS}; default 0 wipes them so retries start clean)
    --packages "name1 name2 ..."  whitelist (passed verbatim to main_setup.sh --packages); empty = all
-   --start-after JOBID           chain the first version after an existing job
+   --max-parallel N              cap on simultaneously-RUNNING jobs (default ${MAX_PARALLEL}).
+                                 1 = strict serial chain (each job depends on the previous; today's
+                                 default behavior). N>1 = sliding window: first N jobs run in parallel
+                                 (subject to slurm node availability), each subsequent job depends on
+                                 the jobid N positions earlier so at most N are RUNNING at once. Each
+                                 sbatch is --nodes=1 --exclusive, so N maps 1:1 to nodes occupied --
+                                 pick N to leave headroom for other users (e.g. 3 nodes available ->
+                                 --max-parallel 2 reserves 1 for others; --max-parallel 3 once a 4th
+                                 node is online).
+   --start-after JOBID           chain the first wave (first MAX_PARALLEL versions) after an existing job
    --dry-run                     print sbatch commands without submitting
    --help
 
-Each per-version job is chained --dependency=afterany:<prev_jobid> so the
-chain proceeds even if a single version fails. Per-job logs land in
+Each per-version job's dependency is computed from MAX_PARALLEL (default 1 =
+strict --dependency=afterany:<prev_jobid> chain). The chain proceeds even
+if a single version fails (afterany, not afterok). Per-job logs land in
 slurm-<jobid>-rocmplus-<v>.{out,err} in the submit directory.
 EOF
    exit 1
@@ -89,6 +110,7 @@ while [[ $# -gt 0 ]]; do
       --replace-existing)  shift; REPLACE_EXISTING=${1} ;;
       --keep-failed-installs) shift; KEEP_FAILED_INSTALLS=${1} ;;
       --packages)          shift; PACKAGES_LIST=${1} ;;
+      --max-parallel)      shift; MAX_PARALLEL=${1} ;;
       --start-after)       shift; START_AFTER=${1} ;;
       --dry-run)           DRY_RUN=1 ;;
       --help|-h)           usage ;;
@@ -104,6 +126,13 @@ IFS=':' read -r THH TMM TSS <<< "${TIME_PER_JOB}"
 TIME_MIN=$(( 10#${THH} * 60 + 10#${TMM} + (10#${TSS} > 0 ? 1 : 0) ))
 if (( TIME_MIN > MAX_TIME_MIN )); then
    echo "ERROR: --time ${TIME_PER_JOB} exceeds partition MaxTime ${MAX_TIME_MIN}min." >&2
+   exit 1
+fi
+
+# MAX_PARALLEL must be a positive integer; the sliding-window dep math
+# below assumes >=1 (1 = current strict-chain behavior).
+if ! [[ "${MAX_PARALLEL}" =~ ^[1-9][0-9]*$ ]]; then
+   echo "ERROR: --max-parallel must be a positive integer (got '${MAX_PARALLEL}')" >&2
    exit 1
 fi
 
@@ -152,6 +181,7 @@ cat <<EOF
  REPLACE_EXISTING:  ${REPLACE_EXISTING}
  KEEP_FAILED:       ${KEEP_FAILED_INSTALLS}
  PACKAGES:          ${PACKAGES_LIST:-<all>}
+ MAX_PARALLEL:      ${MAX_PARALLEL}   $( (( MAX_PARALLEL == 1 )) && echo "(strict serial chain)" || echo "(sliding window: up to ${MAX_PARALLEL} jobs RUNNING simultaneously)")
  sbatch file:       ${SBATCH_FILE}
  Dry run:           ${DRY_RUN}
  Start after:       ${START_AFTER:-<none>}
@@ -160,8 +190,22 @@ EOF
 
 cd "${REPO_ROOT}"
 
-PREV_JOBID="${START_AFTER}"
+# Sliding-window dependency wiring (controlled by MAX_PARALLEL):
+#   - First MAX_PARALLEL jobs (the "first wave") all depend on START_AFTER
+#     (or have no dependency if START_AFTER is empty), so they're free to
+#     start as soon as slurm has nodes for them.
+#   - Subsequent jobs depend afterany on the jobid MAX_PARALLEL positions
+#     earlier in submission order. Since each sbatch is --nodes=1 --exclusive,
+#     a finishing job releases exactly one node, which is what the next
+#     waiting job needs to start.
+# Net effect: at most MAX_PARALLEL jobs are RUNNING simultaneously, regardless
+# of how many free nodes the partition has at any moment.
+#
+# JOBIDS_ONLY tracks submission-order jobids so we can index back N positions
+# without parsing them out of SUBMITTED's "v=jobid" pairs.
+JOBIDS_ONLY=()
 SUBMITTED=()
+i=0
 for v in "${VERSIONS_ARR[@]}"; do
    EXPORT_VARS="ALL,ROCM_VERSION=${v}"
    EXPORT_VARS+=",AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL}"
@@ -176,6 +220,15 @@ for v in "${VERSIONS_ARR[@]}"; do
    # so leave the value un-comma'd. Spaces survive verbatim through to the sbatch.
    EXPORT_VARS+=",PACKAGES_LIST=${PACKAGES_LIST}"
 
+   # Compute this job's dependency:
+   #   i  < MAX_PARALLEL : honor START_AFTER (may be empty -> no dep)
+   #   i >= MAX_PARALLEL : depend on the jobid MAX_PARALLEL slots back
+   if (( i < MAX_PARALLEL )); then
+      DEP="${START_AFTER}"
+   else
+      DEP="${JOBIDS_ONLY[$((i - MAX_PARALLEL))]}"
+   fi
+
    CMD=( sbatch
          --job-name="rocmplus_${v}"
          --time="${TIME_PER_JOB}"
@@ -184,18 +237,21 @@ for v in "${VERSIONS_ARR[@]}"; do
          --error="slurm-%j-rocmplus-${v}.err"
          --export="${EXPORT_VARS}" )
 
-   if [[ -n "${PREV_JOBID}" ]]; then
-      CMD+=( --dependency="afterany:${PREV_JOBID}" )
+   if [[ -n "${DEP}" ]]; then
+      CMD+=( --dependency="afterany:${DEP}" )
    fi
    CMD+=( "${SBATCH_FILE}" )
 
    if (( DRY_RUN == 1 )); then
-      printf '[DRY] '; printf '%q ' "${CMD[@]}"; echo
-      PREV_JOBID="<would-be-jobid-for-${v}>"
+      printf '[DRY] (depends on %s) ' "${DEP:-<none>}"; printf '%q ' "${CMD[@]}"; echo
+      JOBID="<would-be-jobid-${v}>"
+      SUBMITTED+=( "${v}=${JOBID}" )
+      JOBIDS_ONLY+=( "${JOBID}" )
+      i=$((i + 1))
       continue
    fi
 
-   echo "Submitting rocmplus install for ${v} (depends on ${PREV_JOBID:-<none>})..."
+   echo "Submitting rocmplus install for ${v} (depends on ${DEP:-<none>})..."
    OUT=$("${CMD[@]}") || { echo "ERROR: sbatch failed for ${v}" >&2; exit 1; }
    echo "  ${OUT}"
    # "Submitted batch job NNN" -> NNN
@@ -205,7 +261,8 @@ for v in "${VERSIONS_ARR[@]}"; do
       exit 1
    fi
    SUBMITTED+=( "${v}=${JOBID}" )
-   PREV_JOBID="${JOBID}"
+   JOBIDS_ONLY+=( "${JOBID}" )
+   i=$((i + 1))
 done
 
 echo ""

@@ -1005,6 +1005,26 @@ else
       # dad 3/25/3023 removed --enable-mpi-f90 --enable-mpi-c as they apparently are not options
       # dad 3/30/2023 remove --with-pmix
 
+      # 2026-05-05: pin OpenMPI to its bundled openpmix + prrte (see
+      # --with-pmix=internal --with-prrte=internal in OPENMPI_CONFIGURE_COMMAND
+      # below). Without these flags, OpenMPI 5.0's 3rd-party/prrte configure
+      # runs `pkg-config pmix` and silently picks up whatever PMIx happens
+      # to live on the build node:
+      #   slurm 8182 (rocm-7.1.0, sh5-pl1-s12-09): a stale post-provision
+      #   `make install` of PMIx 4.2.7 to /usr/local/{include/pmix*,
+      #   lib/pkgconfig/pmix.pc} (no actual libpmix.so) caused PRRTE to
+      #   compile against PMIx 4.2.7 headers but link against Ubuntu's
+      #   libpmix.so.2.5.2 fallback, producing dozens of undefined
+      #   references (PMIx_Envar_create, PMIx_Pdata_*, PMIx_Info_list_*,
+      #   pmix_show_help_norender, ...). Build aborted in 3rd-party/prrte
+      #   with "ld returned 1 exit status", taking down the whole rocm-7.1.0
+      #   chain (scorep, netcdf-c, ... all need openmpi).
+      # The /usr/local stale install was cleaned up on -09 and -33, but the
+      # node still has Ubuntu libpmix-dev 4.1.2 in /usr/lib/x86_64-linux-gnu/pmix2/
+      # which pkg-config will prefer over openmpi's bundled openpmix unless
+      # explicitly told otherwise. Pinning to internal makes the build
+      # node-agnostic and PMIx-version-immune.
+
       # S7.B: build OpenMPI under /tmp (compute-node local disk) instead
       # of $HOME (NFS). Previously a bare `cd` (= cd $HOME) sent the
       # ~30MB tarball, the configure write storm, and the thousands of
@@ -1056,6 +1076,8 @@ else
          --with-rocm=${ROCM_PATH} \
          --with-ucx=${UCX_PATH} \
          --with-ucc=${UCC_PATH} \
+         --with-pmix=internal \
+         --with-prrte=internal \
          --enable-mca-no-build=btl-uct \
          --enable-mpi \
 	 --enable-mpi-fortran \

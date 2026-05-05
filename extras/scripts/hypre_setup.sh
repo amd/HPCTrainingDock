@@ -283,6 +283,15 @@ _hypre_on_exit() {
    elif [ ${rc} -ne 0 ]; then
       echo "[hypre fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
+   # 2026-05-05: also clean the local build dir if set (regular non-spack
+   # branch puts the source extraction under /tmp via mktemp; see
+   # comment-block above the HYPRE_BUILD_DIR=mktemp call). The spack
+   # branch installs its own EXIT trap that handles SPACK_USER_*
+   # dirs as well as its own HYPRE_BUILD_DIR; that trap REPLACES this
+   # one so this block does not run on the spack code path.
+   if [ -n "${HYPRE_BUILD_DIR:-}" ] && [ -d "${HYPRE_BUILD_DIR}" ]; then
+      ${SUDO:-sudo} rm -rf "${HYPRE_BUILD_DIR}"
+   fi
    return ${rc}
 }
 trap _hypre_on_exit EXIT
@@ -437,6 +446,31 @@ else
          # removed by the EXIT trap above.
 
       else
+
+         # 2026-05-05: isolate the regular (non-spack) hypre build under
+         # /tmp (compute-node local disk) instead of PWD (the shared NFS
+         # HPCTrainingDock checkout). Without this, three concurrent
+         # rocm-version sweeps that hit the hypre step at the same time
+         # collide on a single ~/HPCTrainingDock/hypre-${HYPRE_VERSION}/
+         # directory and corrupt each other's source trees. Observed in
+         # the overnight 8221/8222/8223 sweep (2026-05-05 ~05:52 UTC):
+         #   - 8221 (sh5-pl1-s12-09): `rm -rf hypre-3.1.0` failed with
+         #     "Directory not empty" because 8222 was concurrently
+         #     extracting into the same directory; rc=1.
+         #   - 8222 (sh5-pl1-s12-12): later `sed -i IJ_mv/IJMatrix_parcsr_device.c`
+         #     hit ENOENT because 8221's partial rm had unlinked the file
+         #     after 8222's tar wrote it; rc=2.
+         #   - 8223 (sh5-pl1-s12-33): hit hypre 7 min later (after the
+         #     other two failed and their fail-cleanup traps fired);
+         #     PWD was clean by then; succeeded.
+         # Per-job /tmp dir gives each sweep its own scratch tree, so
+         # rm/wget/tar/cd/sed never see another job's intermediate state.
+         # The spack branch above (line ~412) already used this pattern;
+         # extending to the regular branch closes the gap. Cleanup
+         # consolidated into _hypre_on_exit (which also handles install
+         # rollback), see the trap registration earlier in this script.
+         HYPRE_BUILD_DIR=$(mktemp -d -t hypre-build.XXXXXX)
+         cd "${HYPRE_BUILD_DIR}"
 
          ${SUDO} rm -rf v${HYPRE_VERSION}.tar.gz hypre-${HYPRE_VERSION}
          wget -q https://github.com/hypre-space/hypre/archive/refs/tags/v${HYPRE_VERSION}.tar.gz
