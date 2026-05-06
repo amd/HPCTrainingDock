@@ -2,15 +2,15 @@
 
 # AAC6 — User-Facing System Status
 
-A brief, factual snapshot of the AAC6 cluster as users see it, plus a running change log of what has changed between snapshots.
+The files in this directory are intended to capture the current and past state of the AAC6 AMD system. You will find a brief, factual snapshot of the AAC6 cluster as users see it, plus a running change log of what has changed between snapshots. Note that the reports may not include all relevant changes to the system, but we strive to make them comprehensive enough and useful for users, so anything major can be captured and we can have a record of any potential disruptions to services.
 
-The MOTD on AAC6 links to `AAC6_system_status_current.md`, so users always see the latest state when they log in.
+IMPORTANT: The message of the day (MOTD) on AAC6 links to `AAC6_system_status_current.md`, so users always see the latest state when they log in.
 
 ## Files
 
 | File | What it is |
 |---|---|
-| `AAC6_system_status_current.md` | Latest snapshot. Reflects the system as it is today. |
+| `AAC6_system_status_current.md` | Latest snapshot. Reflects the system as it is since the last system check. |
 | `AAC6_system_status_CHANGELOG.md` | One section per snapshot, newest first. Lists user-visible changes since the previous snapshot. |
 | `archive/AAC6_system_status_<YYYY-MM-DD>.md` | Dated copy of the snapshot taken on that day. |
 
@@ -28,8 +28,8 @@ User-facing facts only. Each snapshot has, in this order:
 8. **Help & Documentation** — `man` pages and links to training repos.
 9. **Changes Since Previous Snapshot** — the diff vs the previous snapshot.
 
-The snapshot ends with a hidden HTML-comment metadata block. It exists for tooling and is not part of the user-facing content; please don't edit or rely on it.
+<!--The snapshot ends with a hidden HTML-comment metadata block. It exists for tooling and is not part of the user-facing content; please don't edit or rely on it.-->
 
 ## Update cadence
 
-The snapshot is republished whenever the AAC6 administrators make a user-visible change to the cluster (ROCm version, partition layout, modules, etc.). Most of the time the snapshot is unchanged for several days at a stretch.
+The snapshot is republished whenever the AAC6 administrators make a user-visible change to the cluster (ROCm version, partition layout, modules, etc.). 
