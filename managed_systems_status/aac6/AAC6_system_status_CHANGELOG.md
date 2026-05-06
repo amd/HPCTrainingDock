@@ -2,6 +2,18 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-05-06
+
+- ROCm default: 7.2.0 → 7.2.2
+- ROCm versions:
+    + 7.2.2
+    - afar-22.1.0
+    - afar-22.2.0
+    - afar-7.0.5
+    - therock-23.1.0
+    - therock-23.2.0
+
+[Full snapshot](archive/AAC6_system_status_2026-05-06.md)
 ## 2026-05-05
 
 A certificate has been added for some services on the cluster. 
