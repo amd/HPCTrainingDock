@@ -279,6 +279,33 @@ else
 
       REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
+
+      # ── therock SDK guard ────────────────────────────────────────────
+      # hip-python on test.pypi.org is published per upstream rocm release
+      # (e.g. 7.0.0, 7.0.1, ..., 7.2.2). therock is a release-candidate
+      # SDK whose ROCM_VERSION numeric (e.g. 7.12.0 for therock-23.1.0,
+      # 7.13.0 for therock-23.2.0) DOES NOT have a matching PyPI wheel
+      # -- the closest available was 7.2.2.562.43 at the time of writing.
+      # Without this guard, `pip install hip-python==7.12.0.*` runs for
+      # ~1 min then aborts with `No matching distribution found` and the
+      # whole run is marked FAILED (slurm 8372, 2026-05-05 on therock-23.1.0).
+      # An operator who knows the exact wheel that works can override
+      # via --hip-python-version <spec>. Otherwise we exit MISSING_PREREQ_RC=42
+      # so the package shows up cleanly as SKIPPED (missing prereq) in the
+      # main_setup.sh per-package summary instead of FAILED.
+      if [[ -n "${ROCM_PATH:-}" && "${ROCM_PATH}" == *therock* && -z "${HIP_PYTHON_VERSION}" ]]; then
+         echo ""
+         echo "[hip-python therock-guard] ROCM_PATH=${ROCM_PATH}"
+         echo "                            no PyPI wheel publishes for therock SDK numerics"
+         echo "                            (e.g. hip-python==7.12.0.* / 7.13.0.* don't exist)."
+         echo "                            Skipping with rc=${MISSING_PREREQ_RC} (MISSING-PREREQ)."
+         echo "                            To force, pass --hip-python-version <spec>"
+         echo "                            (e.g. --hip-python-version 7.2.2.562.43 -- verify"
+         echo "                            availability at https://test.pypi.org/project/hip-python/)."
+         echo ""
+         exit ${MISSING_PREREQ_RC}
+      fi
+
       export HIP_PYTHON_INSTALL_USE_HIP=1
       export ROCM_HOME=${ROCM_PATH}
       export HIPCC=${ROCM_HOME}/bin/hipcc

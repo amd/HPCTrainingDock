@@ -852,6 +852,26 @@ else
       # ROCm's llvm/lib first in LIBRARY_PATH makes the GCC tree lose
       # the find_library race even if env vars are dropped.
       export LIBRARY_PATH="${ROCM_PATH}/llvm/lib:${LIBRARY_PATH:-}"
+      # Bake ROCm's llvm/lib into libtorch_cpu.so's DT_RUNPATH at link
+      # time so libomp.so resolves even when LD_LIBRARY_PATH is stripped
+      # by an external tool (e.g. rocprof-compute v3.4.0, whose
+      # rocprofiler-sdk backend overwrites LD_LIBRARY_PATH with just
+      # ${ROCM_PATH}/lib in the profiled child -- see
+      # /shared/apps/ubuntu/opt/rocm-${ROCM_VERSION}/libexec/rocprofiler-compute/
+      # rocprof_compute_profile/profiler_rocprofiler_sdk.py:73 +
+      # utils/utils.py:766-767, which clobbers the inherited
+      # LD_LIBRARY_PATH because options merge after os.environ.copy()).
+      # Without this rpath, libtorch_cpu.so has NEEDED libomp.so but
+      # only ${ROCM_PATH}/lib in RUNPATH, so the dlopen fails:
+      #   ImportError: libomp.so: cannot open shared object file
+      # surfaced by Pytorch_Profile_Rocprof-compute_ROCm test on
+      # rocm-7.2.1 in cdash nightly 2026-05-05 (LastTest_20260506-0100.log
+      # line 342). LDFLAGS uses --enable-new-dtags-compatible -Wl,-rpath
+      # which the GCC linker records as DT_RUNPATH (consulted for direct
+      # NEEDED entries; that's exactly what libomp.so is for libtorch_cpu).
+      # Belt-and-suspender post-build patchelf below covers the case where
+      # PyTorch's setup.py drops env LDFLAGS for a particular TU.
+      export LDFLAGS="${LDFLAGS:-} -Wl,-rpath,${ROCM_PATH}/llvm/lib"
       if [ ! -f "${OpenMP_omp_LIBRARY}" ]; then
          echo "ERROR: OpenMP_omp_LIBRARY=${OpenMP_omp_LIBRARY} not found."
          echo "ERROR: ROCm clang's libomp.so is required to link fbgemm-using"
@@ -859,6 +879,7 @@ else
          exit 1
       fi
       echo "pytorch: OpenMP_omp_LIBRARY=${OpenMP_omp_LIBRARY}"
+      echo "pytorch: LDFLAGS=${LDFLAGS}"
 
       # don't use sudo if user has write access to install path
       if [ -d "$INSTALL_PATH" ]; then
@@ -1034,7 +1055,46 @@ else
 	 exit 1
       fi
 
-      cmake -DAOTRITON_HIPCC_PATH=${ROCM_PATH}/bin ${AOTRITON_EXTRA_CMAKE_FLAGS} -DCMAKE_INSTALL_PREFIX=${AOTRITON_PATH} -DCMAKE_BUILD_TYPE=Release -DAOTRITON_GPU_BUILD_TIMEOUT=0  -G Ninja ..
+      # ── HIP-discovery override (do NOT remove) ────────────────────────
+      # aotriton's CMakeLists.txt (verified across 0.9.2b, 0.10b, 0.11b,
+      # 0.11.2b) unconditionally appends "/opt/rocm" to CMAKE_PREFIX_PATH
+      # before find_package(hip). On every Slurm build node /opt/rocm is
+      # a symlink to whichever rocm major was bare-installed first
+      # (currently /opt/rocm-7.1.1). Without this override aotriton
+      # therefore links against rocm 7.1.1's libamdhip64.so.7 even when
+      # ROCM_PATH points at /shared/apps/ubuntu/opt/rocm-6.4.0 -- the
+      # resulting libaotriton_v2.so.0.11.2 has DT_NEEDED
+      # libamdhip64.so.7, which does not exist on rocm 6.4.x, so
+      # `import torch` fails at the C1 validation step with
+      # ImportError: libamdhip64.so.7: cannot open shared object file.
+      # On rocm 7.x this contamination is silent (a 7.0.x install
+      # ends up with aotriton symbols from 7.1.1), but it is fatal
+      # on 6.4.x. (Verified: logs_05_06_2026/rocm-6.4.0_8391/
+      # log_pytorch_05_06_2026.txt: 30+ "warning: libamdhip64.so.7,
+      # needed by libaotriton_v2.so.0.11.2, not found" at lines
+      # 98119-98291; readelf -d on
+      # /shared/apps/ubuntu/opt/rocmplus-7.0.0/pytorch-v2.9.1/aotriton/
+      # lib/libaotriton_v2.so.0.11.2 also shows NEEDED libamdhip64.so.7.)
+      #
+      # Fix: pre-set every cmake variable that find_package(hip) and its
+      # transitive find_dependency() walk consult, so aotriton's later
+      #   list(APPEND CMAKE_PREFIX_PATH "/opt/rocm")
+      # is harmless (it only ever appends *after* the entries we set).
+      #   - hip_DIR / hsa-runtime64_DIR / AMDDeviceLibs_DIR /
+      #     amd_comgr_DIR : direct package-config locations, highest
+      #     priority in CMake's find_package() search order.
+      #   - CMAKE_PREFIX_PATH = ${ROCM_PATH} : front-of-list fallback
+      #     so any *_DIR we forgot still resolves to our rocm tree
+      #     before /opt/rocm is searched.
+      AOTRITON_HIP_OVERRIDES=( \
+         "-DCMAKE_PREFIX_PATH=${ROCM_PATH}" \
+         "-Dhip_DIR=${ROCM_PATH}/lib/cmake/hip" \
+         "-Dhsa-runtime64_DIR=${ROCM_PATH}/lib/cmake/hsa-runtime64" \
+         "-DAMDDeviceLibs_DIR=${ROCM_PATH}/lib/cmake/AMDDeviceLibs" \
+         "-Damd_comgr_DIR=${ROCM_PATH}/lib/cmake/amd_comgr" \
+         "-Dhsakmt_DIR=${ROCM_PATH}/lib/cmake/hsakmt" \
+      )
+      cmake -DAOTRITON_HIPCC_PATH=${ROCM_PATH}/bin "${AOTRITON_HIP_OVERRIDES[@]}" ${AOTRITON_EXTRA_CMAKE_FLAGS} -DCMAKE_INSTALL_PREFIX=${AOTRITON_PATH} -DCMAKE_BUILD_TYPE=Release -DAOTRITON_GPU_BUILD_TIMEOUT=0  -G Ninja ..
       AOTRITON_CONFIGURE_RC=$?
       if [ ${AOTRITON_CONFIGURE_RC} -ne 0 ]; then
          echo ""
@@ -1424,6 +1484,55 @@ print('  torch.cuda.is_available() =', torch.cuda.is_available())
       echo "[pytorch C1 validation] OK"
       echo ""
 
+      # ── C2: bake ${ROCM_PATH}/llvm/lib into libtorch_cpu.so's RUNPATH ──
+      # Belt-and-suspender to the LDFLAGS=-Wl,-rpath block far above.
+      # PyTorch's setup.py / cmake occasionally drops the env LDFLAGS
+      # for individual link rules (it composes its own LINK_FLAGS for
+      # libtorch_cpu in caffe2/CMakeLists.txt and torch/CMakeLists.txt),
+      # so we re-assert the rpath unconditionally on the installed
+      # libtorch_cpu.so. That makes "import torch" survive any
+      # consumer that strips LD_LIBRARY_PATH (notably rocprof-compute
+      # v3.4.0 -- see profiler_rocprofiler_sdk.py:73 in the libexec
+      # tree of the loaded rocm module). libtorch_cpu.so is the only
+      # SO under torch/lib that has a direct DT_NEEDED libomp.so;
+      # libtorch_hip.so / libtorch_python.so etc. pick libomp up
+      # transitively, so patching libtorch_cpu alone is sufficient.
+      LIBTORCH_CPU="${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torch/lib/libtorch_cpu.so"
+      if [ -f "${LIBTORCH_CPU}" ] && command -v patchelf >/dev/null 2>&1; then
+         CURRENT_RUNPATH=$(patchelf --print-rpath "${LIBTORCH_CPU}" 2>/dev/null || true)
+         if [[ ":${CURRENT_RUNPATH}:" != *":${ROCM_PATH}/llvm/lib:"* ]]; then
+            NEW_RUNPATH="${CURRENT_RUNPATH:+${CURRENT_RUNPATH}:}${ROCM_PATH}/llvm/lib"
+            echo "[pytorch C2 RUNPATH patch] libtorch_cpu.so before: ${CURRENT_RUNPATH}"
+            ${SUDO} patchelf --set-rpath "${NEW_RUNPATH}" "${LIBTORCH_CPU}"
+            echo "[pytorch C2 RUNPATH patch] libtorch_cpu.so after : $(patchelf --print-rpath "${LIBTORCH_CPU}")"
+            # Verify libomp.so resolves with LD_LIBRARY_PATH stripped to
+            # the env that rocprof-compute presents to its child. If
+            # this fails, the patchelf didn't take and we want to know
+            # about it before main_setup.sh marks pytorch DONE.
+            if ! LD_LIBRARY_PATH="${ROCM_PATH}/lib" \
+                  ldd "${LIBTORCH_CPU}" 2>/dev/null \
+                  | grep -F "libomp.so" \
+                  | grep -qF "${ROCM_PATH}/llvm/lib/libomp.so"; then
+               echo "ERROR: post-patchelf, libomp.so still does not resolve" >&2
+               echo "ERROR: from libtorch_cpu.so under a stripped"          >&2
+               echo "ERROR: LD_LIBRARY_PATH=${ROCM_PATH}/lib environment."  >&2
+               echo "ERROR: This means the Pytorch_Profile_Rocprof-compute" >&2
+               echo "ERROR: regression will fail on this build. Check that" >&2
+               echo "ERROR: patchelf is recent enough (>= 0.10) and that"   >&2
+               echo "ERROR: the runpath edit was not blocked by SELinux/"   >&2
+               echo "ERROR: read-only mount on \${PYTORCH_PATH}."           >&2
+               exit 1
+            fi
+            echo "[pytorch C2 RUNPATH patch] OK -- libomp.so resolves under stripped LD_LIBRARY_PATH"
+         else
+            echo "[pytorch C2 RUNPATH patch] libtorch_cpu.so already has ${ROCM_PATH}/llvm/lib in RUNPATH (no-op)"
+         fi
+      else
+         echo "WARNING: skipping C2 RUNPATH patch: ${LIBTORCH_CPU} missing or patchelf not in PATH" >&2
+         echo "WARNING: this build will fail Pytorch_Profile_Rocprof-compute_ROCm regression"      >&2
+         echo "WARNING: unless something else (e.g. amdclang module) puts llvm/lib on RUNPATH."    >&2
+      fi
+
       # Installing Torchvision
 
       git clone --recursive --depth 1 --branch v${TORCHVISION_VERSION} https://github.com/pytorch/vision
@@ -1587,6 +1696,45 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	prepend_path("PYTHONPATH","${TRITON_PATH}")
 
 	prepend_path("PATH","${PYTORCH_PATH}/bin")
+	-- LD_LIBRARY_PATH for torch/lib so runtime dlopen() of libcaffe2_nvrtc.so
+	-- (and any other lazily-loaded sibling library in torch/lib) resolves.
+	-- Why this is needed:
+	--   PyTorch's CUDA/HIP init lazy-loads libcaffe2_nvrtc.so from inside
+	--   libtorch_hip.so via a bare-name dlopen("libcaffe2_nvrtc.so", ...).
+	--   libtorch_hip.so has DT_RUNPATH (not DT_RPATH) with \$ORIGIN at the
+	--   front, but glibc's ld.so does NOT consult the calling DSO's
+	--   DT_RUNPATH for runtime dlopen() -- DT_RUNPATH is only used for
+	--   the calling DSO's direct DT_NEEDED entries (see ld.so(8) man page,
+	--   "Rpath token expansion" + "DT_RUNPATH"). DT_RPATH would have
+	--   worked, but binutils ld defaults to RUNPATH and our build does
+	--   not pass --disable-new-dtags. Without LD_LIBRARY_PATH, the
+	--   dlopen falls through to the system cache and fails:
+	--     RuntimeError: Error in dlopen: libcaffe2_nvrtc.so: cannot open
+	--                   shared object file: No such file or directory
+	--   Surfaced by Pytorch_Profile_Rocprof-sys_ROCm test on rocm-7.2.1
+	--   in the cdash nightly (cdash-nightly-8394, 2026-05-05). Pytorch_Mnist
+	--   passes only because its simple CNN never reaches the nvrtc stub,
+	--   not because it has a working environment.
+	prepend_path("LD_LIBRARY_PATH","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torch/lib")
+	-- LD_LIBRARY_PATH for ROCm's llvm/lib so libtorch_cpu.so's
+	-- DT_NEEDED libomp.so resolves WITHOUT relying on magma's
+	-- modulefile transitively prepending it (Option B from
+	-- magma_setup.sh) AND without relying on libtorch_cpu.so's
+	-- RUNPATH (which we now also patch in C2 above, but that
+	-- belt-and-suspenders the modulefile, not the other way around).
+	-- Why this is needed:
+	--   PyTorch's libtorch_cpu.so directly NEEDED's libomp.so
+	--   (LLVM OpenMP), which lives at \${ROCM_PATH}/llvm/lib --
+	--   NOT in \${ROCM_PATH}/lib (which is what the rocm modulefile
+	--   adds to LD_LIBRARY_PATH). If LD_LIBRARY_PATH gets stripped
+	--   down to just \${ROCM_PATH}/lib (rocprof-compute v3.4.0's
+	--   rocprofiler-sdk backend does exactly this -- see
+	--   profiler_rocprofiler_sdk.py:73 in the loaded rocm module's
+	--   libexec tree), python crashes on "import torch" with:
+	--     ImportError: libomp.so: cannot open shared object file
+	--   Surfaced by Pytorch_Profile_Rocprof-compute_ROCm test on
+	--   rocm-7.2.1 in cdash nightly 2026-05-05.
+	prepend_path("LD_LIBRARY_PATH","${ROCM_PATH}/llvm/lib")
 	local user = os.getenv("USER")
 	setenv("MIOPEN_USER_DB_PATH", "/tmp/" .. user .. "/my-miopen-cache")
 	setenv("MIOPEN_CUSTOM_CACHE_DIR", "/tmp/" .. user .. "/my-miopen-cache")

@@ -410,6 +410,20 @@ else
       cd ..
       mkdir build && cd build
 
+      # -fPIC for the Fortran compile + CMAKE_POSITION_INDEPENDENT_CODE for
+      # HDF5's own libs: required because Ubuntu 22.04 ships a PIE-default
+      # toolchain (gcc/g++ links executables -fPIE), and on rocm 6.4.x
+      # mpifort resolves to amdflang (classic Flang 99.99.1) which does
+      # NOT default to PIC. CMake's internal FortranCInterface check
+      # compiles VerifyFortran.f -> libVerifyFortran.a (no -fPIC), then
+      # tries to link it into a PIE executable VerifyFortranC, which
+      # fails with `relocation R_X86_64_32 against .rodata can not be
+      # used when making a PIE object; recompile with -fPIE` (slurm 8388
+      # / 8391, 2026-05-06). Setting CMAKE_Fortran_FLAGS=-fPIC ensures the
+      # FortranCInterface test compile gets PIC; CMAKE_POSITION_INDEPENDENT_CODE
+      # ensures HDF5's own Fortran static libs do too.
+      # No-op cost on rocm 7.x (amdflang-new defaults to PIC) and on
+      # gfortran (also no-op since only used for static libs here).
       cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE:STRING=Release \
   			        -DHDF5_BUILD_TOOLS:BOOL=ON -DCMAKE_INSTALL_PREFIX=${HDF5_PATH} \
                                 -DZLIB_ROOT=${HDF5_PATH}/zlib \
@@ -417,6 +431,8 @@ else
                                 -DCMAKE_CXX_COMPILER=${CXX_COMPILER} \
                                 -DCMAKE_C_COMPILER=${C_COMPILER} \
 				-DCMAKE_Fortran_COMPILER=${F_COMPILER} \
+				-DCMAKE_Fortran_FLAGS="-fPIC" \
+				-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON \
 				-DBUILD_TESTING:BOOL=OFF \
 				-DHDF5_ENABLE_PARALLEL:BOOL=${ENABLE_PARALLEL} \
 				-DHDF5_BUILD_FORTRAN:BOOL=ON ..

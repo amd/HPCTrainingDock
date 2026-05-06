@@ -276,6 +276,34 @@ else
          fi
          preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
+         # ── therock SDK guard ─────────────────────────────────────────
+         # The hipfort github repo publishes per-rocm-release branches
+         # (rocm-7.0.0, rocm-7.0.1, ..., rocm-7.2.2). therock is a
+         # release-candidate SDK whose ROCM_VERSION numeric (e.g. 7.12.0
+         # for therock-23.1.0, 7.13.0 for therock-23.2.0) DOES NOT have
+         # a matching upstream branch. Without this guard, the
+         # `git clone --branch rocm-7.12.0 https://github.com/ROCm/hipfort.git`
+         # below aborts immediately with `Remote branch rocm-7.12.0 not
+         # found in upstream origin` and the whole run is marked FAILED
+         # (slurm 8372, 2026-05-05 on therock-23.1.0). An operator who
+         # knows a branch/tag that works (e.g. develop, master, or an
+         # older rocm-7.x.y) can override via --hipfort-version <branch>.
+         # Otherwise we exit MISSING_PREREQ_RC=42 so the package shows
+         # up cleanly as SKIPPED (missing prereq) in main_setup.sh's
+         # per-package summary instead of FAILED.
+         if [[ -n "${ROCM_PATH:-}" && "${ROCM_PATH}" == *therock* && -z "${HIPFORT_VERSION}" ]]; then
+            echo ""
+            echo "[hipfort therock-guard] ROCM_PATH=${ROCM_PATH}"
+            echo "                         no upstream hipfort branch matches therock SDK numerics"
+            echo "                         (e.g. rocm-7.12.0 / rocm-7.13.0 don't exist on github)."
+            echo "                         Skipping with rc=${MISSING_PREREQ_RC} (MISSING-PREREQ)."
+            echo "                         To force, pass --hipfort-version <branch-or-tag>"
+            echo "                         (e.g. --hipfort-version develop -- verify upstream first"
+            echo "                         at https://github.com/ROCm/hipfort/branches)."
+            echo ""
+            exit ${MISSING_PREREQ_RC}
+         fi
+
          if [ -d "$HIPFORT_PATH" ]; then
             # don't use sudo if user has write access to install path
             if [ -w ${HIPFORT_PATH} ]; then

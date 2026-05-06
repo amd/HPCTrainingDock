@@ -579,13 +579,71 @@ CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGP
 # (a new OPENMPI_VERSION/UCX_VERSION/etc. yields a distinct dir name
 # and falls through to a real build instead of being skipped). Placed
 # before the build-dir mktemp so a no-op exit does not leak /tmp.
+#
+# Honor REPLACE_OPENMPI so REPLACE_EXISTING=1 (which sets all four
+# REPLACE_XPMEM/UCX/UCC/OPENMPI=1 at line 470-475) actually triggers
+# a rebuild instead of being short-circuited here. Without this gate,
+# the proper per-component check at line ~964 was unreachable and
+# `--replace 1` was a silent no-op when OPENMPI_PATH already existed
+# (slurm 8384, 2026-05-05: 19s exit with no rebuild despite
+# REPLACE_EXISTING=1).
 NOOP_RC=43
-if [ -d "${OPENMPI_PATH}" ]; then
+if [ -d "${OPENMPI_PATH}" ] && [ "${REPLACE_OPENMPI}" == "0" ]; then
    echo ""
    echo "[openmpi existence-check] ${OPENMPI_PATH} already installed; skipping."
    echo "                          pass --replace 1 (or --replace-openmpi 1) to force rebuild."
    echo ""
    exit ${NOOP_RC}
+fi
+
+# ── kernel-headers preflight ─────────────────────────────────────────
+# XPMEM is a kernel-mode component; its configure step probes
+#   /lib/modules/$(uname -r)/build/include/generated/uapi/linux/version.h
+# (autodetected through the build/ symlink) and bails with
+#   `configure: error: could not find kernel includes to use for configuration`
+# if the file is missing. On Ubuntu 22.04 + HWE 6.5, that file is owned
+# by linux-hwe-6.5-headers-${KERNEL_SERIES} (the *all-arch* parent), NOT
+# the more obvious linux-headers-${KERNEL_RELEASE} arch-specific package.
+#
+# Some Warewulf-imaged nodes in the cluster (e.g. sh5-pl1-s12-09 / -36)
+# have dpkg believe both packages are installed (status `ii`) while the
+# .deb payloads were never delivered to disk. XPMEM then takes the slow
+# path: ./autogen.sh + ./configure runs for ~5min then exits 1, openmpi
+# rolls back, and 13+ downstream packages cascade with `MISSING-PREREQ`.
+# slurm 8389/8390 (2026-05-05) wasted ~2h20m each this way on -36, and
+# 8448 (2026-05-06) re-confirmed the same failure mode.
+#
+# This preflight catches a missing/broken kernel-headers tree in <1s and
+# exits NOOP_RC=42 (MISSING-PREREQ, not failure) so main_setup.sh marks
+# openmpi as "missing prereq, skipped" and downstream packages get the
+# same clean SKIPPED label instead of a 1-hour build failure followed by
+# a fail cascade. The fix on the affected node is the one-shot
+# bare_system/fix_s12_36_kernel_headers.sbatch sbatch wrapper.
+if [ "${BUILD_OPENMPI:-1}" == "1" ] && [ "${BUILD_XPMEM}" == "1" ]; then
+   _XPMEM_KBUILD="/lib/modules/$(uname -r)/build"
+   _XPMEM_VERSION_H="${_XPMEM_KBUILD}/include/generated/uapi/linux/version.h"
+   if [ ! -d "${_XPMEM_KBUILD}" ] || [ ! -f "${_XPMEM_VERSION_H}" ]; then
+      echo ""
+      echo "=================================================================="
+      echo "[openmpi preflight] FATAL: kernel headers tree is incomplete on"
+      echo "                    $(hostname) (${_XPMEM_KBUILD})"
+      echo "                    XPMEM cannot configure without it."
+      echo ""
+      echo "  expected: ${_XPMEM_VERSION_H}"
+      [ -d "${_XPMEM_KBUILD}" ] || echo "  missing : ${_XPMEM_KBUILD}/ (whole dir)"
+      [ -f "${_XPMEM_VERSION_H}" ] || echo "  missing : ${_XPMEM_VERSION_H}"
+      echo ""
+      echo "  Most likely cause: dpkg reports linux-headers + linux-hwe-*-headers"
+      echo "  as installed, but the .deb payloads were never delivered to disk"
+      echo "  (Warewulf overlay drift). Repair on the affected node with:"
+      echo "    sbatch --nodelist=\$(hostname) bare_system/fix_s12_36_kernel_headers.sbatch"
+      echo ""
+      echo "  Skipping openmpi (rc=42, MISSING-PREREQ) -- downstream packages"
+      echo "  will cascade as MISSING-PREREQ rather than build-failure."
+      echo "=================================================================="
+      echo ""
+      exit 42
+   fi
 fi
 
 OPENMPI_DEPS_BUILD_DIR=$(mktemp -d -t openmpi-deps-build.XXXXXX)
@@ -919,18 +977,65 @@ else
       if [[ "${ROCM_VERSION}" == 7* ]]; then
          sed -i -e '7,7a#include <stdbool.h>' src/components/ec/rocm/ec_rocm_executor_interruptible.c
       fi
-      UCC_CONFIGURE_COMMAND="./configure \
-        --prefix=${UCC_PATH} \
-        --with-rocm=${ROCM_PATH} \
-        --with-rocm-arch=all-arch-no-native \
-        --with-ucx=${UCX_PATH}"
+
+      # ── UCC --with-rocm-arch selection ─────────────────────────────────
+      # UCC 1.6.0's `all-arch-no-native` set is hardcoded in
+      # config/m4/rocm.m4 as
+      #   gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102
+      #   gfx1200 gfx1201
+      # That list assumes a ROCm 7+ amdclang. ROCm 6.x amdclang accepts
+      # every entry EXCEPT gfx950 (MI350-class part introduced in ROCm 7),
+      # so when --with-rocm-arch=all-arch-no-native is paired with a
+      # ROCm 6.x install, the libucc_ec_rocm.la link of
+      # ec_rocm_executor_kernel.cu / ec_rocm_reduce.cu fails immediately
+      # with
+      #   clang: error: invalid target ID 'gfx950'; format is a processor
+      #          name followed by an optional colon-delimited list of
+      #          features ...
+      #   make[4]: *** [Makefile:692: ec_rocm_executor_kernel.lo] Error 1
+      # That cascades to make[3]/[2] and openmpi exits rc=2, taking
+      # scorep + 10 MPI-dependent leaves down with it.
+      # See audit notes for slurm 8436-8440 (2026-05-06): all five 6.3.x
+      # builds tripped on this within ~30 min.
+      #
+      # On ROCm 6.x we substitute an explicit list with gfx950 dropped.
+      # gfx1200/gfx1201 are kept because rocm-6.3.x amdclang DOES accept
+      # them (verified 2026-05-06 by per-arch probe with
+      # `echo 'int main(){}' | amdclang -x hip -c --offload-arch=<arch>`
+      # against /shared/apps/ubuntu/opt/rocm-6.3.0 and rocm-6.3.4).
+      # On ROCm 7+ and TheRock builds we keep the upstream
+      # `all-arch-no-native` because their amdclang knows gfx950.
+      #
+      # IMPORTANT: when --with-rocm-arch's value is a *space-delimited
+      # multi-token string* (the multi-gfx form documented in the
+      # comment block above, e.g. "--offload-arch=gfx908 --offload-arch=gfx90a"),
+      # the whole value MUST be passed as a single shell argument so
+      # ucc's configure sees one --with-rocm-arch= argv entry. We
+      # therefore drive ./configure via an array
+      # (UCC_CONFIGURE_ARGS=(...); ./configure "${UCC_CONFIGURE_ARGS[@]}")
+      # instead of the legacy unquoted-string form, which would
+      # word-split on the spaces and pass orphan --offload-arch=...
+      # tokens to configure.
+      if [[ "${ROCM_VERSION}" == 7* || "${ROCM_PATH}" == *therock* ]]; then
+         UCC_ROCM_ARCH_ARG="--with-rocm-arch=all-arch-no-native"
+      else
+         UCC_ROCM_ARCH_ARG="--with-rocm-arch=--offload-arch=gfx908 --offload-arch=gfx90a --offload-arch=gfx942 --offload-arch=gfx1030 --offload-arch=gfx1100 --offload-arch=gfx1101 --offload-arch=gfx1102 --offload-arch=gfx1200 --offload-arch=gfx1201"
+      fi
+      echo "ucc: ROCM_VERSION=${ROCM_VERSION}  UCC_ROCM_ARCH_ARG=${UCC_ROCM_ARCH_ARG}"
+
+      UCC_CONFIGURE_ARGS=(
+         --prefix="${UCC_PATH}"
+         --with-rocm="${ROCM_PATH}"
+         "${UCC_ROCM_ARCH_ARG}"
+         --with-ucx="${UCX_PATH}"
+      )
 
       echo ""
-      echo "UCC_CONFIGURE_COMMAND: "
-      echo "${UCC_CONFIGURE_COMMAND}" | sed 's/\s\+/ \\\n   /g'
+      echo "UCC_CONFIGURE_COMMAND:"
+      printf '   %s\n' "./configure" "${UCC_CONFIGURE_ARGS[@]}"
       echo ""
 
-      ${UCC_CONFIGURE_COMMAND}
+      ./configure "${UCC_CONFIGURE_ARGS[@]}"
 
       # S7.A: scale parallel build to all allocated cores instead of a
       # hardcoded 16 on a 48-core compute node. Audited as S7.A in
@@ -1151,8 +1256,6 @@ fi
 #   --slave   /usr/share/man/man1/mpif90.1.gz   mpif90.1.gz ${OPENMPI_PATH}/share/man/man1/mpif90.1.gz    \
 #   --slave   /usr/share/man/man1/mpifort.1.gz  mpifort.1.gz ${OPENMPI_PATH}/share/man/man1/mpifort.1.gz
 
-module unload "${ROCM_MODULE_NAME}"
-
 # In either case of Cache or Build from source, create a module file for OpenMPI
 
 if [[ "${DRY_RUN}" == "0" ]]; then
@@ -1271,6 +1374,18 @@ EOF
    fi
 
 fi
+
+# Drop the rocm module from the running shell so the next leaf script
+# starts from the same baseline (preflight will reload it). Moved here
+# from BEFORE the modulefile-write block (was at line 1162 prior to
+# 2026-05-06): the rocm modulefile setenv()s ROCM_PATH, and the elif
+# at the top of the if/elif/else above tests `${ROCM_PATH} == *therock*`
+# to decide whether to bake `setenv("UCC_TLS","^rccl")` into the
+# generated openmpi modulefile (UCC 1.6.0 RCCL transport segfaults in
+# MPI_Init on TheRock 23.2.0). Unloading rocm BEFORE that check made
+# ROCM_PATH empty, the elif fell through to else, and 8393 (2026-05-05)
+# emitted a modulefile WITHOUT the UCC_TLS workaround.
+module unload "${ROCM_MODULE_NAME}"
 
 #git clone https://github.com/amd/HPCTrainingExamples
 #cd HPCTrainingExamples/MPI-examples

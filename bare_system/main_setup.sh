@@ -628,13 +628,18 @@ final_summary() {
    if [ ${#FAILED_PKGS[@]} -gt 0 ]; then
       printf "  %-10s (%d): %s\n" "FAILED"     "${#FAILED_PKGS[@]}"     "${FAILED_PKGS[*]}"
       echo "=================================================================="
-      # Real failure: force non-zero exit so callers (the slurm sbatch,
-      # sacct, the dependency chain logger) see this version as failed.
-      # Preserve a non-zero saved_rc if there is one; only synthesize a 1
-      # if we somehow got here with rc=0 (shouldn't happen since
-      # run_and_log returns the leaf script's rc, but defensive).
-      [ "${saved_rc}" -eq 0 ] && exit 1
-      # else: fall through and let the (already-non-zero) saved_rc propagate
+      # Real failure: force exit 1 so the slurm sbatch reports an
+      # unambiguous "FAILED 1:0" in sacct, regardless of which leaf script
+      # ran last. Was previously `[ "${saved_rc}" -eq 0 ] && exit 1` which
+      # propagated `saved_rc` when non-zero -- that meant a chain that
+      # had a real failure earlier but ended on a NOOP_RC=43 deselected
+      # leaf would propagate 43, and sacct would tag the whole job as
+      # "FAILED 43:0" which visually looks identical to the all-deselected
+      # no-failure case (also 43, but caught by the `else` branch below).
+      # Always-1 collapses both ambiguity classes into a single
+      # "real-failure" exit code that pairs cleanly with the per-package
+      # summary above.
+      exit 1
    else
       echo "=================================================================="
       # No real failures: every package landed in OK, DESELECTED, or

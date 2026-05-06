@@ -12,6 +12,36 @@
 
 set -uo pipefail
 
+# Reproducibility: discard any modules the submitter happened to have
+# loaded interactively before running this sweep. Doing the purge HERE
+# (in the submitter's process tree) instead of in the per-job sbatch is
+# strictly better for two reasons:
+#   (1) The submitter shell has Lmods full state (LOADEDMODULES,
+#       _LMFILES_, and any per-shell __LMOD_REF_COUNT_* tracking) so the
+#       purge can fully reverse PATH/LD_LIBRARY_PATH/MPICC/MPI_PATH/etc.
+#       The sbatch worker's --export=ALL inherits env vars but NOT
+#       Lmod's internal shell-only ref counters, so a worker-side purge
+#       is incomplete (slurm 8385/8386/8387, 2026-05-05: openmpi rebuild
+#       failed because UCX picked up a stale $MPICC pointing at a
+#       --replace 1-deleted /shared/.../openmpi-.../bin/mpicc).
+#   (2) Once the submitter env is clean, every sbatch we launch from
+#       here propagates a clean env BY CONSTRUCTION -- no env-scrub
+#       gymnastics in the per-job script.
+# Source lmod.sh first because this script may be invoked as a fresh
+# bash process (./run_rocmplus_install_sweep.sh ...), in which case the
+# `module` shell function from the parent shell is NOT inherited.
+if [[ -r /etc/profile.d/lmod.sh ]]; then
+   # shellcheck disable=SC1091
+   source /etc/profile.d/lmod.sh
+   # --force tolerates modulefiles the submitter loaded but were since
+   # removed from disk (otherwise plain purge errors out and leaves the
+   # rest loaded).
+   module --force purge 2>/dev/null || module purge 2>/dev/null || true
+   echo "sweep: module --force purge done; LOADEDMODULES='${LOADEDMODULES:-<empty>}'"
+else
+   echo "sweep: WARNING /etc/profile.d/lmod.sh not readable; skipping module purge -- inherited modules may leak into sbatch jobs" >&2
+fi
+
 : ${PARTITION:="sh5_cpx_admin_long"}
 : ${TIME_PER_JOB:="24:00:00"}        # walltime per version
 : ${MAX_TIME_MIN:="2880"}            # MaxTime of sh5_cpx_admin_long = 48h

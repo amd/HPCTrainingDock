@@ -149,6 +149,27 @@ else
    exit 1
 fi
 
+# Reproducibility: belt-and-suspenders purge in case the submitter
+# forgot to clean their interactive env (the proper purge is now done
+# in the submitter, see run_rocmplus_install_sweep.sh top-of-script).
+# This worker-side purge is INCOMPLETE because Lmod's __LMOD_REF_COUNT_*
+# shell vars are not propagated via sbatch --export=ALL (only env vars
+# are), so it cannot fully reverse PATH/LD_LIBRARY_PATH/MPICC/MPI_PATH
+# additions made on the submitter side -- but it is a no-op when the
+# submitter already purged (no modules to unload), so it costs nothing.
+#
+# History: slurm 8385 (2026-05-05) failed because the submitter had
+# openmpi/5.0.10 + pytorch/2.9.1 + magma + openblas loaded; UCX picked
+# up the stale $MPICC and tried to link against a libucc.so.1 that the
+# build was about to delete via --replace 1. Fix: do `module purge` on
+# the submitter side BEFORE invoking sbatch (or via the sweep script
+# wrapper, which now does it automatically).
+#
+# --force tolerates modulefiles whose .lua was removed from disk after
+# the submitter loaded them (otherwise plain `module purge` errors out
+# on missing files and leaves the rest loaded).
+module --force purge 2>/dev/null || module purge 2>/dev/null || true
+
 # Load the *system* rocm module (22.04-native tree). Do NOT add
 # /nfsapps/modules/base to MODULEPATH here; see header comment.
 module load "rocm/${ROCM_VERSION}"
