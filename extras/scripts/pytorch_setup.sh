@@ -125,6 +125,164 @@ reset-last()
    last() { send-error "Unsupported argument :: ${1}"; }
 }
 
+# ── HIP bf16 host-compat patch for therock-23.2.0+ (SDK header fixup) ────
+# Why this exists:
+#   amd_hip_bf16.h on rocm-therock-23.2.0 (and by inference rocm 7.3+) uses
+#   the bare `__bf16` keyword unconditionally at namespace scope:
+#     line 136:  static_assert(sizeof(__bf16) == sizeof(unsigned short));
+#     line 167:  __bf16 __x_bf16;            (struct __hip_bfloat16 member)
+#     line 1312+: 13 host-fallback __hmax/__hmin/__hlt... bodies casting
+#                 (__bf16)a > (__bf16)b ...
+#   `__bf16` is a clang/amdclang/hipcc built-in. gcc-13 added it for x86
+#   under `-mavx512bf16`; gcc-11 (Ubuntu 22.04 default, what /usr/bin/c++
+#   resolves to here) has no concept of it.
+#
+#   On rocm-7.0.0 ... 7.2.1 g++ never reached this header because the
+#   public hipblaslt-types.h didn't pull in <hip/hip_bf16.h>. On
+#   therock-23.2.0 the new hipblaslt_e5m3.h:30 unconditionally drags
+#   <hip/hip_bf16.h> in, exposing the latent bug to every host-side TU
+#   that includes <hipblaslt/hipblaslt.h>.
+#
+#   PyTorch's torch_hip target builds 5 such TUs as plain CXX (host
+#   compiler with HIP headers visible -- intentional, see L929-942
+#   amdclang firewall): HIPBlas.cpp, HIPSparseBlas.cpp, Blas.cpp,
+#   SparseHIPBlas.cpp, SparseBlasImpl.cpp. All five fail identically at
+#   ninja step ~7300/7920 with the __bf16 errors above (slurm 8225,
+#   2026-05-05, rocm-therock-23.2.0).
+#
+# What the fix does:
+#   Three coordinated edits, all gated on the sentinel macro
+#   __HPCTRAINING_BF16_GUARD_DEFINED so amdclang/hipcc/gcc-13+ see no
+#   source change at all (the macro is only defined when __bf16 is not
+#   a built-in type):
+#
+#   1. Right after the include guard, insert a `typedef unsigned short
+#      __bf16` fallback. sizeof(unsigned short) == 2 == sizeof(__bf16)
+#      so `static_assert(sizeof(__bf16) == sizeof(unsigned short))` at
+#      line 136 holds, and the `__bf16 __x_bf16` struct member at
+#      line 167 becomes a 2-byte unsigned short field.
+#
+#   2. Wrap `__hip_bfloat16(const __bf16 val) : __x_bf16(val) {}`
+#      (line 201 in stock therock-23.2.0) in
+#      `#if !defined(__HPCTRAINING_BF16_GUARD_DEFINED) ... #endif`.
+#      Reason: when the typedef makes `__bf16 == unsigned short`, this
+#      ctor becomes a duplicate of the `__hip_bfloat16(unsigned short)`
+#      ctor at line 186. Skipping the redundant declaration eliminates
+#      the gcc "cannot be overloaded" error.
+#
+#   3. Wrap `operator __bf16() const { return __x_bf16; }` (line 261)
+#      in the same sentinel guard. Same reason: it duplicates the
+#      `operator unsigned short() const` at line 257.
+#
+#   Casts (`static_cast<__bf16>(val)`) and arithmetic in the inline
+#   __hmax/__hmin/__hlt/... fallback functions become unsigned-short
+#   ops -- semantically wrong for true bf16 -- but pytorch's host TUs
+#   only need the type for ABI/layout (they call hipblaslt host APIs,
+#   no bf16 arithmetic). The device-side bf16 builtins live inside
+#   pre-existing `#if defined(__clang__) && defined(__HIP__)` blocks
+#   (line 96, 322, 626, 844) so gcc never sees them.
+#
+# Why this is in pytorch_setup.sh:
+#   PyTorch is the first known victim. Other packages on therock-23.2.0
+#   that compile host TUs against <hipblaslt/...> with gcc would hit the
+#   same wall -- if/when they do, the same one-shot SDK fixup helps them
+#   too (SDK file persists once patched).
+#
+# Idempotency: the inserted block carries the sentinel
+# `HPCTRAINING_BF16_GUARD_v1`. The function greps for it and exits
+# early on a re-run. A `.hpctraining.bak` of the original file is kept
+# next to the header for one-command revert.
+patch_rocm_bf16_header_for_gcc()
+{
+   local hdr="${ROCM_PATH:-}/include/hip/amd_detail/amd_hip_bf16.h"
+   if [ -z "${ROCM_PATH:-}" ] || [ ! -f "${hdr}" ]; then
+      echo "pytorch: no ${hdr} -- skipping bf16 host-compat patch"
+      return 0
+   fi
+   if grep -q 'HPCTRAINING_BF16_GUARD_v2' "${hdr}"; then
+      echo "pytorch: ${hdr} already has HPCTRAINING_BF16_GUARD_v2 -- skipping"
+      return 0
+   fi
+   if grep -q 'HPCTRAINING_BF16_GUARD_v1' "${hdr}"; then
+      echo "pytorch: ${hdr} has stale HPCTRAINING_BF16_GUARD_v1 -- restoring from .hpctraining.bak so v2 can apply cleanly"
+      if [ ! -f "${hdr}.hpctraining.bak" ]; then
+         echo "pytorch: ERROR no ${hdr}.hpctraining.bak to restore from -- refusing to patch (manual revert needed)"
+         return 1
+      fi
+      ${PKG_SUDO:-sudo} cp -p "${hdr}.hpctraining.bak" "${hdr}"
+   fi
+   if ! grep -q 'static_assert(sizeof(__bf16)' "${hdr}"; then
+      echo "pytorch: ${hdr} has no bare __bf16 static_assert -- header has changed upstream, skipping (please re-audit)"
+      return 0
+   fi
+   if ! grep -q '__hip_bfloat16(const __bf16 val) : __x_bf16(val) {}' "${hdr}"; then
+      echo "pytorch: ${hdr} has no '__hip_bfloat16(const __bf16 val)' anchor -- header has changed upstream, skipping (please re-audit)"
+      return 0
+   fi
+   if ! grep -q 'operator __bf16() const { return __x_bf16; }' "${hdr}"; then
+      echo "pytorch: ${hdr} has no 'operator __bf16()' anchor -- header has changed upstream, skipping (please re-audit)"
+      return 0
+   fi
+   echo "pytorch: patching ${hdr} with __bf16 typedef fallback + duplicate-overload guards for gcc<13 hosts (one-time, sentinel HPCTRAINING_BF16_GUARD_v2)"
+   if [ ! -f "${hdr}.hpctraining.bak" ]; then
+      ${PKG_SUDO:-sudo} cp -p "${hdr}" "${hdr}.hpctraining.bak"
+   fi
+   ${PKG_SUDO:-sudo} python3 - "${hdr}" <<'PY'
+import sys
+p = sys.argv[1]
+src = open(p).read()
+# 1. Insert typedef block after the include guard.
+anchor1 = '#ifndef _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BF16_H_\n#define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BF16_H_\n'
+ins1 = (
+'\n'
+'/* HPCTRAINING_BF16_GUARD_v2: __bf16 fallback for non-clang/non-gcc-13+ hosts.\n'
+'   Inserted by HPCTrainingDock pytorch_setup.sh patch_rocm_bf16_header_for_gcc().\n'
+'   Restores host-side compile of TUs that include <hipblaslt/...> with gcc-11/12,\n'
+'   which on therock-23.2.0+ now transitively pulls <hip/hip_bf16.h> via the new\n'
+'   hipblaslt_e5m3.h chain. Clang/amdclang/hipcc/gcc>=13 see no source change. */\n'
+'#if !defined(__clang__) && !(defined(__GNUC__) && __GNUC__ >= 13) \\\n'
+'    && !defined(__HPCTRAINING_BF16_GUARD_DEFINED)\n'
+'#define __HPCTRAINING_BF16_GUARD_DEFINED 1\n'
+'typedef unsigned short __bf16;\n'
+'#endif\n\n'
+)
+if anchor1 not in src:
+    sys.stderr.write("amd_hip_bf16.h include-guard anchor not found; refusing to patch\n")
+    sys.exit(2)
+src = src.replace(anchor1, anchor1 + ins1, 1)
+
+# 2. Gate the redundant __hip_bfloat16(__bf16) ctor.
+anchor2 = '  __BF16_HOST_DEVICE__ __hip_bfloat16(const __bf16 val) : __x_bf16(val) {}\n'
+guard2 = (
+'#if !defined(__HPCTRAINING_BF16_GUARD_DEFINED)  /* HPCTRAINING_BF16_GUARD_v2: avoid duplicate of __hip_bfloat16(unsigned short) when __bf16==unsigned short */\n'
+'  __BF16_HOST_DEVICE__ __hip_bfloat16(const __bf16 val) : __x_bf16(val) {}\n'
+'#endif\n'
+)
+if src.count(anchor2) != 1:
+    sys.stderr.write("amd_hip_bf16.h: __hip_bfloat16(const __bf16 val) anchor not unique; refusing to patch\n")
+    sys.exit(3)
+src = src.replace(anchor2, guard2, 1)
+
+# 3. Gate the redundant operator __bf16().
+anchor3 = '  __BF16_HOST_DEVICE__ operator __bf16() const { return __x_bf16; }\n'
+guard3 = (
+'#if !defined(__HPCTRAINING_BF16_GUARD_DEFINED)  /* HPCTRAINING_BF16_GUARD_v2: avoid duplicate of operator unsigned short() when __bf16==unsigned short */\n'
+'  __BF16_HOST_DEVICE__ operator __bf16() const { return __x_bf16; }\n'
+'#endif\n'
+)
+if src.count(anchor3) != 1:
+    sys.stderr.write("amd_hip_bf16.h: operator __bf16() anchor not unique; refusing to patch\n")
+    sys.exit(4)
+src = src.replace(anchor3, guard3, 1)
+
+open(p, 'w').write(src)
+print("amd_hip_bf16.h patched: HPCTRAINING_BF16_GUARD_v2 (typedef + 2 overload guards) applied")
+PY
+   echo "pytorch: bf16 host-compat patch verify:"
+   grep -nE 'HPCTRAINING_BF16_GUARD|typedef unsigned short __bf16' "${hdr}" | sed 's/^/    /'
+   ls -la "${hdr}.hpctraining.bak" "${hdr}" | sed 's/^/    /'
+}
+
 
 n=0
 while [[ $# -gt 0 ]]
@@ -1036,6 +1194,16 @@ else
       else
          echo "Skipping ${_BLA} MAGMA 2.10+ patch (file missing or already patched)"
       fi
+
+      # ── HIP bf16 host-compat patch for therock-23.2.0+ ────────────────
+      # SDK-level patch (NOT in pytorch source tree) -- see the function
+      # comment block above patch_rocm_bf16_header_for_gcc() for the full
+      # diagnosis. Idempotent + sentinel-guarded; on rocm-7.0.0...7.2.1
+      # this is not strictly needed (no e5m3 chain to expose the bug)
+      # but the patch is still applied because the header is identically
+      # broken there too -- the typedef block stays #if-skipped on
+      # clang/amdclang/hipcc, so it's a no-op runtime-wise on those SDKs.
+      patch_rocm_bf16_header_for_gcc
 
       # ── HIP_CXX_FLAGS leak to torch_python C sources (issue #103222) ──
       # caffe2/CMakeLists.txt:1768 (v2.9.1; same line in upstream main):
