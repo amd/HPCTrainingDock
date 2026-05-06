@@ -1,4 +1,4 @@
-# AAC6 System Status — 2026-05-06
+# AAC6 System Status — 2026-05-05
 
 ## Sys Admins Comments
 
@@ -6,11 +6,11 @@ No comments
 
 ## Overview
 
-- Date: 2026-05-06 11:50:33 CDT
+- Date: 2026-05-05 11:58:32 CDT
 - OS: Ubuntu 22.04.5 LTS
 - Kernel: 6.5.0-45-generic (x86_64)
 - Login host: pl1vm1mi300ctln01
-- ROCm default: 7.2.2
+- ROCm default: 7.2.0
 
 ## Login & Access
 
@@ -32,7 +32,7 @@ Note: `--gpus=<n>` is required to be allocated GPUs in any partition.
 
 ## Software Stack
 
-- ROCm versions available: 6.3.0, 6.3.1, 6.3.2, 6.3.3, 6.3.4, 6.4.0, 6.4.1, 6.4.2, 6.4.3, 7.0.0, 7.0.1, 7.0.2, 7.1.0, 7.1.1, 7.2.0, 7.2.1, 7.2.2
+- ROCm versions available: 6.3.0, 6.3.1, 6.3.2, 6.3.3, 6.3.4, 6.4.0, 6.4.1, 6.4.2, 6.4.3, 7.0.0, 7.0.1, 7.0.2, 7.1.0, 7.1.1, 7.2.0, 7.2.1, afar-7.0.5, afar-22.1.0, afar-22.2.0, therock-23.1.0, therock-23.2.0
 - gcc: 11.4.0
 - Other user-facing module families: apptainer, fp64monitor, gcc, hmmer, miniconda3, miniforge3, nextflow, paraview, rocbudai, roofline-extractor, tracelens, turbovnc, visit
 - Browse all modules with `module avail`. See `man aac6_modules`.
@@ -48,7 +48,7 @@ Note: `--gpus=<n>` is required to be allocated GPUs in any partition.
 
 | Mount | Size | Used |
 |---|---|---|
-| /home | 207G | 68% |
+| /home | 207G | 67% |
 | /shared | 67T | 58% |
 
 ## Help & Documentation
@@ -61,24 +61,17 @@ Note: `--gpus=<n>` is required to be allocated GPUs in any partition.
 
 ## Changes Since Previous Snapshot
 
-- ROCm default: 7.2.0 → 7.2.2
-- ROCm versions:
-    + 7.2.2
-    - afar-22.1.0
-    - afar-22.2.0
-    - afar-7.0.5
-    - therock-23.1.0
-    - therock-23.2.0
+Initial snapshot.
 
 ---
 
-*Generated on 2026-05-06 11:50:33 CDT.*
+*Generated on 2026-05-05 11:58:32 CDT.*
 
 <!-- AAC6_STATUS_METADATA — machine-readable facts for the next-run diff. Do not edit by hand.
 os=Ubuntu 22.04.5 LTS
 kernel=6.5.0-45-generic
-rocm_default=7.2.2
-rocm_versions=6.3.0,6.3.1,6.3.2,6.3.3,6.3.4,6.4.0,6.4.1,6.4.2,6.4.3,7.0.0,7.0.1,7.0.2,7.1.0,7.1.1,7.2.0,7.2.1,7.2.2
+rocm_default=7.2.0
+rocm_versions=6.3.0,6.3.1,6.3.2,6.3.3,6.3.4,6.4.0,6.4.1,6.4.2,6.4.3,7.0.0,7.0.1,7.0.2,7.1.0,7.1.1,7.2.0,7.2.1,afar-7.0.5,afar-22.1.0,afar-22.2.0,therock-23.1.0,therock-23.2.0
 module_top=apptainer,fp64monitor,gcc,hmmer,miniconda3,miniforge3,nextflow,paraview,rocbudai,roofline-extractor,tracelens,turbovnc,visit
 default_partition=1CN192C24G1H_MI300A_Ubuntu22
 partitions=1CN192C24G1H_MI300A_Ubuntu22:1,1CN192C4G1H_MI300A_Ubuntu22:3,1CN48C6G1H_MI300A_Ubuntu22:4,sh5_cpx_admin_long:4
