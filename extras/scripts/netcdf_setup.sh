@@ -600,15 +600,38 @@ else
                fi
             fi
          fi
+         # ---------------------------------------------------------------------
+         # Fortran-PIC fix (audit_2026_05_07.md, jobs 8492/8493/8494):
+         #
+         # On ROCm 6.x SDKs `mpifort` wraps `amdflang` (flang-classic 18.0.0
+         # on 6.3.x, 19.0.0 on 6.4.x), which does NOT default to -fPIC. PnetCDF
+         # builds .f / .f90 objects into static libf77.a / libf90.a and then
+         # libtool assembles them into the SHARED libpnetcdf.so. Without
+         # -fPIC the link fails on Ubuntu's binutils:
+         #   /usr/bin/ld: ../binding/f77/.libs/libf77.a(strerrnof.o):
+         #     relocation R_X86_64_32S against `.rodata' can not be used
+         #     when making a shared object; recompile with -fPIC
+         # Verified failing log:
+         #   logs_05_06_2026/rocm-6.3.{2,3,4}_849{4,3,2}/log_netcdf_05_06_2026.txt
+         # No-op cost on rocm 7.x (amdflang-new defaults to PIC) and on
+         # gfortran (also no-op for shared-lib builds).
+         #
+         # Companion fix to extras/scripts/hdf5_setup.sh:434
+         # (-DCMAKE_Fortran_FLAGS="-fPIC"); the same root cause manifests
+         # there in CMake form.
+         # ---------------------------------------------------------------------
+         PNETCDF_FORTRAN_PIC_FLAGS=( FFLAGS="-fPIC" FCFLAGS="-fPIC" )
          if [ -n "${PNETCDF_FORTRAN_LIBS}" ]; then
             echo "PnetCDF: linking amdflang Fortran runtime: ${PNETCDF_FORTRAN_LIBS}"
             ./configure --prefix=${PNETCDF_PATH} MPICC=`which mpicc` MPIF90=`which mpifort` \
+                        "${PNETCDF_FORTRAN_PIC_FLAGS[@]}" \
                         LIBS="${PNETCDF_FORTRAN_LIBS}"
          else
             echo "WARNING: could not locate amdflang Fortran runtime under ROCM_PATH=${ROCM_PATH:-<unset>};"
             echo "         libpnetcdf.so may have unresolved Fortran::runtime::* / _FortranA* symbols"
             echo "         and the subsequent netcdf-c utility link will fail."
-            ./configure --prefix=${PNETCDF_PATH} MPICC=`which mpicc` MPIF90=`which mpifort`
+            ./configure --prefix=${PNETCDF_PATH} MPICC=`which mpicc` MPIF90=`which mpifort` \
+                        "${PNETCDF_FORTRAN_PIC_FLAGS[@]}"
          fi
          make -j ${MAKE_JOBS}
          make install

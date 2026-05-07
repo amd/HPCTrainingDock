@@ -335,6 +335,51 @@ else
          exit 1
       fi
 
+      # ---------------------------------------------------------------------
+      # Classic-Flang detection (audit_2026_05_07.md / chat 2026-05-07).
+      #
+      # ROCm 6.x ships amdflang-classic (an LLVM-Flang derivative based on
+      # the legacy PGI/F18 frontend). Its kind for `logical(c_bool)` is
+      # NOT interoperable with C `_Bool`, so PETSc's BindingsFortran
+      # configure check rejects it and the whole configure aborts. Verified
+      # failure pattern (sweeps 8492-8498):
+      #   6.3.0/8493, 6.3.3/8494, 6.3.4/8492, 6.4.0/8495,
+      #   6.4.2/8498, 6.4.3/8497, 6.4.4/8496
+      # all bail at the same point during PETSc 3.24.1 configure with
+      # "Fortran compiler does not support BIND(C) for type(c_bool)".
+      #
+      # Probe `mpif90 --version`. amdflang-classic reports
+      #   "flang-classic version 18.0.0 ..."   (ROCm 6.3.x)
+      #   "flang-classic version 19.0.0 ..."   (ROCm 6.4.x)
+      # whereas amdflang-new (ROCm 7.x and afar) reports
+      #   "AMD flang version 22.x.x ..."       (no "classic" substring).
+      # When classic flang is detected we degrade gracefully:
+      #   non-spack: append --with-fortran-bindings=0 to ./configure
+      #   spack    : flip +fortran -> -fortran in the spec
+      # PETSc still builds; C/C++/HIP users are unaffected; petsc4py and
+      # native Fortran callers lose bindings on those rocms only. This is
+      # a deliberate trade vs the prior behavior of FAILED-with-no-install.
+      # Numbered ROCm 7.x and afar SDKs keep the default (+fortran /
+      # --with-fortran-bindings=1), no change for them.
+      # ---------------------------------------------------------------------
+      PETSC_FORTRAN_FLAG="--with-fortran-bindings=1"
+      PETSC_SPACK_FORTRAN_VARIANT="+fortran"
+      if [[ -x "${MPI_PATH}/bin/mpif90" ]]; then
+         _mpif90_banner=$("${MPI_PATH}/bin/mpif90" --version 2>&1 | head -n 5 || true)
+         if echo "${_mpif90_banner}" | grep -qi "flang-classic"; then
+            echo ""
+            echo "[petsc classic-Flang detected] mpif90 wraps amdflang-classic:"
+            echo "${_mpif90_banner}" | sed 's/^/    /'
+            echo "[petsc classic-Flang detected] -> Fortran bindings DISABLED"
+            echo "[petsc classic-Flang detected]    (configure: --with-fortran-bindings=0;"
+            echo "[petsc classic-Flang detected]     spack: -fortran)"
+            echo ""
+            PETSC_FORTRAN_FLAG="--with-fortran-bindings=0"
+            PETSC_SPACK_FORTRAN_VARIANT="-fortran"
+         fi
+         unset _mpif90_banner
+      fi
+
       # don't use sudo if user has write access to install path
       if [ -d "$INSTALL_PATH" ]; then
          # don't use sudo if user has write access to install path
@@ -416,7 +461,12 @@ else
          # load spack environment
          source spack/share/spack/setup-env.sh
 
-         module load hdf5
+         # Tolerate missing hdf5 module under `set -e` (line 12). If the
+         # hdf5 sweep failed earlier, an unguarded `module load hdf5` would
+         # abort the whole script before spack ever runs. With ||true the
+         # script continues; spack will pick up whatever hdf5 it finds via
+         # `spack external find` (or build its own as a normal dependency).
+         module load hdf5 2>/dev/null || true
 
          # find already installed libs for spack: include --all otherwise ROCm libs will not be found
          spack external find --all
@@ -426,8 +476,10 @@ else
          # change spack install dir for Hypre
          sed -i 's|$spack/opt/spack|'"${PETSC_PATH}"'|g' spack/etc/spack/defaults/base/config.yaml 
 
-         # install petsc with spack, some variants are not specified because true by default
-         spack install petsc@$PETSC_VERSION+rocm+fortran+mumps+suite-sparse amdgpu_target=$AMDGPU_GFXMODEL
+         # install petsc with spack, some variants are not specified because true by default.
+         # PETSC_SPACK_FORTRAN_VARIANT is +fortran by default but flips to -fortran when
+         # classic-Flang is detected upstream (see classic-Flang block above).
+         spack install petsc@$PETSC_VERSION+rocm${PETSC_SPACK_FORTRAN_VARIANT}+mumps+suite-sparse amdgpu_target=$AMDGPU_GFXMODEL
 
          # get petsc install dir created by spack
          PETSC_PATH_ORIGINAL=$PETSC_PATH
@@ -511,18 +563,33 @@ print('matdensecupmimpl.h patched: added <cuda/std/iterator> for CCCL 3.0+')
             echo "petsc: no libcudacxx detected (no ${ROCM_PATH:-<unset>}/include/cuda/std/__cccl/version.h) -- skipping matdensecupmimpl.h cuda/std/iterator patch"
          fi
 
+         # System hdf5 is OPTIONAL: if its module loads cleanly we use it
+         # (DOWNLOAD_HDF5=0 -> --download-hdf5=0); otherwise we fall back
+         # to PETSc's own internal hdf5 build (DOWNLOAD_HDF5=1 ->
+         # --download-hdf5=1). The 2>/dev/null||true is essential under
+         # `set -e` (line 12): without it, a missing hdf5 module (e.g.
+         # because hdf5_setup.sh itself failed earlier in the same sweep)
+         # would abort the script with rc=1 BEFORE the if-test below ever
+         # runs, defeating the fallback design. Verified failure pattern:
+         # 6.4.0/8391, 6.4.3/8388, 6.3.0/8440, 6.3.4/8436, 7.0.0/8185,
+         # 7.13.0/8186 -- 30-line petsc logs that all bail at this exact
+         # line in lockstep with the parent sweep's hdf5(rc=1) failure.
          DOWNLOAD_HDF5=1
-         module load hdf5
-         if [[ "${HDF5_PATH}" != "" ]]; then
+         module load hdf5 2>/dev/null || true
+         if [[ -n "${HDF5_PATH:-}" ]]; then
             DOWNLOAD_HDF5=0
          fi
 
+         # PETSC_FORTRAN_FLAG is --with-fortran-bindings=1 by default but flips to
+         # --with-fortran-bindings=0 when classic-Flang is detected upstream
+         # (see classic-Flang block above).
          ./configure --with-debugging=0 --with-x=0 COPTFLAGS="-O3 -march=native -mtune=native" \
                      CXXOPTFLAGS="-O3 -march=native -mtune=native" FOPTFLAGS="-O3 -march=native -mtune=native" \
                      HIPOPTFLAGS="-O3 -march=native -mtune=native" --download-fblaslapack=1 --download-hdf5=$DOWNLOAD_HDF5 --download-metis=1 \
                      --download-parmetis=1 --with-shared-libraries=1 --download-blacs=1 --download-scalapack=1 --download-mumps=1 \
                      --download-suitesparse=1 --with-hip-arch=$AMDGPU_GFXMODEL --with-mpi=1 --with-mpi-dir=$MPI_PATH \
-                     --prefix=$PETSC_PATH --with-hip=1 --with-hip-dir=$ROCM_PATH
+                     --prefix=$PETSC_PATH --with-hip=1 --with-hip-dir=$ROCM_PATH \
+                     ${PETSC_FORTRAN_FLAG}
 
          make PETSC_DIR=$PETSC_REPO PETSC_ARCH=arch-linux-c-opt all
          if [ $? -ne 0 ]; then
@@ -631,7 +698,10 @@ print('matdensecupmimpl.h patched: added <cuda/std/iterator> for CCCL 3.0+')
 
       module unload ${ROCM_MODULE_NAME}
       module unload $MPI_MODULE
-      module unload hdf5
+      # `module unload hdf5` may fail if we took the DOWNLOAD_HDF5=1
+      # path above and never loaded it (or if the load itself silently
+      # no-op'd via ||true). Tolerate either case under `set -e`.
+      module unload hdf5 2>/dev/null || true
       if [[ ${USE_AMDFLANG} == "1" ]]; then
          module unload amdflang-new
       fi

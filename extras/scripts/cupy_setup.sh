@@ -519,6 +519,21 @@ else
       uv pip install -v --target=$CUPY_PATH cupy-xarray --no-deps
       deactivate
       cd /
+      # ── Shebang rewrite ────────────────────────────────────────────
+      # uv-pip console_script wrappers (cupyx-bench, f2py, numpy-config,
+      # ...) get baked with `#!${CUPY_BUILD_ROOT}/cupy_build/bin/python3`
+      # because uv pip --target invokes the venv's python. The /tmp
+      # build dir disappears with the EXIT trap at end-of-job, so any
+      # PATH-resolved cupyx-bench afterwards fails with "bad
+      # interpreter". Same root cause + same fix as pytorch_setup.sh
+      # (see bare_system/fix_python_venv_shebangs.sh + audit
+      # 2026-05-07: 660 broken cupy wrappers across 30 installs).
+      # /usr/bin/env python3 works because the cupy modulefile
+      # prepends ${CUPY_PATH}/lib/python3.X/site-packages onto
+      # PYTHONPATH, so the cupy package is importable under the
+      # system python3 once `module load cupy` is in effect.
+      ${SUDO} find ${CUPY_PATH}/bin -maxdepth 1 -type f \
+         -exec sed -i '1s|^#!.*python3.*$|#!/usr/bin/env python3|' {} + 2>/dev/null || true
       # clean-up: trap handles ${CUPY_BUILD_ROOT}/{cupy,cupy_build}
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find $CUPY_PATH -type f -execdir chown root:root "{}" +

@@ -256,6 +256,50 @@ if [ "${BUILD_MAGMA}" = "0" ]; then
    exit ${NOOP_RC}
 fi
 
+# ── afar SDK incompatibility detection ───────────────────────────────
+# AMD's pre-release "AFAR" ROCm drops (rocm-afar-22.x, rocm-afar-7.0.5)
+# are runtime-only / partial SDKs. Verified empirically on this cluster
+# (audit_2026_05_06, job 8490, log_magma_05_06_2026.txt:14192):
+#
+#   afar-22.1.0  $ find <ROCM_PATH> -name 'hipblas-config.cmake'
+#                -> 0 matches  (and 0 for rocblas, rocthrust, miopen, ...)
+#   afar-22.2.0  $ same probe -> 1 match (cmake configs present)
+#   rocm-7.2.1   $ same probe -> 1 match
+#
+# magma's CMakeLists.txt:473 calls target_link_libraries(magma roc::hipblas);
+# without hipblas-config.cmake the imported target is never registered
+# and CMake fails with "Target ... links to: roc::hipblas but the target
+# was not found." Skipping here turns 8490-style FAILED magma(rc=1) into
+# the correct SKIPPED(no-op) bucket on afar-22.1.0 (afar-22.2.0 ships
+# the cmake configs; the probe correctly lets that case through).
+#
+# Probe shape: gated on `${ROCM_PATH}` matching `*afar*` AND no
+# hipblas-config.cmake present. Self-corrects if AMD ships the cmake
+# metadata in a future afar drop (matches the rocm-bundled hipfort
+# policy in extras/scripts/hipfort_setup.sh).
+if [[ "${ROCM_PATH:-}" == *afar* ]]; then
+   if [[ -z "${ROCM_PATH:-}" ]] && type module >/dev/null 2>&1; then
+      module load "rocm/${ROCM_VERSION}" 2>/dev/null || true
+   fi
+   if [ ! -f "${ROCM_PATH}/lib/cmake/hipblas/hipblas-config.cmake" ]; then
+      echo ""
+      echo "[magma afar-skip] ROCM_PATH=${ROCM_PATH} is an AMD AFAR partial SDK"
+      echo "                  missing : <ROCM_PATH>/lib/cmake/hipblas/hipblas-config.cmake"
+      echo "                  magma requires roc::hipblas imported target; cannot build on afar SDK."
+      echo "                  Skipping (no magma build, no openblas build, no cache restore)."
+      echo ""
+      if [ -d "${MAGMA_PATH}" ]; then
+         echo "[magma afar-skip] removing stale from-source install: ${MAGMA_PATH}"
+         ${SUDO} rm -rf "${MAGMA_PATH}"
+      fi
+      if [ -f "${MAGMA_MODULE_DIR}/${MAGMA_VERSION}.lua" ]; then
+         echo "[magma afar-skip] removing stale modulefile: ${MAGMA_MODULE_DIR}/${MAGMA_VERSION}.lua"
+         ${SUDO} rm -f "${MAGMA_MODULE_DIR}/${MAGMA_VERSION}.lua"
+      fi
+      exit ${NOOP_RC}
+   fi
+fi
+
 # ── --replace: remove prior installs + modulefiles BEFORE building ───
 if [ "${REPLACE}" = "1" ]; then
    REPLACE_MAGMA=1

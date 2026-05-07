@@ -280,64 +280,112 @@ else
       REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
-      # ── therock SDK fallback: pick latest published hip-python ──────
-      # hip-python on test.pypi.org is published per upstream rocm release
-      # (e.g. 7.0.0, 7.0.1, ..., 7.2.2). therock is a release-candidate
-      # SDK whose ROCM_VERSION numeric (e.g. 7.12.0 for therock-23.1.0,
-      # 7.13.0 for therock-23.2.0) DOES NOT have a matching PyPI wheel
-      # -- as of 2026-05-06 the latest available was 7.2.2.562.43.
-      # Without this fallback, `pip install hip-python==7.12.0.*` runs
-      # for ~1 min then aborts with `No matching distribution found`
-      # (slurm 8372, 2026-05-05 on therock-23.1.0).
+      # ── PyPI version selection: handle missing wheels for ROCM_VERSION ─
+      # hip-python on test.pypi.org is published per upstream ROCm release
+      # (e.g. 5.4.3.x, ..., 6.3.0.x, 6.3.1.x, 6.3.2.x, 6.3.3.x, 6.4.0.x,
+      # ..., 7.2.2.562.43). The publication is sparse: not every ROCm
+      # point release gets a wheel (e.g. 6.3.4 was skipped, slurm 8492
+      # 2026-05-06; therock-23.x SDKs are pre-release and never get one).
       #
-      # Policy (per user request 2026-05-06): on therock, query the
-      # PyPI JSON for the latest published hip-python release and use
-      # that. The hip-python ABI is forward-compatible with the rocm
-      # tree it's loaded against (it dlopen's libamdhip64 at runtime
-      # via the rocm module's LD_LIBRARY_PATH, no DT_NEEDED ABI lock),
-      # so a 7.2.2.x wheel running against a 7.12.0 therock SDK works
-      # for the same set of HIP entry points the wheel was built for.
-      # `--hip-python-version <spec>` still overrides this fallback.
+      # Three policies, in priority order:
+      #   1. --hip-python-version <spec> -- operator override, used as-is.
+      #   2. therock-* SDKs (ROCM_PATH matches *therock*): pick the
+      #      LATEST published hip-python. ABI is forward-compatible
+      #      (hip-python dlopen's libamdhip64 at runtime via the rocm
+      #      module's LD_LIBRARY_PATH, no DT_NEEDED ABI lock), so a
+      #      7.2.2.x wheel running against a 7.12.0 therock SDK works.
+      #   3. Numbered SDKs (rocm-X.Y.Z): probe PyPI; if at least one
+      #      "${ROCM_VERSION}.*" wheel exists, use the legacy wildcard
+      #      and let pip pick the highest match (no behaviour change).
+      #      If NONE match (e.g. 6.3.4 has no 6.3.4.x wheel), fall
+      #      back to the NEAREST-LOWER published version on the same
+      #      major.minor lineage (6.3.4 -> 6.3.3.540.31). Nearest-
+      #      lower is preferred over latest because the 6.3.x runtime
+      #      ABI is much closer to a 6.3.x wheel than a 7.x wheel.
+      #
+      # Without this fallback:
+      #   - therock-23.1.0 (slurm 8372, 2026-05-05): "pip install
+      #     hip-python==7.12.0.*" -> No matching distribution found.
+      #   - 6.3.4 (slurm 8492, 2026-05-06): "pip install
+      #     hip-python==6.3.4.*" -> same error.
       #
       # If the network probe fails (CI or air-gapped builds), preserve
-      # the old safe behaviour: exit MISSING_PREREQ_RC=42 so the
-      # package shows up cleanly as SKIPPED in the main_setup.sh
-      # per-package summary instead of FAILED.
-      if [[ -n "${ROCM_PATH:-}" && "${ROCM_PATH}" == *therock* && -z "${HIP_PYTHON_VERSION}" ]]; then
+      # the safe behaviour: exit MISSING_PREREQ_RC=42 so main_setup.sh
+      # buckets the package as SKIPPED instead of FAILED.
+      if [[ -z "${HIP_PYTHON_VERSION}" ]]; then
          echo ""
-         echo "[hip-python therock-fallback] ROCM_PATH=${ROCM_PATH}"
-         echo "                              no PyPI wheel for therock SDK numeric ${ROCM_VERSION};"
-         echo "                              probing test.pypi.org for latest published hip-python..."
-         _hp_latest=$(python3 - <<'PY' 2>/dev/null
-import json, urllib.request, sys
+         echo "[hip-python pypi-probe] ROCM_PATH=${ROCM_PATH:-<unset>}"
+         echo "                        ROCM_VERSION=${ROCM_VERSION}"
+         echo "                        probing test.pypi.org for matching hip-python wheel..."
+         _hp_choice=$(python3 - "${ROCM_VERSION}" "${ROCM_PATH:-}" <<'PY' 2>/dev/null
+import json, sys, urllib.request
+target = sys.argv[1]
+rocm_path = sys.argv[2] if len(sys.argv) > 2 else ""
+is_therock = "therock" in rocm_path
+def vkey(v):
+    return tuple(int(p) if p.isdigit() else 0 for p in v.split('.'))
 try:
     data = json.loads(urllib.request.urlopen(
         'https://test.pypi.org/pypi/hip-python/json', timeout=30).read())
-    versions = list(data.get('releases', {}).keys())
+    versions = sorted(data.get('releases', {}).keys(), key=vkey)
     if not versions:
         sys.exit(1)
-    def vkey(v):
-        return tuple(int(p) if p.isdigit() else p for p in v.split('.'))
-    print(sorted(versions, key=vkey)[-1])
+    if is_therock:
+        # therock: latest published wheel (forward-compat dlopen ABI)
+        print("LATEST", versions[-1])
+    else:
+        # numbered SDK: prefer exact-match prefix `${ROCM_VERSION}.`
+        prefix = target + "."
+        exact = [v for v in versions if v.startswith(prefix)]
+        if exact:
+            # at least one match exists; emit WILDCARD so caller uses
+            # the legacy `${ROCM_VERSION}.*` spec and lets pip resolve
+            print("WILDCARD", "")
+        else:
+            # no match: pick nearest-LOWER published version
+            target_key = vkey(target)
+            lower = [v for v in versions if vkey(v) <= target_key]
+            if not lower:
+                sys.exit(2)  # no lower version exists either
+            print("NEAREST_LOWER", lower[-1])
 except Exception:
     sys.exit(1)
 PY
 )
-         if [ -z "${_hp_latest}" ]; then
+         _hp_rc=$?
+         if [ ${_hp_rc} -ne 0 ] || [ -z "${_hp_choice}" ]; then
             echo ""
-            echo "[hip-python therock-fallback] PyPI probe failed (network down? proxy?)"
-            echo "                              cannot determine latest hip-python version."
-            echo "                              Skipping with rc=${MISSING_PREREQ_RC} (MISSING-PREREQ)."
-            echo "                              To force, pass --hip-python-version <spec>"
-            echo "                              (e.g. --hip-python-version 7.2.2.562.43)."
+            echo "[hip-python pypi-probe] FAILED (rc=${_hp_rc}: network down? proxy? no lower version?)"
+            echo "                        cannot determine an installable hip-python version."
+            echo "                        Skipping with rc=${MISSING_PREREQ_RC} (MISSING-PREREQ)."
+            echo "                        To force, pass --hip-python-version <spec>"
+            echo "                        (e.g. --hip-python-version 7.2.2.562.43)."
             echo ""
             exit ${MISSING_PREREQ_RC}
          fi
-         HIP_PYTHON_VERSION="${_hp_latest}"
-         echo "                              latest published hip-python: ${HIP_PYTHON_VERSION}"
-         echo "                              using this version against therock SDK ${ROCM_VERSION}"
+         _hp_mode="${_hp_choice%% *}"
+         _hp_ver="${_hp_choice#* }"
+         case "${_hp_mode}" in
+            LATEST)
+               HIP_PYTHON_VERSION="${_hp_ver}"
+               echo "                        therock SDK -> LATEST published wheel: ${HIP_PYTHON_VERSION}"
+               ;;
+            WILDCARD)
+               echo "                        exact match exists -> using legacy wildcard ${ROCM_VERSION}.*"
+               ;;
+            NEAREST_LOWER)
+               HIP_PYTHON_VERSION="${_hp_ver}"
+               echo "                        no exact match -> NEAREST-LOWER wheel: ${HIP_PYTHON_VERSION}"
+               echo "                        (rationale: 6.3.x runtime ABI is closer to a 6.3.x wheel than to 7.x)"
+               ;;
+            *)
+               echo "                        WARNING: unexpected probe output: ${_hp_choice}"
+               echo "                        Skipping with rc=${MISSING_PREREQ_RC}."
+               exit ${MISSING_PREREQ_RC}
+               ;;
+         esac
          echo ""
-         unset _hp_latest
+         unset _hp_choice _hp_rc _hp_mode _hp_ver
       fi
 
       # ── Derive numba-hip extras name ────────────────────────────────
@@ -397,6 +445,25 @@ PY
       deactivate
       # hip-python-build venv lives under HIP_PYTHON_BUILD_DIR
       # (under /tmp) and is removed by the EXIT trap above.
+      # ── Shebang rewrite ────────────────────────────────────────────
+      # pip console_script wrappers under numba-hip/bin (numba, f2py,
+      # numpy-config) get baked with `#!${HIP_PYTHON_BUILD_DIR}/
+      # hip-python-build/bin/python3` because pip --target invokes
+      # the venv's python. The /tmp build dir vanishes with the EXIT
+      # trap, breaking any direct call to numba afterwards. Same root
+      # cause + same fix as pytorch_setup.sh / cupy_setup.sh (see
+      # bare_system/fix_python_venv_shebangs.sh + audit 2026-05-07:
+      # 75 broken numba-hip wrappers across 25 installs).
+      # /usr/bin/env python3 works because the hip-python modulefile
+      # prepends ${HIP_PYTHON_PATH}/numba-hip onto PYTHONPATH, so
+      # `from numba ...` resolves under the system python3 once
+      # `module load hip-python` is in effect.
+      for _hp_bin in ${HIP_PYTHON_PATH}/numba-hip/bin ${HIP_PYTHON_PATH}/hip-python/bin; do
+         [ -d "${_hp_bin}" ] || continue
+         ${SUDO} find "${_hp_bin}" -maxdepth 1 -type f \
+            -exec sed -i '1s|^#!.*python3.*$|#!/usr/bin/env python3|' {} + 2>/dev/null || true
+      done
+      unset _hp_bin
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find $HIP_PYTHON_PATH -type f -execdir chown root:root "{}" +
          ${SUDO} find $HIP_PYTHON_PATH -type d -execdir chown root:root "{}" +

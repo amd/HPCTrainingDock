@@ -435,30 +435,44 @@ if [ "${INSTALL_PATH_INPUT}" != "" ]; then
 else
    INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}
 fi
+# Strip any trailing slash so downstream concatenations like
+# "${INSTALL_PATH}"/openmpi-... don't produce "//" embedded paths.
+# The generated openmpi modulefile bakes MPI_PATH="${OPENMPI_PATH}"
+# verbatim (see heredocs near line ~1309/1342/1366), and downstream
+# tests that compare against `which mpifort` (canonical, single-slash)
+# get a string mismatch when MPI_PATH carries a literal "//".
+# Same trailing-slash strip applied to the per-component *_PATH_INPUT
+# values to keep the cache filenames and the modulefile's MPI_PATH
+# canonical regardless of how main_setup.sh passes paths in.
+INSTALL_PATH="${INSTALL_PATH%/}"
 
 if [ "${XPMEM_PATH_INPUT}" != "" ]; then
    XPMEM_PATH="${XPMEM_PATH_INPUT}"
 else
    XPMEM_PATH="${INSTALL_PATH}"/xpmem-${XPMEM_VERSION}
 fi
+XPMEM_PATH="${XPMEM_PATH%/}"
 
 if [ "${UCX_PATH_INPUT}" != "" ]; then
    UCX_PATH="${UCX_PATH_INPUT}"
 else
    UCX_PATH="${INSTALL_PATH}"/ucx-${UCX_VERSION}${XPMEM_STRING}
 fi
+UCX_PATH="${UCX_PATH%/}"
 
 if [ "${UCC_PATH_INPUT}" != "" ]; then
    UCC_PATH="${UCC_PATH_INPUT}"
 else
    UCC_PATH="${INSTALL_PATH}"/ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}
 fi
+UCC_PATH="${UCC_PATH%/}"
 
 if [ "${OPENMPI_PATH_INPUT}" != "" ]; then
    OPENMPI_PATH="${OPENMPI_PATH_INPUT}"
 else
    OPENMPI_PATH="${INSTALL_PATH}"/openmpi-${OPENMPI_VERSION}-ucc-${UCC_VERSION}-ucx-${UCX_VERSION}${XPMEM_STRING}
 fi
+OPENMPI_PATH="${OPENMPI_PATH%/}"
 
 # ── BUILD_OPENMPI=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
 NOOP_RC=43

@@ -215,6 +215,54 @@ if [ "${BUILD_TAU}" = "0" ]; then
    exit ${NOOP_RC}
 fi
 
+# ── afar SDK incompatibility detection ───────────────────────────────
+# AMD's pre-release "AFAR" ROCm drops (rocm-afar-22.x, rocm-afar-7.0.5)
+# are runtime-only / partial SDKs. Verified empirically on this cluster
+# (audit_2026_05_06, jobs 8489 + 8490, log_tau_05_06_2026.txt:3274):
+#
+#   afar-22.{1,2}.0  $ find <ROCM_PATH> -path '*/clang/Basic/SourceManager.h'
+#                    -> 0 matches
+#   rocm-7.2.1       $ same probe
+#                    -> .../lib/llvm/include/clang/Basic/SourceManager.h
+#
+# tau's plugins/llvm vendored CMake build always #includes
+# <clang/Basic/SourceManager.h> (Instrument.cpp:53). The plugin cannot
+# be built without the clang dev tree, and afar SDKs intentionally
+# omit it. Skipping here turns 8489/8490-style FAILED(2) tau(rc=2)
+# into the correct SKIPPED(no-op) bucket and saves ~6 min of CPU per
+# afar sweep on a build that has no chance.
+#
+# Probe shape: gated on `${ROCM_PATH}` matching `*afar*` AND the
+# missing clang header. The header check exists so this block
+# self-corrects if AMD ships a more complete afar drop later (matches
+# the rocm-bundled hipfort policy in extras/scripts/hipfort_setup.sh).
+# We probe BOTH SDK layouts (THEROCK lib/llvm/include and STANDARD
+# llvm/include) -- both exist on afar SDKs but neither contains
+# clang/Basic/.
+if [[ "${ROCM_PATH:-}" == *afar* ]]; then
+   if [[ -z "${ROCM_PATH:-}" ]] && type module >/dev/null 2>&1; then
+      module load "rocm/${ROCM_VERSION}" 2>/dev/null || true
+   fi
+   if [ ! -f "${ROCM_PATH}/lib/llvm/include/clang/Basic/SourceManager.h" ] \
+      && [ ! -f "${ROCM_PATH}/llvm/include/clang/Basic/SourceManager.h" ]; then
+      echo ""
+      echo "[tau afar-skip] ROCM_PATH=${ROCM_PATH} is an AMD AFAR partial SDK"
+      echo "                missing : <ROCM_PATH>/{lib/llvm,llvm}/include/clang/Basic/SourceManager.h"
+      echo "                tau plugins/llvm requires the clang dev tree; cannot build on afar SDK."
+      echo "                Skipping (no source build, no cache restore)."
+      echo ""
+      if [ -d "${TAU_PATH}" ]; then
+         echo "[tau afar-skip] removing stale from-source install: ${TAU_PATH}"
+         ${SUDO} rm -rf "${TAU_PATH}"
+      fi
+      if [ -f "${MODULE_PATH}/dev.lua" ]; then
+         echo "[tau afar-skip] removing stale modulefile: ${MODULE_PATH}/dev.lua"
+         ${SUDO} rm -f "${MODULE_PATH}/dev.lua"
+      fi
+      exit ${NOOP_RC}
+   fi
+fi
+
 if [ "${REPLACE}" = "1" ]; then
    echo "[tau --replace 1] removing prior tau install + modulefile if present"
    echo "  install dir: ${TAU_PATH}"

@@ -394,6 +394,55 @@ if [ "${BUILD_PYTORCH}" = "0" ]; then
    exit ${NOOP_RC}
 fi
 
+# ── afar SDK incompatibility detection ───────────────────────────────
+# AMD's pre-release "AFAR" ROCm drops (rocm-afar-22.x, rocm-afar-7.0.5)
+# are runtime-only / partial SDKs. Verified empirically on this cluster
+# (audit_2026_05_06, job 8489, log_pytorch_05_06_2026.txt:46050-46089):
+#
+#   afar-22.2.0  $ ls <ROCM_PATH>/lib/libMIOpen*
+#                -> No such file or directory
+#   afar-22.2.0  $ cat <ROCM_PATH>/lib/cmake/miopen/miopen-targets-release.cmake
+#                -> IMPORTED_LOCATION_RELEASE ".../lib/libMIOpen.so.1.0.70200"
+#   rocm-7.2.1   $ ls <ROCM_PATH>/lib/libMIOpen*
+#                -> libMIOpen.so, .so.1, .so.1.0.70201
+#
+# pytorch's cmake find_package(miopen) loads miopen-config.cmake (which
+# IS present on afar) and then dies at the IMPORTED_LOCATION existence
+# check on libMIOpen.so. Skipping here turns 8489-style FAILED pytorch
+# (rc=1) into the correct SKIPPED(no-op) bucket and saves ~3.5h of
+# CPU per afar sweep on a build that has no chance.
+#
+# Probe shape: gated on `${ROCM_PATH}` matching `*afar*` AND no
+# libMIOpen.so* present. The runtime-library check exists so this
+# block self-corrects if AMD ships a more complete afar drop later
+# (matches the rocm-bundled hipfort policy in
+# extras/scripts/hipfort_setup.sh).
+if [[ "${ROCM_PATH:-}" == *afar* ]]; then
+   if [[ -z "${ROCM_PATH:-}" ]] && type module >/dev/null 2>&1; then
+      module load "rocm/${ROCM_VERSION}" 2>/dev/null || true
+   fi
+   if ! ls "${ROCM_PATH}"/lib/libMIOpen.so* >/dev/null 2>&1; then
+      echo ""
+      echo "[pytorch afar-skip] ROCM_PATH=${ROCM_PATH} is an AMD AFAR partial SDK"
+      echo "                    missing : <ROCM_PATH>/lib/libMIOpen.so* (cmake config refs nonexistent .so)"
+      echo "                    pytorch's find_package(miopen) requires the runtime lib; cannot build on afar SDK."
+      echo "                    Skipping (no source build, no cache restore)."
+      echo ""
+      if [ -d "${INSTALL_PATH}" ]; then
+         echo "[pytorch afar-skip] removing stale from-source install: ${INSTALL_PATH}"
+         ${SUDO} rm -rf "${INSTALL_PATH}"
+      fi
+      for _mf in "${MODULE_PATH}/${PYTORCH_VERSION}.lua" "${MODULE_PATH}/${PYTORCH_VERSION}_tunableop_enabled.lua"; do
+         if [ -f "${_mf}" ]; then
+            echo "[pytorch afar-skip] removing stale modulefile: ${_mf}"
+            ${SUDO} rm -f "${_mf}"
+         fi
+      done
+      unset _mf
+      exit ${NOOP_RC}
+   fi
+fi
+
 if [ "${REPLACE}" = "1" ]; then
    echo "[pytorch --replace 1] removing prior install + modulefiles if present"
    echo "  install dir:        ${INSTALL_PATH}"
@@ -717,6 +766,36 @@ else
       DS_BUILD_RAGGED_DEVICE_OPS=0 \
       DS_BUILD_OPS=0 \
       pip3 install --upgrade deepspeed einops psutil pydantic==2.11.9 hjson pydantic-core==2.33.2 msgpack typing_inspection annotated_types py-cpuinfo --no-cache-dir --target=$DEEPSPEED_PATH --no-build-isolation --no-deps
+
+      # ── Shebang rewrite (wheel branch) ─────────────────────────────
+      # Each pip3 install --target= above ran while the pytorch_build
+      # venv (line 677) was active, so every console_script wrapper
+      # (cmake, ninja, ctest, torchrun, transformers-cli, deepspeed,
+      # ...) was baked with `#!${PYTORCH_BUILD_DIR}/bin/python3` -- a
+      # /tmp path that disappears with the EXIT trap. PATH-resolved
+      # invocations afterwards fail with "bad interpreter". Same root
+      # cause + same fix as the source-build branch (further down at
+      # the venv-relocation step). See bare_system/
+      # fix_python_venv_shebangs.sh for the cluster-wide hot-fix
+      # that addressed yesterday's installs (audit 2026-05-07: ~377
+      # broken wrappers across pytorch satellite trees).
+      # /usr/bin/env python3 works because each satellite's path is
+      # added to PYTHONPATH by the pytorch modulefile, so imports
+      # resolve under the system python3 once `module load pytorch`
+      # is in effect.
+      for _pt_bin in ${PYTORCH_PATH}/bin \
+                     ${TORCHAUDIO_PATH}/bin \
+                     ${TORCHVISION_PATH}/bin \
+                     ${TRANSFORMERS_PATH}/bin \
+                     ${SAGEATTENTION_PATH}/bin \
+                     ${FLASHATTENTION_PATH}/bin \
+                     ${TRITON_PATH}/bin \
+                     ${DEEPSPEED_PATH}/bin; do
+         [ -d "${_pt_bin}" ] || continue
+         ${SUDO} find "${_pt_bin}" -maxdepth 1 -type f \
+            -exec sed -i '1s|^#!.*python3.*$|#!/usr/bin/env python3|' {} + 2>/dev/null || true
+      done
+      unset _pt_bin
 
       deactivate
       cd ..
@@ -1418,8 +1497,30 @@ else
 	${SUDO} mkdir -p ${PYTORCH_PATH_SITE_PACKAGES}
         ${SUDO} cp -a lib/python*/site-packages/* ${PYTORCH_PATH_SITE_PACKAGES}
 	${SUDO} mkdir -p ${PYTORCH_PATH}/bin
-	export PYTHON3_PATH=`which python3`
-	${SUDO} find bin/ -maxdepth 1 -type f ! -name 'python*' -exec sed -i "s#${PYTORCH_BUILD_DIR}/bin/python3#${PYTHON3_PATH}#g" {} +
+	# ── Shebang rewrite ────────────────────────────────────────────
+	# pip console_script wrappers (cmake/ninja/ctest/torchrun/pip/...)
+	# get baked with `#!${PYTORCH_BUILD_DIR}/bin/python3` -- a /tmp
+	# path that disappears with the EXIT trap at end-of-job. Without
+	# rewriting, every PATH-resolved cmake/ninja/etc under `module
+	# load pytorch` fails with "bad interpreter: No such file or
+	# directory" (verified slurm 8161 cmake breakage on rocm-7.2.1;
+	# same pattern was present on all 13 installed pytorch trees,
+	# hot-fixed by bare_system/fix_python_venv_shebangs.sh on 2026-05-07).
+	#
+	# The PRIOR rewrite used `which python3` while the venv was still
+	# active, so PYTHON3_PATH resolved to the SAME /tmp path that was
+	# already in the shebang -> no-op sed. Switching the rewrite
+	# target to `/usr/bin/env python3` is correct because:
+	#   (1) the modulefile prepends ${PYTORCH_PATH}/lib/python3.X/
+	#       site-packages onto PYTHONPATH, so `from cmake import cmake`
+	#       (and ninja, torch, etc.) resolves under the system python3
+	#       once `module load pytorch/...` is in effect.
+	#   (2) the modulefile also prepends ${PYTORCH_PATH}/bin onto PATH,
+	#       so `env python3` finds ${PYTORCH_PATH}/bin/python3 (a
+	#       symlink to /usr/bin/python3 placed there by `cp -a` below).
+	# Tested end-to-end: cmake --version returns 4.3.2 on rocm-7.2.1.
+	${SUDO} find bin/ -maxdepth 1 -type f ! -name 'python*' \
+	   -exec sed -i '1s|^#!.*python3.*$|#!/usr/bin/env python3|' {} +
 	${SUDO} cp -a bin/* ${PYTORCH_PATH}/bin
       fi
       echo ""
@@ -1627,6 +1728,30 @@ print('  torch.cuda.is_available() =', torch.cuda.is_available())
       DS_BUILD_RAGGED_DEVICE_OPS=0 \
       DS_BUILD_OPS=0 \
       pip3 install --upgrade deepspeed einops psutil pydantic==2.11.9 hjson pydantic-core==2.33.2 msgpack typing_inspection annotated_types py-cpuinfo --no-cache-dir --target=$DEEPSPEED_PATH --no-build-isolation --no-deps
+
+      # ── Shebang rewrite (source-build branch satellites) ───────────
+      # Each pip3 install --target= above (transformers, triton,
+      # sageattention, flashattention, deepspeed) ran while the
+      # pytorch_build venv (line 1183) was active, so every console
+      # script was baked with `#!${PYTORCH_BUILD_DIR}/bin/python3`
+      # -- the same /tmp dir that disappears with the EXIT trap.
+      # The pytorch core sweep further up (around line 1492) only
+      # covers ${PYTORCH_PATH}/bin; this loop catches the satellites.
+      # Same root cause + same fix as the wheel branch above and as
+      # bare_system/fix_python_venv_shebangs.sh (audit 2026-05-07).
+      for _pt_bin in ${PYTORCH_PATH}/bin \
+                     ${TORCHAUDIO_PATH}/bin \
+                     ${TORCHVISION_PATH}/bin \
+                     ${TRANSFORMERS_PATH}/bin \
+                     ${SAGEATTENTION_PATH}/bin \
+                     ${FLASHATTENTION_PATH}/bin \
+                     ${TRITON_PATH}/bin \
+                     ${DEEPSPEED_PATH}/bin; do
+         [ -d "${_pt_bin}" ] || continue
+         ${SUDO} find "${_pt_bin}" -maxdepth 1 -type f \
+            -exec sed -i '1s|^#!.*python3.*$|#!/usr/bin/env python3|' {} + 2>/dev/null || true
+      done
+      unset _pt_bin
 
       deactivate
       # cd from pytorch_build/flash-attention back to the starting directory

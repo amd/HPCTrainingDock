@@ -193,6 +193,49 @@ if [ "${BUILD_KOKKOS}" = "0" ]; then
    exit ${NOOP_RC}
 fi
 
+# ── afar SDK incompatibility detection ───────────────────────────────
+# AMD's pre-release "AFAR" ROCm drops (rocm-afar-22.x, rocm-afar-7.0.5)
+# are runtime-only / partial SDKs. Verified empirically on this cluster
+# (audit_2026_05_06, job 8490, log_kokkos_05_06_2026.txt:96):
+#
+#   afar-22.1.0  $ find <ROCM_PATH> -name 'rocthrust*'
+#                -> 0 matches  (no headers, no libs, no cmake config)
+#   afar-22.2.0  $ same probe -> cmake config present, headers absent
+#   rocm-7.2.1   $ same probe -> all present
+#
+# kokkos's cmake/Modules/FindTPLROCTHRUST.cmake:11 calls
+# find_package(rocthrust) which fails with "Could not find a package
+# configuration file provided by 'rocthrust'". Skipping here turns
+# 8490-style FAILED kokkos(rc=1) into the correct SKIPPED(no-op)
+# bucket on afar-22.1.0.
+#
+# Probe shape: gated on `${ROCM_PATH}` matching `*afar*` AND no
+# rocthrust-config.cmake. Self-corrects if AMD ships rocthrust in a
+# future afar drop (matches the rocm-bundled hipfort policy in
+# extras/scripts/hipfort_setup.sh).
+if [[ "${ROCM_PATH:-}" == *afar* ]]; then
+   if [[ -z "${ROCM_PATH:-}" ]] && type module >/dev/null 2>&1; then
+      module load "rocm/${ROCM_VERSION}" 2>/dev/null || true
+   fi
+   if [ ! -f "${ROCM_PATH}/lib/cmake/rocthrust/rocthrust-config.cmake" ]; then
+      echo ""
+      echo "[kokkos afar-skip] ROCM_PATH=${ROCM_PATH} is an AMD AFAR partial SDK"
+      echo "                   missing : <ROCM_PATH>/lib/cmake/rocthrust/rocthrust-config.cmake"
+      echo "                   kokkos requires find_package(rocthrust); cannot build on afar SDK."
+      echo "                   Skipping (no source build, no cache restore)."
+      echo ""
+      if [ -d "${KOKKOS_PATH}" ]; then
+         echo "[kokkos afar-skip] removing stale from-source install: ${KOKKOS_PATH}"
+         ${SUDO} rm -rf "${KOKKOS_PATH}"
+      fi
+      if [ -f "${MODULE_PATH}/${KOKKOS_VERSION}.lua" ]; then
+         echo "[kokkos afar-skip] removing stale modulefile: ${MODULE_PATH}/${KOKKOS_VERSION}.lua"
+         ${SUDO} rm -f "${MODULE_PATH}/${KOKKOS_VERSION}.lua"
+      fi
+      exit ${NOOP_RC}
+   fi
+fi
+
 if [ "${REPLACE}" = "1" ]; then
    echo "[kokkos --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${KOKKOS_PATH}"

@@ -224,6 +224,51 @@ if [ "${BUILD_HYPRE}" = "0" ]; then
    exit ${NOOP_RC}
 fi
 
+# ── afar SDK incompatibility detection ───────────────────────────────
+# AMD's pre-release "AFAR" ROCm drops (rocm-afar-22.x, rocm-afar-7.0.5)
+# are runtime-only / partial SDKs. Verified empirically on this cluster
+# (audit_2026_05_06, job 8490, log_hypre_05_06_2026.txt:69):
+#
+#   afar-22.1.0  $ find <ROCM_PATH> -name 'rocblas-config.cmake'
+#                -> 0 matches  (.so present at <ROCM_PATH>/lib/librocblas.so*
+#                               but no cmake metadata)
+#   afar-22.2.0  $ same probe -> 1 match (cmake config present)
+#   rocm-7.2.1   $ same probe -> 1 match
+#
+# hypre's config/cmake/HYPRE_SetupHIPToolkit.cmake:223 calls
+# find_package(rocblas) which fails with "Could not find a package
+# configuration file provided by 'rocblas'". Skipping here turns
+# 8490-style FAILED hypre(rc=1) into the correct SKIPPED(no-op)
+# bucket on afar-22.1.0 (afar-22.2.0 ships the cmake config; the
+# probe correctly lets that case through).
+#
+# Probe shape: gated on `${ROCM_PATH}` matching `*afar*` AND no
+# rocblas-config.cmake. Self-corrects if AMD ships the cmake metadata
+# in a future afar drop (matches the rocm-bundled hipfort policy in
+# extras/scripts/hipfort_setup.sh).
+if [[ "${ROCM_PATH:-}" == *afar* ]]; then
+   if [[ -z "${ROCM_PATH:-}" ]] && type module >/dev/null 2>&1; then
+      module load "rocm/${ROCM_VERSION}" 2>/dev/null || true
+   fi
+   if [ ! -f "${ROCM_PATH}/lib/cmake/rocblas/rocblas-config.cmake" ]; then
+      echo ""
+      echo "[hypre afar-skip] ROCM_PATH=${ROCM_PATH} is an AMD AFAR partial SDK"
+      echo "                  missing : <ROCM_PATH>/lib/cmake/rocblas/rocblas-config.cmake"
+      echo "                  hypre requires find_package(rocblas); cannot build on afar SDK."
+      echo "                  Skipping (no source build, no cache restore)."
+      echo ""
+      if [ -d "${HYPRE_PATH}" ]; then
+         echo "[hypre afar-skip] removing stale from-source install: ${HYPRE_PATH}"
+         ${SUDO} rm -rf "${HYPRE_PATH}"
+      fi
+      if [ -f "${MODULE_PATH}/${HYPRE_VERSION}.lua" ]; then
+         echo "[hypre afar-skip] removing stale modulefile: ${MODULE_PATH}/${HYPRE_VERSION}.lua"
+         ${SUDO} rm -f "${MODULE_PATH}/${HYPRE_VERSION}.lua"
+      fi
+      exit ${NOOP_RC}
+   fi
+fi
+
 # ── --replace: remove prior install + modulefile BEFORE building ─────
 # Invoked when the operator (or main_setup.sh's --replace-existing 1
 # pass-through) wants this version's install dir + ${HYPRE_VERSION}.lua
