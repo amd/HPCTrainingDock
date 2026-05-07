@@ -45,7 +45,22 @@ FTORCH_PATH=/opt/rocmplus-${ROCM_VERSION}/ftorch
 FTORCH_PATH_INPUT=""
 PYTORCH_MODULE=pytorch
 FTORCH_VERSION=""    # empty -> default branch (main); else passed to git checkout after clone
+# --fc-compiler {gfortran|amdflang}: choose Fortran compiler for the FTorch
+# build. Default is gfortran (matches Ubuntu 22.04 system default). Selecting
+# `amdflang` loads the rocm-tied `amdclang` modulefile (which sets
+# CC=amdclang, CXX=amdclang++, FC=amdflang -- amdflang-new on ROCm 7.x,
+# amdflang-classic on ROCm 6.x), appends `_amdflang` to BOTH ${FTORCH_PATH}
+# and ${MODULE_PATH}, and renames the modulefile to dev_amdflang.lua so
+# the gfortran and amdflang installs coexist side by side. This mirrors
+# the `--use-amdflang 1` suffix pattern in petsc_setup.sh.
+# Rationale: Fortran .mod files are NOT compiler-portable -- gfortran's
+# gzip-compressed .mod cannot be consumed by amdflang and vice versa --
+# so a single ftorch install cannot serve both toolchains.
+FC_COMPILER=gfortran
 # --replace 1: rm -rf prior install dir + dev.lua before build.
+# (When --fc-compiler amdflang, the suffix _amdflang is added to BOTH
+# paths above, so we always clean whatever the resolved
+# FTORCH_PATH/MODULE_PATH is.)
 # --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
 REPLACE=0
 KEEP_FAILED_INSTALLS=0
@@ -71,6 +86,7 @@ usage()
    echo "  --install-path [ FTORCH_PATH ] default $FTORCH_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --ftorch-version [ FTORCH_VERSION ] git tag/branch/commit to check out after clone (default: repo HEAD)"
+   echo "  --fc-compiler [ gfortran|amdflang ] Fortran compiler for the build, default $FC_COMPILER. amdflang appends _amdflang to install + modulefile paths and loads the rocm-tied amdclang module."
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --replace [ 0|1 ] remove prior install + modulefile before building, default $REPLACE"
    echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
@@ -132,6 +148,11 @@ do
           FTORCH_VERSION=${1}
           reset-last
           ;;
+      "--fc-compiler")
+          shift
+          FC_COMPILER=${1}
+          reset-last
+          ;;
       "--replace")
           shift
           REPLACE=${1}
@@ -160,8 +181,39 @@ else
    FTORCH_PATH=/opt/rocmplus-${ROCM_VERSION}/ftorch
 fi
 
+# ── --fc-compiler validation + path/modulefile suffix ───────────────
+# Mirrors petsc_setup.sh's --use-amdflang 1 suffix pattern: when the
+# operator picks the amdflang toolchain we install to a sibling location
+# (FTORCH_PATH_amdflang) and write a sibling modulefile (dev_amdflang.lua
+# under MODULE_PATH_amdflang) so the gfortran and amdflang installs
+# coexist. .mod files are not portable across Fortran compilers, so a
+# single install cannot serve both toolchains. The modulefile suffix
+# (_amdflang on MODULE_PATH itself) keeps the Lmod hierarchy clean: a
+# user picks the toolchain at `module load ftorch` time by selecting
+# either the dev or dev_amdflang version under whichever MODULE_PATH
+# the site exposes.
+case "${FC_COMPILER}" in
+   gfortran|amdflang) ;;
+   *)
+      send-error "Unsupported --fc-compiler value: '${FC_COMPILER}' (expected: gfortran|amdflang)"
+      ;;
+esac
+# Modulefile inside the per-toolchain MODULE_PATH always stays dev.lua
+# so the Lmod hierarchy is symmetrical:
+#   ftorch/dev          (gfortran build)
+#   ftorch_amdflang/dev (amdflang build)
+# i.e. the *directory* (= Lmod module name) carries the toolchain tag,
+# not the file name. This matches petsc's _amdflang suffix convention.
+MODULEFILE_NAME=dev.lua
+if [ "${FC_COMPILER}" = "amdflang" ]; then
+   FTORCH_PATH=${FTORCH_PATH}_amdflang
+   MODULE_PATH=${MODULE_PATH}_amdflang
+fi
+
 # ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
-# Modulefile name is dev.lua (no version baked in).
+# Modulefile name is dev.lua in both cases; the install dir +
+# enclosing module dir carry the _amdflang suffix when --fc-compiler
+# amdflang was passed (see suffix block above).
 # ── BUILD_FTORCH=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
 NOOP_RC=43
 if [ "${BUILD_FTORCH}" = "0" ]; then
@@ -172,9 +224,9 @@ fi
 if [ "${REPLACE}" = "1" ]; then
    echo "[ftorch --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${FTORCH_PATH}"
-   echo "  modulefile:  ${MODULE_PATH}/dev.lua"
+   echo "  modulefile:  ${MODULE_PATH}/${MODULEFILE_NAME}"
    ${SUDO} rm -rf "${FTORCH_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/dev.lua"
+   ${SUDO} rm -f  "${MODULE_PATH}/${MODULEFILE_NAME}"
 fi
 
 # ── Existence guard: skip if already installed (see hypre_setup.sh) ──
@@ -196,7 +248,7 @@ _ftorch_on_exit() {
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[ftorch fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO:-sudo} rm -rf "${FTORCH_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/dev.lua"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${MODULEFILE_NAME}"
    elif [ ${rc} -ne 0 ]; then
       echo "[ftorch fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -210,6 +262,7 @@ echo "Starting FTorch Install with"
 echo "ROCM_VERSION: $ROCM_VERSION"
 echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL"
 echo "BUILD_FTORCH: $BUILD_FTORCH"
+echo "FC_COMPILER: $FC_COMPILER"
 echo "FTORCH_PATH: $FTORCH_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
 echo "==================================="
@@ -265,7 +318,11 @@ else
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   if [ -f ${CACHE_FILES}/ftorch.tgz ]; then
+   # Cached tarballs in /CacheFiles only exist for the gfortran build
+   # (the historical default); they bake gfortran .mod files which can't
+   # be consumed by amdflang. Skip the cache restore path for the
+   # amdflang variant so it always builds from source.
+   if [ "${FC_COMPILER}" != "amdflang" ] && [ -f ${CACHE_FILES}/ftorch.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached FTorch"
@@ -286,7 +343,15 @@ else
       echo "============================"
       echo ""
 
+      # When --fc-compiler amdflang, also preflight the rocm-tied
+      # `amdclang` module: it sets CC=amdclang, CXX=amdclang++, FC=amdflang
+      # (and exports OMPI_CC/CXX/FC for OpenMPI wrappers). It must be
+      # loaded BEFORE the FTorch cmake invocation so cmake auto-detects
+      # the AMD toolchain rather than falling back to gcc/gfortran.
       REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${PYTORCH_MODULE}" )
+      if [ "${FC_COMPILER}" = "amdflang" ]; then
+         REQUIRED_MODULES+=( "amdclang" )
+      fi
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
       if [ -d "$FTORCH_PATH" ]; then
@@ -345,7 +410,30 @@ else
       fi
       echo "ftorch: using cmake at ${CMAKE_BIN} (head -1: $(head -1 "${CMAKE_BIN}" 2>/dev/null))"
 
-      "${CMAKE_BIN}" -DCMAKE_INSTALL_PREFIX=$FTORCH_PATH  -DGPU_DEVICE=HIP ..
+      # When --fc-compiler amdflang, point cmake explicitly at the
+      # amdflang binary that the `amdclang` module exported via $FC,
+      # plus the matching C/C++ compilers. This belt-and-suspenders is
+      # needed because cmake caches the auto-detected compiler on the
+      # first configure (so a later toolchain swap inside the same
+      # build dir would silently keep gfortran). Falls back to
+      # ${ROCM_PATH}/llvm/bin/amdflang if $FC was not exported (e.g.
+      # the amdclang module landed in a non-standard location).
+      CMAKE_FC_ARGS=()
+      if [ "${FC_COMPILER}" = "amdflang" ]; then
+         AMDFLANG_BIN="${FC:-${ROCM_PATH}/llvm/bin/amdflang}"
+         AMDCLANG_BIN="${CC:-${ROCM_PATH}/llvm/bin/amdclang}"
+         AMDCLANGXX_BIN="${CXX:-${ROCM_PATH}/llvm/bin/amdclang++}"
+         echo "ftorch: building with AMD toolchain"
+         echo "  CC  = ${AMDCLANG_BIN}"
+         echo "  CXX = ${AMDCLANGXX_BIN}"
+         echo "  FC  = ${AMDFLANG_BIN}"
+         CMAKE_FC_ARGS+=( "-DCMAKE_C_COMPILER=${AMDCLANG_BIN}" )
+         CMAKE_FC_ARGS+=( "-DCMAKE_CXX_COMPILER=${AMDCLANGXX_BIN}" )
+         CMAKE_FC_ARGS+=( "-DCMAKE_Fortran_COMPILER=${AMDFLANG_BIN}" )
+      fi
+
+      "${CMAKE_BIN}" -DCMAKE_INSTALL_PREFIX=$FTORCH_PATH  -DGPU_DEVICE=HIP \
+         "${CMAKE_FC_ARGS[@]}" ..
       make -j
       ${SUDO} make install
 
@@ -360,23 +448,40 @@ else
 
       # cleanup: trap handles ${FTORCH_BUILD_ROOT}/FTorch
       cd /
+      if [ "${FC_COMPILER}" = "amdflang" ]; then
+         module unload amdclang 2>/dev/null || true
+      fi
       module unload ${ROCM_MODULE_NAME}
       module unload ${PYTORCH_MODULE}
    fi
 
-   # Create a module file for cupy
+   # Create a module file for ftorch.
    #
    # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
    # see netcdf_setup.sh for the lying-probe failure mode this replaces).
+   #
+   # Modulefile name is always dev.lua; the enclosing MODULE_PATH carries
+   # the _amdflang suffix when --fc-compiler amdflang was passed (so the
+   # Lmod module name becomes ftorch_amdflang vs ftorch). When the
+   # amdflang build, also emit a prereq("amdclang") so consumers can't
+   # load the amdflang ftorch into a gcc/gfortran environment (the .mod
+   # files would not match -- see header for full rationale).
    PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
+   FC_PREREQ_LINE=""
+   if [ "${FC_COMPILER}" = "amdflang" ]; then
+      FC_PREREQ_LINE='prereq("amdclang")'
+   fi
+
    # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/dev.lua
+   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${MODULEFILE_NAME}
 	whatis("FTorch: a library for directly calling PyTorch ML models from Fortran")
+	whatis("Fortran toolchain: ${FC_COMPILER}")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
 	prereq("${ROCM_MODULE_NAME}")
+	${FC_PREREQ_LINE}
 	load("${PYTORCH_MODULE}")
 	prepend_path("LD_LIBRARY_PATH", pathJoin("${FTORCH_PATH}", "lib"))
 	setenv("FTORCH_HOME","${FTORCH_PATH}")

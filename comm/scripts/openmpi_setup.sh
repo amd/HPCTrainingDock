@@ -1230,7 +1230,20 @@ else
          # sudo's per-call overhead on NFS, the prior loop dominated the
          # tail of the install phase. Audited as S7.C in
          # slurm-7935-rocmplus-7.0.1.out.
-         ${SUDO_OPENMPI} gzip ${OPENMPI_PATH}/share/man/man1/*
+         #
+         # 2026-05-07 (Rocky/RHEL): some openmpi-5.0+bundled-hwloc
+         # installs leave a circular symlink pair under share/man/man1/
+         # (hwloc-ls.1 ↔ lstopo.1). A bare `gzip <glob>` follows both
+         # ends of the loop, the kernel returns ELOOP, gzip exits 1, and
+         # under set -eo pipefail this aborts the whole script -- the
+         # EXIT-trap fail-cleanup then rm -rf's XPMEM/UCX/UCC/OPENMPI
+         # plus the modulefile, leaving INSTALL_PATH (e.g.
+         # /opt/rocmplus-7.2.3) existing but empty. Restrict to regular
+         # files via `find -type f` so symlinks (cyclic or otherwise)
+         # are silently skipped, and pass `-f` so a stale .gz from a
+         # prior aborted install is overwritten rather than prompting.
+         ${SUDO_OPENMPI} find "${OPENMPI_PATH}/share/man/man1" -maxdepth 1 \
+            -type f -name '*.1' -exec gzip -f {} +
       fi
       # make ucx the default point-to-point
       echo "pml = ucx" | ${SUDO_OPENMPI} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf

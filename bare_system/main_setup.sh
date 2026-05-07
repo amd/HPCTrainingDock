@@ -10,6 +10,14 @@
 : ${BUILD_TENSORFLOW:="1"}
 : ${BUILD_JAX:="1"}
 : ${BUILD_FTORCH:="1"}
+# FTorch Fortran toolchain selector. Default gfortran (matches Ubuntu
+# 22.04 system default and historical sweep behavior). Set to amdflang
+# in the sbatch --export to build a parallel ftorch_amdflang install
+# (sibling install dir + dev_amdflang.lua modulefile) that consumers
+# can pair with `module load amdclang` for a uniform AMD toolchain
+# (CC=amdclang, CXX=amdclang++, FC=amdflang). See ftorch_setup.sh for
+# the .mod-file portability rationale.
+: ${FTORCH_FC_COMPILER:="gfortran"}
 : ${BUILD_JULIA:="1"}
 : ${BUILD_MAGMA:="1"}
 : ${BUILD_PETSC:="1"}
@@ -1031,7 +1039,7 @@ run_and_log tensorflow extras/scripts/tensorflow_setup.sh ${COMMON_OPTIONS} --bu
 run_and_log pytorch extras/scripts/pytorch_setup.sh ${COMMON_OPTIONS} --build-pytorch ${BUILD_PYTORCH} --python-version ${PYTHON_VERSION} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/pytorch)
 
-run_and_log ftorch extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} --build-ftorch ${BUILD_FTORCH} ${REPLACE_OPTS} \
+run_and_log ftorch extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} --build-ftorch ${BUILD_FTORCH} --fc-compiler ${FTORCH_FC_COMPILER} ${REPLACE_OPTS} \
    $(path_args ftorch rocmplus-${ROCMPLUS_SUFFIX}/ftorch)
 
 #If ROCm should be installed in a different location
