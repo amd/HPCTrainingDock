@@ -2,6 +2,12 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-05-07
+
+- ROCm versions:
+    - afar-7.0.5
+
+[Full snapshot](archive/AAC6_system_status_2026-05-07.md)
 ## 2026-05-06
 
 More software packages for all the ROCm versions are being filled in
