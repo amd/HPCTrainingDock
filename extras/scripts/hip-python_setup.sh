@@ -280,31 +280,88 @@ else
       REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
-      # ── therock SDK guard ────────────────────────────────────────────
+      # ── therock SDK fallback: pick latest published hip-python ──────
       # hip-python on test.pypi.org is published per upstream rocm release
       # (e.g. 7.0.0, 7.0.1, ..., 7.2.2). therock is a release-candidate
       # SDK whose ROCM_VERSION numeric (e.g. 7.12.0 for therock-23.1.0,
       # 7.13.0 for therock-23.2.0) DOES NOT have a matching PyPI wheel
-      # -- the closest available was 7.2.2.562.43 at the time of writing.
-      # Without this guard, `pip install hip-python==7.12.0.*` runs for
-      # ~1 min then aborts with `No matching distribution found` and the
-      # whole run is marked FAILED (slurm 8372, 2026-05-05 on therock-23.1.0).
-      # An operator who knows the exact wheel that works can override
-      # via --hip-python-version <spec>. Otherwise we exit MISSING_PREREQ_RC=42
-      # so the package shows up cleanly as SKIPPED (missing prereq) in the
-      # main_setup.sh per-package summary instead of FAILED.
+      # -- as of 2026-05-06 the latest available was 7.2.2.562.43.
+      # Without this fallback, `pip install hip-python==7.12.0.*` runs
+      # for ~1 min then aborts with `No matching distribution found`
+      # (slurm 8372, 2026-05-05 on therock-23.1.0).
+      #
+      # Policy (per user request 2026-05-06): on therock, query the
+      # PyPI JSON for the latest published hip-python release and use
+      # that. The hip-python ABI is forward-compatible with the rocm
+      # tree it's loaded against (it dlopen's libamdhip64 at runtime
+      # via the rocm module's LD_LIBRARY_PATH, no DT_NEEDED ABI lock),
+      # so a 7.2.2.x wheel running against a 7.12.0 therock SDK works
+      # for the same set of HIP entry points the wheel was built for.
+      # `--hip-python-version <spec>` still overrides this fallback.
+      #
+      # If the network probe fails (CI or air-gapped builds), preserve
+      # the old safe behaviour: exit MISSING_PREREQ_RC=42 so the
+      # package shows up cleanly as SKIPPED in the main_setup.sh
+      # per-package summary instead of FAILED.
       if [[ -n "${ROCM_PATH:-}" && "${ROCM_PATH}" == *therock* && -z "${HIP_PYTHON_VERSION}" ]]; then
          echo ""
-         echo "[hip-python therock-guard] ROCM_PATH=${ROCM_PATH}"
-         echo "                            no PyPI wheel publishes for therock SDK numerics"
-         echo "                            (e.g. hip-python==7.12.0.* / 7.13.0.* don't exist)."
-         echo "                            Skipping with rc=${MISSING_PREREQ_RC} (MISSING-PREREQ)."
-         echo "                            To force, pass --hip-python-version <spec>"
-         echo "                            (e.g. --hip-python-version 7.2.2.562.43 -- verify"
-         echo "                            availability at https://test.pypi.org/project/hip-python/)."
+         echo "[hip-python therock-fallback] ROCM_PATH=${ROCM_PATH}"
+         echo "                              no PyPI wheel for therock SDK numeric ${ROCM_VERSION};"
+         echo "                              probing test.pypi.org for latest published hip-python..."
+         _hp_latest=$(python3 - <<'PY' 2>/dev/null
+import json, urllib.request, sys
+try:
+    data = json.loads(urllib.request.urlopen(
+        'https://test.pypi.org/pypi/hip-python/json', timeout=30).read())
+    versions = list(data.get('releases', {}).keys())
+    if not versions:
+        sys.exit(1)
+    def vkey(v):
+        return tuple(int(p) if p.isdigit() else p for p in v.split('.'))
+    print(sorted(versions, key=vkey)[-1])
+except Exception:
+    sys.exit(1)
+PY
+)
+         if [ -z "${_hp_latest}" ]; then
+            echo ""
+            echo "[hip-python therock-fallback] PyPI probe failed (network down? proxy?)"
+            echo "                              cannot determine latest hip-python version."
+            echo "                              Skipping with rc=${MISSING_PREREQ_RC} (MISSING-PREREQ)."
+            echo "                              To force, pass --hip-python-version <spec>"
+            echo "                              (e.g. --hip-python-version 7.2.2.562.43)."
+            echo ""
+            exit ${MISSING_PREREQ_RC}
+         fi
+         HIP_PYTHON_VERSION="${_hp_latest}"
+         echo "                              latest published hip-python: ${HIP_PYTHON_VERSION}"
+         echo "                              using this version against therock SDK ${ROCM_VERSION}"
          echo ""
-         exit ${MISSING_PREREQ_RC}
+         unset _hp_latest
       fi
+
+      # ── Derive numba-hip extras name ────────────────────────────────
+      # numba-hip's pyproject.toml exposes per-rocm-release optional
+      # dependency groups named `rocm-X-Y-Z` (HYPHENS, three numeric
+      # components only -- e.g. `rocm-7-2-2`, NOT `rocm-7-2-2-562-43`).
+      # Verified 2026-05-06 against the dev branch
+      # (https://raw.githubusercontent.com/ROCm/numba-hip/dev/pyproject.toml).
+      #
+      # The legacy line used `numba-hip[rocm-${ROCM_VERSION}]` (DOTS),
+      # which is a latent bug across all rocm versions: pip silently
+      # treats an unknown extra as a no-op so the install succeeded
+      # but pulled NO hip-python / hip-python-as-cuda / rocm-llvm-python
+      # transitive deps under numba-hip. We're re-installing those by
+      # name above so the runtime impact was nil, but it leaves
+      # `numba-hip[rocm-X-Y-Z]` machinery unexercised.
+      #
+      # Pick the X-Y-Z extras suffix from whichever version we're
+      # actually installing: the user override, the therock fallback,
+      # or the rocm SDK numeric (in that priority order). Truncate to
+      # 3 components since the extras only ship that granularity.
+      NUMBA_HIP_VERSION_BASE="${HIP_PYTHON_VERSION:-${ROCM_VERSION}}"
+      NUMBA_HIP_EXTRA_SUFFIX="$(echo "${NUMBA_HIP_VERSION_BASE}" \
+         | awk -F. '{ printf "%s-%s-%s", $1, $2, $3 }')"
 
       export HIP_PYTHON_INSTALL_USE_HIP=1
       export ROCM_HOME=${ROCM_PATH}
@@ -332,10 +389,11 @@ else
       python3 -m pip install pip --upgrade
       HIP_PYTHON_PIP_SPEC="${HIP_PYTHON_VERSION:-${ROCM_VERSION}.*}"
       echo "Installing hip-python with PyPI spec: ${HIP_PYTHON_PIP_SPEC}"
+      echo "Installing numba-hip with extras suffix: rocm-${NUMBA_HIP_EXTRA_SUFFIX}"
       python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python -i https://test.pypi.org/simple "hip-python==${HIP_PYTHON_PIP_SPEC}" --force-reinstall --no-cache
       python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python -i https://test.pypi.org/simple "hip-python-as-cuda==${HIP_PYTHON_PIP_SPEC}" --force-reinstall --no-cache
       python3 -m pip config set global.extra-index-url https://test.pypi.org/simple
-      python3 -m pip install --target=$HIP_PYTHON_PATH/numba-hip "numba-hip[rocm-${ROCM_VERSION}] @ git+https://github.com/ROCm/numba-hip.git" --force-reinstall --no-cache
+      python3 -m pip install --target=$HIP_PYTHON_PATH/numba-hip "numba-hip[rocm-${NUMBA_HIP_EXTRA_SUFFIX}] @ git+https://github.com/ROCm/numba-hip.git" --force-reinstall --no-cache
       deactivate
       # hip-python-build venv lives under HIP_PYTHON_BUILD_DIR
       # (under /tmp) and is removed by the EXIT trap above.
@@ -379,9 +437,14 @@ else
    fi
    unset _leaf_dir
 
+   # Provenance: which actual PyPI version we landed on. Useful for
+   # therock builds where the spec ends up not matching ROCM_VERSION.
+   _HIP_PYTHON_PROVENANCE="hip-python wheel ${HIP_PYTHON_PIP_SPEC:-(unknown)} (numba-hip extras: rocm-${NUMBA_HIP_EXTRA_SUFFIX:-?})"
+
    # The - option suppresses tabs
    cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
         whatis("HIP-Python with ROCm support")
+        whatis(" ${_HIP_PYTHON_PROVENANCE} ")
         whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
         prereq("${ROCM_MODULE_NAME}")
@@ -389,5 +452,6 @@ else
         prepend_path("PYTHONPATH","$HIP_PYTHON_PATH/numba-hip")
 	setenv("NUMBA_HIP_USE_DEVICE_LIB_CACHE","0")
 EOF
+   unset _HIP_PYTHON_PROVENANCE
 
 fi

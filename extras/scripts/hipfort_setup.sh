@@ -183,8 +183,95 @@ if [ "${REPLACE}" = "1" ]; then
    ${SUDO} rm -f  "${MODULE_PATH}/${ROCM_VERSION}.lua"
 fi
 
-# ── Existence guard: skip if already installed (see hypre_setup.sh) ──
+# ── rocm-bundled hipfort detection ───────────────────────────────────
+# Starting with ROCm 6.3, the rocm SDK ships hipfort built-in. Verified
+# on this cluster (2026-05-06) two SDK layouts coexist:
+#
+#   STANDARD layout (rocm-6.3.x..7.2.x, afar-22.x):
+#     ${ROCM_PATH}/include/hipfort/
+#     ${ROCM_PATH}/lib/libhipfort-{amdgcn,nvptx}.a
+#     ${ROCM_PATH}/lib/cmake/hipfort/hipfort-config.cmake (+ targets)
+#
+#   THEROCK layout (rocm-therock-23.1.0 / 23.2.0):
+#     ${ROCM_PATH}/lib/llvm/include/hipfort/
+#     ${ROCM_PATH}/lib/llvm/lib/libhipfort-{amdgcn,nvptx}.a
+#     ${ROCM_PATH}/lib/llvm/lib/cmake/hipfort/...
+#   This is what the canonical user-facing
+#   /shared/apps/modules/.../rocm-therock-23.1.0/hipfort/23.1.0.lua
+#   passthrough modulefile points at (`local base = "<ROCM_PATH>/lib/llvm"`).
+#
+# When the SDK already has hipfort, building our own from source is
+#   (a) wasteful (~1 min CPU + ~50 MB disk per rocm version),
+#   (b) ABI-risky (rocm's bundled headers/libs are the canonical pair
+#       and our from-source build may pull a newer/older hipfort tag),
+#   (c) confusing for users (two libhipfort-amdgcn.a on disk).
+#
+# Policy (per user request 2026-05-06): when bundled, do NOT emit a
+# from-source modulefile. Users get hipfort transparently via the
+# `rocm/<v>` module's includes/libs / via the canonical
+# rocm-<v>/hipfort/<v>.lua passthrough modulefile created by
+# rocm_setup.sh. A `hipfort_from_source/<v>` modulefile would falsely
+# advertise a separate from-source install that doesn't exist.
+#
+# This block:
+#   1. cleans up any stale from-source install + modulefile left by a
+#      prior sweep that ran before this guard existed,
+#   2. exits NOOP_RC=43 immediately so main_setup.sh marks hipfort as
+#      DESELECTED (rocm-bundled) rather than FAILED.
+#
+# Override with --hipfort-version <branch> to force a from-source
+# build anyway (e.g. to test a newer hipfort against an older rocm).
 NOOP_RC=43
+if [[ -z "${HIPFORT_VERSION}" ]]; then
+   # Need ROCM_PATH for the probe. main_setup.sh's run_and_log path
+   # already loads `rocm/${ROCM_VERSION}` before invoking us, so
+   # ROCM_PATH is normally set. Fall back to an in-place rocm module
+   # load when run standalone.
+   if [[ -z "${ROCM_PATH:-}" ]] && type module >/dev/null 2>&1; then
+      module load "rocm/${ROCM_VERSION}" 2>/dev/null || true
+   fi
+   # Detect either the STANDARD layout (under ${ROCM_PATH}) or the
+   # THEROCK layout (under ${ROCM_PATH}/lib/llvm). The first match
+   # wins and its base path is reported in the [rocm-bundled] message.
+   _hipfort_bundled_base=""
+   if [[ -n "${ROCM_PATH:-}" ]]; then
+      for _cand in "${ROCM_PATH}" "${ROCM_PATH}/lib/llvm"; do
+         if [ -d "${_cand}/include/hipfort" ] \
+            && [ -f "${_cand}/lib/libhipfort-amdgcn.a" ]; then
+            _hipfort_bundled_base="${_cand}"
+            break
+         fi
+      done
+      unset _cand
+   fi
+   if [[ -n "${_hipfort_bundled_base}" ]]; then
+      echo ""
+      echo "[hipfort rocm-bundled] hipfort is shipped with this rocm SDK"
+      echo "                       base    : ${_hipfort_bundled_base}"
+      echo "                       include : ${_hipfort_bundled_base}/include/hipfort"
+      echo "                       libs    : ${_hipfort_bundled_base}/lib/libhipfort-{amdgcn,nvptx}.a"
+      echo "                       cmake   : ${_hipfort_bundled_base}/lib/cmake/hipfort"
+      echo "                       Skipping from-source build AND from-source modulefile."
+      echo "                       Users get hipfort via the rocm/<v> module already."
+      echo "                       (override with --hipfort-version <branch> to force)"
+      echo ""
+      # Idempotent cleanup of any stale from-source install + module
+      # left behind by a prior sweep that ran before this guard existed.
+      if [ -d "${HIPFORT_PATH}" ]; then
+         echo "[hipfort rocm-bundled] removing stale from-source install: ${HIPFORT_PATH}"
+         ${SUDO} rm -rf "${HIPFORT_PATH}"
+      fi
+      if [ -f "${MODULE_PATH}/${ROCM_VERSION}.lua" ]; then
+         echo "[hipfort rocm-bundled] removing stale modulefile: ${MODULE_PATH}/${ROCM_VERSION}.lua"
+         ${SUDO} rm -f "${MODULE_PATH}/${ROCM_VERSION}.lua"
+      fi
+      unset _hipfort_bundled_base
+      exit ${NOOP_RC}
+   fi
+   unset _hipfort_bundled_base
+fi
+
+# ── Existence guard: skip if already installed (see hypre_setup.sh) ──
 if [ -d "${HIPFORT_PATH}" ]; then
    echo ""
    echo "[hipfort existence-check] ${HIPFORT_PATH} already installed; skipping."

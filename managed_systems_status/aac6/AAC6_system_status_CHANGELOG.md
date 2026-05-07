@@ -2,6 +2,19 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-05-06
+
+More software packages for all the ROCm versions are being filled in
+and fixed. Notable fixes.
+  * The therock-23.1.0 MPI has a bug with `rccl_init`. Set an environment
+    variable in the openmpi module file to disable rccl in MPI for this
+    version of ROCm.
+  * afar and rocm-6.3.x sweeps are being installed
+  * rocprof-sys fixed for pytorch by including a `LD_LIBRARY_PATH` to
+    the `libcaffe2_nvtrx.so` to fix rocprof-sys profiling of pytorch
+  * rocprof-compute is fixed for pytorch profiling to bring in
+    the libomp.so library
+
 ## 2026-05-05
 
 A certificate has been added for some services on the cluster. 
