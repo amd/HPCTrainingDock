@@ -1,5 +1,37 @@
 #!/bin/bash
 
+# ---------------------------------------------------------------------
+# Self-copy guard.
+#
+# Bash reads scripts incrementally by byte offset, not line number. If
+# the source file is overwritten in-place while a long sweep is
+# running (editor save, `sed -i`, Cursor StrReplace, etc.), bash's
+# cached offset shifts, and it reads garbled bytes at its current
+# position -- producing spurious .err noise like
+#   bare_system/main_setup.sh: line 1033: LD_JAX}: command not found
+# (the fragment is the middle of `${BUILD_JAX}` after an unrelated
+# top-of-file insertion shifts the line down by ~440 bytes).
+#
+# Cross-ref: jobs 8052/8053 (May 2), 8224 (May 5), 8523 (May 7). Same
+# root cause; different fragments because the offset drift differs
+# per edit. POSIX/bash doc:
+#   "If the script is modified while it is being read, the result is
+#    unspecified."
+#
+# Fix: cp this script to a tempfile and re-exec from there. Once
+# exec'd, the running bash holds the tempfile's inode; subsequent
+# edits to the source path no longer affect this in-flight process.
+# Idempotent via MAIN_SETUP_SELFCOPIED. Cleanup of the tempfile is
+# folded into final_summary() so the existing
+# `trap final_summary EXIT` (further down) is not displaced.
+if [[ -z "${MAIN_SETUP_SELFCOPIED:-}" ]]; then
+   _MS_SELF=$(mktemp -t main_setup.XXXXXX.sh) || exit 1
+   cp -- "$0" "$_MS_SELF"
+   export MAIN_SETUP_SELFCOPIED="$_MS_SELF"
+   exec /bin/bash "$_MS_SELF" "$@"
+fi
+# ---------------------------------------------------------------------
+
 : ${ROCM_VERSION:=""}
 : ${ROCM_INSTALLPATH:="/opt/"}
 : ${TOP_INSTALL_PATH:="/opt"}
@@ -10,14 +42,19 @@
 : ${BUILD_TENSORFLOW:="1"}
 : ${BUILD_JAX:="1"}
 : ${BUILD_FTORCH:="1"}
-# FTorch Fortran toolchain selector. Default gfortran (matches Ubuntu
-# 22.04 system default and historical sweep behavior). Set to amdflang
-# in the sbatch --export to build a parallel ftorch_amdflang install
-# (sibling install dir + dev_amdflang.lua modulefile) that consumers
-# can pair with `module load amdclang` for a uniform AMD toolchain
-# (CC=amdclang, CXX=amdclang++, FC=amdflang). See ftorch_setup.sh for
-# the .mod-file portability rationale.
-: ${FTORCH_FC_COMPILER:="gfortran"}
+# FTorch Fortran toolchain selector. Accepts:
+#   gfortran  -- only build gfortran ftorch (legacy behavior)
+#   amdflang  -- only build amdflang ftorch (sibling ftorch_amdflang
+#                install + module)
+#   both      -- build BOTH; ~2 min extra wall-time per sweep, no
+#                module-load ambiguity since they live under separate
+#                Lmod names (ftorch vs ftorch_amdflang)
+# Default `both` so users can pick the toolchain at `module load` time
+# without each having to wait for a custom rebuild. .mod files are not
+# portable across Fortran compilers, so this is the only way to serve
+# both communities from one sweep -- see ftorch_setup.sh for the .mod
+# format diff (gfortran = gzip; amdflang = LLVM Flang text format).
+: ${FTORCH_FC_COMPILER:="both"}
 : ${BUILD_JULIA:="1"}
 : ${BUILD_MAGMA:="1"}
 : ${BUILD_PETSC:="1"}
@@ -376,7 +413,14 @@ if [[ "${QUICK_INSTALLS}" == "1" ]]; then
          BUILD_PYTORCH)    DESELECTED_BY[pytorch]="quick-installs" ;;
          BUILD_TENSORFLOW) DESELECTED_BY[tensorflow]="quick-installs" ;;
          BUILD_JAX)        DESELECTED_BY[jax]="quick-installs" ;;
-         BUILD_FTORCH)     DESELECTED_BY[ftorch]="quick-installs" ;;
+         BUILD_FTORCH)     DESELECTED_BY[ftorch]="quick-installs"
+                           # ftorch_amdflang is a sibling run_and_log
+                           # entry gated by the same BUILD_FTORCH flag
+                           # (see the case-block at the bottom of this
+                           # file). Map both so quick-installs gets the
+                           # one-line marker for both, not the verbose
+                           # 3-line "skipped" banner for ftorch_amdflang.
+                           DESELECTED_BY[ftorch_amdflang]="quick-installs" ;;
          BUILD_JULIA)      ;;  # dormant: no run_and_log call exists
       esac
    done
@@ -458,6 +502,17 @@ if (( ${#PACKAGES_ARR[@]} > 0 )); then
       # land in OK / FAILED / SKIPPED depending on the actual outcome.
       unset "DESELECTED_BY[${p}]"
    done
+   # Sibling-name propagation: a few user-facing names spawn more than
+   # one run_and_log entry (e.g. `ftorch` builds both `ftorch` and
+   # `ftorch_amdflang` when FTORCH_FC_COMPILER=both). Mirror the
+   # deselection state of the canonical name onto its siblings so the
+   # per-package summary doesn't surface the verbose 3-line "skipped"
+   # banner for packages the user never asked about.
+   if [[ -n "${DESELECTED_BY[ftorch]:-}" ]]; then
+      DESELECTED_BY[ftorch_amdflang]="${DESELECTED_BY[ftorch]}"
+   else
+      unset "DESELECTED_BY[ftorch_amdflang]"
+   fi
    echo ""
 fi
 
@@ -620,6 +675,11 @@ run_and_log() {
 # cleanly given the constraint imposed by the actual FAILED package.
 final_summary() {
    local saved_rc=$?
+   # Clean up the self-copy from the top-of-file guard, if any.
+   # Folded in here (rather than as a separate EXIT trap) because bash
+   # `trap ... EXIT` would replace this trap, not chain. Done first so
+   # both exit paths below pick it up before they call `exit`.
+   [[ -n "${MAIN_SETUP_SELFCOPIED:-}" ]] && rm -f -- "${MAIN_SETUP_SELFCOPIED}"
    echo ""
    echo "=================================================================="
    echo "  main_setup.sh per-package summary for rocm-${ROCM_VERSION:-?}"
@@ -1039,8 +1099,31 @@ run_and_log tensorflow extras/scripts/tensorflow_setup.sh ${COMMON_OPTIONS} --bu
 run_and_log pytorch extras/scripts/pytorch_setup.sh ${COMMON_OPTIONS} --build-pytorch ${BUILD_PYTORCH} --python-version ${PYTHON_VERSION} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/pytorch)
 
-run_and_log ftorch extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} --build-ftorch ${BUILD_FTORCH} --fc-compiler ${FTORCH_FC_COMPILER} ${REPLACE_OPTS} \
-   $(path_args ftorch rocmplus-${ROCMPLUS_SUFFIX}/ftorch)
+# FTorch: dispatch to one or both toolchains per FTORCH_FC_COMPILER.
+# Each variant goes to a different install dir / Lmod module
+# (ftorch vs ftorch_amdflang -- the leaf script appends _amdflang to
+# both paths internally), so they coexist. Each gets its own
+# run_and_log entry so the per-package summary lists them separately
+# and a failure in one doesn't shadow the other.
+case "${FTORCH_FC_COMPILER}" in
+   gfortran|both)
+      run_and_log ftorch extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} --build-ftorch ${BUILD_FTORCH} --fc-compiler gfortran ${REPLACE_OPTS} \
+         $(path_args ftorch rocmplus-${ROCMPLUS_SUFFIX}/ftorch)
+      ;;
+esac
+case "${FTORCH_FC_COMPILER}" in
+   amdflang|both)
+      run_and_log ftorch_amdflang extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} --build-ftorch ${BUILD_FTORCH} --fc-compiler amdflang ${REPLACE_OPTS} \
+         $(path_args ftorch rocmplus-${ROCMPLUS_SUFFIX}/ftorch)
+      ;;
+esac
+case "${FTORCH_FC_COMPILER}" in
+   gfortran|amdflang|both) ;;
+   *)
+      echo "ERROR: unrecognized FTORCH_FC_COMPILER='${FTORCH_FC_COMPILER}' (expected: gfortran|amdflang|both)" >&2
+      exit 1
+      ;;
+esac
 
 #If ROCm should be installed in a different location
 #if [ "${ROCM_INSTALLPATH}" != "/opt/" ]; then

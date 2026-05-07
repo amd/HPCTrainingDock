@@ -556,50 +556,67 @@ else
       # configure with: MPI OMPT OPENMP PDT ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -pdt=${PDT_PATH} -iowrapper
 
+      # LLVM_PLUGIN= on every `${SUDO} ... make install` line below skips
+      # plugins/llvm in the root install pass. Why: TAU's top-level
+      # Makefile.skel has `all: install` and `install: .clean`, so `make -j`
+      # above already runs the plugins/llvm install recipe AS ADMIN (cmake
+      # configure + cmake --build + cmake --install), and it succeeds because
+      # ${TAU_PATH} was set chmod -R a+rwX above. The subsequent
+      # `${SUDO} make install` would otherwise re-run that same recipe AS
+      # ROOT (after first `rm -Rf build` via the .clean prereq), producing
+      # root-owned files in plugins/llvm/build/ that break the next cycle's
+      # `make clean` recursion (Permission denied / Error 1 in sweep logs).
+      # Setting LLVM_PLUGIN= on the make command line overrides the plain
+      # `LLVM_PLUGIN=plugins/llvm` assignment in the configure-generated
+      # Makefile, so plugins/llvm is dropped from $(SUBDIR) for both the
+      # .clean and install recursions in the root pass. Net effect: cmake
+      # --build and cmake --install only ever run as admin (least
+      # privilege), build/ stays admin-owned across cycles, and one
+      # plugin rebuild per cycle is saved.
       make -j $(nproc)
-      ${SUDO} env PATH=$PATH make install
+      ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: MPI PDT ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -pdt=${PDT_PATH} -iowrapper
 
       make -j $(nproc)
-      ${SUDO} env PATH=$PATH make install
+      ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: OMPT OPENMP PDT ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -pdt=${PDT_PATH} -iowrapper
 
       make -j $(nproc)
-      ${SUDO} env PATH=$PATH make install
+      ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: PDT ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -pdt=${PDT_PATH} -iowrapper
 
       make -j $(nproc)
-      ${SUDO} env PATH=$PATH make install
+      ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -iowrapper
 
       make -j $(nproc)
-      ${SUDO} env PATH=$PATH make install
+      ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: OMPT OPENMP ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -iowrapper
 
       make -j $(nproc)
-      ${SUDO} env PATH=$PATH make install
+      ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: MPI ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -mpi -iowrapper
 
       make -j $(nproc)
-      ${SUDO} env PATH=$PATH make install
+      ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: MPI OMPT OPENMP ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -iowrapper
 
       make -j $(nproc)
-      ${SUDO} env PATH=$PATH make install
+      ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # the configure flag -no_pthread_create
       # still creates linking options for the pthread wrapper

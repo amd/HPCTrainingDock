@@ -1889,6 +1889,20 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	setenv("MIOPEN_USER_DB_PATH", "/tmp/" .. user .. "/my-miopen-cache")
 	setenv("MIOPEN_CUSTOM_CACHE_DIR", "/tmp/" .. user .. "/my-miopen-cache")
 	setenv("Torch_DIR","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages")
+	-- Re-export the gfx arch list pytorch was built for. Without this,
+	-- ANY downstream cmake project that does find_package(Torch) (which
+	-- transitively pulls in Caffe2Config -> LoadHIP.cmake) hard-errors
+	-- with:
+	--   "No GPU arch specified for ROCm build. Please use
+	--    PYTORCH_ROCM_ARCH environment variable"
+	-- because LoadHIP.cmake checks the env var, not anything baked into
+	-- the cmake configs themselves. Surfaced by the
+	-- ftorch_multigpu_test_amdflang.sh on rocm-7.0.2 (job 8596,
+	-- 2026-05-07) where FTorchConfig -> TorchConfig -> Caffe2Config ->
+	-- LoadHIP failed, and the gfortran ftorch_multigpu_test.sh has the
+	-- same bug masked by missing set -e. Value matches the build-time
+	-- export at pytorch_setup.sh:1305.
+	setenv("PYTORCH_ROCM_ARCH","${AMDGPU_GFXMODEL}")
 EOF
 # An alternate module with tunable gemms
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}_tunableop_enabled.lua
