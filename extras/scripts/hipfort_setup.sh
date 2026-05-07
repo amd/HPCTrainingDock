@@ -265,6 +265,31 @@ if [[ -z "${HIPFORT_VERSION}" ]]; then
          echo "[hipfort rocm-bundled] removing stale modulefile: ${MODULE_PATH}/${ROCM_VERSION}.lua"
          ${SUDO} rm -f "${MODULE_PATH}/${ROCM_VERSION}.lua"
       fi
+      # ── Drop a BUNDLED marker so the inventory tool can distinguish ──
+      # "bundled in the SDK (use ROCm's copy)" from "absent / failed".
+      # The marker lands as a sibling of the (intentionally absent)
+      # install dir, i.e. directly under the rocmplus-${PREFIX}-${NUMERIC}/
+      # root, named hipfort.BUNDLED. Best-effort: never aborts the script.
+      # See bare_system/inventory_packages.py ('B' symbol).
+      _BUNDLED_MARKER_DIR="$(dirname "${HIPFORT_PATH}")"
+      ${SUDO} mkdir -p "${_BUNDLED_MARKER_DIR}" 2>/dev/null || true
+      if [ -d "${_BUNDLED_MARKER_DIR}" ]; then
+         ${SUDO} tee "${_BUNDLED_MARKER_DIR}/hipfort.BUNDLED" >/dev/null 2>/dev/null <<MARKER_EOF || true
+BUNDLED package: hipfort
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    hipfort_setup.sh (rocm-bundled guard)
+Reason:          hipfort is shipped with this ROCm SDK at
+                 ${_hipfort_bundled_base:-${ROCM_PATH}}.
+                 No separate from-source build or modulefile is needed.
+                 Users get hipfort via the rocm/<v> module's includes/libs
+                 (and the canonical rocm-<v>/hipfort/<v>.lua passthrough
+                 modulefile created by rocm_setup.sh).
+                 To force a from-source build, pass --hipfort-version <branch>.
+MARKER_EOF
+      fi
+      unset _BUNDLED_MARKER_DIR
       unset _hipfort_bundled_base
       exit ${NOOP_RC}
    fi

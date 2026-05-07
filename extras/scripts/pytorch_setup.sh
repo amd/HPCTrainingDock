@@ -439,6 +439,31 @@ if [[ "${ROCM_PATH:-}" == *afar* ]]; then
          fi
       done
       unset _mf
+      # ── Drop a SKIPPED marker so the inventory tool can distinguish ──
+      # "skipped on this SDK" from "absent / failed". The marker lands as
+      # a sibling of the install dir, i.e. directly under the
+      # rocmplus-${PREFIX}-${NUMERIC}/ root, named pytorch.SKIPPED.
+      # Best-effort: never aborts the script. See
+      # bare_system/inventory_packages.py for how this is surfaced
+      # ('N' symbol -- Not possible to build on this SDK -- in the
+      # per-version package matrix).
+      _SKIP_MARKER_DIR="$(dirname "${INSTALL_PATH}")"
+      ${SUDO} mkdir -p "${_SKIP_MARKER_DIR}" 2>/dev/null || true
+      if [ -d "${_SKIP_MARKER_DIR}" ]; then
+         ${SUDO} tee "${_SKIP_MARKER_DIR}/pytorch.SKIPPED" >/dev/null 2>/dev/null <<MARKER_EOF || true
+SKIPPED package: pytorch
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    pytorch_setup.sh (afar-skip guard)
+Reason:          AFAR SDK is missing <ROCM_PATH>/lib/libMIOpen.so* (cmake
+                 config refs nonexistent .so). pytorch's find_package(miopen)
+                 requires the runtime lib; cannot build on this SDK.
+                 Self-corrects on the next sweep if AMD ships a more
+                 complete AFAR drop.
+MARKER_EOF
+      fi
+      unset _SKIP_MARKER_DIR
       exit ${NOOP_RC}
    fi
 fi

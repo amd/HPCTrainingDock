@@ -265,6 +265,27 @@ if [[ "${ROCM_PATH:-}" == *afar* ]]; then
          echo "[hypre afar-skip] removing stale modulefile: ${MODULE_PATH}/${HYPRE_VERSION}.lua"
          ${SUDO} rm -f "${MODULE_PATH}/${HYPRE_VERSION}.lua"
       fi
+      # ── Drop a SKIPPED marker so the inventory tool can distinguish ──
+      # "skipped on this SDK" from "absent / failed". See
+      # bare_system/inventory_packages.py ('N' symbol -- Not possible to build on this SDK).
+      _SKIP_MARKER_DIR="$(dirname "${HYPRE_PATH}")"
+      ${SUDO} mkdir -p "${_SKIP_MARKER_DIR}" 2>/dev/null || true
+      if [ -d "${_SKIP_MARKER_DIR}" ]; then
+         ${SUDO} tee "${_SKIP_MARKER_DIR}/hypre.SKIPPED" >/dev/null 2>/dev/null <<MARKER_EOF || true
+SKIPPED package: hypre
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    hypre_setup.sh (afar-skip guard)
+Reason:          AFAR SDK is missing
+                 <ROCM_PATH>/lib/cmake/rocblas/rocblas-config.cmake.
+                 hypre requires find_package(rocblas); cannot build
+                 on this SDK.
+                 Self-corrects on the next sweep if AMD ships a more
+                 complete AFAR drop.
+MARKER_EOF
+      fi
+      unset _SKIP_MARKER_DIR
       exit ${NOOP_RC}
    fi
 fi

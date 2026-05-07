@@ -296,6 +296,27 @@ if [[ "${ROCM_PATH:-}" == *afar* ]]; then
          echo "[magma afar-skip] removing stale modulefile: ${MAGMA_MODULE_DIR}/${MAGMA_VERSION}.lua"
          ${SUDO} rm -f "${MAGMA_MODULE_DIR}/${MAGMA_VERSION}.lua"
       fi
+      # ── Drop a SKIPPED marker so the inventory tool can distinguish ──
+      # "skipped on this SDK" from "absent / failed". See
+      # bare_system/inventory_packages.py ('N' symbol -- Not possible to build on this SDK).
+      _SKIP_MARKER_DIR="$(dirname "${MAGMA_PATH}")"
+      ${SUDO} mkdir -p "${_SKIP_MARKER_DIR}" 2>/dev/null || true
+      if [ -d "${_SKIP_MARKER_DIR}" ]; then
+         ${SUDO} tee "${_SKIP_MARKER_DIR}/magma.SKIPPED" >/dev/null 2>/dev/null <<MARKER_EOF || true
+SKIPPED package: magma
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    magma_setup.sh (afar-skip guard)
+Reason:          AFAR SDK is missing
+                 <ROCM_PATH>/lib/cmake/hipblas/hipblas-config.cmake.
+                 magma's CMake requires the roc::hipblas imported target;
+                 cannot build on this SDK.
+                 Self-corrects on the next sweep if AMD ships a more
+                 complete AFAR drop.
+MARKER_EOF
+      fi
+      unset _SKIP_MARKER_DIR
       exit ${NOOP_RC}
    fi
 fi
