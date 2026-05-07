@@ -68,17 +68,38 @@ fi
 # MAX_PARALLEL: cap on simultaneously-RUNNING jobs across the chain.
 #   1 (default) = strict serial: each job depends on the previous one.
 #   N > 1       = sliding window: first N jobs all start concurrently (subject
-#                 to slurm node availability); each subsequent job depends
-#                 afterany on the jobid N positions earlier in submission
-#                 order, so at most N jobs are RUNNING at once.
+#                 to slurm node availability); each subsequent job's dependency
+#                 is an OR (Slurm `?` separator) over the previous N jobids in
+#                 submission order, so the next-in-line job becomes eligible
+#                 the moment ANY one of its window-of-N parents terminates --
+#                 not the specific jobid N positions earlier.
 # Each per-version sbatch is --nodes=1 --exclusive (see run_rocmplus_install.sbatch),
-# so MAX_PARALLEL maps 1:1 to nodes occupied. Pick MAX_PARALLEL to leave
-# headroom on the partition for other users (e.g. 3 nodes available -> use 2
-# to keep one free; bump to 3 once a 4th node comes online).
+# and the partition itself caps RUNNING jobs at the node count, so OR-of-window
+# is safe: even if the dependency formally allows N+1 jobs to be eligible, slurm
+# queues the surplus on `Resources` rather than over-allocating. The OR form
+# eliminates the "head-of-line waiting for the wrong specific ancestor" stall
+# that the prior single-jobid AND chain exhibited when wall-clocks were uneven.
+# Pick MAX_PARALLEL to leave headroom on the partition for other users (e.g. 3
+# nodes available -> use 2 to keep one free; bump to 3 once a 4th node comes
+# online).
 : ${MAX_PARALLEL:=1}
 
 ROCM_VERSIONS_RAW=""
+# START_AFTER and START_AFTER_ANY: optional pre-wired dependencies for the
+# first wave (the first MAX_PARALLEL jobs in submission order):
+#   START_AFTER       single jobid, treated as afterany:JID
+#   START_AFTER_ANY   space- or comma-separated list of jobids, OR'd
+#                     together as afterany:JID1?afterany:JID2?...
+# When both are set, START_AFTER's jobid is OR-joined with START_AFTER_ANY's
+# list, so the first-wave dep becomes
+#   afterany:${START_AFTER}?afterany:JID1?afterany:JID2?...
+# Use START_AFTER_ANY when an existing sweep / unrelated long job COULD free a
+# node before the canonical START_AFTER target finishes -- e.g., chaining a
+# 6.3.x sweep behind both an in-flight afar-22.2.0 sweep AND an in-flight
+# rocm-7.1.1 full sweep. The 6.3.x first wave then starts on whichever of
+# those two parents finishes first.
 START_AFTER=""
+START_AFTER_ANY=""
 DRY_RUN=0
 
 usage() {
@@ -108,20 +129,28 @@ Usage: $0 [opts]
    --max-parallel N              cap on simultaneously-RUNNING jobs (default ${MAX_PARALLEL}).
                                  1 = strict serial chain (each job depends on the previous; today's
                                  default behavior). N>1 = sliding window: first N jobs run in parallel
-                                 (subject to slurm node availability), each subsequent job depends on
-                                 the jobid N positions earlier so at most N are RUNNING at once. Each
-                                 sbatch is --nodes=1 --exclusive, so N maps 1:1 to nodes occupied --
-                                 pick N to leave headroom for other users (e.g. 3 nodes available ->
-                                 --max-parallel 2 reserves 1 for others; --max-parallel 3 once a 4th
-                                 node is online).
+                                 (subject to slurm node availability), each subsequent job's dependency
+                                 is an OR over the previous N submitted jobids (Slurm '?' separator),
+                                 so it becomes eligible the moment ANY of its N parents finishes -- not
+                                 the specific jobid N positions earlier. Each sbatch is --nodes=1
+                                 --exclusive, so N maps 1:1 to nodes occupied; pick N to leave headroom
+                                 for other users (e.g. 3 nodes available -> --max-parallel 2 reserves 1
+                                 for others; --max-parallel 3 once a 4th node is online).
    --start-after JOBID           chain the first wave (first MAX_PARALLEL versions) after an existing job
+                                 (single afterany:JOBID dep). May be combined with --start-after-any.
+   --start-after-any "j1 j2 ..." chain the first wave after ANY of the listed jobids (OR-of-afterany).
+                                 Useful when multiple in-flight sweeps could each free a node and you
+                                 want this sweep to start on whichever one finishes first. Space- or
+                                 comma-separated. May be combined with --start-after (the lists are
+                                 OR-merged into a single afterany:J1?afterany:J2?... dep string).
    --dry-run                     print sbatch commands without submitting
    --help
 
 Each per-version job's dependency is computed from MAX_PARALLEL (default 1 =
-strict --dependency=afterany:<prev_jobid> chain). The chain proceeds even
-if a single version fails (afterany, not afterok). Per-job logs land in
-slurm-<jobid>-rocmplus-<v>.{out,err} in the submit directory.
+strict --dependency=afterany:<prev_jobid> chain; N>1 = OR over the previous N
+submitted jobids). The chain proceeds even if a single version fails (afterany,
+not afterok). Per-job logs land in slurm-<jobid>-rocmplus-<v>.{out,err} in the
+submit directory.
 EOF
    exit 1
 }
@@ -142,6 +171,7 @@ while [[ $# -gt 0 ]]; do
       --packages)          shift; PACKAGES_LIST=${1} ;;
       --max-parallel)      shift; MAX_PARALLEL=${1} ;;
       --start-after)       shift; START_AFTER=${1} ;;
+      --start-after-any)   shift; START_AFTER_ANY=${1} ;;
       --dry-run)           DRY_RUN=1 ;;
       --help|-h)           usage ;;
       *)                   echo "Unknown arg: ${1}" >&2; usage ;;
@@ -215,23 +245,46 @@ cat <<EOF
  sbatch file:       ${SBATCH_FILE}
  Dry run:           ${DRY_RUN}
  Start after:       ${START_AFTER:-<none>}
+ Start after any:   ${START_AFTER_ANY:-<none>}
 ==================================================================
 EOF
 
 cd "${REPO_ROOT}"
 
+# Normalize START_AFTER_ANY into a bash array of bare jobids (commas + whitespace
+# both accepted as separators, matching --rocm-versions parsing convention).
+read -r -a START_AFTER_ANY_ARR <<< "${START_AFTER_ANY//,/ }"
+
+# join_or_deps: emit "afterany:J1?afterany:J2?..." from the bare jobids passed
+# as positional args. Empty input -> empty string. The Slurm '?' separator is
+# OR-semantics: the dependent job becomes eligible as soon as ANY one of the
+# listed parents satisfies its afterany clause.
+join_or_deps() {
+   local -a parts=()
+   local jid
+   for jid in "$@"; do
+      [[ -z "${jid}" ]] && continue
+      parts+=( "afterany:${jid}" )
+   done
+   local IFS='?'
+   echo "${parts[*]}"
+}
+
 # Sliding-window dependency wiring (controlled by MAX_PARALLEL):
-#   - First MAX_PARALLEL jobs (the "first wave") all depend on START_AFTER
-#     (or have no dependency if START_AFTER is empty), so they're free to
-#     start as soon as slurm has nodes for them.
-#   - Subsequent jobs depend afterany on the jobid MAX_PARALLEL positions
-#     earlier in submission order. Since each sbatch is --nodes=1 --exclusive,
-#     a finishing job releases exactly one node, which is what the next
-#     waiting job needs to start.
-# Net effect: at most MAX_PARALLEL jobs are RUNNING simultaneously, regardless
-# of how many free nodes the partition has at any moment.
+#   - First MAX_PARALLEL jobs (the "first wave") all share the same dep:
+#     OR-merge of START_AFTER (single jobid) and START_AFTER_ANY (list of
+#     jobids) -- empty if both are unset, in which case the first wave has
+#     no dep and starts as soon as slurm has nodes.
+#   - Subsequent jobs depend on an OR over the previous MAX_PARALLEL jobids
+#     in submission order (the "sliding window"). Since each sbatch is
+#     --nodes=1 --exclusive and the partition itself caps the number of
+#     RUNNING jobs by node count, OR-of-window cannot over-allocate -- it
+#     just lets the next-in-line job start the moment ANY of its window-of-N
+#     ancestors releases a node, which avoids the head-of-line stall the
+#     prior single-jobid AND chain exhibited when the specific "N positions
+#     earlier" jobid happened to outlive its window peers.
 #
-# JOBIDS_ONLY tracks submission-order jobids so we can index back N positions
+# JOBIDS_ONLY tracks submission-order jobids so we can slice the window
 # without parsing them out of SUBMITTED's "v=jobid" pairs.
 JOBIDS_ONLY=()
 SUBMITTED=()
@@ -250,13 +303,15 @@ for v in "${VERSIONS_ARR[@]}"; do
    # so leave the value un-comma'd. Spaces survive verbatim through to the sbatch.
    EXPORT_VARS+=",PACKAGES_LIST=${PACKAGES_LIST}"
 
-   # Compute this job's dependency:
-   #   i  < MAX_PARALLEL : honor START_AFTER (may be empty -> no dep)
-   #   i >= MAX_PARALLEL : depend on the jobid MAX_PARALLEL slots back
+   # Compute this job's dependency string (already includes "afterany:" tokens
+   # and OR-separator '?' joins; empty string means no --dependency flag).
+   #   i  < MAX_PARALLEL : OR-merge of START_AFTER + START_AFTER_ANY
+   #   i >= MAX_PARALLEL : OR over the previous MAX_PARALLEL jobids
    if (( i < MAX_PARALLEL )); then
-      DEP="${START_AFTER}"
+      DEP=$(join_or_deps "${START_AFTER}" "${START_AFTER_ANY_ARR[@]}")
    else
-      DEP="${JOBIDS_ONLY[$((i - MAX_PARALLEL))]}"
+      WINDOW=( "${JOBIDS_ONLY[@]:i - MAX_PARALLEL:MAX_PARALLEL}" )
+      DEP=$(join_or_deps "${WINDOW[@]}")
    fi
 
    CMD=( sbatch
@@ -268,7 +323,7 @@ for v in "${VERSIONS_ARR[@]}"; do
          --export="${EXPORT_VARS}" )
 
    if [[ -n "${DEP}" ]]; then
-      CMD+=( --dependency="afterany:${DEP}" )
+      CMD+=( --dependency="${DEP}" )
    fi
    CMD+=( "${SBATCH_FILE}" )
 
