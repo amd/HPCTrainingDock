@@ -548,6 +548,171 @@ else
       module unload ${ROCM_MODULE_NAME}
    fi
 
+   # ── Post-install check: cupy/cupy#9742 (HIP __shfl_*_sync 32-bit mask) ─
+   #
+   # Refs:  https://github.com/cupy/cupy/issues/9742   (bug report)
+   #        https://github.com/cupy/cupy/pull/9748     (fix, merged 2026-04-28)
+   #        https://github.com/cupy/cupy/pull/9897     (v14 backport)
+   #        icon4py / dycore reproducer 2026-05-03  (cluster impact)
+   echo ""
+   echo "============================"
+   echo " Post-install check (cupy#9742)"
+   echo "============================"
+   python3 - "${CUPY_PATH}" "${ROCM_VERSION}" <<'__CUPY_9742_CHECK_PYEOF__'
+import os, re, sys
+
+install_root, rocm_version = sys.argv[1], sys.argv[2]
+workaround = os.path.join(install_root, "cupy", "_core", "include", "cupy",
+                          "hip_workaround.cuh")
+if not os.path.isfile(workaround):
+    print(f"[cupy#9742-check] no hip_workaround.cuh at {workaround}; "
+          f"not a recognisable cupy install -- skipping")
+    sys.exit(0)
+
+with open(workaround, errors="replace") as fh:
+    text = fh.read()
+
+# Walk #if/#ifdef/#endif stack to find which conditional gates are still
+# OPEN at the line of the first `#define __shfl_*_sync(mask, ...)` strip
+# macro.  Proper preprocessor-aware classification, not a head-only
+# regex (which would mis-count the #ifndef INCLUDE_GUARD_*_H wrapper).
+OPEN_RE  = re.compile(r"^\s*#\s*(if|ifdef|ifndef)\s+(.*?)\s*(?://.*)?$")
+CLOSE_RE = re.compile(r"^\s*#\s*endif\b")
+DEF_RE   = re.compile(r"^\s*#\s*define\s+__shfl_(?:xor_|up_|down_|)sync\s*\(\s*mask\b")
+stack, open_at = [], None
+for line in text.splitlines():
+    if open_at is None and DEF_RE.match(line):
+        open_at = list(stack)
+    m = OPEN_RE.match(line)
+    if m:
+        stack.append(m.group(2))
+    elif CLOSE_RE.match(line) and stack:
+        stack.pop()
+
+if open_at is None:
+    print("[cupy#9742-check] FAIL: no __shfl_*_sync strip define in "
+          "hip_workaround.cuh -- UNKNOWN cupy shape, refusing to bless")
+    sys.exit(2)
+
+# Drop the always-present outer __HIP_DEVICE_COMPILE__ guard and any
+# include-guard-style #ifndef ..._GUARD_..._H around the whole file.
+real_gates = [d for d in open_at
+              if "__HIP_DEVICE_COMPILE__" not in d
+              and not re.search(r"GUARD|_H\b", d)]
+
+# Classify the workaround shape:
+#   UNCONDITIONAL_STRIP -- cupy 13.x / AMD ROCm fork: strip always on
+#                          under __HIP_DEVICE_COMPILE__; safe always.
+#   V14_GATE            -- cupy 14.0.1 (the bug): strip only active for
+#                          HIP_VERSION < 60200000, INERT on all ROCm
+#                          6.2+ that this cluster ships.
+#   THREE_TIER_GATE     -- post-PR-9748 / cupy 14.0.2+/15+: three-tier
+#                          gate on HIP_VERSION + opt-in/opt-out macros;
+#                          source has been migrated to 64-bit literals.
+#   UNKNOWN             -- shape doesn't match any of the above.
+if not real_gates:
+    shape = "UNCONDITIONAL_STRIP"
+elif ("CUPY_HIP_SHFL_WORKAROUND" in text
+      and "HIP_ENABLE_WARP_SYNC_BUILTINS" in text
+      and "HIP_DISABLE_WARP_SYNC_BUILTINS" in text):
+    shape = "THREE_TIER_GATE"
+elif (any(re.search(r"HIP_VERSION\s*<\s*60200000", g) for g in real_gates)
+      and "CUPY_HIP_SHFL_WORKAROUND" not in text):
+    shape = "V14_GATE"
+else:
+    shape = "UNKNOWN"
+
+m = re.match(r"(\d+)\.(\d+)", rocm_version.strip())
+if not m:
+    print(f"[cupy#9742-check] FAIL: unparseable rocm version {rocm_version!r}")
+    sys.exit(2)
+hip_version = int(m.group(1)) * 10_000_000 + int(m.group(2)) * 100_000
+
+# Is the strip active under cupy_setup.sh's default flags (no
+# -DHIP_{ENABLE,DISABLE}_WARP_SYNC_BUILTINS) for this rocm version?
+if shape == "UNCONDITIONAL_STRIP":
+    active = True
+elif shape == "V14_GATE":
+    active = hip_version < 60_200_000
+elif shape == "THREE_TIER_GATE":
+    # tier 1 (rocm <6.2): always; tier 2 (6.2-6.4): opt-in not set so on;
+    # tier 3 (rocm 7+): opt-out not set so OFF.
+    active = hip_version < 70_000_000
+else:
+    active = False
+
+print(f"[cupy#9742-check] shape={shape}  rocm={rocm_version}  "
+      f"HIP_VERSION={hip_version}  strip_active={active}")
+
+if shape == "UNKNOWN":
+    print("[cupy#9742-check] FAIL: unrecognised hip_workaround.cuh shape; "
+          "refusing to bless install (manual review required)")
+    sys.exit(2)
+
+if active:
+    print("[cupy#9742-check] PASS: strip macros neutralise any source-side mask")
+    sys.exit(0)
+
+# Strip is INERT for this rocm.  Source MUST use 64-bit literals.  Scan
+# both source files (.pyx, .cu, .py, ...) AND compiled artefacts (.so,
+# .a) for __shfl_*_sync(0x[fF]+, ...) without a `ULL` suffix -- the
+# binary scan catches the canonical hits in _routines_math.so /
+# _routines_indexing.so that are not shipped as .pyx.
+TEXT_EXTS = (".pyx", ".pxi", ".cu", ".cuh", ".h", ".hpp",
+             ".cpp", ".cc", ".py", ".in")
+BIN_EXTS  = (".so", ".a", ".o", ".dylib", ".dll", ".pyd")
+BAD = re.compile(
+    rb"__shfl_(?:xor_|up_|down_|)sync\s*\(\s*"
+    rb"(?:\(\s*unsigned\s+(?:int)?\s*\)\s*)?"
+    rb"0x[fF]+(?!u?ll)(?![0-9a-fA-F])\s*,",
+    re.IGNORECASE,
+)
+SIZE_CAP = 256 * 1024 * 1024
+hits = []
+for dirpath, dirnames, filenames in os.walk(install_root):
+    dirnames[:] = [d for d in dirnames
+                   if not d.endswith(".dist-info") and d != "__pycache__"]
+    for fn in filenames:
+        if not (fn.endswith(TEXT_EXTS) or fn.endswith(BIN_EXTS)):
+            continue
+        path = os.path.join(dirpath, fn)
+        try:
+            if os.path.getsize(path) > SIZE_CAP:
+                continue
+            with open(path, "rb") as fh:
+                blob = fh.read()
+        except OSError:
+            continue
+        for m in BAD.finditer(blob):
+            s, e = max(0, m.start() - 8), min(len(blob), m.end() + 24)
+            snippet = blob[s:e].decode("utf-8", errors="replace")
+            hits.append((path, snippet.replace("\n", "\\n")))
+
+if hits:
+    print(f"[cupy#9742-check] FAIL: {len(hits)} __shfl_*_sync call(s) with "
+          f"32-bit mask literal found in install (strip is INERT on ROCm "
+          f"{rocm_version}, so these will trip hiprtc_runtime.h's "
+          f'"sizeof(MaskT) == 8" static_assert at JIT compile time):')
+    for path, snippet in hits[:10]:
+        print(f"[cupy#9742-check]   {path}: ...{snippet}...")
+    if len(hits) > 10:
+        print(f"[cupy#9742-check]   ... and {len(hits) - 10} more")
+    sys.exit(1)
+
+print("[cupy#9742-check] PASS: strip INERT but source has no 32-bit "
+      "__shfl_*_sync masks -- safe")
+sys.exit(0)
+__CUPY_9742_CHECK_PYEOF__
+   _check_rc=$?
+   if [ "${_check_rc}" -ne 0 ]; then
+      echo "ERROR: cupy install at ${CUPY_PATH} failed the cupy#9742"
+      echo "       check (HIP __shfl_*_sync 32-bit-mask bug, rc=${_check_rc})."
+      echo "       Refusing to create a modulefile.  See the FAIL lines"
+      echo "       above for the offending source/binary hits."
+      exit 1
+   fi
+   unset _check_rc
+
    # Determine the version label for the modulefile from what was
    # actually installed in ${CUPY_PATH}, NOT from the user-supplied
    # CUPY_VERSION variable.  Rationale: for ROCm >= 6.5 the build
