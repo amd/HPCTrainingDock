@@ -58,6 +58,7 @@ Usage:
   python3 bare_system/inventory_packages.py --roots /shared/apps/ubuntu/opt
   python3 bare_system/inventory_packages.py --reasons   # also print reasons
   python3 bare_system/inventory_packages.py --versions  # version strings, not Y
+  python3 bare_system/inventory_packages.py --install-provenance  # script@hash dirty/clean
 """
 import argparse
 import os
@@ -542,6 +543,236 @@ def render_reasons(reasons, text=False):
     print()
 
 
+# ── Install-script provenance (--install-provenance) ────────────────
+#
+# Parses `whatis("Built by: <script>_setup.sh@<hash> (clean|dirty|unknown)")`
+# lines that the per-package setup scripts embed in generated modulefiles.
+# Reads the .lua text directly off disk -- no Lmod / `module show` needed --
+# so this also works in CI / containers that have the files but not a
+# fully initialized Lmod environment.
+
+# Inventory pkg name -> module-category dir name under
+# {module_path}/rocmplus-{version}/. Most packages match 1:1; the
+# exceptions below mirror main_setup.sh's `path_args` / `rocmplus_args`
+# wiring. Tuples are tried in order: first dir that actually exists wins
+# for the cell.
+PKG_TO_MODULE_CAT = {
+    "hipfort":  ("hipfort_from_source", "hipfort"),
+    "netcdf":   ("netcdf-c", "netcdf-fortran"),
+    "ftorch":   ("ftorch", "ftorch_amdflang"),
+}
+
+# whatis("Built by: <script>@<hash> (<dirty>)")
+# Hash may be empty when the writer ran in a stripped-of-.git context.
+_BUILT_BY_LINE_RE = re.compile(
+    r'whatis\s*\(\s*"Built by:\s*'
+    r'(?P<script>[^@"]+?)@(?P<hash>[0-9a-fA-F]*|unknown)\s+'
+    r'\((?P<dirty>clean|dirty|unknown)\)\s*"\s*\)'
+)
+
+
+def _discover_default_module_path():
+    """Best-effort resolution of the Lmod tree containing rocmplus-* dirs.
+
+    Returns a path or None. Tried in order:
+      1. `module --terse avail` (works under Lmod): take any banner line
+         ending in 'base:' and return its dirname.
+      2. $MODULEPATH: first component ending in '/base' -> dirname; else
+         first component whose parent contains rocmplus-*.
+      3. Site default `/shared/apps/modules/ubuntu/lmodfiles` if it exists.
+    """
+    try:
+        out = subprocess.run(
+            ["bash", "-lc",
+             "source /etc/profile.d/lmod.sh 2>/dev/null; module --terse avail 2>&1"],
+            capture_output=True, text=True, timeout=10)
+        for line in (out.stdout or "").splitlines():
+            line = line.strip()
+            if line.endswith("/base:"):
+                return os.path.dirname(line[:-1])
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+    mp = os.environ.get("MODULEPATH", "")
+    parts = [p for p in mp.split(":") if p]
+    for p in parts:
+        if p.rstrip("/").endswith("/base") and os.path.isdir(p):
+            return os.path.dirname(p.rstrip("/"))
+    for p in parts:
+        parent = os.path.dirname(p.rstrip("/"))
+        if parent and os.path.isdir(parent):
+            try:
+                if any(d.startswith("rocmplus-")
+                       for d in os.listdir(parent)):
+                    return parent
+            except OSError:
+                pass
+
+    fallback = "/shared/apps/modules/ubuntu/lmodfiles"
+    return fallback if os.path.isdir(fallback) else None
+
+
+def _category_dir_for(module_path, version, pkg):
+    """Return existing category dir under {module_path}/rocmplus-{version}/
+    for `pkg`, or None."""
+    base = os.path.join(module_path, f"rocmplus-{version}")
+    candidates = PKG_TO_MODULE_CAT.get(pkg, (pkg,))
+    for cat in candidates:
+        d = os.path.join(base, cat)
+        if os.path.isdir(d):
+            return d
+    return None
+
+
+def _scan_built_by(category_dir):
+    """Return a list of unique (script, hash, dirty) tuples parsed from
+    every non-backup .lua under category_dir. Empty if none captured.
+
+    Selection rule: skip files whose name contains '.bak' (the cluster
+    keeps timestamped backup copies alongside live modulefiles). Beyond
+    that, every modulefile contributes its `Built by:` payload; results
+    are deduped (a category can have e.g. <ver>.lua and
+    <ver>_tunableop_enabled.lua written by the same setup script with
+    the same hash, which then collapses into one cell entry).
+    """
+    seen = []
+    seen_keys = set()
+    try:
+        names = sorted(os.listdir(category_dir))
+    except OSError:
+        return seen
+    for name in names:
+        if not name.endswith(".lua"):
+            continue
+        if ".bak" in name:
+            continue
+        path = os.path.join(category_dir, name)
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        m = _BUILT_BY_LINE_RE.search(text)
+        if not m:
+            continue
+        script = m.group("script").strip()
+        h = m.group("hash") or ""
+        dirty = m.group("dirty")
+        key = (script, h, dirty)
+        if key not in seen_keys:
+            seen_keys.add(key)
+            seen.append(key)
+    return seen
+
+
+_DIRTY_GLYPH = {"clean": "C", "dirty": "D", "unknown": "?"}
+
+
+def _format_provenance_cell(entries, pkg):
+    """Render scan output for one cell. Empty list -> 'unknown'.
+
+    Each (script, hash, dirty) entry renders as `<hash6> <C|D|?>` when
+    the script's short name (after stripping a trailing `_setup.sh`)
+    matches the row's `pkg` (the common case), or `<short-script>@<hash6>
+    <C|D|?>` when a different script wrote the modulefile (e.g.
+    openblas's modulefile written by magma_setup.sh). Hash is truncated
+    to 6 chars (or '?' if empty). Multiple distinct entries are
+    slash-joined, mirroring the multi-version cell format under
+    --versions in the main matrix.
+    """
+    if not entries:
+        return "unknown"
+    parts = []
+    for script, h, dirty in entries:
+        s = script
+        if s.endswith("_setup.sh"):
+            s = s[:-len("_setup.sh")]
+        h_short = (h[:6] if h else "?")
+        d_short = _DIRTY_GLYPH.get(dirty, dirty)
+        if s == pkg:
+            parts.append(f"{h_short} {d_short}")
+        else:
+            parts.append(f"{s}@{h_short} {d_short}")
+    return " / ".join(parts)
+
+
+def collect_provenance(module_path, versions):
+    """Return {(version, pkg): cell_string} for every (version, pkg) where
+    the module-category dir exists. Cells with no category dir are
+    omitted; the renderer fills those with '-'."""
+    out = {}
+    for v in versions:
+        for pkg, _pres, _ver in PKG_LIST:
+            cat = _category_dir_for(module_path, v, pkg)
+            if cat is None:
+                continue
+            entries = _scan_built_by(cat)
+            out[(v, pkg)] = _format_provenance_cell(entries, pkg)
+    return out
+
+
+def _provenance_cell(module_path, version, pkg, scan_cache):
+    key = (version, pkg)
+    if key in scan_cache:
+        return scan_cache[key]
+    return "-"
+
+
+def render_provenance_text(title, versions, module_path, scan_cache):
+    print(f"=== {title} ===")
+    pkg_col = max(len("package"), max(len(p) for p, _, _ in PKG_LIST))
+    cell_rows = []
+    for pkg, _pres, _ver in PKG_LIST:
+        cells = [_provenance_cell(module_path, v, pkg, scan_cache)
+                 for v in versions]
+        cell_rows.append((pkg, cells))
+    col_widths = []
+    for ci, v in enumerate(versions):
+        w = max(len(v), 6)
+        for _, cells in cell_rows:
+            w = max(w, len(cells[ci]))
+        col_widths.append(w)
+    sep = "  "
+
+    def emit(left, cells):
+        parts = [left.ljust(pkg_col)]
+        for c, w in zip(cells, col_widths):
+            parts.append(str(c).ljust(w))
+        print(sep.join(parts).rstrip())
+
+    emit("package", list(versions))
+    emit("-" * pkg_col, ["-" * w for w in col_widths])
+    for pkg, cells in cell_rows:
+        emit(pkg, cells)
+    print()
+
+
+def _render_provenance_md_one(title, versions, module_path, scan_cache):
+    print(f"## {title}\n")
+    header = ["package"] + list(versions)
+    print("| " + " | ".join(header) + " |")
+    print("|" + "|".join(["---"] * len(header)) + "|")
+    for pkg, _pres, _ver in PKG_LIST:
+        cells = [_provenance_cell(module_path, v, pkg, scan_cache)
+                 for v in versions]
+        print("| " + " | ".join([pkg] + cells) + " |")
+    print()
+
+
+def render_provenance_md(title, versions, module_path, scan_cache,
+                         per_table=None):
+    if per_table and per_table > 0 and len(versions) > per_table:
+        for i in range(0, len(versions), per_table):
+            chunk = versions[i:i + per_table]
+            sub_title = (f"{title}  (part {i // per_table + 1} of "
+                         f"{(len(versions) + per_table - 1) // per_table}: "
+                         f"{chunk[0]} … {chunk[-1]})")
+            _render_provenance_md_one(sub_title, chunk, module_path,
+                                      scan_cache)
+    else:
+        _render_provenance_md_one(title, versions, module_path, scan_cache)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -570,6 +801,23 @@ def main():
              "render slash-joined in semver-ascending order, e.g. "
              "'2.7.1 / 2.9.1'. 'N'/'B'/'-' glyphs and the amdclang / "
              "count Y rows are unchanged.")
+    ap.add_argument("--install-provenance", action="store_true",
+        help="emit ONLY the install-script provenance matrix (no Y/N/B/-, "
+             "no amdclang, no count Y, no reasons). Cells contain "
+             "'<hash6> <C|D>' (hash + clean/dirty) parsed from "
+             "whatis(\"Built by: ...\") in each category modulefile; "
+             "the writer-script prefix is shown only when it differs "
+             "from the row's package name (e.g. magma_setup writes the "
+             "openblas modulefile -> 'magma@<hash6> C'). 'unknown' = "
+             "installed but no Built-by line; '-' = no modulefile "
+             "category dir for that (version, pkg).")
+    ap.add_argument("--module-path", default=None, metavar="PATH",
+        help="filesystem root containing rocmplus-<version>/<category>/ "
+             "modulefiles (same role as main_setup.sh --top-module-path). "
+             "Used by --install-provenance. Default: auto-detected from "
+             "`module --terse avail` (sibling of the 'base' module tree); "
+             "fallbacks: $MODULEPATH, then "
+             "/shared/apps/modules/ubuntu/lmodfiles.")
     args = ap.parse_args()
 
     # Markdown auto-chunk when versions are on (cells get wider, so the
@@ -589,6 +837,62 @@ def main():
           if v.startswith("7.")
           or v.startswith("therock-")
           or v.startswith("afar-")]
+
+    # ── --install-provenance: provenance-only output (exclusive) ────
+    if args.install_provenance:
+        module_path = args.module_path or _discover_default_module_path()
+        if not module_path or not os.path.isdir(module_path):
+            print("ERROR: --install-provenance needs a module-path root "
+                  "containing rocmplus-<version>/ category dirs.",
+                  file=sys.stderr)
+            print("       Pass --module-path PATH explicitly. Tried: "
+                  f"{module_path or '<none>'}", file=sys.stderr)
+            return 1
+        scan_cache = collect_provenance(module_path, all_versions)
+        # Auto-chunk markdown like the main matrix when per_table is unset.
+        prov_per_table = args.per_table if args.per_table else 5
+        if args.text:
+            print(f"Module path: {module_path}")
+            print(f"Install roots (column source): {', '.join(args.roots)}")
+            print(f"Generated: "
+                  f"{datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')}")
+            print("Provenance: parsed from whatis(\"Built by: "
+                  "<script>@<hash> (<dirty>)\") lines in modulefiles.")
+            print("Cells:  '<hash6> <C|D>'  (writer-script prefix shown "
+                  "only when it differs from the row package, e.g. "
+                  "'magma@<hash6> C' on the openblas row).  "
+                  "'unknown' = no Built-by line  "
+                  "'-' = no module category dir")
+            print()
+            if v7:
+                render_provenance_text("ROCm 7.x.x + therock + afar",
+                                       v7, module_path, scan_cache)
+            if v6:
+                render_provenance_text("ROCm 6.x.x", v6,
+                                       module_path, scan_cache)
+        else:
+            print(f"Module path: `{module_path}`  ")
+            print("Install roots (column source): "
+                  f"{', '.join('`' + r + '`' for r in args.roots)}  ")
+            print(f"Generated: "
+                  f"{datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
+            print("Provenance is parsed from `whatis(\"Built by: "
+                  "<script>@<hash> (<dirty>)\")` lines in each category's "
+                  "modulefile. Cells show **`<hash6> <C|D>`**; the "
+                  "writer-script prefix is shown only when it differs "
+                  "from the row package (e.g. `magma@<hash6> C` on the "
+                  "openblas row). **`unknown`** = modulefile lacks a "
+                  "`Built by:` line; **`-`** = no module category dir for "
+                  "that (version, pkg).\n")
+            if v7:
+                render_provenance_md("ROCm 7.x.x + therock + afar", v7,
+                                     module_path, scan_cache,
+                                     per_table=prov_per_table)
+            if v6:
+                render_provenance_md("ROCm 6.x.x", v6, module_path,
+                                     scan_cache,
+                                     per_table=prov_per_table)
+        return 0
 
     versions_note_text = (
         "  Y cells replaced by version string under --versions (versionless "

@@ -318,14 +318,30 @@ else
    # source dependency); falls back to "unknown" when the install runs
    # from a stripped-of-.git context (Docker layer, release tarball, or
    # git binary missing).
-   LEAF_SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
+   #
+   # Why the absolute-path dance: BASH_SOURCE[0] is whatever path was used
+   # to invoke the script -- often the relative `extras/scripts/ftorch_setup.sh`
+   # when called from bare_system/main_setup.sh. Passing that relative path
+   # to `git -C "${_leaf_dir}" log -- "${BASH_SOURCE[0]}"` makes git look
+   # for `${_leaf_dir}/extras/scripts/ftorch_setup.sh` (a path that does
+   # not exist), `git log` succeeds with empty output, and
+   # LEAF_SCRIPT_COMMIT ends up as the empty string -- which is what
+   # produced the `whatis("Built by: ftorch_setup.sh@ (clean)")` lines
+   # (no SHA, no "unknown") that the 2026-05-08 audit flagged across every
+   # rocmplus-* ftorch + ftorch_amdflang modulefile in this sweep.
+   # Absolutize once, here, and feed the absolute path to every git query
+   # (matches cupy_setup.sh).
+   LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+   LEAF_SCRIPT_NAME="$(basename "${LEAF_SCRIPT_PATH}")"
    LEAF_SCRIPT_COMMIT=unknown
    LEAF_SCRIPT_DIRTY=unknown
-   _leaf_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _leaf_dir=""
-   if [ -n "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
+   _leaf_dir="$(dirname "${LEAF_SCRIPT_PATH}")"
+   if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
       && git -C "${_leaf_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-      LEAF_SCRIPT_COMMIT="$(git -C "${_leaf_dir}" log -n 1 --pretty=format:%H -- "${BASH_SOURCE[0]}" 2>/dev/null || echo unknown)"
-      if [ -n "$(git -C "${_leaf_dir}" status --porcelain -- "${BASH_SOURCE[0]}" 2>/dev/null)" ]; then
+      _commit="$(git -C "${_leaf_dir}" log -n 1 --pretty=format:%H -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)"
+      [ -n "${_commit}" ] && LEAF_SCRIPT_COMMIT="${_commit}"
+      unset _commit
+      if [ -n "$(git -C "${_leaf_dir}" status --porcelain -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)" ]; then
          LEAF_SCRIPT_DIRTY=dirty
       else
          LEAF_SCRIPT_DIRTY=clean
