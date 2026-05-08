@@ -194,6 +194,9 @@ do
    shift
 done
 
+# 1 = policy gate below blocked a requested build (for jax.SKIPPED / inventory 'N').
+JAX_POLICY_SKIP=0
+
 # ── JAX policy gate ──────────────────────────────────────────────────
 # Compatibility table (per upstream ROCm/JAX release notes, also
 # echoed by compat_info() further down):
@@ -238,6 +241,9 @@ if [ "${ROCM_MAJOR}" -ge 7 ] 2>/dev/null && [ "${DISTRO_VERSION}" = "22.04" ]; t
    echo "             JAX 8.0 / 7.1 require Python > 3.10; JAX 5.0 requires ROCm 6.x."
    echo "             Forcing BUILD_JAX=0 to skip cleanly."
    echo "             (Override: bump system Python to 3.11+ or drop ROCm to 6.x.)"
+   if [ "${BUILD_JAX}" = "1" ]; then
+      JAX_POLICY_SKIP=1
+   fi
    BUILD_JAX=0
 elif [ "${ROCM_MAJOR}" = "6" ] && [ "${JAX_VERSION_USER_SET}" = "0" ]; then
    echo "[jax policy] ROCm ${ROCM_VERSION} (6.x): defaulting JAX_VERSION to 5.0"
@@ -269,13 +275,43 @@ else
    JAXLIB_PATH=/opt/rocmplus-${ROCM_VERSION}/jaxlib-v0.${JAX_VERSION}
 fi
 
+# Sibling markers for bare_system/inventory_packages.py ('N' = not buildable on
+# this stack), mirroring pytorch.SKIPPED / ftorch.SKIPPED.
+_jax_write_policy_skip_markers() {
+   local _root _line
+   _root="$(dirname "${JAX_PATH}")"
+   ${SUDO} mkdir -p "${_root}" 2>/dev/null || true
+   if [ ! -d "${_root}" ]; then
+      echo "jax: could not create skip-marker dir ${_root}" >&2
+      return 0
+   fi
+   _line="ROCm ${ROCM_VERSION} on Ubuntu ${DISTRO_VERSION}: JAX lines for ROCm 7+ need Python 3.11+; this stack uses Python 3.10. Not buildable without upgrading Python or using ROCm 6.x with JAX 5.0."
+   for _pkg in jax jaxlib; do
+      ${SUDO} tee "${_root}/${_pkg}.SKIPPED" >/dev/null 2>/dev/null <<MARKER_EOF || true
+SKIPPED package: ${_pkg} (jax driver also governs jaxlib)
+ROCm version:    ${ROCM_VERSION}
+Distro:          ${DISTRO} ${DISTRO_VERSION}
+JAX line:        ${JAX_VERSION} (see jax_setup.sh policy gate)
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    jax_setup.sh (ROCm 7+ vs Python 3.10 policy)
+Reason:          ${_line}
+MARKER_EOF
+   done
+   unset _pkg _line
+}
+
 # ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
 # Modulefile name is 0.${JAX_VERSION}.lua to match the
 # `tee ${MODULE_PATH}/0.${JAX_VERSION}.lua` write below.
 # ── BUILD_JAX=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
 NOOP_RC=43
 if [ "${BUILD_JAX}" = "0" ]; then
-   echo "[jax BUILD_JAX=0] operator opt-out; skipping (no jax build, no jaxlib build, no cache restore)."
+   if [ "${JAX_POLICY_SKIP}" = "1" ]; then
+      _jax_write_policy_skip_markers
+      echo "[jax BUILD_JAX=0] policy skip: ROCm 7+ on Ubuntu 22.04 requires Python 3.11+ for JAX; wrote jax.SKIPPED + jaxlib.SKIPPED under $(dirname "${JAX_PATH}")."
+   else
+      echo "[jax BUILD_JAX=0] operator opt-out; skipping (no jax build, no jaxlib build, no cache restore)."
+   fi
    exit ${NOOP_RC}
 fi
 
@@ -283,6 +319,11 @@ if [ "${REPLACE}" = "1" ]; then
    REPLACE_JAX=1
    REPLACE_JAXLIB=1
 fi
+_root_mark="$(dirname "${JAX_PATH}")"
+if [ "${REPLACE}" = "1" ] || [ "${REPLACE_JAX}" = "1" ] || [ "${REPLACE_JAXLIB}" = "1" ]; then
+   ${SUDO} rm -f "${_root_mark}/jax.SKIPPED" "${_root_mark}/jaxlib.SKIPPED"
+fi
+unset _root_mark
 if [ "${REPLACE_JAX}" = "1" ]; then
    echo "[jax --replace-jax 1] removing prior jax install + modulefile if present"
    echo "  install dir: ${JAX_PATH}"

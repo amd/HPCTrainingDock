@@ -36,6 +36,29 @@ preflight_modules() {
    echo "preflight: all required modules loaded."
 }
 
+# Best-effort sibling marker for bare_system/inventory_packages.py ('N' cell
+# when FTorch cannot run because required modules are missing — mirrors
+# pytorch_setup.sh's pytorch.SKIPPED pattern).
+_ftorch_write_missing_prereq_marker() {
+   local _skip_dir _mods
+   _skip_dir="$(dirname "${FTORCH_PATH}")"
+   _mods=$(printf '%s ' "$@")
+   ${SUDO} mkdir -p "${_skip_dir}" 2>/dev/null || true
+   if [ ! -d "${_skip_dir}" ]; then
+      echo "ftorch: could not create skip-marker dir ${_skip_dir}" >&2
+      return 0
+   fi
+   ${SUDO} tee "${_skip_dir}/ftorch.SKIPPED" >/dev/null 2>/dev/null <<MARKER_EOF || true
+SKIPPED package: ftorch
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Fortran toolchain: ${FC_COMPILER} (install prefix ${FTORCH_PATH})
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    ftorch_setup.sh (preflight_modules)
+Reason:          Required Lmod module(s) could not be loaded (needed: ${_mods}). Typical case: no ${PYTORCH_MODULE} module for this rocmplus tree. Install PyTorch for this SDK or include pytorch in --packages. See the log for the Lmod error.
+MARKER_EOF
+}
+
 # Variables controlling setup process
 ROCM_VERSION=6.2.0
 BUILD_FTORCH=0
@@ -227,6 +250,9 @@ if [ "${REPLACE}" = "1" ]; then
    echo "  modulefile:  ${MODULE_PATH}/${MODULEFILE_NAME}"
    ${SUDO} rm -rf "${FTORCH_PATH}"
    ${SUDO} rm -f  "${MODULE_PATH}/${MODULEFILE_NAME}"
+   _ft_mark="$(dirname "${FTORCH_PATH}")/ftorch.SKIPPED"
+   ${SUDO} rm -f "${_ft_mark}"
+   unset _ft_mark
 fi
 
 # ── Existence guard: skip if already installed (see hypre_setup.sh) ──
@@ -322,17 +348,21 @@ else
    # (the historical default); they bake gfortran .mod files which can't
    # be consumed by amdflang. Skip the cache restore path for the
    # amdflang variant so it always builds from source.
-   if [ "${FC_COMPILER}" != "amdflang" ] && [ -f ${CACHE_FILES}/ftorch.tgz ]; then
+   if [ "${FC_COMPILER}" != "amdflang" ] && [ -f "${CACHE_FILES}/ftorch.tgz" ]; then
       echo ""
       echo "============================"
       echo " Installing Cached FTorch"
       echo "============================"
       echo ""
 
-      #install the cached version
-      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/ftorch
-      cd /opt/rocmplus-${ROCM_VERSION}
-      ${SUDO} tar -xzpf ${CACHE_FILES}/ftorch.tgz
+      # Install next to CMAKE_INSTALL_PREFIX: tarball layout matches a
+      # rocmplus root with a top-level `ftorch/` (same as historical
+      # cache capture under /opt/rocmplus-${ROCM_VERSION}/). Honor
+      # --install-path / shared-apps trees; do not hardcode /opt.
+      FTORCH_PARENT="$(dirname "${FTORCH_PATH}")"
+      echo "ftorch cache: extracting ${CACHE_FILES}/ftorch.tgz into ${FTORCH_PARENT}"
+      ${SUDO} mkdir -p "${FTORCH_PARENT}"
+      ${SUDO} tar -xzpf "${CACHE_FILES}/ftorch.tgz" -C "${FTORCH_PARENT}"
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm ${CACHE_FILES}/ftorch.tgz
       fi
@@ -352,7 +382,13 @@ else
       if [ "${FC_COMPILER}" = "amdflang" ]; then
          REQUIRED_MODULES+=( "amdclang" )
       fi
-      preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
+      preflight_modules "${REQUIRED_MODULES[@]}" || {
+         _rc=$?
+         if [ "${_rc}" -eq "${MISSING_PREREQ_RC}" ]; then
+            _ftorch_write_missing_prereq_marker "${REQUIRED_MODULES[@]}"
+         fi
+         exit "${_rc}"
+      }
 
       if [ -d "$FTORCH_PATH" ]; then
          # don't use sudo if user has write access to install path
