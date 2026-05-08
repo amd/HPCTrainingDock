@@ -37,7 +37,6 @@
 : ${BUILD_FLANGNEW:="0"}
 : ${BUILD_MAGMA:="0"}
 : ${BUILD_OLLAMA:="1"}
-: ${BUILD_HIPFORT:="0"}
 : ${BUILD_ALL_LATEST:="0"}
 : ${HIPIFLY_MODULE:="1"}
 : ${RETRY:=3}
@@ -132,7 +131,6 @@ usage()
     print_default_option build-adios2 "[BUILD_ADIOS2: 0 or 1]" "include this flag to build version 2.10.1" "${BUILD_ADIOS2} (don't build)"
     print_default_option build-ftorch "[BUILD_FTORCH: 0 or 1]" "include this flag to build version dev" "${BUILD_FTORCH} (don't build)"
     print_default_option build-julia "[BUILD_JULIA: 0 or 1]" "include this flag to build version 1.12" "${BUILD_JULIA} (don't build)"
-    print_default_option build-hipfort "[BUILD_HIPFORT: 0 or 1]" "include this flag to build the same version as ROCm" "${BUILD_HIPFORT} (don't build)"
     print_default_option build-cupy "[BUILD_CUPY: 0 or 1]" "include this flag to build version 13.6.0" "${BUILD_CUPY} (don't build)"
     print_default_option build-hip-python "[BUILD_HIP_PYTHON: 0 or 1]" "include this flag to build version 13.6.0" "${BUILD_HIP_PYTHON} (don't build)"
     print_default_option build-tensorflow "[BUILD_TENSORFLOW: 0 or 1]" "include this flag to build branch r2.20-rocm-enhanced" "${BUILD_TENSORFLOW} (don't build)"
@@ -354,10 +352,6 @@ do
             BUILD_FLANGNEW="1"
             reset-last
             ;;
-        "--build-hipfort")
-            BUILD_HIPFORT="1"
-            reset-last
-            ;;
         "--build-ftorch")
             BUILD_FTORCH="1"
             reset-last
@@ -400,7 +394,6 @@ do
 	    BUILD_HPCTOOLKIT="1"
 	    BUILD_X11VNC="1"
 	    BUILD_FLANGNEW="1"
-	    BUILD_HIPFORT="1"
 	    BUILD_FTORCH="1"
 	    BUILD_MAGMA="1"
 	    #BUILD_JULIA="1"
@@ -506,10 +499,6 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
 	    echo "Setting FLANGNEW build"
             BUILD_FLANGNEW=1
 	    ;;
-         "hipfort")
-	    echo "Setting HIPFORT build"
-            BUILD_HIPFORT=1
-	    ;;
          "ftorch")
 	    echo "Setting FTORCH build"
             BUILD_FTORCH=1
@@ -603,7 +592,6 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             BUILD_HPCTOOLKIT="1"
             BUILD_X11VNC="1"
             BUILD_FLANGNEW="1"
-            BUILD_HIPFORT="1"
             BUILD_FTORCH="1"
             BUILD_MAGMA="1"
             #BUILD_JULIA="1"
@@ -739,7 +727,6 @@ do
        --build-arg BUILD_FFTW=${BUILD_FFTW} \
        --build-arg BUILD_OLLAMA=${BUILD_OLLAMA} \
        --build-arg HIPIFLY_MODULE=${HIPIFLY_MODULE} \
-       --build-arg BUILD_HIPFORT=${BUILD_HIPFORT} \
        --build-arg BUILD_FTORCH=${BUILD_FTORCH} \
        --build-arg BUILD_MAGMA=${BUILD_MAGMA} \
        --build-arg BUILD_JULIA=${BUILD_JULIA} \

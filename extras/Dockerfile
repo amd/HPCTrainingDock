@@ -42,7 +42,6 @@ ARG BUILD_NETCDF
 ARG BUILD_ADIOS2
 ARG BUILD_JAX
 ARG BUILD_X11VNC
-ARG BUILD_HIPFORT
 ARG BUILD_MAGMA
 ARG BUILD_FFTW
 ARG HIPIFLY_MODULE
@@ -88,9 +87,11 @@ COPY extras/scripts/compiler_setup.sh /tmp/extras/compiler_setup.sh
 RUN  /tmp/extras/compiler_setup.sh && \
      rm -f /tmp/extras/compiler_setup.sh
 
-COPY extras/scripts/hipfort_setup.sh /tmp/extras/hipfort_setup.sh
-RUN  /tmp/extras/hipfort_setup.sh --build-hipfort ${BUILD_HIPFORT} --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} \
-                                  --fc-compiler amdflang-new && rm -f /tmp/extras/hipfort_setup.sh
+# hipfort: build-from-source removed. ROCm 6.3+ ships hipfort natively
+# (rocm/<v> module exposes it directly); the prior COPY+RUN of
+# extras/scripts/hipfort_setup.sh in this image is no longer needed.
+# The script itself remains in extras/scripts/ for any operator who
+# wants to invoke it manually for an older SDK.
 
 COPY extras/scripts/hipifly_setup.sh /tmp/extras/hipifly_setup.sh
 RUN  /tmp/extras/hipifly_setup.sh --hipifly-module ${HIPIFLY_MODULE} --rocm-version ${ROCM_VERSION} && \

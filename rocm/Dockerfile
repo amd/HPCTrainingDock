@@ -56,6 +56,26 @@ RUN  /tmp/rocm/rocm_setup.sh \
         --python-version ${PYTHON_VERSION} && \
      rm -f /tmp/rocm/rocm_setup.sh
 
+# Vendored cherry-picks on top of the SDK we just installed. Selective
+# by ROCM_VERSION (only 7.2.0 / 7.2.1 currently need a fix; every other
+# release is a no-op exit 43). The .patch files under
+# rocm/sources/rocm-patches/ are read at build time; rocm_patches.sh
+# probes both /tmp/rocm/sources/rocm-patches and the repo-relative
+# layout, so this COPY pair is sufficient. Layout matters: the .sh and
+# the sources/ dir must end up siblings under /tmp/rocm/ so the script
+# can find the bundle without --patch-source-dir.
+COPY rocm/scripts/rocm_patches.sh    /tmp/rocm/rocm_patches.sh
+COPY rocm/sources/rocm-patches       /tmp/rocm/sources/rocm-patches
+# rocm_patches.sh exit codes:
+#   0  -- vendored fix applied (currently only ROCm 7.2.0 / 7.2.1)
+#   43 -- NOOP_RC: this ROCm release has no vendored fix; treat as success
+#         so the image build does not fail for unaffected releases.
+#   *  -- real error
+RUN  /tmp/rocm/rocm_patches.sh --rocm-version ${ROCM_VERSION} ; rc=$? ; \
+     if [ "$rc" -ne 0 ] && [ "$rc" -ne 43 ]; then exit "$rc"; fi ; \
+     rm -f /tmp/rocm/rocm_patches.sh ; \
+     rm -rf /tmp/rocm/sources/rocm-patches
+
 COPY rocm/scripts/flang-new_setup.sh /tmp/rocm/flang-new_setup.sh
 RUN  /tmp/rocm/flang-new_setup.sh \
         --build-flang-new ${BUILD_FLANGNEW} \

@@ -59,6 +59,10 @@ Usage:
   python3 bare_system/inventory_packages.py --reasons   # also print reasons
   python3 bare_system/inventory_packages.py --versions  # version strings, not Y
   python3 bare_system/inventory_packages.py --install-provenance  # script@hash dirty/clean
+  python3 bare_system/inventory_packages.py --install-provenance --with-dates
+                                                                  # date instead of hash
+  python3 bare_system/inventory_packages.py --install-provenance --with-dates \\
+                                            --provenance-time      # date + HH:MM
 """
 import argparse
 import os
@@ -571,6 +575,70 @@ _BUILT_BY_LINE_RE = re.compile(
 )
 
 
+def _discover_git_repo():
+    """Walk up from this file to the first ancestor containing `.git`.
+
+    Returns an absolute path or None. Used as the default for
+    `--git-repo` so commit-date lookups work when the script is run
+    from a checkout (the common case in this project).
+    """
+    here = os.path.dirname(os.path.realpath(__file__))
+    cur = here
+    while True:
+        if os.path.isdir(os.path.join(cur, ".git")):
+            return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return None
+        cur = parent
+
+
+@lru_cache(maxsize=None)
+def _commit_date(repo, h, fmt):
+    """Return the commit date string for hash `h` in `repo`, formatted
+    by git's `--format=%<fmt>` (e.g. 'cs' -> 'YYYY-MM-DD'; 'ci' ->
+    'YYYY-MM-DD HH:MM:SS +TZ'). '?' on any failure (no repo, missing
+    hash, no git binary, timeout). Cached per (repo, hash, fmt).
+
+    Note: returns the raw git output trimmed to one line; the caller
+    is responsible for slicing 'ci' down to 'YYYY-MM-DD HH:MM' if it
+    wants minute-precision.
+    """
+    if not h or h == "unknown" or not repo:
+        return "?"
+    try:
+        out = subprocess.run(
+            ["git", "-C", repo, "show", "-s", f"--format=%{fmt}", h],
+            capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return "?"
+    if out.returncode != 0:
+        return "?"
+    line = (out.stdout or "").strip().splitlines()[0:1]
+    return line[0] if line else "?"
+
+
+def _commit_date_cell(repo, h, with_dates, time_too):
+    """Format the date payload that replaces the hash in a provenance cell.
+
+    Returns:
+      - h[:6] when with_dates=False (current behavior).
+      - 'YYYY-MM-DD' when with_dates=True, time_too=False.
+      - 'YYYY-MM-DD HH:MM' when with_dates=True, time_too=True.
+      - '?' if the hash is empty / 'unknown' / not found in `repo`.
+    """
+    if not with_dates:
+        return (h[:6] if h else "?")
+    if not h or h == "unknown":
+        return "?"
+    if time_too:
+        raw = _commit_date(repo, h, "ci")  # "YYYY-MM-DD HH:MM:SS +TZ"
+        if raw == "?":
+            return "?"
+        return raw[:16]  # "YYYY-MM-DD HH:MM"
+    return _commit_date(repo, h, "cs")  # "YYYY-MM-DD"
+
+
 def _discover_default_module_path():
     """Best-effort resolution of the Lmod tree containing rocmplus-* dirs.
 
@@ -668,17 +736,19 @@ def _scan_built_by(category_dir):
 _DIRTY_GLYPH = {"clean": "C", "dirty": "D", "unknown": "?"}
 
 
-def _format_provenance_cell(entries, pkg):
+def _format_provenance_cell(entries, pkg, repo=None,
+                            with_dates=False, time_too=False):
     """Render scan output for one cell. Empty list -> 'unknown'.
 
-    Each (script, hash, dirty) entry renders as `<hash6> <C|D|?>` when
-    the script's short name (after stripping a trailing `_setup.sh`)
-    matches the row's `pkg` (the common case), or `<short-script>@<hash6>
-    <C|D|?>` when a different script wrote the modulefile (e.g.
-    openblas's modulefile written by magma_setup.sh). Hash is truncated
-    to 6 chars (or '?' if empty). Multiple distinct entries are
-    slash-joined, mirroring the multi-version cell format under
-    --versions in the main matrix.
+    Each (script, hash, dirty) entry renders as `<payload> <C|D|?>` where
+    `<payload>` is `<hash6>` by default, or `YYYY-MM-DD` (resp.
+    `YYYY-MM-DD HH:MM`) when --with-dates is on (resp. plus
+    --provenance-time). The writer-script prefix `<short-script>@` is
+    shown only when the script's short name (after stripping a trailing
+    `_setup.sh`) differs from the row's `pkg` (e.g. magma_setup.sh
+    writes openblas's modulefile -> 'magma@<payload> C'). Multiple
+    distinct entries are slash-joined, mirroring the multi-version
+    cell format under --versions in the main matrix.
     """
     if not entries:
         return "unknown"
@@ -687,19 +757,24 @@ def _format_provenance_cell(entries, pkg):
         s = script
         if s.endswith("_setup.sh"):
             s = s[:-len("_setup.sh")]
-        h_short = (h[:6] if h else "?")
+        payload = _commit_date_cell(repo, h, with_dates, time_too)
         d_short = _DIRTY_GLYPH.get(dirty, dirty)
         if s == pkg:
-            parts.append(f"{h_short} {d_short}")
+            parts.append(f"{payload} {d_short}")
         else:
-            parts.append(f"{s}@{h_short} {d_short}")
+            parts.append(f"{s}@{payload} {d_short}")
     return " / ".join(parts)
 
 
-def collect_provenance(module_path, versions):
+def collect_provenance(module_path, versions, repo=None,
+                       with_dates=False, time_too=False):
     """Return {(version, pkg): cell_string} for every (version, pkg) where
     the module-category dir exists. Cells with no category dir are
-    omitted; the renderer fills those with '-'."""
+    omitted; the renderer fills those with '-'.
+
+    `repo`, `with_dates`, `time_too` are threaded into the cell
+    formatter; see _format_provenance_cell.
+    """
     out = {}
     for v in versions:
         for pkg, _pres, _ver in PKG_LIST:
@@ -707,7 +782,9 @@ def collect_provenance(module_path, versions):
             if cat is None:
                 continue
             entries = _scan_built_by(cat)
-            out[(v, pkg)] = _format_provenance_cell(entries, pkg)
+            out[(v, pkg)] = _format_provenance_cell(
+                entries, pkg, repo=repo,
+                with_dates=with_dates, time_too=time_too)
     return out
 
 
@@ -810,7 +887,8 @@ def main():
              "from the row's package name (e.g. magma_setup writes the "
              "openblas modulefile -> 'magma@<hash6> C'). 'unknown' = "
              "installed but no Built-by line; '-' = no modulefile "
-             "category dir for that (version, pkg).")
+             "category dir for that (version, pkg). Combine with "
+             "--with-dates to swap <hash6> for YYYY-MM-DD.")
     ap.add_argument("--module-path", default=None, metavar="PATH",
         help="filesystem root containing rocmplus-<version>/<category>/ "
              "modulefiles (same role as main_setup.sh --top-module-path). "
@@ -818,7 +896,31 @@ def main():
              "`module --terse avail` (sibling of the 'base' module tree); "
              "fallbacks: $MODULEPATH, then "
              "/shared/apps/modules/ubuntu/lmodfiles.")
+    ap.add_argument("--with-dates", action="store_true",
+        help="under --install-provenance, REPLACE the 6-char hash in each "
+             "cell with the commit date (YYYY-MM-DD) from the git repo, "
+             "e.g. '2026-04-19 C' instead of '838906 C'. Empty / unknown "
+             "hashes and lookup failures render as '?'.")
+    ap.add_argument("--provenance-time", action="store_true",
+        help="implies --with-dates; show 'YYYY-MM-DD HH:MM' instead of "
+             "just the date (useful when several rebuilds happened on the "
+             "same day).")
+    ap.add_argument("--git-repo", default=None, metavar="PATH",
+        help="git checkout to query for commit dates (used by "
+             "--with-dates). Default: walk up from this script's path to "
+             "the first ancestor containing .git.")
     args = ap.parse_args()
+
+    # --provenance-time implies --with-dates.
+    if args.provenance_time:
+        args.with_dates = True
+    # --with-dates / --provenance-time / --git-repo only meaningful with
+    # --install-provenance; flag mismatch early so the operator sees the
+    # error before any output is produced.
+    if (args.with_dates or args.git_repo) and not args.install_provenance:
+        print("ERROR: --with-dates / --provenance-time / --git-repo "
+              "require --install-provenance.", file=sys.stderr)
+        return 1
 
     # Markdown auto-chunk when versions are on (cells get wider, so the
     # full 11-version 7.x table no longer fits glow's default width).
@@ -848,21 +950,51 @@ def main():
             print("       Pass --module-path PATH explicitly. Tried: "
                   f"{module_path or '<none>'}", file=sys.stderr)
             return 1
-        scan_cache = collect_provenance(module_path, all_versions)
-        # Auto-chunk markdown like the main matrix when per_table is unset.
-        prov_per_table = args.per_table if args.per_table else 5
+        # Resolve git repo for date lookups (only required if --with-dates).
+        git_repo = args.git_repo or _discover_git_repo()
+        if args.with_dates and (not git_repo or not os.path.isdir(
+                os.path.join(git_repo, ".git"))):
+            print("ERROR: --with-dates needs a git checkout to look up "
+                  "commit dates. Pass --git-repo PATH explicitly. Tried: "
+                  f"{git_repo or '<none>'}", file=sys.stderr)
+            return 1
+        scan_cache = collect_provenance(
+            module_path, all_versions,
+            repo=git_repo if args.with_dates else None,
+            with_dates=args.with_dates,
+            time_too=args.provenance_time)
+        # Auto-chunk markdown. Cells widen with date+time, so step
+        # --per-table down by one when --provenance-time is on.
+        if args.per_table:
+            prov_per_table = args.per_table
+        elif args.provenance_time:
+            prov_per_table = 4
+        else:
+            prov_per_table = 5
+        # Build a one-line description of the cell payload so the legend
+        # matches the actual output mode.
+        if args.provenance_time:
+            payload_desc = "YYYY-MM-DD HH:MM"
+        elif args.with_dates:
+            payload_desc = "YYYY-MM-DD"
+        else:
+            payload_desc = "<hash6>"
         if args.text:
             print(f"Module path: {module_path}")
             print(f"Install roots (column source): {', '.join(args.roots)}")
+            if args.with_dates:
+                print(f"Git repo (commit dates): {git_repo}")
             print(f"Generated: "
                   f"{datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')}")
             print("Provenance: parsed from whatis(\"Built by: "
                   "<script>@<hash> (<dirty>)\") lines in modulefiles.")
-            print("Cells:  '<hash6> <C|D>'  (writer-script prefix shown "
-                  "only when it differs from the row package, e.g. "
-                  "'magma@<hash6> C' on the openblas row).  "
+            print(f"Cells:  '{payload_desc} <C|D>'  (writer-script prefix "
+                  "shown only when it differs from the row package, e.g. "
+                  f"'magma@{payload_desc} C' on the openblas row).  "
                   "'unknown' = no Built-by line  "
-                  "'-' = no module category dir")
+                  "'-' = no module category dir"
+                  + ("  '?' = empty / unresolved hash" if args.with_dates
+                     else ""))
             print()
             if v7:
                 render_provenance_text("ROCm 7.x.x + therock + afar",
@@ -874,16 +1006,21 @@ def main():
             print(f"Module path: `{module_path}`  ")
             print("Install roots (column source): "
                   f"{', '.join('`' + r + '`' for r in args.roots)}  ")
+            if args.with_dates:
+                print(f"Git repo (commit dates): `{git_repo}`  ")
             print(f"Generated: "
                   f"{datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
+            unresolved_hint = (
+                " **`?`** = empty / unresolved hash (no commit date "
+                "available in this checkout)." if args.with_dates else "")
             print("Provenance is parsed from `whatis(\"Built by: "
                   "<script>@<hash> (<dirty>)\")` lines in each category's "
-                  "modulefile. Cells show **`<hash6> <C|D>`**; the "
-                  "writer-script prefix is shown only when it differs "
-                  "from the row package (e.g. `magma@<hash6> C` on the "
-                  "openblas row). **`unknown`** = modulefile lacks a "
-                  "`Built by:` line; **`-`** = no module category dir for "
-                  "that (version, pkg).\n")
+                  f"modulefile. Cells show **`{payload_desc} <C|D>`**; "
+                  "the writer-script prefix is shown only when it differs "
+                  f"from the row package (e.g. `magma@{payload_desc} C` "
+                  "on the openblas row). **`unknown`** = modulefile lacks "
+                  "a `Built by:` line; **`-`** = no module category dir "
+                  "for that (version, pkg)." + unresolved_hint + "\n")
             if v7:
                 render_provenance_md("ROCm 7.x.x + therock + afar", v7,
                                      module_path, scan_cache,
