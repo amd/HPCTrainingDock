@@ -243,23 +243,6 @@ if [ -d "${INSTALL_PATH}" ]; then
    exit ${NOOP_RC}
 fi
 
-# ── EXIT trap: fail-cleanup of partial install + modulefile ──────────
-_elpa_on_exit() {
-   local rc=$?
-   if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
-      echo "[elpa fail-cleanup] rc=${rc}: removing partial install + modulefile"
-      ${SUDO:-sudo} rm -rf "${INSTALL_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${ELPA_VERSION}.lua"
-   elif [ ${rc} -ne 0 ]; then
-      echo "[elpa fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
-   fi
-   if [ -n "${ELPA_BUILD_DIR:-}" ] && [ -d "${ELPA_BUILD_DIR}" ]; then
-      ${SUDO:-sudo} rm -rf "${ELPA_BUILD_DIR}"
-   fi
-   return ${rc}
-}
-trap _elpa_on_exit EXIT
-
 echo ""
 echo "==================================="
 echo "Starting ELPA Install with"
@@ -400,7 +383,6 @@ else
       --prefix=${INSTALL_PATH} \
       SCALAPACK_LDFLAGS="-L${PETSC_PATH}/lib -lscalapack -lflapack -lfblas -lpthread -lm -Wl,-rpath,${PETSC_PATH}/lib" \
       SCALAPACK_FCFLAGS="-L${PETSC_PATH}/lib -lscalapack -lflapack -lfblas -lpthread -lm -I${PETSC_PATH}/include" \
-#      LDFLAGS="-L${ROCM_PATH}/lib -L${PETSC_PATH}/lib -L/tmp -lstdc++" \
       LDFLAGS="-L${ROCM_PATH}/lib -L${PETSC_PATH}/lib -lstdc++" \
       CPPFLAGS="-I${ROCM_PATH}/include -I${ROCM_PATH}/include/rocsolver" \
       CFLAGS="-g -O3 -march=native ${ELPA_GCC_WARNINGS}" \
@@ -410,7 +392,7 @@ else
       FC=mpifort \
       CC=mpicc \
       CXX=mpicxx \
-      --disable-avx512 \
+      --enable-avx512=yes  \
       --with-rocsolver \
       --with-mpi=yes \
       --enable-c-tests=no \
