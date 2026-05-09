@@ -62,7 +62,6 @@ fi
 : ${BUILD_HYPRE:="1"}
 : ${BUILD_SCOREP:="1"}
 : ${BUILD_KOKKOS:="1"}
-: ${BUILD_HIPFORT:="1"}
 : ${BUILD_HDF5:="1"}
 : ${BUILD_NETCDF:="1"}
 : ${BUILD_FFTW:="1"}
@@ -160,7 +159,7 @@ usage()
    echo "  --quick-installs [0 or 1]:  skip packages whose wall >= 20 min (measured from job 8065 sweep): pytorch (91m), tensorflow (70m), jax (34m, when policy gate allows). Also skips ftorch (transitive: needs pytorch) and julia (dormant: no install wired). Threshold raised from 15 -> 20 min after job 8065 audit moved petsc (17m) and scorep (17m) under the cutoff. Default $QUICK_INSTALLS"
    echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf the versioned subdir under \${TOP_INSTALL_PATH} (the version itself lives in the leaf script). Default $REPLACE_EXISTING"
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
-   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipfort, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs)."
+   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs)."
    echo "  --rocm-rc-prefix [ FAMILY ]:  release-candidate family name (e.g. 'therock', 'afar'). Auto-detected from \${ROCM_PATH} basename for rocm-{therock,afar}-* trees. Empty for regular releases. When non-empty, install/module dirs become rocmplus-\${FAMILY}-\${ROCM_VERSION}/ instead of rocmplus-\${ROCM_VERSION}/. Default: auto-detected (empty for regular releases)."
    echo "  --help: prints this message"
    exit 1
@@ -380,7 +379,9 @@ declare -A DESELECTED_BY=()
 #   ftorch        0:49        <1m         <1m          SKIP  (transitive: preflight
 #                                                              requires pytorch which
 #                                                              is itself SKIP-ed)
-#   hipfort       0:23         0:24        n/a          BUILD (< 20 min)
+#   hipfort     bundled     bundled      bundled      SKIP  (rocm-bundled since 6.3+;
+#                                                              build-from-source removed
+#                                                              from this orchestrator)
 #   flang-new   skip-policy  <2m (untar) <2m            BUILD (< 20 min)
 #   julia         dormant     dormant      dormant      SKIP  (BUILD_JULIA exists but
 #                                                              there is no `run_and_log
@@ -456,7 +457,6 @@ declare -A PKG_FLAG=(
    [kokkos]=BUILD_KOKKOS
    [miniconda3]=BUILD_MINICONDA3
    [miniforge3]=BUILD_MINIFORGE3
-   [hipfort]=BUILD_HIPFORT
    [hipifly]=BUILD_HIPIFLY
    [hdf5]=BUILD_HDF5
    [netcdf]=BUILD_NETCDF
@@ -826,7 +826,7 @@ REPLACE_OPTS="--replace ${REPLACE_EXISTING} --keep-failed-installs ${KEEP_FAILED
 # Usage: $(path_args <install_subpath> <module_category/package>)
 # Used by the legacy scripts that have NOT been migrated to the
 # version-agnostic --install-path-as-parent pattern (flang-new, openmpi,
-# mvapich, rocprof-sys, rocprof-compute, hip-python, hipfort, hipifly,
+# mvapich, rocprof-sys, rocprof-compute, hip-python, hipifly,
 # tensorflow, ftorch). For these, --install-path is treated as a full
 # leaf dir (no version appended by the leaf script) -- effectively the
 # legacy semantic predating the new --install-path / --install-path-no-
@@ -895,6 +895,13 @@ if [ "${SKIP_ROCM_INSTALL}" == 0 ]; then
    run_and_log rocm-rocprof-sys rocm/scripts/rocm_rocprof-sys_setup.sh --rocm-version ${ROCM_VERSION}
 
    run_and_log rocm-rocprof-compute rocm/scripts/rocm_rocprof-compute_setup.sh --rocm-version ${ROCM_VERSION}
+
+   # Vendored cherry-picks layered on top of the SDK we just installed.
+   # The script is selective by ROCM_VERSION (currently only 7.2.0 / 7.2.1
+   # need a fix; everything else exits NOOP_RC=43 → SKIPPED(no-op) in the
+   # per-package summary). See rocm/scripts/rocm_patches.sh and
+   # rocm/sources/rocm-patches/README.md.
+   run_and_log rocm-patches rocm/scripts/rocm_patches.sh --rocm-version ${ROCM_VERSION}
 else
    source ~/.bashrc
 fi
@@ -1002,7 +1009,7 @@ run_and_log hip-python extras/scripts/hip-python_setup.sh ${COMMON_OPTIONS} --bu
 
 # tensorflow / jax / pytorch / ftorch are the long-pole builds (each
 # 30-90 min on a cold workspace) and have been moved to the END of the
-# sweep so the short builds (magma, kokkos, hipfort, hipifly, hdf5,
+# sweep so the short builds (magma, kokkos, hipifly, hdf5,
 # netcdf, fftw, petsc, hypre) finish first and surface fast in the
 # logs. See the block after `hypre` below for the reordered ML group.
 
@@ -1061,8 +1068,13 @@ run_and_log miniconda3 extras/scripts/miniconda3_setup.sh --rocm-version ${ROCM_
 run_and_log miniforge3 extras/scripts/miniforge3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniforge3 ${BUILD_MINIFORGE3} \
    $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH} --module-path ${TOP_MODULE_PATH}/LinuxPlus/miniforge3")
 
-run_and_log hipfort extras/scripts/hipfort_setup.sh ${COMMON_OPTIONS} --build-hipfort ${BUILD_HIPFORT} ${REPLACE_OPTS} \
-   $(path_args hipfort rocmplus-${ROCMPLUS_SUFFIX}/hipfort_from_source)
+# hipfort: build-from-source intentionally removed. ROCm 6.3+ ships
+# hipfort natively (see <pkg>.BUNDLED markers / rocm/<v> module). The
+# legacy run_and_log call previously invoked extras/scripts/hipfort_setup.sh
+# under rocmplus-<v>/hipfort_from_source which is no longer needed and
+# was producing no-op skip lines on every sweep. The setup script and
+# the BUNDLED-marker writer remain in extras/scripts/hipfort_setup.sh
+# for any operator who wants to invoke it manually for an older SDK.
 
 run_and_log hipifly extras/scripts/hipifly_setup.sh --rocm-version ${ROCM_VERSION} --build-hipifly ${BUILD_HIPIFLY} --hipifly-module ${HIPIFLY_MODULE} ${REPLACE_OPTS} \
    $(path_args hipifly rocmplus-${ROCMPLUS_SUFFIX}/hipifly)

@@ -1,0 +1,217 @@
+From 1a3564a51a3a53f033e68c28e53fc78510c1e71c Mon Sep 17 00:00:00 2001
+From: habajpai-amd <habajpai@amd.com>
+Date: Mon, 24 Nov 2025 19:51:27 +0530
+Subject: [PATCH] [rocprof-sys] Fix fork() handling for GPU profiling and AMD
+ SMI (#1930)
+
+- Fix fork() handling for GPU profiling and AMD SMI
+- Add hipMallocConcurrency test for CI with GPU
+---
+ .../lib/rocprof-sys/library/amd_smi.cpp       | 29 +++++++++++++++++++
+ .../lib/rocprof-sys/library/amd_smi.hpp       | 17 +++++++++++
+ .../library/components/exit_gotcha.cpp        |  2 +-
+ .../library/components/fork_gotcha.cpp        | 10 +++++++
+ .../lib/rocprof-sys/library/sampling.cpp      | 14 +++++++++
+ .../lib/rocprof-sys/library/sampling.hpp      |  6 ++++
+ .../rocprof-sys/library/thread_deleter.cpp    |  6 ++--
+ 7 files changed, 81 insertions(+), 3 deletions(-)
+
+diff --git a/projects/rocprofiler-systems/source/lib/rocprof-sys/library/amd_smi.cpp b/projects/rocprofiler-systems/source/lib/rocprof-sys/library/amd_smi.cpp
+index 5a7b1edcc3..42b9d571ec 100644
+--- a/projects/rocprofiler-systems/source/lib/rocprof-sys/library/amd_smi.cpp
++++ b/projects/rocprofiler-systems/source/lib/rocprof-sys/library/amd_smi.cpp
+@@ -1292,6 +1292,35 @@ device_count()
+ {
+     return gpu::device_count();
+ }
++
++void
++postfork_child_cleanup()
++{
++    // In child process, disable AMD SMI to prevent shutdown errors
++    ROCPROFSYS_VERBOSE_F(2, "Disabling AMD SMI in child process after fork...\n");
++
++    // Set to Finalized to prevent any sampling attempts (though is_child_process() check
++    // in sample() already handles this)
++    get_state().store(State::Finalized);
++
++    // Mark as not initialized so shutdown won't try to cleanup AMD SMI library
++    is_initialized() = false;
++
++    // Clear device list to prevent any GPU operations
++    data::device_list.clear();
++}
++
++void
++postfork_parent_reinit()
++{
++    // In parent process, AMD SMI device handles may be corrupted after fork
++    // Reinitialize AMD SMI to get fresh handles
++    ROCPROFSYS_VERBOSE_F(2, "Reinitializing AMD SMI in parent process after fork...\n");
++
++    // Shutdown and reinitialize to get fresh device handles
++    shutdown();
++    setup();
++}
+ }  // namespace amd_smi
+ }  // namespace rocprofsys
+ 
+diff --git a/projects/rocprofiler-systems/source/lib/rocprof-sys/library/amd_smi.hpp b/projects/rocprofiler-systems/source/lib/rocprof-sys/library/amd_smi.hpp
+index 826b9301ed..044b6ae8a3 100644
+--- a/projects/rocprofiler-systems/source/lib/rocprof-sys/library/amd_smi.hpp
++++ b/projects/rocprofiler-systems/source/lib/rocprof-sys/library/amd_smi.hpp
+@@ -71,6 +71,14 @@ post_process();
+ 
+ void set_state(State);
+ 
++// Fork handling - cleanup AMD SMI state in child process
++void
++postfork_child_cleanup();
++
++// Fork handling - reinitialize AMD SMI state in parent process
++void
++postfork_parent_reinit();
++
+ struct settings
+ {
+     bool busy          = true;
+@@ -133,6 +141,7 @@ private:
+     friend void rocprofsys::amd_smi::sample();
+     friend void rocprofsys::amd_smi::shutdown();
+     friend void rocprofsys::amd_smi::post_process();
++    friend void rocprofsys::amd_smi::postfork_child_cleanup();
+ 
+     static size_t                        device_count;
+     static std::set<uint32_t>            device_list;
+@@ -168,6 +177,14 @@ post_process()
+ inline void
+ set_state(State)
+ {}
++
++inline void
++postfork_child_cleanup()
++{}
++
++inline void
++postfork_parent_reinit()
++{}
+ #endif
+ }  // namespace amd_smi
+ }  // namespace rocprofsys
+diff --git a/projects/rocprofiler-systems/source/lib/rocprof-sys/library/components/exit_gotcha.cpp b/projects/rocprofiler-systems/source/lib/rocprof-sys/library/components/exit_gotcha.cpp
+index 3cf4730a10..656697d73b 100644
+--- a/projects/rocprofiler-systems/source/lib/rocprof-sys/library/components/exit_gotcha.cpp
++++ b/projects/rocprofiler-systems/source/lib/rocprof-sys/library/components/exit_gotcha.cpp
+@@ -60,7 +60,7 @@ invoke_exit_gotcha(const exit_gotcha::gotcha_data& _data, FuncT _func, Args... _
+ {
+     threading::clear_callbacks();
+ 
+-    if(get_state() < State::Finalized)
++    if(get_state() < State::Finalized && !is_child_process())
+     {
+         if(config::settings_are_configured())
+         {
+diff --git a/projects/rocprofiler-systems/source/lib/rocprof-sys/library/components/fork_gotcha.cpp b/projects/rocprofiler-systems/source/lib/rocprof-sys/library/components/fork_gotcha.cpp
+index af2152b921..d77fd6de8b 100644
+--- a/projects/rocprofiler-systems/source/lib/rocprof-sys/library/components/fork_gotcha.cpp
++++ b/projects/rocprofiler-systems/source/lib/rocprof-sys/library/components/fork_gotcha.cpp
+@@ -97,6 +97,11 @@ postfork_parent()
+ {
+     if(postfork_parent_lock) return;
+ 
++    // Reinitialize AMD SMI in parent process to get fresh device handles before
++    // unblocking the shutdown/setup transition. AMD SMI device handles may be corrupted
++    // after fork.
++    if(config::get_use_sampling()) sampling::postfork_parent_reinit();
++
+     rocprofsys::categories::enable_categories(config::get_enabled_categories());
+ 
+     if(config::get_use_sampling()) sampling::unblock_samples();
+@@ -115,6 +120,11 @@ postfork_child()
+         << "Error! child process " << process::get_id()
+         << " believes it is the root process " << get_root_process_id() << "\n";
+ 
++    set_state(State::Finalized);
++
++    // Clean up AMD SMI in child process before other shutdowns
++    if(config::get_use_sampling()) sampling::postfork_child_cleanup();
++
+     settings::enabled() = false;
+     settings::verbose() = -127;
+     settings::debug()   = false;
+diff --git a/projects/rocprofiler-systems/source/lib/rocprof-sys/library/sampling.cpp b/projects/rocprofiler-systems/source/lib/rocprof-sys/library/sampling.cpp
+index 1c1be80192..8b98777b7e 100644
+--- a/projects/rocprofiler-systems/source/lib/rocprof-sys/library/sampling.cpp
++++ b/projects/rocprofiler-systems/source/lib/rocprof-sys/library/sampling.cpp
+@@ -32,6 +32,7 @@
+ #include "core/state.hpp"
+ #include "core/trace_cache/cache_manager.hpp"
+ #include "core/utility.hpp"
++#include "library/amd_smi.hpp"
+ #include "library/components/backtrace.hpp"
+ #include "library/components/backtrace_metrics.hpp"
+ #include "library/components/backtrace_timestamp.hpp"
+@@ -1835,6 +1836,19 @@ struct sampling_initialization
+     }
+ };
+ }  // namespace
++void
++postfork_parent_reinit()
++{
++    if(config::get_use_process_sampling() && config::get_use_amd_smi())
++        amd_smi::postfork_parent_reinit();
++}
++
++void
++postfork_child_cleanup()
++{
++    if(config::get_use_process_sampling() && config::get_use_amd_smi())
++        amd_smi::postfork_child_cleanup();
++}
+ }  // namespace sampling
+ }  // namespace rocprofsys
+ 
+diff --git a/projects/rocprofiler-systems/source/lib/rocprof-sys/library/sampling.hpp b/projects/rocprofiler-systems/source/lib/rocprof-sys/library/sampling.hpp
+index a3bd3fedd9..387d778cc0 100644
+--- a/projects/rocprofiler-systems/source/lib/rocprof-sys/library/sampling.hpp
++++ b/projects/rocprofiler-systems/source/lib/rocprof-sys/library/sampling.hpp
+@@ -65,5 +65,11 @@ void unblock_signals(std::set<int> = {});
+ 
+ void
+ post_process();
++
++void
++postfork_parent_reinit();
++
++void
++postfork_child_cleanup();
+ }  // namespace sampling
+ }  // namespace rocprofsys
+diff --git a/projects/rocprofiler-systems/source/lib/rocprof-sys/library/thread_deleter.cpp b/projects/rocprofiler-systems/source/lib/rocprof-sys/library/thread_deleter.cpp
+index ffc6357a10..604c9f5c65 100644
+--- a/projects/rocprofiler-systems/source/lib/rocprof-sys/library/thread_deleter.cpp
++++ b/projects/rocprofiler-systems/source/lib/rocprof-sys/library/thread_deleter.cpp
+@@ -24,6 +24,7 @@
+ #include "api.hpp"
+ #include "core/utility.hpp"
+ #include "library/components/pthread_create_gotcha.hpp"
++#include "library/runtime.hpp"
+ #include "library/thread_info.hpp"
+ 
+ #include <timemory/backends/threading.hpp>
+@@ -44,9 +45,10 @@ thread_deleter<void>::operator()() const
+     {
+         auto _tid = _info->index_data->sequent_value;
+ 
+-        component::pthread_create_gotcha::shutdown(_tid);
++        if(!is_child_process()) component::pthread_create_gotcha::shutdown(_tid);
+         set_thread_state(ThreadState::Completed);
+-        if(get_state() < State::Finalized && _tid == 0) rocprofsys_finalize_hidden();
++        if(get_state() < State::Finalized && !is_child_process() && _tid == 0)
++            rocprofsys_finalize_hidden();
+     }
+     else
+     {
+-- 
+2.34.1
+
