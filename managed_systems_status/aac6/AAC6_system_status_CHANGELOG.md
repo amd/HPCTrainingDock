@@ -7,6 +7,10 @@ Newest entries first. Each entry summarises user-visible changes since the previ
 - ROCm versions:
     - afar-7.0.5
 
+- Fixing CPX mode for prolog and for fixed configuration
+- Adding patching for ROCm with fixes for rocprof-sys failures
+- Adding --install-provenance with --with-dates
+
 [Full snapshot](archive/AAC6_system_status_2026-05-07.md)
 ## 2026-05-06
 
