@@ -17,6 +17,17 @@
 #                            file written by rocm_setup.sh so
 #                            LD_LIBRARY_PATH picks the patched .so up
 #                            ahead of the SDK's own copy.
+#   * ROCm 7.1.0 / 7.1.1  -- five-patch stack on rocprof-sys 1.2.x
+#                            (Bug A + Bug B fork-handling + B'/B''
+#                            v1.3.0-shaped fixes carried back +
+#                            Bug C eager-BFD-preload skip).
+#                            Build is currently driven by the
+#                            standalone apply_and_build.sh in the
+#                            /opt/rocm-patches-${ROCM_VERSION}/ prefix
+#                            (not yet wired into this script's in-tree
+#                            builder). Use --module-file-only to
+#                            backfill the modulefile entry once the
+#                            standalone build has produced the .so.
 #
 # The patch text is vendored under rocm/sources/rocm-patches/ and is the
 # *only* delta this script applies; everything else (clone of the
@@ -38,6 +49,17 @@
 # Idempotent: re-running with the same ROCM_VERSION while the patched
 # library is already in place + the module file already has the overlay
 # entry is a fast check-and-exit-0.
+#
+# Backfill mode (--module-file-only):
+#   Skips the build entirely and only applies the modulefile overlay
+#   edit. Use this on clusters where rocm_setup.sh wrote the
+#   rocm/X.Y.Z.lua modulefile BEFORE rocm_patches.sh existed, the
+#   patched .so was already built by hand and is in place, but the
+#   modulefile is still missing its `prepend_path("LD_LIBRARY_PATH",
+#   "${INSTALL_PREFIX}/lib")` line. Idempotent: detects ANY existing
+#   reference to `rocm-patches-${ROCM_VERSION}` in the modulefile
+#   (whether written by this script or by a human admin) and exits
+#   without touching the file.
 
 LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
 LEAF_DIR="$(dirname "${LEAF_SCRIPT_PATH}")"
@@ -48,6 +70,7 @@ REPLACE=0
 MODULE_PATH=/etc/lmod/modules/ROCm
 INSTALL_PREFIX=""
 PATCH_SOURCE_DIR=""
+MODULE_FILE_ONLY=0
 NOOP_RC=43
 
 # ── distro / sudo plumbing (matches sibling *_setup.sh) ─────────────
@@ -68,6 +91,12 @@ usage() {
    echo "  --module-path     [ MODULE_PATH ]     default ${MODULE_PATH}"
    echo "  --install-prefix  [ DIR ]             default /opt/rocm-patches-\${ROCM_VERSION}"
    echo "  --patch-source-dir [ DIR ]            auto-detected; vendored .patch tree"
+   echo "  --module-file-only                    skip build; just apply the modulefile"
+   echo "                                        LD_LIBRARY_PATH overlay edit (idempotent)."
+   echo "                                        Use this to backfill the overlay entry on"
+   echo "                                        a cluster where the patched .so is already"
+   echo "                                        on disk but the rocm/X.Y.Z.lua modulefile"
+   echo "                                        was installed before this script existed."
    echo "  --help"
    exit 1
 }
@@ -91,6 +120,7 @@ while [[ $# -gt 0 ]]; do
       "--module-path")       shift; MODULE_PATH=${1};        reset-last ;;
       "--install-prefix")    shift; INSTALL_PREFIX=${1};     reset-last ;;
       "--patch-source-dir")  shift; PATCH_SOURCE_DIR=${1};   reset-last ;;
+      "--module-file-only")         MODULE_FILE_ONLY=1;      reset-last ;;
       "--*")                 send-error "Unsupported argument at position $((${n}+1)) :: ${1}" ;;
       *)                     last ${1} ;;
    esac
@@ -113,10 +143,6 @@ rocm_version_to_patches() {
 }
 
 PATCH_BUNDLES="$(rocm_version_to_patches "${ROCM_VERSION}")"
-if [ -z "${PATCH_BUNDLES}" ]; then
-   echo "[rocm_patches] no vendored patches needed for ROCm ${ROCM_VERSION} -- skipping (no-op)"
-   exit ${NOOP_RC}
-fi
 
 # ── locate the vendored .patch tree ─────────────────────────────────
 # Two layouts to support:
@@ -124,7 +150,8 @@ fi
 #                      <repo>/rocm/sources/rocm-patches/
 #   (b) Docker layout: /tmp/rocm/rocm_patches.sh +
 #                      /tmp/rocm/sources/rocm-patches/  (we COPY both)
-# If --patch-source-dir was passed, we trust it.
+# If --patch-source-dir was passed, we trust it. Empty in
+# --module-file-only mode is fine (we don't read patches).
 if [ -z "${PATCH_SOURCE_DIR}" ]; then
    for cand in \
       "${LEAF_DIR}/../sources/rocm-patches" \
@@ -135,9 +162,11 @@ if [ -z "${PATCH_SOURCE_DIR}" ]; then
       fi
    done
 fi
-[ -d "${PATCH_SOURCE_DIR}" ] || send-error "patch source dir not found (looked next to ${LEAF_DIR})"
 
 # ── derived paths ───────────────────────────────────────────────────
+# Set unconditionally so --module-file-only mode (which never reads
+# PATCH_BUNDLES or PATCH_SOURCE_DIR) can still resolve INSTALL_PREFIX
+# and MODULE_FILE for the modulefile edit.
 [ -n "${INSTALL_PREFIX}" ] || INSTALL_PREFIX="/opt/rocm-patches-${ROCM_VERSION}"
 ROCM_PATH="/opt/rocm-${ROCM_VERSION}"
 MODULE_FILE="${MODULE_PATH}/rocm/${ROCM_VERSION}.lua"
@@ -154,16 +183,35 @@ echo "  MODULE_FILE       : $MODULE_FILE"
 echo "  PATCH_SOURCE_DIR  : $PATCH_SOURCE_DIR"
 echo "  PATCH_BUNDLES     : $PATCH_BUNDLES"
 echo "  REPLACE           : $REPLACE"
+echo "  MODULE_FILE_ONLY  : $MODULE_FILE_ONLY"
 echo "=================================="
 echo ""
 
 # ── prerequisite: rocm_setup.sh actually installed something ────────
 # If /opt/rocm-${ROCM_VERSION} doesn't exist we have nothing to overlay
 # (rocm_setup.sh either was deselected or failed). Bail cleanly so the
-# patch step doesn't masquerade as a real failure.
-if [ ! -d "${ROCM_PATH}" ]; then
+# patch step doesn't masquerade as a real failure. Skipped under
+# --module-file-only (backfill mode does not touch the SDK install).
+if [ "${MODULE_FILE_ONLY}" -eq 0 ] && [ ! -d "${ROCM_PATH}" ]; then
    echo "[rocm_patches] ${ROCM_PATH} does not exist -- rocm_setup.sh must run first; skipping (no-op)"
    exit ${NOOP_RC}
+fi
+
+# ── prerequisite: in build mode, we need a registered bundle and a
+#    patch source tree.  In --module-file-only mode, neither is
+#    required (we are just editing the modulefile to point at an
+#    existing overlay that was built out-of-tree, e.g. via the
+#    standalone apply_and_build.sh on the rocm-patches-X.Y.Z prefix
+#    for ROCm releases that the in-tree builder does not yet handle
+#    -- currently 7.1.0 and 7.1.1, where the rocprof-sys 1.2.1 source
+#    line needs all five vendored patches and the build is driven by
+#    rocm-patches-7.1.{0,1}/apply_and_build.sh).
+if [ "${MODULE_FILE_ONLY}" -eq 0 ]; then
+   if [ -z "${PATCH_BUNDLES}" ]; then
+      echo "[rocm_patches] no vendored patches needed for ROCm ${ROCM_VERSION} -- skipping (no-op)"
+      exit ${NOOP_RC}
+   fi
+   [ -d "${PATCH_SOURCE_DIR}" ] || send-error "patch source dir not found (looked next to ${LEAF_DIR})"
 fi
 
 # ─────────────────────────────────────────────────────────────────────
@@ -619,6 +667,18 @@ EOF
 # resolved path string, so the overlay line MUST be inserted AFTER the
 # original `prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))`.
 # We insert it immediately after that line, idempotently.
+#
+# Idempotency strategy:
+#
+# We detect a previous overlay edit by looking for ANY reference to
+# `rocm-patches-${ROCM_VERSION}` in the modulefile -- not just our
+# current ${INSTALL_PREFIX}/lib path. This catches:
+#   * a prior run of this same script (same INSTALL_PREFIX) -- skip;
+#   * a hand-applied edit by an admin (different absolute path
+#     prefix, e.g. /shared/apps/.../opt/rocm-patches-X.Y.Z/lib) --
+#     warn that the path differs from this run's INSTALL_PREFIX/lib
+#     but DO NOT add a second line. The hand-applied entry is the
+#     source of truth on that cluster; we don't second-guess it.
 # ─────────────────────────────────────────────────────────────────────
 patch_module_file() {
    if [ ! -f "${MODULE_FILE}" ]; then
@@ -630,8 +690,30 @@ patch_module_file() {
    fi
 
    local overlay="${INSTALL_PREFIX}/lib"
-   if grep -Fq "${overlay}" "${MODULE_FILE}"; then
-      echo "[rocm_patches] module file already has overlay entry; nothing to do"
+   local marker="rocm-patches-${ROCM_VERSION}"
+
+   # Pattern-based idempotency: any rocm-patches-${ROCM_VERSION} string
+   # in the modulefile means somebody (this script on a previous run,
+   # or a human admin) has already wired the overlay. Don't add a
+   # second entry under any circumstances.
+   if grep -Fq "${marker}" "${MODULE_FILE}"; then
+      # Try to extract the existing overlay path so we can warn on
+      # mismatch with this run's INSTALL_PREFIX/lib.
+      local existing
+      existing="$(grep -oE '"[^"]*'"${marker}"'[^"]*/lib"' "${MODULE_FILE}" \
+                   | head -1 | tr -d '"')"
+      if [ -n "${existing}" ] && [ "${existing}" != "${overlay}" ]; then
+         echo "[rocm_patches] module file already has an overlay entry, but it"
+         echo "[rocm_patches]   points at:        ${existing}"
+         echo "[rocm_patches]   this run targets: ${overlay}"
+         echo "[rocm_patches] keeping the existing entry (likely an admin's hand"
+         echo "[rocm_patches] edit on a cluster with a non-default install layout)."
+         echo "[rocm_patches] If you intended to use ${overlay}, edit ${MODULE_FILE}"
+         echo "[rocm_patches] manually or re-run with --install-prefix matching the"
+         echo "[rocm_patches] existing path."
+      else
+         echo "[rocm_patches] module file already has overlay entry for ${marker}; nothing to do"
+      fi
       return 0
    fi
 
@@ -641,16 +723,17 @@ patch_module_file() {
    if grep -q 'prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))' "${MODULE_FILE}"; then
       ${SUDO} sed -i '/prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))/a\
 \
-\t-- rocm-patches overlay (rocprof-sys 1.3.0 cherry-pick of upstream PR #3412\
-\t-- to close the SIGSEGV in rocprofiler_configure +0x404 during static-init\
-\t-- on OpenMP-target + MPI workloads). prepend_path is LIFO, so the overlay\
-\t-- MUST come after the SDK lib path so it lands FIRST in LD_LIBRARY_PATH.\
+\t-- rocm-patches-'"${ROCM_VERSION}"' overlay (cherry-picks of upstream PRs and\
+\t-- vendored fixes for rocprof-sys regressions on this ROCm release line;\
+\t-- see '"${INSTALL_PREFIX}"'/doc/ for the full bug report). prepend_path\
+\t-- is LIFO, so the overlay MUST come AFTER the SDK lib path so it lands\
+\t-- FIRST in the resolved LD_LIBRARY_PATH.\
 \tprepend_path("LD_LIBRARY_PATH", "'"${overlay}"'")' \
          "${MODULE_FILE}"
    else
       ${SUDO} tee -a "${MODULE_FILE}" >/dev/null <<-EOF
 
-	-- rocm-patches overlay (rocprof-sys 1.3.0 cherry-pick of upstream PR #3412)
+	-- rocm-patches-${ROCM_VERSION} overlay (rocprof-sys regression fixes; see ${INSTALL_PREFIX}/doc/)
 	prepend_path("LD_LIBRARY_PATH", "${overlay}")
 EOF
    fi
@@ -658,6 +741,38 @@ EOF
 
 # ── dispatch ────────────────────────────────────────────────────────
 rc=0
+
+# Backfill mode: skip the build entirely; only apply the modulefile
+# overlay edit. The function is idempotent (won't add a second entry
+# on a re-run, won't overwrite a hand-applied entry pointing
+# elsewhere), so this is safe to call regardless of cluster state.
+# Sanity-check: the overlay lib dir must already exist (the patched
+# .so was built either by the in-tree builder above, or by the
+# standalone rocm-patches-X.Y.Z/apply_and_build.sh for releases the
+# in-tree builder does not yet handle). Pointing the modulefile at
+# an empty/non-existent dir would be silently wrong.
+if [ "${MODULE_FILE_ONLY}" -eq 1 ]; then
+   echo "[rocm_patches] --module-file-only mode: skipping build, only patching ${MODULE_FILE}"
+   if [ ! -d "${INSTALL_PREFIX}/lib" ]; then
+      echo "[rocm_patches] ERROR: ${INSTALL_PREFIX}/lib does not exist." >&2
+      echo "[rocm_patches]   --module-file-only is a backfill helper; the patched .so" >&2
+      echo "[rocm_patches]   must already be built and on disk before calling it." >&2
+      echo "[rocm_patches]   Either (a) build it first via the standalone" >&2
+      echo "[rocm_patches]       ${INSTALL_PREFIX}/apply_and_build.sh" >&2
+      echo "[rocm_patches]   or (b) drop --module-file-only and let this script run" >&2
+      echo "[rocm_patches]   the full build (only supported for 7.2.0/7.2.1 today)." >&2
+      exit 1
+   fi
+   patch_module_file
+   rc=$?
+   if [ "${rc}" -eq 0 ]; then
+      echo ""
+      echo "[rocm_patches] ROCm ${ROCM_VERSION} module file overlay edit applied (backfill)."
+      echo "[rocm_patches]   module file: ${MODULE_FILE}"
+   fi
+   exit ${rc}
+fi
+
 for bundle in ${PATCH_BUNDLES}; do
    case "${bundle}" in
       rocprof-sys-1.3.0)  build_rocprof_sys_1_3_0 || rc=$? ;;

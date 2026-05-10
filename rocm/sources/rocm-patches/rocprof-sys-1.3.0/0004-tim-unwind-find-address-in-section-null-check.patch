@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: AAC6 HPC ops <hpc-ops@example.invalid>
+Date: Fri, 8 May 2026 19:30:00 -0500
+Subject: [PATCH] [timemory] tim::unwind::find_address_in_section: null-check
+ _inp and section before dereferencing
+
+bfd_map_over_sections is the canonical way to walk a bfd's sections; it
+calls a user-supplied callback once per section. In a single-threaded
+context the section pointer is always non-null, but the BFD library is
+not thread-safe and the v1.3.0 backtrace path can drive concurrent
+section iteration when several worker threads simultaneously throw
+exceptions whose constructor (rocprofsys::exception<...>::exception)
+captures a stack trace.  Under our reproducer (PyTorch DataLoader
+post-fork + MIOpen autograd workers + a thread_data overflow throwing
+out_of_range from many threads at once) this surfaces as SIGSEGV at
+small near-NULL faulting addresses (0x3b4, 0x402, 0x489, ...) where
+the next bfd_section_flags(section) dereferences either NULL or a
+stale-pointer offset.
+
+Adding a null-check at the top of find_address_in_section turns those
+crashes into a no-op for the affected stack frame; the worst case is
+that the addr2line report is incomplete for that one address, which is
+strictly better than crashing with a confusing SIGSEGV that masks the
+real upstream bug.
+
+This is a defence-in-depth fix; the upstream callers should still avoid
+concurrent BFD iteration.
+---
+ .../external/timemory/source/timemory/unwind/addr2line.cpp | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+--- a/projects/rocprofiler-systems/external/timemory/source/timemory/unwind/addr2line.cpp
++++ b/projects/rocprofiler-systems/external/timemory/source/timemory/unwind/addr2line.cpp
+@@ -54,6 +54,20 @@
+     if(!data)
+         return;
+ 
++    // CHERRY-PICK / LOCAL FIX (rocm-7.2.x stack only):
++    // bfd_map_over_sections can hand us a NULL or stale section pointer
++    // when called from a multi-threaded backtrace path (e.g. when MIOpen
++    // worker threads spawned by torch::autograd concurrently throw
++    // exceptions whose ctors capture a backtrace through BFD, which is
++    // not thread-safe in v1.3.0). Without this guard a NULL section
++    // turns the next bfd_section_flags() into a SIGSEGV at small
++    // near-NULL addresses (0x3b4 / 0x402 / 0x489 etc).  The mainline
++    // workaround is to fix the upstream caller (do not throw exceptions
++    // on hot paths, do not enter BFD concurrently); this guard is a
++    // belt-and-braces fallback that is harmless when section is valid.
++    if(!_inp || !section)
++        return;
++
+     auto* _info = static_cast<addr2line_info*>(data);
+     if(*_info)
+         return;
+-- 
+2.34.1
+

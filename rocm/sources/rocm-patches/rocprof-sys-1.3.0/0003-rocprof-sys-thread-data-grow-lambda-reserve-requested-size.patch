@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: AAC6 HPC ops <hpc-ops@example.invalid>
+Date: Fri, 8 May 2026 19:00:00 -0500
+Subject: [PATCH] [rocprof-sys] thread_data grow lambda: reserve _sz+1, not
+ capacity+1
+
+The base_thread_data ctor in v1.3.0 registers a grow-functor that grows
+each per-Tp stable_vector by ONE chunk's worth of slots:
+
+    _v->reserve(_v->capacity() + 1);
+
+For containers whose template ChunkSizeV (= MaxThreads template arg)
+is smaller than the requesting thread id, this is insufficient.  In
+particular, pthread_mutex_gotcha uses stable_vector<...,128,...>, so
+the chunk size is 128.  When the 256th thread tries to take its slot
+via thread_data<...>::instance(), grow_data() calls every functor with
+_sz = 257; the lambda observes capacity() == 0 (or 128 depending on
+order), reserves capacity()+1 (= 1 or 129), which rounds up to 128 or
+256 -- still less than 257.  resize(capacity()) leaves the container
+short, and the subsequent _v->at(_tid) throws std::out_of_range.
+
+The out-of-range exception's backtrace handler then trips a separate
+null-deref in tim::unwind::find_address_in_section (under BFD's
+non-thread-safe section iteration), which the test surfaces as a
+SIGSEGV.
+
+The minimal fix is to reserve exactly what was requested; stable_vector::
+reserve loops add_chunk() until capacity() >= new_capacity, so a single
+call with _sz+1 is sufficient regardless of ChunkSizeV.
+
+This patch is local to AAC6's ROCm 7.2.x stack; develop has refactored
+this code path entirely (PR #3703 / #4143) so no upstream cherry-pick
+is available.
+---
+ .../source/lib/rocprof-sys/library/thread_data.hpp | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/projects/rocprofiler-systems/source/lib/rocprof-sys/library/thread_data.hpp b/projects/rocprofiler-systems/source/lib/rocprof-sys/library/thread_data.hpp
+index 9c1e005f5b..7b6acb77b1 100644
+--- a/projects/rocprofiler-systems/source/lib/rocprof-sys/library/thread_data.hpp
++++ b/projects/rocprofiler-systems/source/lib/rocprof-sys/library/thread_data.hpp
+@@ -70,9 +70,21 @@ struct base_thread_data
+     {
+         auto _func = [](int64_t _sz) -> int64_t {
+             decltype(auto) _v = Tp::private_instance();
++            // CHERRY-PICK / LOCAL FIX (rocm-7.2.x stack only):
++            // The original v1.3.0 code grew the per-Tp stable_vector by ONE
++            // chunk worth at a time:
++            //     _v->reserve(_v->capacity() + 1);
++            // For containers whose template ChunkSizeV is smaller than the
++            // requesting thread index (e.g. pthread_mutex_gotcha uses
++            // stable_vector<...,128,...>), a single +1 round leaves
++            // capacity() at one chunk's size (128) even when the caller's
++            // _sz is 256+, and a subsequent at(_sz) throws out_of_range.
++            // The thrown exception's backtrace handler then trips a
++            // null-deref in tim::unwind::find_address_in_section under
++            // BFD's racey iteration. Reserve the actually-requested size.
+             if(_v && _v->capacity() < static_cast<size_t>(_sz + 1))
+             {
+-                _v->reserve(_v->capacity() + 1);
++                _v->reserve(static_cast<size_t>(_sz + 1));
+                 _v->resize(_v->capacity());
+             }
+             return (_v) ? _v->capacity() : 0;
+-- 
+2.34.1
+

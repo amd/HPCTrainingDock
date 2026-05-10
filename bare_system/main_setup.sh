@@ -67,6 +67,7 @@ fi
 : ${BUILD_FFTW:="1"}
 : ${BUILD_MINICONDA3:="1"}
 : ${BUILD_MINIFORGE3:="1"}
+: ${BUILD_LIKWID:="1"}
 : ${BUILD_HPCTOOLKIT:="1"}
 : ${BUILD_MPI4PY:="1"}
 : ${BUILD_TAU:="1"}
@@ -159,7 +160,7 @@ usage()
    echo "  --quick-installs [0 or 1]:  skip packages whose wall >= 20 min (measured from job 8065 sweep): pytorch (91m), tensorflow (70m), jax (34m, when policy gate allows). Also skips ftorch (transitive: needs pytorch) and julia (dormant: no install wired). Threshold raised from 15 -> 20 min after job 8065 audit moved petsc (17m) and scorep (17m) under the cutoff. Default $QUICK_INSTALLS"
    echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf the versioned subdir under \${TOP_INSTALL_PATH} (the version itself lives in the leaf script). Default $REPLACE_EXISTING"
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
-   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs)."
+   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, likwid, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs)."
    echo "  --rocm-rc-prefix [ FAMILY ]:  release-candidate family name (e.g. 'therock', 'afar'). Auto-detected from \${ROCM_PATH} basename for rocm-{therock,afar}-* trees. Empty for regular releases. When non-empty, install/module dirs become rocmplus-\${FAMILY}-\${ROCM_VERSION}/ instead of rocmplus-\${ROCM_VERSION}/. Default: auto-detected (empty for regular releases)."
    echo "  --help: prints this message"
    exit 1
@@ -444,6 +445,7 @@ declare -A PKG_FLAG=(
    [rocprof-sys]=BUILD_ROCPROF_SYS
    [rocprof-compute]=BUILD_ROCPROF_COMPUTE
    [hpctoolkit]=BUILD_HPCTOOLKIT
+   [likwid]=BUILD_LIKWID
    [scorep]=BUILD_SCOREP
    [tau]=BUILD_TAU
    [cupy]=BUILD_CUPY
@@ -975,6 +977,9 @@ run_and_log rocprof-compute tools/scripts/rocprof-compute_setup.sh ${COMMON_OPTI
 #   run_and_log rocprofiler-sdk tools/scripts/rocprofiler-sdk_setup.sh ${COMMON_OPTIONS} --build-rocprofiler-sdk ${BUILD_ROCPROFILER_SDK} --python-version ${PYTHON_VERSION} \
 #      $(path_args rocprofiler-sdk rocmplus-${ROCMPLUS_SUFFIX}/rocprofiler-sdk)
 #fi
+
+run_and_log likwid tools/scripts/likwid_setup.sh ${COMMON_OPTIONS} --build-likwid ${BUILD_LIKWID} ${REPLACE_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/likwid)
 
 run_and_log hpctoolkit tools/scripts/hpctoolkit_setup.sh ${COMMON_OPTIONS} --build-hpctoolkit ${BUILD_HPCTOOLKIT} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/hpctoolkit)

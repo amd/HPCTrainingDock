@@ -115,6 +115,7 @@ PKG_LIST = [
     ("scorep",     r"^scorep(-v.*)?$",                    r"^scorep-v(.+)$"),
     ("tau",        r"^tau$",                              None),
     ("pdt",        r"^pdt$",                              None),
+    ("likwid",     r"^likwid(-v.*)?$",                    r"^likwid-v(.+)$"),
     ("hpctoolkit", r"^hpctoolkit(-v.*)?$",                r"^hpctoolkit-v(.+)$"),
     ("hpcviewer",  r"^hpcviewer(-v.*)?$",                 r"^hpcviewer-v(.+)$"),
     ("mpi4py",     r"^mpi4py(-v.*)?$",                    r"^mpi4py-v(.+)$"),
