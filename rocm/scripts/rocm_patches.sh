@@ -145,7 +145,12 @@ rocm_version_to_patches() {
       # rocprof-sys cherry-picks: only the v1.3.0 source line is currently
       # handled in-tree (rocm-7.2.x). The 6.4.x / 7.0.x / 7.1.x rocprof-sys
       # overlays are still built out-of-tree via the per-version
-      # apply_and_build.sh in /opt/rocm-patches-X.Y.Z/.
+      # apply_and_build.sh in /opt/rocm-patches-X.Y.Z/. The afar-22.{1,2}.0
+      # rocprof-sys overlays follow the same out-of-tree pattern
+      # (apply_and_build.sh pinned to upstream tag rocm-7.1.0 = v1.2.0
+      # source baseline matching the afar-22.x .deb's librocprof-sys.so.1.2.0);
+      # use rocm_patches.sh --module-file-only --rocm-version afar-22.X.0
+      # to backfill the modulefile entry after the standalone build.
       #
       # rocprof-compute overlay (see rocprof-compute/ bundle): produces a
       # nuitka onefile of upstream rocprofiler-compute, drops it under
@@ -154,14 +159,30 @@ rocm_version_to_patches() {
       # shadows the broken in-distribution Python wrapper (or, on 7.1.x,
       # supersedes the rocm_setup.sh-built binary by being earlier on
       # PATH). Applies to every ROCm release the cluster has shipped with
-      # a broken or in-built rocprof-compute -- 6.3.x through 7.1.x.
-      7.2.0)        echo "rocprof-sys-1.3.0" ;;
-      7.2.1)        echo "rocprof-sys-1.3.0" ;;
-      6.3.*)        echo "rocprof-compute" ;;
-      6.4.*)        echo "rocprof-compute" ;;
-      7.0.*)        echo "rocprof-compute" ;;
-      7.1.*)        echo "rocprof-compute" ;;
-      *)            echo "" ;;
+      # a broken or in-built rocprof-compute -- 6.3.x through 7.1.x for
+      # official releases, plus afar-22.{1,2}.0 and therock-23.2.0 on the
+      # RC side (the three RC trees whose VERSION.sha was non-empty when
+      # the dispatch was authored).
+      #
+      # Empirical NOTE (2026-05): for all three RC trees in this
+      # dispatch entry, the VERSION.sha on disk does NOT resolve to a
+      # public commit on github.com/ROCm/rocprofiler-compute -- the
+      # RC .debs are built from internal AMD branches.  build.sh's
+      # RC-mode catches this in `git rev-parse --verify` and returns
+      # exit 43 (soft no-op).  We still LIST the trees here so that
+      # any future RC .deb whose VERSION.sha gets pushed upstream
+      # gets the overlay automatically; right now no overlay is
+      # actually produced for these three.
+      7.2.0)            echo "rocprof-sys-1.3.0" ;;
+      7.2.1)            echo "rocprof-sys-1.3.0" ;;
+      6.3.*)            echo "rocprof-compute" ;;
+      6.4.*)            echo "rocprof-compute" ;;
+      7.0.*)            echo "rocprof-compute" ;;
+      7.1.*)            echo "rocprof-compute" ;;
+      afar-22.1.0)      echo "rocprof-compute" ;;
+      afar-22.2.0)      echo "rocprof-compute" ;;
+      therock-23.2.0)   echo "rocprof-compute" ;;
+      *)                echo "" ;;
    esac
 }
 
@@ -735,6 +756,9 @@ rocprof_compute_detail_block() {
       7.0.2) echo 'Upstream tag `rocm-7.0.2` resolves to commit `246dd58`, upstream VERSION `3.2.3`.' ;;
       7.1.0) echo 'Upstream tag `rocm-7.1.0` -- monorepo (rocm-systems @ rocm-7.1.0), `projects/rocprofiler-compute` subtree.  rocm_setup.sh also builds a nuitka binary in `${ROCM_PATH}/bin/`; the overlay supersedes it via PATH ordering.' ;;
       7.1.1) echo 'Upstream tag `rocm-7.1.1` -- monorepo subtree.  rocm_setup.sh also builds a nuitka binary in `${ROCM_PATH}/bin/`; the overlay supersedes it via PATH ordering.' ;;
+      afar-22.1.0)    echo 'RC tree (no `rocm-afar-22.1.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (afar-22.1.0 ships `167a9576`, upstream VERSION `3.3.0`).' ;;
+      afar-22.2.0)    echo 'RC tree (no `rocm-afar-22.2.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (afar-22.2.0 ships `bad92dc4`, upstream VERSION `3.3.0`).' ;;
+      therock-23.2.0) echo 'RC tree (no `rocm-therock-23.2.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (therock-23.2.0 ships `bc96f0a`, upstream VERSION `3.6.0`).' ;;
       *)     echo "Upstream tag \`rocm-$1\`." ;;
    esac
 }
@@ -771,12 +795,35 @@ build_rocprof_compute() {
    # versioned filename (rocprof-compute-v<X>.bin) and re-points
    # lib/rocprof-compute.bin at it via symlink, so this check is
    # sufficient regardless of which upstream tag we last built.
+   #
+   # Exit code 43 from build.sh is the agreed soft no-op: an RC tree
+   # whose VERSION.sha is missing/empty, so the upstream commit cannot
+   # be pinned reliably. Treat that as "no overlay produced, but not
+   # a failure"; do not invoke install.sh in that case (there's no
+   # binary to wire up, and we should not edit the modulefile to point
+   # at a nonexistent overlay).
+   local skipped=0
    if [ -e "${out_bin}" ] && [ "${REPLACE}" -eq 0 ]; then
       echo "[rocm_patches] ${out_bin} already exists -- skipping build (use --replace to force)"
    else
       echo "[rocm_patches] running nuitka build for rocprof-compute ${ROCM_VERSION} ..."
       echo "[rocm_patches]   (wall time ~25-30 min, peak ~10 GB RAM; runs on this host)"
-      bash "${overlay_dir}/build.sh" || return 1
+      # build.sh runs under `set -euo pipefail`; capture its exit
+      # status WITHOUT short-circuiting via `||` so we can distinguish
+      # the 43-soft-skip from a real failure.
+      local build_rc=0
+      bash "${overlay_dir}/build.sh" || build_rc=$?
+      if [ "${build_rc}" -eq 43 ]; then
+         echo "[rocm_patches] build.sh returned 43 (RC tree without VERSION.sha)"
+         echo "[rocm_patches] no rocprof-compute overlay will be produced for ${ROCM_VERSION}"
+         skipped=1
+      elif [ "${build_rc}" -ne 0 ]; then
+         return 1
+      fi
+   fi
+
+   if [ "${skipped}" -eq 1 ]; then
+      return 43
    fi
 
    # ── 4. wire up via install.sh ────────────────────────────────────
@@ -920,7 +967,21 @@ for bundle in ${PATCH_BUNDLES}; do
          # build_rocprof_compute runs the bundle's own install.sh which
          # edits the modulefile (prepend_path PATH), so there's no
          # follow-on hook from this script.
-         build_rocprof_compute && built_rocprof_compute=1 || rc=$? ;;
+         #
+         # Exit 43 is a soft skip (RC tree with no VERSION.sha): treat
+         # it as success-with-no-overlay-produced, NOT a build failure.
+         # That keeps the per-package summary line clean on clusters
+         # where some RC trees have a pinnable upstream commit and
+         # others don't.
+         build_rocprof_compute
+         bundle_rc=$?
+         if [ "${bundle_rc}" -eq 0 ]; then
+            built_rocprof_compute=1
+         elif [ "${bundle_rc}" -eq 43 ]; then
+            : # soft skip; leave built_rocprof_compute=0, rc unchanged
+         else
+            rc=${bundle_rc}
+         fi ;;
       *)
          echo "[rocm_patches] ERROR: no builder registered for bundle '${bundle}'" >&2
          rc=1 ;;
@@ -935,14 +996,23 @@ fi
 
 if [ "${rc}" -eq 0 ]; then
    echo ""
-   echo "[rocm_patches] ROCm ${ROCM_VERSION} patch overlay applied successfully."
-   if [ "${built_rocprof_sys}" -eq 1 ]; then
-      echo "[rocm_patches]   rocprof-sys library: ${INSTALL_PREFIX}/lib/librocprof-sys.so.1.3.0"
+   if [ "${built_rocprof_sys}" -eq 0 ] && [ "${built_rocprof_compute}" -eq 0 ]; then
+      # All bundles dispatched ran (or were skipped) without error, but
+      # nothing landed on disk -- e.g. every dispatched bundle was a
+      # soft no-op (RC tree without a public-resolvable VERSION.sha).
+      echo "[rocm_patches] ROCm ${ROCM_VERSION}: no overlay artefacts were produced."
+      echo "[rocm_patches]   (every dispatched bundle returned a soft no-op;"
+      echo "[rocm_patches]    see preceding lines for the per-bundle reason)"
+   else
+      echo "[rocm_patches] ROCm ${ROCM_VERSION} patch overlay applied successfully."
+      if [ "${built_rocprof_sys}" -eq 1 ]; then
+         echo "[rocm_patches]   rocprof-sys library: ${INSTALL_PREFIX}/lib/librocprof-sys.so.1.3.0"
+      fi
+      if [ "${built_rocprof_compute}" -eq 1 ]; then
+         echo "[rocm_patches]   rocprof-compute:     ${INSTALL_PREFIX}/rocprof-compute/bin/rocprof-compute"
+      fi
+      echo "[rocm_patches]   module file:         ${MODULE_FILE}"
    fi
-   if [ "${built_rocprof_compute}" -eq 1 ]; then
-      echo "[rocm_patches]   rocprof-compute:     ${INSTALL_PREFIX}/rocprof-compute/bin/rocprof-compute"
-   fi
-   echo "[rocm_patches]   module file:         ${MODULE_FILE}"
 fi
 
 exit ${rc}

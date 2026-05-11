@@ -906,6 +906,25 @@ if [ "${SKIP_ROCM_INSTALL}" == 0 ]; then
    run_and_log rocm-patches rocm/scripts/rocm_patches.sh --rocm-version ${ROCM_VERSION}
 else
    source ~/.bashrc
+
+   # RC trees (rocm-therock-*, rocm-afar-*) reach this branch because
+   # SKIP_ROCM_INSTALL=1 is forced: amdgpu-install cannot materialise an
+   # RC flavour, and the operator must have pre-loaded the matching
+   # rocm/${ROCM_VERSION} module so the SDK is on disk already.
+   # rocm_patches.sh still has work to do on these trees:
+   #   * rocprof-compute overlay for any RC version whose
+   #     ${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha is
+   #     populated (afar-22.{1,2}.0, therock-23.2.0 today). build.sh
+   #     soft-no-ops via exit 43 on RC trees without a pin.
+   #   * --module-file-only modulefile backfill is also useful here
+   #     when a rocprof-sys overlay was built out-of-tree (afar-22.x).
+   # ROCM_PATH is exported by the pre-loaded module, so pass it
+   # through so the prerequisite check in rocm_patches.sh resolves to
+   # the cluster-specific SDK install path rather than the default
+   # /opt/rocm-${ROCM_VERSION}.
+   run_and_log rocm-patches rocm/scripts/rocm_patches.sh \
+      --rocm-version ${ROCM_VERSION} \
+      --rocm-path "${ROCM_PATH}"
 fi
 
 # ── Package installation ─────────────────────────────────────────────

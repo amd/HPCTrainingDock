@@ -27,7 +27,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OVERLAY_NAME="$(basename "$(dirname "$SCRIPT_DIR")")"     # rocm-patches-X.Y.Z
 ROCM_VERSION="${OVERLAY_NAME#rocm-patches-}"
 
-if [[ ! "$ROCM_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+if [[ ! "$ROCM_VERSION" =~ ^([a-z]+-)?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "ERROR: could not derive ROCM_VERSION from path '$SCRIPT_DIR'" >&2
     exit 1
 fi

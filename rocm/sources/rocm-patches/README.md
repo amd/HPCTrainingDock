@@ -83,40 +83,64 @@ References:
 
 ### `rocprof-compute/` -- nuitka onefile rebuild of upstream rocprofiler-compute
 
-Affected ROCm releases: **6.3.0, 6.3.1, 6.3.2, 6.3.3, 6.3.4, 6.4.0,
-6.4.1, 6.4.2, 6.4.3, 7.0.0, 7.0.1, 7.0.2, 7.1.0, 7.1.1** (fourteen
-release lines).
+Affected ROCm releases:
+
+* **official releases (14):** 6.3.0, 6.3.1, 6.3.2, 6.3.3, 6.3.4,
+  6.4.0, 6.4.1, 6.4.2, 6.4.3, 7.0.0, 7.0.1, 7.0.2, 7.1.0, 7.1.1
+* **release-candidate flavours (3):** afar-22.1.0, afar-22.2.0,
+  therock-23.2.0
+
+Seventeen ROCm-installation flavours total.
 
 This is a **rebuild-style** bundle: no `.patch` files, just three
 shell artefacts (`install.sh`, `build.sh`, `README.md.in`) that the
 `build_rocprof_compute()` function in `rocm_patches.sh` copies into
 `/opt/rocm-patches-${ROCM_VERSION}/rocprof-compute/` and invokes.
 
-Background.  On 6.3.x / 6.4.x / 7.0.x the in-distribution
-`rocprof-compute` command is a symlink to a Python wrapper whose pip
-dependencies were never installed by HPCTrainingDock
-(`rocm_rocprof-compute_setup.sh` early-exits for ROCM_VERSION > 6.1.2),
-so the wrapper aborts at startup with
+Background.  On 6.3.x / 6.4.x / 7.0.x and on the afar/therock RC
+flavours, the in-distribution `rocprof-compute` command is a symlink
+to a Python wrapper whose pip dependencies were never installed by
+HPCTrainingDock (`rocm_rocprof-compute_setup.sh` early-exits for
+ROCM_VERSION > 6.1.2), so the wrapper aborts at startup with
 `[ERROR] The 'astunparse==1.6.2' package was not found ...`.  Most
 6.4.x / 7.0.x prefixes happen to have a working pre-built
 `rocprof-compute.exe` next to the wrapper, but it is never wired into
 `$PATH`.  6.3.x predates standalone-binary packaging entirely (the
 v3.0.0 / Omniperf transition was Python-only) and ships no .exe at
 all.  6.4.3's .exe is shipped with a broken pyinstaller bundle
-(missing `VERSION.sha`) and is unusable.
+(missing `VERSION.sha`) and is unusable.  The afar/therock RC trees
+also ship no usable .exe.
 
-The bundle's `build.sh` produces a fresh nuitka onefile from
-`https://github.com/ROCm/rocprofiler-compute.git` @ tag
-`rocm-${ROCM_VERSION}` using the same recipe that
-`rocm_setup.sh` uses for `>= 7.1.0`, with one auto-detected
-adjustment (drop `--include-package=rocprof_compute_tui` for v3.0.x /
-v3.1.x, which lacks that subpackage), one bug-fix relative to the
-in-tree build path (write `VERSION.sha` to both `src/` and the repo
-root so the `--include-data-files=${PROJECT_SOURCE_DIR}/VERSION*=./`
-glob actually captures it -- v3.0.x / v3.1.x crash hard at startup
-without it; v3.2.x falls back to "unknown" instead), and one
-upstream-tag fallback for 6.3.4 (no `rocm-6.3.4` tag exists upstream
-so build.sh falls back to `rocm-6.3.3`).
+The bundle's `build.sh` operates in **two source-pinning modes**:
+
+* **official-release mode** (ROCM_VERSION is `X.Y.Z`): clone upstream
+  at git tag `rocm-${ROCM_VERSION}`.  This is the path used by all 14
+  official lines.
+* **RC mode** (ROCM_VERSION matches `afar-*` / `therock-*`): clone
+  upstream at the *commit SHA recorded in*
+  `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (the .deb's
+  own build provenance).  A full clone is done so the abbreviated
+  SHA on disk (e.g. `bc96f0a`) can be resolved against the local
+  object database via `git rev-parse`.  RC trees whose VERSION.sha
+  is **missing or empty** are a *soft no-op*: `build.sh` exits 43
+  (handled by `build_rocprof_compute()` in `rocm_patches.sh` as
+  "no overlay produced, but not a failure"); we will not guess a
+  commit, because the .deb may have been built from an unmerged
+  branch we cannot identify.  This is what skips
+  `therock-23.1.0` (empty `VERSION.sha`) and `afar-7.0.5` (no
+  `rocprof-compute` install at all -- absent from the dispatch
+  table so it never even reaches `build.sh`).
+
+Three nuitka adjustments are shared across all modes:
+
+* Auto-detected drop of `--include-package=rocprof_compute_tui` for
+  v3.0.x / v3.1.x (the subpackage appeared in v3.2.x).
+* Write `VERSION.sha` to both `src/` and the repo root so the
+  `--include-data-files=${PROJECT_SOURCE_DIR}/VERSION*=./` glob
+  actually captures it -- v3.0.x / v3.1.x crash hard at startup
+  without it; v3.2.x falls back to "unknown" instead.
+* Upstream-tag fallback for 6.3.4 (no `rocm-6.3.4` tag exists
+  upstream so build.sh falls back to `rocm-6.3.3`).
 
 `install.sh` does the wire-up: symlinks `bin/rocprof-compute ->
 ../lib/rocprof-compute.bin` and adds a single `prepend_path("PATH",
@@ -130,6 +154,32 @@ References:
   on the cluster.
 * central bug report (Appendix D):
   `/shared/apps/ubuntu/opt/rocm-patches-7.2.1/doc/PROFILING_TEAM_REPORT.md`.
+
+### Release-candidate flavour coverage matrix
+
+RC trees on this cluster (`rocm-{therock,afar}-*` prefixes) are
+pre-installed externally and the `SKIP_ROCM_INSTALL=1` branch of
+`main_setup.sh` forces `rocm_setup.sh` to skip them.
+`rocm_patches.sh` *does* still run on RC trees (see the same branch
+of `main_setup.sh`), and its current per-tree coverage is:
+
+| RC tree              | rocprof-compute overlay              | rocprof-sys overlay                 |
+|----------------------|--------------------------------------|-------------------------------------|
+| `afar-22.1.0`        | Track A attempted, **soft no-op**: VERSION.sha `167a9576` is not in any public ref of `github.com/ROCm/rocprofiler-compute` (verified via GitHub commits API HTTP 422). `build.sh` returns 43 and no overlay is produced. The .deb was likely built from an internal AMD branch. | Track B (out-of-tree `apply_and_build.sh` mapped to upstream tag `rocm-7.1.0` = v1.2.0 source; `librocprof-sys.so.1.2.0` drop-in copied from `rocm-patches-7.1.0/lib/`, identical SONAME=librocprof-sys.so.1 and matching rocprofiler-sdk SONAME).  Modulefile backfilled via `rocm_patches.sh --module-file-only`. |
+| `afar-22.2.0`        | Track A attempted, **soft no-op**: VERSION.sha `bad92dc4` not in any public ref (HTTP 422 from commits API). Same root cause as 22.1.0. | Track B (same as 22.1.0) |
+| `afar-7.0.5`         | not in dispatch (no `rocprof-compute` install on this tree) | n/a (no `rocprof-sys` install) |
+| `therock-23.1.0`     | not in dispatch (empty `VERSION.sha`; cannot pin upstream commit) | not engineered (v1.5.0 source; documented as passing `MPI_Ghost_Exchange_Ver2`) |
+| `therock-23.2.0`     | Track A attempted, **soft no-op**: VERSION.sha `bc96f0a` not in any public ref (HTTP 422 from commits API). Same root cause as the afar trees: built from internal AMD branch. | not engineered (v1.6.0 init refactor regression; would need a v1.6.0-shaped patch bundle from scratch -- separate effort) |
+
+Net Track A outcome for RC trees: on this cluster all three RC trees
+that had a populated `VERSION.sha` produced *unresolvable* commits, so
+no rocprof-compute overlay was produced for any of them.  The
+machinery is in place and will start producing overlays automatically
+the moment a future RC `.deb` ships a `VERSION.sha` that has been
+pushed to the public repo.  The "do not guess a commit" policy
+trades coverage breadth for build-provenance fidelity: a guessed
+overlay would not necessarily reproduce the in-distribution binary's
+behaviour.
 
 ## Adding a new patch
 
