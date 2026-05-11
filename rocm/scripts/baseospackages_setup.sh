@@ -44,13 +44,13 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    fi
    ${PKG_SUDO} apt-get -q -y update
    ${PKG_SUDO} apt-get dist-upgrade -y
-   ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -q -y build-essential cmake libnuma1 wget gnupg2 m4 bash-completion git-core autoconf libtool autotools-dev \
+   ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y build-essential cmake libnuma1 wget gnupg2 m4 bash-completion git-core autoconf libtool autotools-dev \
       lsb-release libpapi-dev libpfm4-dev libudev1 rpm librpm-dev curl apt-utils vim tmux rsync ${SUDO} \
       bison flex texinfo libnuma-dev pkg-config libibverbs-dev rdmacm-utils ssh locales gpg ca-certificates \
       gcc g++ gfortran ninja-build libtbb-dev nano ccache
 
 # Install python packages
-   ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -q -y python3-pip python3-dev python3-venv
+   ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y python3-pip python3-dev python3-venv
 
    ${SUDO} localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
 elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
@@ -79,7 +79,7 @@ fi
 #
 #   # Step 1
 #   ${PKG_SUDO} apt-get -y update
-#   ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y ca-certificates gpg wget
+#   ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates gpg wget
 #   # Step 2
 #   test -f /usr/share/doc/kitware-archive-keyring/copyright || \
 #      wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
@@ -92,9 +92,9 @@ fi
 #   test -f /usr/share/doc/kitware-archive-keyring/copyright || \
 #      ${SUDO} rm /usr/share/keyrings/kitware-archive-keyring.gpg
 #   # Step 5
-#   ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y kitware-archive-keyring
+#   ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y kitware-archive-keyring
 #
-#   ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y cmake=3.31.6-0kitware1ubuntu22.04.1
+#   ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y cmake=3.31.6-0kitware1ubuntu22.04.1
 #   CMAKE_VERSION=`cmake --version`
 #   echo "Installed latest version of cmake ($CMAKE_VERSION)"
 #else

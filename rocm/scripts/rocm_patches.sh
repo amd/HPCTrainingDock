@@ -364,7 +364,7 @@ build_rocprof_sys_1_3_0() {
 
    # ── build deps ───────────────────────────────────────────────────
    if [ "${DISTRO}" = "ubuntu" ]; then
-      ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -q -y \
+      ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y \
          build-essential cmake git ca-certificates pkg-config \
          libelf-dev libdw-dev libdrm-dev libnuma-dev libsqlite3-dev \
          zlib1g-dev libzstd-dev libssl-dev || true

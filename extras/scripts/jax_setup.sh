@@ -489,7 +489,7 @@ else
 	    echo ".....Installing python-is-python3 with sudo......"
             echo "============================"
     	    ${PKG_SUDO} apt-get update
-            ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3
+            ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y python-is-python3
          else
             ln -s $(which python3) ~/bin/python
             export PATH="$HOME/bin:$PATH"

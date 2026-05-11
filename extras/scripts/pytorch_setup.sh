@@ -1064,10 +1064,10 @@ else
       if [[ "${DISTRO}" == "ubuntu" ]]; then
          if [ "${EUID:-$(id -u)}" -eq 0 ] || sudo -n true 2>/dev/null; then
             ${PKG_SUDO} apt-get update
-            ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y python-is-python3 liblzma-dev libzstd-dev git-lfs
+            ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y python-is-python3 liblzma-dev libzstd-dev git-lfs
             module load ${MPI_MODULE}
             if [[ `which mpicc | wc -l` -eq 0 ]]; then
-               ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y libopenmpi-dev
+               ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y libopenmpi-dev
             fi
          else
             ln -s $(which python3) ~/bin/python

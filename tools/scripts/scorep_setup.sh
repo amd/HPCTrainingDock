@@ -449,7 +449,7 @@ else
       if [[ `which mpicc | wc -l` -eq 0 ]]; then
          PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
          ${PKG_SUDO} apt-get update
-         ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -q -y libopenmpi-dev
+         ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y libopenmpi-dev
       fi
 
       if [[ $MPI_CONFIG == "" ]]; then

@@ -158,7 +158,7 @@ if [ "${BUILD_AOMP_LATEST}" = "1" ]; then
       export AOMP=$PWD/aomp
 
       ${PKG_SUDO} apt-get update
-      ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y gawk ninja-build generate-ninja ccache libssl-dev \
+      ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y gawk ninja-build generate-ninja ccache libssl-dev \
 	      libgmp-dev libmpfr-dev libbabeltrace-dev liblzma-dev libdrm-dev libelf-dev
       pip3 install CppHeaderParser
 

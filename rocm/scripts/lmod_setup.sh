@@ -30,7 +30,7 @@ echo ""
 
 if [ "${DISTRO}" = "ubuntu" ]; then
    ${PKG_SUDO} apt-get -qq update
-   ${PKG_SUDO} ${DEB_FRONTEND} apt-get -qqy install lmod
+   ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get -qqy install lmod
    ${SUDO}  sed -i -e '1,$s!/etc/lmod/modules!#/etc/lmod/modules!' -e '1,$s/!/usr/share/lmod/lmod/modulesfiles/!' /etc/lmod/modulespath
    cat <<-EOF | ${SUDO} tee -a /etc/lmod/modulespath >> /dev/null
 	/etc/lmod/modules/Linux

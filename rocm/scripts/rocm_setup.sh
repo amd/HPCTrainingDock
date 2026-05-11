@@ -312,7 +312,7 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
 
       if [ "${DISTRO}" == "ubuntu" ]; then
          ${PKG_SUDO} apt-get update
-         ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y libdrm-dev logrotate
+         ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y libdrm-dev logrotate
 
          #mkdir --parents --mode=0755 /etc/apt/keyrings
          #${SUDO} mkdir --parents --mode=0755 /etc/apt/keyrings
@@ -333,7 +333,7 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
          wget -q https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/${DISTRO}/${ROCM_REPO_DIST}/amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
 
          # Run the amdgpu-install script. We have already installed the kernel driver, so use we use --no-dkms
-         ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -q -y --allow-downgrades ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+         ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y --allow-downgrades ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
       elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
 	 ${PKG_SUDO} dnf config-manager --set-enabled crb
          ${PKG_SUDO} dnf install -y python3-setuptools python3-wheel python3-devel
@@ -651,7 +651,7 @@ if [ "${INCLUDE_TOOLS}" = "1" ]; then
          echo "ROCm built-in ${TOOL_NAME_MC} already installed"
       else
          if [ "${DISTRO}" == "ubuntu" ]; then
-            ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -q -y ${TOOL_NAME}
+            ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y ${TOOL_NAME}
          fi
       fi
 
@@ -734,7 +734,7 @@ EOF
          echo "ROCm built-in ${TOOL_NAME_MC} already installed"
       else
          if [ "${DISTRO}" == "ubuntu" ]; then
-            ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -q -y ${TOOL_NAME}
+            ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y ${TOOL_NAME}
          fi
       fi
 

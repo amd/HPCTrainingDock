@@ -429,7 +429,7 @@ else
       # callers shouldn't rely on that. See openmpi_setup.sh /
       # audit_2026_05_01.md Issue 2.
       PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
-      ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -q -y pipx libboost-all-dev liblzma-dev libgtk-3-dev
+      ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y pipx libboost-all-dev liblzma-dev libgtk-3-dev
 
       # Per-job throwaway build dir for the hpctoolkit clone.
       # Replaces a fixed `cd /tmp; rm -rf /tmp/hpctoolkit` pattern
