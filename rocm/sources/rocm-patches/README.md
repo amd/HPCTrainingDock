@@ -81,6 +81,72 @@ References:
   `/shared/apps/ubuntu/opt/rocm-patches-7.2.1/doc/` on the cluster
   where the fix was first staged.
 
+### How the patched .so wins runtime resolution (post-install steps)
+
+Dropping the patched `librocprof-sys.so.X.Y.Z` next to the SDK and
+adding the patches-overlay lib to `LD_LIBRARY_PATH` via the modulefile
+is **not sufficient** on its own.  The SDK binary
+`${ROCM_PATH}/bin/rocprof-sys-run` rewrites the child process's
+`LD_LIBRARY_PATH` by prepending `${ROCPROFSYS_ROOT}/lib` (= the SDK's
+own lib dir) ahead of whatever the parent shell inherited.  That
+pushes the modulefile's overlay entry to a later position than the
+SDK's lib dir, and the dynamic loader resolves `librocprof-sys.so.1`
+to the SDK's unpatched copy in the profiled child -- so Bug A's
+SIGSEGV in `rocprofiler_configure()` reappears even though the
+patched .so is on disk and the modulefile is correct.
+
+`rocm_patches.sh` therefore performs **two finishing steps** after
+every successful build (and also during `--module-file-only`
+backfill):
+
+1. **`fix_overlay_runpath_and_libunwind`**: cmake bakes absolute
+   paths into the patched .so's `DT_RUNPATH` that point inside the
+   build tree (`<INSTALL_PREFIX>/build/rocprofiler-systems/external/timemory/...`).
+   Those directories disappear once `build/` is cleaned up, and the
+   .so silently picks up `libunwind.so.99: not found` / `libgotcha.so.2: not found`
+   at load time.  The fix copies the timemory-bundled
+   `libunwind.so.99.0.0` to `${INSTALL_PREFIX}/lib/` (borrowing from a
+   sibling overlay if our own `build/` is gone -- DT_SONAME is the
+   same across all our overlays so they are drop-in compatible),
+   then rewrites `DT_RUNPATH` via `patchelf --set-rpath` to:
+
+   ```
+   $ORIGIN:$ORIGIN/../../rocm-X.Y.Z/lib/rocprofiler-systems:$ORIGIN/../../rocm-X.Y.Z/lib:/usr/lib/x86_64-linux-gnu/elfutils
+   ```
+
+   `$ORIGIN` resolves to `${INSTALL_PREFIX}/lib/` so the bundled
+   libunwind is found, and the relative hops `$ORIGIN/../..` reach
+   the SDK's lib + rocprofiler-systems subdir to resolve `libgotcha`
+   etc.  Idempotent: a re-run detects the already-portable RUNPATH
+   and skips.
+
+2. **`swap_sdk_lib_symlink`**: turns the SDK's versioned
+   `librocprof-sys.so.X.Y.Z` into a symlink that points at the
+   overlay's patched copy.  The original SDK file is preserved as
+   `librocprof-sys.so.X.Y.Z.orig` for clean rollback.  This is the
+   step that actually wins the race against `rocprof-sys-run`'s
+   `LD_LIBRARY_PATH` prepending: now wherever the dynamic loader
+   resolves `librocprof-sys.so.1`, the patched bits run.  Only the
+   one versioned file becomes a symlink; the `librocprof-sys.so.1`
+   and `librocprof-sys.so` aliases (SDK-relative symlinks already)
+   reach the patched lib transitively without modification.
+   Idempotent: a re-run detects an existing symlink that already
+   points at the overlay and exits without change.
+
+Coverage matrix for these two finishing steps:
+
+| ROCm release line | rocprof-sys overlay | runpath+libunwind fix | SDK symlink swap |
+|-------------------|---------------------|-----------------------|------------------|
+| `7.2.0`, `7.2.1`            | yes (in-tree build) | yes | yes |
+| `7.1.0`, `7.1.1`            | yes (apply_and_build.sh) | yes | yes |
+| `7.0.0`, `7.0.1`, `7.0.2`   | yes (apply_and_build.sh) | yes | yes |
+| `6.4.0`, `6.4.1`, `6.4.2`, `6.4.3` | yes (apply_and_build.sh) | yes | yes |
+| `afar-22.1.0`, `afar-22.2.0`       | yes (shortcut from rocm-patches-7.1.0/lib) | yes | yes |
+| `6.3.0` -- `6.3.4`          | not engineered (different bug surface) | n/a | n/a |
+| `therock-23.1.0`, `therock-23.2.0` | not engineered                          | n/a | n/a |
+
+Rollback is one command per overlay: `mv ${ROCM_PATH}/lib/librocprof-sys.so.X.Y.Z.orig ${ROCM_PATH}/lib/librocprof-sys.so.X.Y.Z`.
+
 ### `rocprof-compute/` -- nuitka onefile rebuild of upstream rocprofiler-compute
 
 Affected ROCm releases:
