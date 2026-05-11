@@ -71,6 +71,7 @@ MODULE_PATH=/etc/lmod/modules/ROCm
 INSTALL_PREFIX=""
 PATCH_SOURCE_DIR=""
 MODULE_FILE_ONLY=0
+ROCM_PATH_OVERRIDE=""
 NOOP_RC=43
 
 # ── distro / sudo plumbing (matches sibling *_setup.sh) ─────────────
@@ -90,6 +91,9 @@ usage() {
    echo "  --replace                             force rebuild even if already applied"
    echo "  --module-path     [ MODULE_PATH ]     default ${MODULE_PATH}"
    echo "  --install-prefix  [ DIR ]             default /opt/rocm-patches-\${ROCM_VERSION}"
+   echo "  --rocm-path       [ DIR ]             default /opt/rocm-\${ROCM_VERSION}"
+   echo "                                        (the SDK install rocm_setup.sh produced;"
+   echo "                                        prerequisite-existence check uses this)"
    echo "  --patch-source-dir [ DIR ]            auto-detected; vendored .patch tree"
    echo "  --module-file-only                    skip build; just apply the modulefile"
    echo "                                        LD_LIBRARY_PATH overlay edit (idempotent)."
@@ -119,6 +123,7 @@ while [[ $# -gt 0 ]]; do
       "--replace")                  REPLACE=1;               reset-last ;;
       "--module-path")       shift; MODULE_PATH=${1};        reset-last ;;
       "--install-prefix")    shift; INSTALL_PREFIX=${1};     reset-last ;;
+      "--rocm-path")         shift; ROCM_PATH_OVERRIDE=${1}; reset-last ;;
       "--patch-source-dir")  shift; PATCH_SOURCE_DIR=${1};   reset-last ;;
       "--module-file-only")         MODULE_FILE_ONLY=1;      reset-last ;;
       "--*")                 send-error "Unsupported argument at position $((${n}+1)) :: ${1}" ;;
@@ -137,7 +142,25 @@ done
 rocm_version_to_patches() {
    local v="$1"
    case "$v" in
-      7.2.0|7.2.1)  echo "rocprof-sys-1.3.0" ;;
+      # rocprof-sys cherry-picks: only the v1.3.0 source line is currently
+      # handled in-tree (rocm-7.2.x). The 6.4.x / 7.0.x / 7.1.x rocprof-sys
+      # overlays are still built out-of-tree via the per-version
+      # apply_and_build.sh in /opt/rocm-patches-X.Y.Z/.
+      #
+      # rocprof-compute overlay (see rocprof-compute/ bundle): produces a
+      # nuitka onefile of upstream rocprofiler-compute, drops it under
+      # /opt/rocm-patches-${ROCM_VERSION}/rocprof-compute/, and adds a
+      # prepend_path("PATH", ...) line to the modulefile so the overlay
+      # shadows the broken in-distribution Python wrapper (or, on 7.1.x,
+      # supersedes the rocm_setup.sh-built binary by being earlier on
+      # PATH). Applies to every ROCm release the cluster has shipped with
+      # a broken or in-built rocprof-compute -- 6.3.x through 7.1.x.
+      7.2.0)        echo "rocprof-sys-1.3.0" ;;
+      7.2.1)        echo "rocprof-sys-1.3.0" ;;
+      6.3.*)        echo "rocprof-compute" ;;
+      6.4.*)        echo "rocprof-compute" ;;
+      7.0.*)        echo "rocprof-compute" ;;
+      7.1.*)        echo "rocprof-compute" ;;
       *)            echo "" ;;
    esac
 }
@@ -168,7 +191,11 @@ fi
 # PATCH_BUNDLES or PATCH_SOURCE_DIR) can still resolve INSTALL_PREFIX
 # and MODULE_FILE for the modulefile edit.
 [ -n "${INSTALL_PREFIX}" ] || INSTALL_PREFIX="/opt/rocm-patches-${ROCM_VERSION}"
-ROCM_PATH="/opt/rocm-${ROCM_VERSION}"
+if [ -n "${ROCM_PATH_OVERRIDE}" ]; then
+   ROCM_PATH="${ROCM_PATH_OVERRIDE}"
+else
+   ROCM_PATH="/opt/rocm-${ROCM_VERSION}"
+fi
 MODULE_FILE="${MODULE_PATH}/rocm/${ROCM_VERSION}.lua"
 
 echo ""
@@ -658,6 +685,112 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────
+# build_rocprof_compute
+# ---------------------
+# Materialize the rocprof-compute overlay for one ROCm version:
+#
+#   1. Stage the vendored install.sh / build.sh / README.md.in into
+#      ${INSTALL_PREFIX}/rocprof-compute/.
+#   2. Render README.md from README.md.in (substitutes @VERSION@ and
+#      @DETAIL_BLOCK@; the latter is a per-version snippet picked
+#      from a local lookup table below).
+#   3. Run build.sh (nuitka onefile of upstream rocprofiler-compute @
+#      tag rocm-${ROCM_VERSION}).  Idempotent: skips if
+#      lib/rocprof-compute.bin already exists and --replace was not
+#      passed.  Wall time on a compute node is ~25-30 min per build;
+#      caller (main_setup.sh) is responsible for running this on a
+#      host with enough RAM (peak ~10 GB) and CPU.
+#   4. Run install.sh with ROCM_PATH and MODULEFILE injected via env
+#      so it edits the modulefile this run targets (rather than its
+#      built-in /shared/apps/... default).
+#
+# Notes:
+#   * No vendored .patch files.  The whole bundle is a single
+#      pair of shell scripts plus a README template.
+#   * For 7.1.x specifically, the in-distribution rocprof-compute.bin
+#      produced by rocm_setup.sh's nuitka build is still on disk
+#      under ${ROCM_PATH}/bin/.  The overlay places another binary
+#      earlier on PATH so the regression-test view of rocprof-compute
+#      always resolves to the patches tree; the rocm_setup.sh-built
+#      binary is left in place but shadowed.
+#   * For 6.3.x there is no .exe to fall back to (the v3.0.0 / Omniperf
+#      transition was still Python-only); build.sh is the only option.
+# ─────────────────────────────────────────────────────────────────────
+rocprof_compute_detail_block() {
+   # Per-version one-liner that lands in the rendered README.md under
+   # ${INSTALL_PREFIX}/rocprof-compute/.  Keep these short -- the doc
+   # body lives in README.md.in.
+   case "$1" in
+      6.3.0) echo 'Upstream tag `rocm-6.3.0` resolves to commit `4244ddb`, upstream VERSION `3.0.0`.' ;;
+      6.3.1) echo 'Upstream tag `rocm-6.3.1` resolves to commit `2ef01fb`, upstream VERSION `3.0.0` (same commit as rocm-6.3.2 and rocm-6.3.3; only CMakeLists.txt differs from rocm-6.3.0).' ;;
+      6.3.2) echo 'Upstream tag `rocm-6.3.2` resolves to commit `2ef01fb`, upstream VERSION `3.0.0` (same commit as rocm-6.3.1 and rocm-6.3.3).' ;;
+      6.3.3) echo 'Upstream tag `rocm-6.3.3` resolves to commit `2ef01fb`, upstream VERSION `3.0.0`.' ;;
+      6.3.4) echo 'No upstream `rocm-6.3.4` tag exists; build.sh falls back to the most recent 6.3.x tag (`rocm-6.3.3` / commit `2ef01fb`, upstream VERSION `3.0.0`).  In-distribution VERSION.sha on this cluster is `dc8dc2c3`.' ;;
+      6.4.0) echo 'Upstream tag `rocm-6.4.0` resolves to commit `62bf58c`, upstream VERSION `3.1.0`.' ;;
+      6.4.1) echo 'Upstream tag `rocm-6.4.1` resolves to commit `7b25d958`, upstream VERSION `3.1.0`.' ;;
+      6.4.2) echo 'Upstream tag `rocm-6.4.2` resolves to commit `3c7933e1`, upstream VERSION `3.1.1`.' ;;
+      6.4.3) echo 'Upstream tag `rocm-6.4.3` resolves to commit `3c7933e1`, upstream VERSION `3.1.1`.  Note: the in-distribution `rocprof-compute.exe` for rocm-6.4.3 ships with a broken pyinstaller bundle (missing `VERSION.sha` inside the onefile), so a fresh nuitka rebuild is required.' ;;
+      7.0.0) echo 'Upstream tag `rocm-7.0.0` resolves to commit `246dd58`, upstream VERSION `3.2.3` (same commit as rocm-7.0.1 and rocm-7.0.2).' ;;
+      7.0.1) echo 'Upstream tag `rocm-7.0.1` resolves to commit `246dd58`, upstream VERSION `3.2.3`.' ;;
+      7.0.2) echo 'Upstream tag `rocm-7.0.2` resolves to commit `246dd58`, upstream VERSION `3.2.3`.' ;;
+      7.1.0) echo 'Upstream tag `rocm-7.1.0` -- monorepo (rocm-systems @ rocm-7.1.0), `projects/rocprofiler-compute` subtree.  rocm_setup.sh also builds a nuitka binary in `${ROCM_PATH}/bin/`; the overlay supersedes it via PATH ordering.' ;;
+      7.1.1) echo 'Upstream tag `rocm-7.1.1` -- monorepo subtree.  rocm_setup.sh also builds a nuitka binary in `${ROCM_PATH}/bin/`; the overlay supersedes it via PATH ordering.' ;;
+      *)     echo "Upstream tag \`rocm-$1\`." ;;
+   esac
+}
+
+build_rocprof_compute() {
+   local bundle_dir="${PATCH_SOURCE_DIR}/rocprof-compute"
+   local overlay_dir="${INSTALL_PREFIX}/rocprof-compute"
+   local out_bin="${overlay_dir}/lib/rocprof-compute.bin"
+
+   [ -d "${bundle_dir}" ] || send-error "patch bundle missing: ${bundle_dir}"
+   for f in install.sh build.sh README.md.in; do
+      [ -f "${bundle_dir}/${f}" ] || send-error "missing vendored file: ${bundle_dir}/${f}"
+   done
+
+   # ── 1. stage the overlay tree ────────────────────────────────────
+   ${SUDO} mkdir -p "${overlay_dir}/bin" "${overlay_dir}/lib" \
+                    "${overlay_dir}/build" "${overlay_dir}/doc"
+   if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+      ${SUDO} chown -R "$(id -u):$(id -g)" "${overlay_dir}" || true
+   fi
+   install -m 0755 "${bundle_dir}/install.sh" "${overlay_dir}/install.sh"
+   install -m 0755 "${bundle_dir}/build.sh"   "${overlay_dir}/build.sh"
+
+   # ── 2. render README.md from README.md.in ────────────────────────
+   local detail
+   detail="$(rocprof_compute_detail_block "${ROCM_VERSION}")"
+   sed -e "s/@VERSION@/${ROCM_VERSION}/g" \
+       -e "s|@DETAIL_BLOCK@|${detail}|g" \
+       "${bundle_dir}/README.md.in" > "${overlay_dir}/README.md"
+
+   # ── 3. build (idempotent) ────────────────────────────────────────
+   # Skip the slow build if a binary is already in place and the user
+   # didn't ask for a forced rebuild.  build.sh itself produces a
+   # versioned filename (rocprof-compute-v<X>.bin) and re-points
+   # lib/rocprof-compute.bin at it via symlink, so this check is
+   # sufficient regardless of which upstream tag we last built.
+   if [ -e "${out_bin}" ] && [ "${REPLACE}" -eq 0 ]; then
+      echo "[rocm_patches] ${out_bin} already exists -- skipping build (use --replace to force)"
+   else
+      echo "[rocm_patches] running nuitka build for rocprof-compute ${ROCM_VERSION} ..."
+      echo "[rocm_patches]   (wall time ~25-30 min, peak ~10 GB RAM; runs on this host)"
+      bash "${overlay_dir}/build.sh" || return 1
+   fi
+
+   # ── 4. wire up via install.sh ────────────────────────────────────
+   # Inject ROCM_PATH and MODULEFILE so install.sh edits the modulefile
+   # *this* run targets, not its built-in /shared/apps/... default.
+   echo "[rocm_patches] running install.sh to wire bin/ symlinks and modulefile ..."
+   ROCM_PATH="${ROCM_PATH}" \
+   MODULEFILE="${MODULE_FILE}" \
+   bash "${overlay_dir}/install.sh" || return 1
+
+   return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────
 # patch_module_file
 # -----------------
 # Append, exactly once, an LD_LIBRARY_PATH overlay line to the
@@ -773,24 +906,43 @@ if [ "${MODULE_FILE_ONLY}" -eq 1 ]; then
    exit ${rc}
 fi
 
+# Track which bundles actually ran so we only invoke bundle-specific
+# post-build hooks (e.g. the rocprof-sys LD_LIBRARY_PATH modulefile edit)
+# when the matching bundle was built this run.
+built_rocprof_sys=0
+built_rocprof_compute=0
+
 for bundle in ${PATCH_BUNDLES}; do
    case "${bundle}" in
-      rocprof-sys-1.3.0)  build_rocprof_sys_1_3_0 || rc=$? ;;
+      rocprof-sys-1.3.0)
+         build_rocprof_sys_1_3_0 && built_rocprof_sys=1 || rc=$? ;;
+      rocprof-compute)
+         # build_rocprof_compute runs the bundle's own install.sh which
+         # edits the modulefile (prepend_path PATH), so there's no
+         # follow-on hook from this script.
+         build_rocprof_compute && built_rocprof_compute=1 || rc=$? ;;
       *)
          echo "[rocm_patches] ERROR: no builder registered for bundle '${bundle}'" >&2
          rc=1 ;;
    esac
 done
 
-if [ "${rc}" -eq 0 ]; then
+# patch_module_file() adds the LD_LIBRARY_PATH overlay required by the
+# rocprof-sys bundle; only call it when that bundle was actually built.
+if [ "${rc}" -eq 0 ] && [ "${built_rocprof_sys}" -eq 1 ]; then
    patch_module_file || rc=$?
 fi
 
 if [ "${rc}" -eq 0 ]; then
    echo ""
    echo "[rocm_patches] ROCm ${ROCM_VERSION} patch overlay applied successfully."
-   echo "[rocm_patches]   library:     ${INSTALL_PREFIX}/lib/librocprof-sys.so.1.3.0"
-   echo "[rocm_patches]   module file: ${MODULE_FILE}"
+   if [ "${built_rocprof_sys}" -eq 1 ]; then
+      echo "[rocm_patches]   rocprof-sys library: ${INSTALL_PREFIX}/lib/librocprof-sys.so.1.3.0"
+   fi
+   if [ "${built_rocprof_compute}" -eq 1 ]; then
+      echo "[rocm_patches]   rocprof-compute:     ${INSTALL_PREFIX}/rocprof-compute/bin/rocprof-compute"
+   fi
+   echo "[rocm_patches]   module file:         ${MODULE_FILE}"
 fi
 
 exit ${rc}

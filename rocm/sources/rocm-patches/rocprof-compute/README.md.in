@@ -1,0 +1,74 @@
+# rocprof-compute overlay for ROCm @VERSION@
+
+## TL;DR
+
+The in-distribution `rocprof-compute` command on `$PATH` for `rocm-@VERSION@`
+fails at startup because it's a Python wrapper whose dependencies were
+never installed (`astunparse`, `colorlover`, etc.).  This overlay
+provides a working `rocprof-compute` without touching the original ROCm
+distribution: a nuitka onefile binary under `lib/`, a `bin/`
+symlink, and a `prepend_path("PATH", ...)` line in the corresponding
+Lmod modulefile.
+
+## Layout
+
+```text
+rocprof-compute/
+├── README.md          (this file)
+├── install.sh         idempotent wire-up: ensures lib/ + bin/ symlinks
+│                      and edits the modulefile to prepend our bin/ to PATH
+├── build.sh           idempotent nuitka rebuild from upstream tag rocm-@VERSION@,
+│                      drops a fresh binary into lib/
+├── bin/
+│   └── rocprof-compute    -> ../lib/rocprof-compute.bin
+├── lib/
+│   └── rocprof-compute.bin   either (a) symlink to the working but un-wired
+│                             /shared/apps/ubuntu/opt/rocm-@VERSION@/bin/rocprof-compute.exe
+│                             (shipped by the ROCm package),
+│                             OR (b) a fresh nuitka onefile produced by build.sh
+└── build/                   work directory populated by build.sh
+```
+
+## Rationale
+
+The fix is *purely* a wiring repair: the working binary is already on
+disk in every affected ROCm prefix as `rocprof-compute.exe`, but the
+`rocprof-compute` symlink that the user actually invokes was wired to
+the Python wrapper at `${ROCM_PATH}/libexec/rocprofiler-compute/rocprof-compute`
+which aborts on missing pip dependencies.  The overlay shadows that
+broken symlink via PATH ordering — the original distribution bytes are
+untouched and the change reverts cleanly by unloading the rocm/@VERSION@
+module.
+
+@DETAIL_BLOCK@
+
+## Reproducing the fix on a fresh cluster install
+
+```bash
+cd /shared/apps/ubuntu/opt/rocm-patches-@VERSION@/rocprof-compute
+./install.sh                  # shim mode (uses the in-distribution .exe)
+# OR
+sbatch --time=01:00:00 ./build.sh  # build a fresh nuitka onefile, then:
+./install.sh
+```
+
+Both end with the same wiring; the difference is whether
+`lib/rocprof-compute.bin` is a symlink to the in-distribution binary
+or a freshly-compiled file with documented provenance.
+
+## Verification
+
+```bash
+module purge && module load rocm/@VERSION@
+which rocprof-compute
+# expected: /shared/apps/ubuntu/opt/rocm-patches-@VERSION@/rocprof-compute/bin/rocprof-compute
+rocprof-compute --version
+rocprof-compute analyze --help | head -10
+```
+
+Companion documents:
+
+- `/shared/apps/ubuntu/opt/rocm-patches-7.2.1/doc/PROFILING_TEAM_REPORT.md`
+  (Appendix D covers the rocprof-compute side of this campaign).
+- For ROCm 7.0.x specifically:
+  `/shared/apps/ubuntu/opt/rocm-patches-7.0.2/doc/ROCPROF_COMPUTE_NUITKA_70x.md`.
