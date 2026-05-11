@@ -760,7 +760,6 @@ print('matdensecupmimpl.h patched: added <cuda/std/iterator> for CCCL 3.0+')
 	setenv("SLEPC_DIR", "$SLEPC_PATH")
 	prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
 	prepend_path("LD_LIBRARY_PATH",pathJoin("${SLEPC_PATH}", "lib"))
-	append_path("LD_LIBRARY_PATH","/usr/lib")
 EOF
 
 fi
