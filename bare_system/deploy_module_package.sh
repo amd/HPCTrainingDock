@@ -116,7 +116,7 @@ fi
 # rewrites the existing line
 #     local mbase = " /etc/lmod/modules/ROCm/rocm"
 # to
-#     local mbase = "${NFSAPPS_MODULES}"
+#     local mbase = "${TOP_MODULE_PATH}"
 # so the existing prepend_path lines resolve to
 # /nfsapps/modules/{rocm-<v>, rocmplus-<v>} as intended.
 

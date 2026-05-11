@@ -48,21 +48,64 @@
 #
 # Idempotent: re-running with the same ROCM_VERSION while the patched
 # library is already in place + the module file already has the overlay
-# entry is a fast check-and-exit-0.
+# entry + the SDK lib symlink swap is in place is a fast
+# check-and-exit-0.
+#
+# Two post-install finishing steps the script applies after every
+# successful build (and during --module-file-only backfill) are:
+#
+#   * fix_overlay_runpath_and_libunwind: cmake bakes absolute paths to
+#     the build tree into the patched .so's DT_RUNPATH, and the
+#     timemory-bundled libunwind.so.99 lives only in the build tree.
+#     After the build dir is cleaned up the patched .so cannot load
+#     (libunwind.so.99 missing, libgotcha.so.2 missing, etc.). The
+#     fixup copies libunwind next to the patched .so and rewrites
+#     DT_RUNPATH to a portable $ORIGIN-rooted form that reaches the
+#     SDK's lib + rocprofiler-systems subdir.
+#
+#   * swap_sdk_lib_symlink: rocprof-sys-run (the SDK binary) prepends
+#     ROCPROFSYS_ROOT/lib (the SDK lib) ahead of the inherited
+#     LD_LIBRARY_PATH for the profiled child process. That defeats the
+#     modulefile's LD_LIBRARY_PATH overlay. Making the SDK's
+#     versioned librocprof-sys.so.X.Y.Z a symlink to the patched .so
+#     in ${INSTALL_PREFIX}/lib/ is the canonical way to win the race:
+#     wherever the loader looks (SDK lib or overlay lib), the patched
+#     bits run. The original SDK file is preserved next door as
+#     .orig.
 #
 # Backfill mode (--module-file-only):
-#   Skips the build entirely and only applies the modulefile overlay
-#   edit. Use this on clusters where rocm_setup.sh wrote the
-#   rocm/X.Y.Z.lua modulefile BEFORE rocm_patches.sh existed, the
-#   patched .so was already built by hand and is in place, but the
-#   modulefile is still missing its `prepend_path("LD_LIBRARY_PATH",
-#   "${INSTALL_PREFIX}/lib")` line. Idempotent: detects ANY existing
-#   reference to `rocm-patches-${ROCM_VERSION}` in the modulefile
-#   (whether written by this script or by a human admin) and exits
-#   without touching the file.
+#   Skips the build entirely and applies the three finishing steps:
+#   modulefile overlay edit + fix_overlay_runpath_and_libunwind +
+#   swap_sdk_lib_symlink. Use this on clusters where the patched .so
+#   was produced by the standalone /opt/rocm-patches-X.Y.Z/apply_and_build.sh
+#   (out-of-tree builder for the 7.1.x / 7.0.x / 6.4.x / afar-22.x
+#   release lines), and the in-tree script has nothing to build but
+#   still has to finish the deployment.
 
 LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
 LEAF_DIR="$(dirname "${LEAF_SCRIPT_PATH}")"
+
+# Provenance: same pattern as the per-package `*_setup.sh` leaves
+# (see kokkos_setup.sh ~L540).  Captures this script's git state so we
+# can later embed a `whatis("Built by: rocm_patches.sh@<hash> (<dirty>)")`
+# line in the SDK modulefile we edit.  inventory_packages.py reads
+# that line to populate the `rocm_patches` provenance row.  Falls
+# back to "unknown" outside a git checkout (Docker layer, release
+# tarball, or git binary missing).
+LEAF_SCRIPT_NAME="$(basename "${LEAF_SCRIPT_PATH}")"
+LEAF_SCRIPT_COMMIT=unknown
+LEAF_SCRIPT_DIRTY=unknown
+if [ -d "${LEAF_DIR}" ] && command -v git >/dev/null 2>&1 \
+   && git -C "${LEAF_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+   _commit="$(git -C "${LEAF_DIR}" log -n 1 --pretty=format:%H -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)"
+   [ -n "${_commit}" ] && LEAF_SCRIPT_COMMIT="${_commit}"
+   unset _commit
+   if [ -n "$(git -C "${LEAF_DIR}" status --porcelain -- "${LEAF_SCRIPT_PATH}" 2>/dev/null)" ]; then
+      LEAF_SCRIPT_DIRTY=dirty
+   else
+      LEAF_SCRIPT_DIRTY=clean
+   fi
+fi
 
 # ── defaults ────────────────────────────────────────────────────────
 : ${ROCM_VERSION:=""}
@@ -156,31 +199,43 @@ rocm_version_to_patches() {
       # nuitka onefile of upstream rocprofiler-compute, drops it under
       # /opt/rocm-patches-${ROCM_VERSION}/rocprof-compute/, and adds a
       # prepend_path("PATH", ...) line to the modulefile so the overlay
-      # shadows the broken in-distribution Python wrapper (or, on 7.1.x,
-      # supersedes the rocm_setup.sh-built binary by being earlier on
-      # PATH). Applies to every ROCm release the cluster has shipped with
-      # a broken or in-built rocprof-compute -- 6.3.x through 7.1.x for
-      # official releases, plus afar-22.{1,2}.0 and therock-23.2.0 on the
-      # RC side (the three RC trees whose VERSION.sha was non-empty when
-      # the dispatch was authored).
+      # shadows the in-distribution Python wrapper / .exe.  This is the
+      # SOLE source of a working `rocprof-compute` on every supported
+      # ROCm release -- 6.3.x through 7.2.x for official releases, plus
+      # afar-22.{1,2}.0 and therock-23.{1,2}.0 on the RC side.  Prior
+      # to 2026-05 the nuitka build for 7.1.0+ lived inline in
+      # rocm/scripts/rocm_setup.sh; it has been moved here so the
+      # build, install wiring, and provenance whatis() line are all
+      # produced by a single script.  (See companion edit in
+      # rocm_setup.sh: the >=7.1.0 nuitka THEN-branch is now a no-op
+      # comment that defers to this overlay.)
       #
-      # Empirical NOTE (2026-05): for all three RC trees in this
-      # dispatch entry, the VERSION.sha on disk does NOT resolve to a
-      # public commit on github.com/ROCm/rocprofiler-compute -- the
+      # On the 7.2.x line two bundles run back-to-back: the rocprof-sys
+      # cherry-pick (for 7.2.0/7.2.1 only -- 7.2.2/7.2.3 have no rocprof-sys
+      # patch yet) PLUS the rocprof-compute overlay.  build_rocprof_compute()
+      # is invoked after build_rocprof_sys_1_3_0() because the dispatch
+      # iterates PATCH_BUNDLES in order.
+      #
+      # Empirical NOTE (2026-05): for the RC trees afar-22.{1,2}.0 and
+      # therock-23.{1,2}.0, the VERSION.sha on disk does NOT resolve to
+      # a public commit on github.com/ROCm/rocprofiler-compute -- the
       # RC .debs are built from internal AMD branches.  build.sh's
       # RC-mode catches this in `git rev-parse --verify` and returns
       # exit 43 (soft no-op).  We still LIST the trees here so that
       # any future RC .deb whose VERSION.sha gets pushed upstream
       # gets the overlay automatically; right now no overlay is
-      # actually produced for these three.
-      7.2.0)            echo "rocprof-sys-1.3.0" ;;
-      7.2.1)            echo "rocprof-sys-1.3.0" ;;
+      # actually produced for those RC trees.
+      7.2.0)            echo "rocprof-sys-1.3.0 rocprof-compute" ;;
+      7.2.1)            echo "rocprof-sys-1.3.0 rocprof-compute" ;;
+      7.2.2)            echo "rocprof-compute" ;;
+      7.2.3)            echo "rocprof-compute" ;;
       6.3.*)            echo "rocprof-compute" ;;
       6.4.*)            echo "rocprof-compute" ;;
       7.0.*)            echo "rocprof-compute" ;;
       7.1.*)            echo "rocprof-compute" ;;
       afar-22.1.0)      echo "rocprof-compute" ;;
       afar-22.2.0)      echo "rocprof-compute" ;;
+      therock-23.1.0)   echo "rocprof-compute" ;;
       therock-23.2.0)   echo "rocprof-compute" ;;
       *)                echo "" ;;
    esac
@@ -728,14 +783,17 @@ EOF
 # Notes:
 #   * No vendored .patch files.  The whole bundle is a single
 #      pair of shell scripts plus a README template.
-#   * For 7.1.x specifically, the in-distribution rocprof-compute.bin
-#      produced by rocm_setup.sh's nuitka build is still on disk
-#      under ${ROCM_PATH}/bin/.  The overlay places another binary
-#      earlier on PATH so the regression-test view of rocprof-compute
-#      always resolves to the patches tree; the rocm_setup.sh-built
-#      binary is left in place but shadowed.
+#   * Prior to 2026-05 the nuitka build for ROCm >= 7.1.0 lived inline
+#      in rocm/scripts/rocm_setup.sh; that block has been retired in
+#      favour of this overlay so the build, the install wiring, and
+#      the `Built by: rocm_patches.sh@...` provenance line are all
+#      produced by a single script.  rocm_setup.sh no longer builds
+#      rocprof-compute on any ROCm version.
 #   * For 6.3.x there is no .exe to fall back to (the v3.0.0 / Omniperf
 #      transition was still Python-only); build.sh is the only option.
+#   * For 7.x the SDK still ships a (broken) Python wrapper at
+#      ${ROCM_PATH}/bin/rocprof-compute; the overlay's bin/ wins via
+#      PATH ordering on the modulefile.
 # ─────────────────────────────────────────────────────────────────────
 rocprof_compute_detail_block() {
    # Per-version one-liner that lands in the rendered README.md under
@@ -754,10 +812,15 @@ rocprof_compute_detail_block() {
       7.0.0) echo 'Upstream tag `rocm-7.0.0` resolves to commit `246dd58`, upstream VERSION `3.2.3` (same commit as rocm-7.0.1 and rocm-7.0.2).' ;;
       7.0.1) echo 'Upstream tag `rocm-7.0.1` resolves to commit `246dd58`, upstream VERSION `3.2.3`.' ;;
       7.0.2) echo 'Upstream tag `rocm-7.0.2` resolves to commit `246dd58`, upstream VERSION `3.2.3`.' ;;
-      7.1.0) echo 'Upstream tag `rocm-7.1.0` -- monorepo (rocm-systems @ rocm-7.1.0), `projects/rocprofiler-compute` subtree.  rocm_setup.sh also builds a nuitka binary in `${ROCM_PATH}/bin/`; the overlay supersedes it via PATH ordering.' ;;
-      7.1.1) echo 'Upstream tag `rocm-7.1.1` -- monorepo subtree.  rocm_setup.sh also builds a nuitka binary in `${ROCM_PATH}/bin/`; the overlay supersedes it via PATH ordering.' ;;
+      7.1.0) echo 'Upstream tag `rocm-7.1.0` -- monorepo (rocm-systems @ rocm-7.1.0), `projects/rocprofiler-compute` subtree.' ;;
+      7.1.1) echo 'Upstream tag `rocm-7.1.1` -- monorepo (rocm-systems @ rocm-7.1.1), `projects/rocprofiler-compute` subtree.' ;;
+      7.2.0) echo 'Upstream tag `rocm-7.2.0` -- monorepo (rocm-systems @ rocm-7.2.0), `projects/rocprofiler-compute` subtree.  Builds alongside the rocprof-sys 1.3.0 cherry-pick.' ;;
+      7.2.1) echo 'Upstream tag `rocm-7.2.1` -- monorepo (rocm-systems @ rocm-7.2.1), `projects/rocprofiler-compute` subtree.  Builds alongside the rocprof-sys 1.3.0 cherry-pick.' ;;
+      7.2.2) echo 'Upstream tag `rocm-7.2.2` -- monorepo (rocm-systems @ rocm-7.2.2), `projects/rocprofiler-compute` subtree.  No rocprof-sys cherry-pick on this version yet.' ;;
+      7.2.3) echo 'Upstream tag `rocm-7.2.3` -- monorepo (rocm-systems @ rocm-7.2.3), `projects/rocprofiler-compute` subtree.  No rocprof-sys cherry-pick on this version yet.' ;;
       afar-22.1.0)    echo 'RC tree (no `rocm-afar-22.1.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (afar-22.1.0 ships `167a9576`, upstream VERSION `3.3.0`).' ;;
       afar-22.2.0)    echo 'RC tree (no `rocm-afar-22.2.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (afar-22.2.0 ships `bad92dc4`, upstream VERSION `3.3.0`).' ;;
+      therock-23.1.0) echo 'RC tree (no `rocm-therock-23.1.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (when present).' ;;
       therock-23.2.0) echo 'RC tree (no `rocm-therock-23.2.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (therock-23.2.0 ships `bc96f0a`, upstream VERSION `3.6.0`).' ;;
       *)     echo "Upstream tag \`rocm-$1\`." ;;
    esac
@@ -834,6 +897,178 @@ build_rocprof_compute() {
    MODULEFILE="${MODULE_FILE}" \
    bash "${overlay_dir}/install.sh" || return 1
 
+   return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# fix_overlay_runpath_and_libunwind
+# ---------------------------------
+# After the patched librocprof-sys.so.X.Y.Z lands in
+# ${INSTALL_PREFIX}/lib/, two follow-up steps are required before the
+# patched .so will actually load at runtime:
+#
+#   1. Resolve libunwind.so.99 (the timemory-bundled libunwind built
+#      next to the patched .so). The build tree ships it at
+#      <INSTALL_PREFIX>/build/rocprofiler-systems/external/timemory/
+#      external/libunwind/install/lib/libunwind.so.99.0.0.  Copy it
+#      next to the patched .so plus the SONAME / dev symlinks. If the
+#      build dir was cleaned up (out-of-tree apply_and_build.sh, or
+#      operator removed build/), borrow from a sibling overlay whose
+#      libunwind is on disk and ABI-compatible (any 7.x or 6.4.x
+#      bundled libunwind works -- DT_SONAME = libunwind.so.99 for all).
+#
+#   2. Rewrite the patched .so's DT_RUNPATH from the absolute
+#      build-tree paths cmake baked in (which point at directories
+#      cleaned up after the build) to a portable form pointing at
+#      $ORIGIN (= ${INSTALL_PREFIX}/lib, where libunwind.so.99 now
+#      lives), the matching SDK's lib dir, and the SDK's
+#      rocprofiler-systems internal lib subdir (where libgotcha.so.2
+#      etc. live), plus the standard elfutils path.
+#
+# Idempotent.  Returns 0 on success, 1 on hard error.
+# ─────────────────────────────────────────────────────────────────────
+fix_overlay_runpath_and_libunwind() {
+   local lib_dir="${INSTALL_PREFIX}/lib"
+   local patched
+   patched=$(ls -1 "${lib_dir}"/librocprof-sys.so.[0-9]*.[0-9]*.[0-9]* 2>/dev/null \
+              | grep -vE '\.orig$' | head -1)
+   if [ -z "${patched}" ]; then
+      echo "[rocm_patches] fix_overlay_runpath_and_libunwind: no patched .so in ${lib_dir}; skipping"
+      return 0
+   fi
+
+   # 1. libunwind.so.99 next to the patched .so
+   if [ ! -e "${lib_dir}/libunwind.so.99.0.0" ]; then
+      local src=""
+      local candidate
+      candidate=$(find "${INSTALL_PREFIX}/build" \
+                      -path '*/timemory/external/libunwind/install/lib/libunwind.so.99.0.0' \
+                      2>/dev/null | head -1)
+      if [ -n "${candidate}" ] && [ -f "${candidate}" ]; then
+         src="${candidate}"
+      else
+         # Build tree was cleaned up; look at sibling overlays in the
+         # same install root (/opt/rocm-patches-* by default; honour
+         # whatever prefix the caller chose).
+         local roots
+         roots="$(dirname "${INSTALL_PREFIX}")"
+         local donor
+         for donor in 7.1.0 7.1.1 7.0.2 6.4.3 6.4.0 7.0.0; do
+            local d="${roots}/rocm-patches-${donor}/build/rocprofiler-systems/external/timemory/external/libunwind/install/lib/libunwind.so.99.0.0"
+            if [ -f "${d}" ]; then
+               src="${d}"
+               break
+            fi
+         done
+      fi
+      if [ -z "${src}" ] || [ ! -f "${src}" ]; then
+         echo "[rocm_patches] WARNING: libunwind.so.99.0.0 not findable; patched .so" >&2
+         echo "[rocm_patches]          will fail to load with 'libunwind.so.99: not found'." >&2
+         echo "[rocm_patches]          Provide a libunwind under ${lib_dir}/ manually." >&2
+         return 1
+      fi
+      echo "[rocm_patches] copy libunwind.so.99.0.0 from ${src}"
+      ${SUDO} install -m 0755 "${src}" "${lib_dir}/libunwind.so.99.0.0"
+      ${SUDO} ln -sfn libunwind.so.99.0.0 "${lib_dir}/libunwind.so.99"
+      ${SUDO} ln -sfn libunwind.so.99     "${lib_dir}/libunwind.so"
+   else
+      echo "[rocm_patches] libunwind.so.99.0.0 already present in ${lib_dir}"
+   fi
+
+   # 2. Rewrite RUNPATH on the patched .so
+   if ! command -v patchelf >/dev/null 2>&1; then
+      echo "[rocm_patches] ERROR: patchelf not on PATH; cannot rewrite RUNPATH" >&2
+      return 1
+   fi
+
+   local sdk_name
+   # Trim any rocm- prefix and use what's left (handles 7.2.1 → rocm-7.2.1,
+   # afar-22.1.0 → rocm-afar-22.1.0, therock-23.2.0 → rocm-therock-23.2.0).
+   sdk_name="rocm-${ROCM_VERSION}"
+   local new_rpath="\$ORIGIN:\$ORIGIN/../../${sdk_name}/lib/rocprofiler-systems:\$ORIGIN/../../${sdk_name}/lib:/usr/lib/x86_64-linux-gnu/elfutils"
+   local cur_rpath
+   cur_rpath=$(patchelf --print-rpath "${patched}" 2>/dev/null)
+   if [ "${cur_rpath}" = "${new_rpath}" ]; then
+      echo "[rocm_patches] RUNPATH on $(basename "${patched}") is already portable"
+   else
+      echo "[rocm_patches] rewriting RUNPATH on $(basename "${patched}")"
+      echo "[rocm_patches]   from: ${cur_rpath}"
+      echo "[rocm_patches]   to:   ${new_rpath}"
+      ${SUDO} patchelf --set-rpath "${new_rpath}" "${patched}" || return 1
+   fi
+
+   # 3. Verify all NEEDED libs resolve from the install location.
+   local missing
+   missing=$(cd "${lib_dir}" && ldd "./$(basename "${patched}")" 2>&1 \
+              | grep -E 'not found' | head -5)
+   if [ -n "${missing}" ]; then
+      echo "[rocm_patches] WARNING: patched .so still has unresolved deps:" >&2
+      echo "${missing}" | sed 's/^/[rocm_patches]   /' >&2
+      return 1
+   fi
+   return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# swap_sdk_lib_symlink
+# --------------------
+# Replace the SDK's versioned librocprof-sys.so.X.Y.Z with an absolute
+# symlink to the patched .so in ${INSTALL_PREFIX}/lib/.  The original
+# SDK file is preserved as `.orig` on the first run.  Idempotent:
+# detects an existing swap (live entry already pointing at the
+# patches lib) and exits with no change.  Refuses to overwrite if a
+# `.orig` is already present alongside a live SDK file that is NOT
+# the overlay symlink (means a previous swap was partially reverted
+# by hand -- requires operator attention).
+#
+# Why this is necessary on top of the LD_LIBRARY_PATH modulefile
+# overlay: rocprof-sys-run (the SDK binary at
+# ${ROCM_PATH}/bin/rocprof-sys-run) constructs the child env by
+# prepending ${ROCPROFSYS_ROOT}/lib ahead of the inherited
+# LD_LIBRARY_PATH.  That defeats the modulefile overlay -- the SDK's
+# unpatched .so wins dlopen() resolution in the profiled child and
+# the Bug A SIGSEGV in rocprofiler_configure() returns.  Making the
+# SDK's own versioned .so a symlink into the patches dir means the
+# patched bits run regardless of which path the loader picks.
+#
+# Touches exactly ONE node under the SDK tree (the versioned .so).
+# The librocprof-sys.so / .so.MAJOR aliases are SDK-relative symlinks
+# that already point at the versioned file and need no change.
+# ─────────────────────────────────────────────────────────────────────
+swap_sdk_lib_symlink() {
+   local overlay_lib="${INSTALL_PREFIX}/lib"
+   local patched
+   patched=$(ls -1 "${overlay_lib}"/librocprof-sys.so.[0-9]*.[0-9]*.[0-9]* 2>/dev/null \
+              | grep -vE '\.orig$' | head -1)
+   if [ -z "${patched}" ]; then
+      echo "[rocm_patches] swap_sdk_lib_symlink: no patched .so in ${overlay_lib}; skipping"
+      return 0
+   fi
+   local sofile
+   sofile="$(basename "${patched}")"
+   local sdk_so="${ROCM_PATH}/lib/${sofile}"
+   if [ ! -e "${sdk_so}" ] && [ ! -L "${sdk_so}" ]; then
+      echo "[rocm_patches] swap_sdk_lib_symlink: SDK has no ${sofile} at ${sdk_so}"
+      echo "[rocm_patches]   (SDK SONAME differs from overlay's; nothing to swap)"
+      return 0
+   fi
+   if [ -L "${sdk_so}" ] \
+        && [ "$(readlink -f "${sdk_so}")" = "$(readlink -f "${patched}")" ]; then
+      echo "[rocm_patches] SDK ${sofile} already points at the overlay (idempotent)"
+      return 0
+   fi
+   if [ -e "${sdk_so}.orig" ]; then
+      echo "[rocm_patches] WARNING: ${sdk_so}.orig already exists but live file is" >&2
+      echo "[rocm_patches]          not the overlay symlink.  Refusing to overwrite --" >&2
+      echo "[rocm_patches]          investigate.  (Re-run after restoring .orig or" >&2
+      echo "[rocm_patches]          fixing the live file by hand.)" >&2
+      return 1
+   fi
+   echo "[rocm_patches] swap SDK ${sofile}:"
+   echo "[rocm_patches]   ${sdk_so}.orig <-- (current SDK file moved aside)"
+   echo "[rocm_patches]   ${sdk_so}      --> ${patched}"
+   ${SUDO} mv -n "${sdk_so}" "${sdk_so}.orig" || return 1
+   ${SUDO} ln -sfn "${patched}" "${sdk_so}"   || return 1
    return 0
 }
 
@@ -919,6 +1154,50 @@ EOF
    fi
 }
 
+# ─────────────────────────────────────────────────────────────────────
+# write_rocm_patches_provenance
+# -----------------------------
+# Embed a `whatis("Built by: rocm_patches.sh@<hash> (<dirty>)")` line
+# in the SDK modulefile we just edited, matching the convention used
+# by every `_setup.sh` leaf in this repo.  inventory_packages.py reads
+# this line to populate the `rocm_patches` row of its
+# --install-provenance matrix.
+#
+# Idempotent in two ways:
+#   * If an existing `Built by: ${LEAF_SCRIPT_NAME}@...` line is already
+#     present in the modulefile, REPLACE its payload in place so the
+#     latest hash + clean/dirty bit wins (re-runs at different commits
+#     don't leave stale entries behind).
+#   * Otherwise append a new line at the end of the file. We don't try
+#     to insert it next to rocm_setup.sh's own `Built by:` line near
+#     the top, because that anchor may not exist on older modulefiles
+#     written before rocm_setup.sh started emitting Built-by lines.
+#     inventory_packages.py uses re.finditer over the whole file and
+#     does not care about ordering.
+#
+# Co-exists cleanly with rocm_setup.sh's `Built by: rocm_setup.sh@...`
+# line in the same .lua: the line is keyed by writer-script name, and
+# inventory_packages.py filters by script when populating each row.
+# ─────────────────────────────────────────────────────────────────────
+write_rocm_patches_provenance() {
+   if [ ! -f "${MODULE_FILE}" ]; then
+      echo "[rocm_patches] WARNING: ${MODULE_FILE} missing; cannot embed provenance line"
+      return 0
+   fi
+   local new_line='whatis("Built by: '"${LEAF_SCRIPT_NAME}"'@'"${LEAF_SCRIPT_COMMIT:0:12}"' ('"${LEAF_SCRIPT_DIRTY}"')")'
+   if grep -q "Built by: ${LEAF_SCRIPT_NAME}@" "${MODULE_FILE}"; then
+      # Replace existing payload in-place. Using '#' as sed delimiter
+      # so the embedded `/` in "rocm_patches.sh" doesn't need escaping.
+      ${SUDO} sed -i \
+         "s#whatis(\"Built by: ${LEAF_SCRIPT_NAME}@[^\"]*\")#${new_line}#" \
+         "${MODULE_FILE}"
+      echo "[rocm_patches] refreshed provenance in ${MODULE_FILE}"
+   else
+      echo "${new_line}" | ${SUDO} tee -a "${MODULE_FILE}" >/dev/null
+      echo "[rocm_patches] embedded provenance into ${MODULE_FILE}"
+   fi
+}
+
 # ── dispatch ────────────────────────────────────────────────────────
 rc=0
 
@@ -943,11 +1222,25 @@ if [ "${MODULE_FILE_ONLY}" -eq 1 ]; then
       echo "[rocm_patches]   the full build (only supported for 7.2.0/7.2.1 today)." >&2
       exit 1
    fi
-   patch_module_file
-   rc=$?
+   patch_module_file || rc=$?
+   # Self-heal the patched .so's RUNPATH and ensure libunwind.so.99 is
+   # next to it (no-op if already done).  Then swap the SDK's
+   # versioned .so to point at the overlay (no-op if already swapped).
+   # Both steps are needed for clusters whose patched .so was built by
+   # the standalone apply_and_build.sh and never had the RUNPATH /
+   # SDK-swap follow-up applied.
+   if [ "${rc}" -eq 0 ]; then
+      fix_overlay_runpath_and_libunwind || rc=$?
+   fi
+   if [ "${rc}" -eq 0 ]; then
+      swap_sdk_lib_symlink || rc=$?
+   fi
+   if [ "${rc}" -eq 0 ]; then
+      write_rocm_patches_provenance || rc=$?
+   fi
    if [ "${rc}" -eq 0 ]; then
       echo ""
-      echo "[rocm_patches] ROCm ${ROCM_VERSION} module file overlay edit applied (backfill)."
+      echo "[rocm_patches] ROCm ${ROCM_VERSION} backfill applied (modulefile + SDK swap)."
       echo "[rocm_patches]   module file: ${MODULE_FILE}"
    fi
    exit ${rc}
@@ -990,8 +1283,32 @@ done
 
 # patch_module_file() adds the LD_LIBRARY_PATH overlay required by the
 # rocprof-sys bundle; only call it when that bundle was actually built.
+# fix_overlay_runpath_and_libunwind() turns the patched .so's bogus
+# absolute build-tree DT_RUNPATH into a portable form ($ORIGIN-rooted)
+# and installs libunwind.so.99 next to the patched .so. swap_sdk_lib_symlink()
+# then makes the SDK's own librocprof-sys.so.X.Y.Z a symlink to the
+# patched .so so the runtime defeats rocprof-sys-run's own
+# LD_LIBRARY_PATH prepending of ROCPROFSYS_ROOT/lib.
 if [ "${rc}" -eq 0 ] && [ "${built_rocprof_sys}" -eq 1 ]; then
    patch_module_file || rc=$?
+   if [ "${rc}" -eq 0 ]; then
+      fix_overlay_runpath_and_libunwind || rc=$?
+   fi
+   if [ "${rc}" -eq 0 ]; then
+      swap_sdk_lib_symlink || rc=$?
+   fi
+fi
+
+# Embed the rocm_patches provenance whatis() line in the SDK modulefile
+# when at least one bundle actually produced an overlay this run.  Skip
+# the soft-noop/no-dispatch cases so inventory_packages.py's
+# `rocm_patches` row stays '-' for versions where we did no work
+# (instead of misleadingly claiming a "Built by:" run).  See
+# write_rocm_patches_provenance() for the full idempotency story.
+if [ "${rc}" -eq 0 ] \
+     && { [ "${built_rocprof_sys}" -eq 1 ] \
+          || [ "${built_rocprof_compute}" -eq 1 ]; }; then
+   write_rocm_patches_provenance || rc=$?
 fi
 
 if [ "${rc}" -eq 0 ]; then

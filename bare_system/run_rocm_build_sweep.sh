@@ -11,17 +11,35 @@
 set -uo pipefail
 
 : ${PARTITION:="sh5_cpx_admin_long"}
-: ${MIN_PER_VERSION:="60"}        # estimated minutes per ROCm build (cold docker
+: ${MIN_PER_VERSION:="95"}        # estimated minutes per ROCm build (cold docker
                                   # cache; ~35 min with warm cache). Includes
                                   # the slow chown -R sysadmin pass (~11 min)
-                                  # plus make rocm + rocm_package + module pkg.
+                                  # plus make rocm + rocm_package + module pkg
+                                  # (~60 min total) plus Phase 3.6
+                                  # rocm_patches.sh (~30 min: rocprof-compute
+                                  # nuitka on 6.3.x-7.1.x, rocprof-sys-1.3.0
+                                  # cmake on 7.2.x). Versions with no
+                                  # vendored fix (NOOP_RC=43) skip the
+                                  # patches wall in under a second; set
+                                  # --skip-patches 1 to opt out entirely.
 : ${MARGIN_MIN:="60"}             # global margin (minutes)
 : ${MAX_TIME_MIN:="2880"}         # MaxTime of sh5_cpx_admin_long = 48h
-: ${FORCE_EXTRACT:="0"}
+# --replace-existing is the rocm-sweep analog of run_rocmplus_install_sweep.sh's
+# flag of the same name (semantics: when set, the existing /opt/rocm-<v> tree
+# and the matching modulefiles are deleted and re-extracted from a fresh
+# tarball).  FORCE_EXTRACT is still honoured as a deprecated env-var alias.
+if [ -z "${REPLACE_EXISTING:-}" ] && [ -n "${FORCE_EXTRACT:-}" ]; then
+   echo "[rocm_sweep] NOTE: FORCE_EXTRACT is deprecated; map to REPLACE_EXISTING=${FORCE_EXTRACT}" >&2
+   REPLACE_EXISTING="${FORCE_EXTRACT}"
+fi
+: ${REPLACE_EXISTING:="0"}
+: ${SKIP_PATCHES:="0"}
 : ${KEEP_TARBALLS:="3"}
 : ${DISTRO:="ubuntu"}
 : ${DISTRO_VERSION:="24.04"}
 : ${AMDGPU_GFXMODEL:="gfx942;gfx90a"}
+: ${TOP_INSTALL_PATH:="/nfsapps/opt"}     # on-host SDK extract destination (mirrors run_rocmplus_install_sweep.sh)
+: ${TOP_MODULE_PATH:="/nfsapps/modules"}  # on-host Lmod root for the deployed modulefiles
 
 ROCM_VERSIONS_RAW=""
 
@@ -32,11 +50,15 @@ Usage: $0 [opts]
    --partition NAME              Slurm partition (default $PARTITION)
    --min-per-version N           estimated minutes per build (default $MIN_PER_VERSION)
    --margin-min N                margin minutes added to total (default $MARGIN_MIN)
-   --force-extract 0|1           overwrite existing /nfsapps/opt/rocm-<v> (default $FORCE_EXTRACT)
+   --replace-existing 0|1        overwrite existing \${TOP_INSTALL_PATH}/rocm-<v> (default $REPLACE_EXISTING)
+                                 (alias: --force-extract -- deprecated, kept for backward compat)
+   --skip-patches 0|1            skip Phase 3.6 (rocm_patches.sh) (default $SKIP_PATCHES)
    --keep-tarballs N             prune policy (default $KEEP_TARBALLS)
    --distro NAME                 default $DISTRO
    --distro-version VER          default $DISTRO_VERSION
    --amdgpu-gfxmodel GFX         default $AMDGPU_GFXMODEL
+   --top-install-path PATH       on-host SDK extract destination (default $TOP_INSTALL_PATH)
+   --top-module-path  PATH       on-host Lmod root for deployed modulefiles (default $TOP_MODULE_PATH)
    --dry-run                     print sbatch command without submitting
    --help
 EOF
@@ -50,11 +72,16 @@ while [[ $# -gt 0 ]]; do
       --partition)        shift; PARTITION=${1} ;;
       --min-per-version)  shift; MIN_PER_VERSION=${1} ;;
       --margin-min)       shift; MARGIN_MIN=${1} ;;
-      --force-extract)    shift; FORCE_EXTRACT=${1} ;;
+      --replace-existing) shift; REPLACE_EXISTING=${1} ;;
+      --force-extract)    shift; REPLACE_EXISTING=${1}
+                          echo "[rocm_sweep] NOTE: --force-extract is deprecated; use --replace-existing" >&2 ;;
+      --skip-patches)     shift; SKIP_PATCHES=${1} ;;
       --keep-tarballs)    shift; KEEP_TARBALLS=${1} ;;
       --distro)           shift; DISTRO=${1} ;;
       --distro-version)   shift; DISTRO_VERSION=${1} ;;
       --amdgpu-gfxmodel)  shift; AMDGPU_GFXMODEL=${1} ;;
+      --top-install-path) shift; TOP_INSTALL_PATH=${1} ;;
+      --top-module-path)  shift; TOP_MODULE_PATH=${1} ;;
       --dry-run)          DRY_RUN=1 ;;
       --help|-h)          usage ;;
       *)                  echo "Unknown arg: ${1}" >&2; usage ;;
@@ -93,15 +120,18 @@ cat <<EOF
  Per-version est:  ${MIN_PER_VERSION} min
  Margin:           ${MARGIN_MIN} min
  Total --time:     ${TIME_STR}
- Force extract:    ${FORCE_EXTRACT}
+ Replace existing: ${REPLACE_EXISTING}
+ Skip patches:     ${SKIP_PATCHES}
  Keep tarballs:    ${KEEP_TARBALLS}
  Distro:           ${DISTRO} ${DISTRO_VERSION}
  GFX:              ${AMDGPU_GFXMODEL}
+ TOP_INSTALL_PATH: ${TOP_INSTALL_PATH}
+ TOP_MODULE_PATH:  ${TOP_MODULE_PATH}
  sbatch file:      ${SBATCH_FILE}
 ==================================================================
 EOF
 
-EXPORT_VARS="ALL,ROCM_VERSIONS=${ROCM_VERSIONS_NORM},FORCE_EXTRACT=${FORCE_EXTRACT},KEEP_TARBALLS=${KEEP_TARBALLS},DISTRO=${DISTRO},DISTRO_VERSION=${DISTRO_VERSION},AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL}"
+EXPORT_VARS="ALL,ROCM_VERSIONS=${ROCM_VERSIONS_NORM},REPLACE_EXISTING=${REPLACE_EXISTING},SKIP_PATCHES=${SKIP_PATCHES},KEEP_TARBALLS=${KEEP_TARBALLS},DISTRO=${DISTRO},DISTRO_VERSION=${DISTRO_VERSION},AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL},TOP_INSTALL_PATH=${TOP_INSTALL_PATH},TOP_MODULE_PATH=${TOP_MODULE_PATH}"
 
 CMD=( sbatch
       --time="${TIME_STR}"
