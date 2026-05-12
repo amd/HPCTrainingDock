@@ -438,6 +438,27 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
 
       if [ "${DISTRO}" == "ubuntu" ]; then
          ${PKG_SUDO} apt-get update
+
+         # KNOWN ENV LEAK: amdgpu-install (invoked below) internally calls
+         # `sudo apt-get install`, and the inner sudo strips DEBIAN_FRONTEND
+         # from the outer process even when we wrap with
+         # `DEBIAN_FRONTEND=... sudo amdgpu-install ...`. tzdata gets pulled
+         # in as a transitive dep of ROCm packages (or of x11-common, libpq5,
+         # etc. in the same install txn) and triggers an interactive
+         # "Geographic area:" prompt that hangs the build forever. Pre-install
+         # + pre-configure tzdata up front so dpkg never has to ask.
+         #
+         # Required for both delta-release and full-release builds: full
+         # releases (e.g. ROCm 7.2.3) hit this on the first `amdgpu-install
+         # --rocmrelease=<ver>` call below; delta releases (e.g. 7.2.2 -> 7.2.1
+         # base) hit it on the base install in the BASE_ROCM_VERSION branch.
+         # Doing it once here covers both paths.
+         echo "[rocm_setup] pre-configuring tzdata to defeat interactive prompt during ROCm install"
+         echo "Etc/UTC" | ${SUDO} tee /etc/timezone > /dev/null
+         ${SUDO} ln -fs /usr/share/zoneinfo/Etc/UTC /etc/localtime
+         ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y tzdata
+         ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive dpkg-reconfigure --frontend=noninteractive tzdata
+
          ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y libdrm-dev logrotate
 
          #mkdir --parents --mode=0755 /etc/apt/keyrings
@@ -511,20 +532,11 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
                | ${SUDO} tee /etc/apt/sources.list.d/rocm-${BASE_ROCM_VERSION}.list > /dev/null
             ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get update
 
-            # KNOWN ENV LEAK: amdgpu-install internally calls `sudo apt-get
-            # install`, and the inner sudo strips DEBIAN_FRONTEND from the
-            # outer process even though we wrap with `DEBIAN_FRONTEND=... sudo
-            # ...`. tzdata gets pulled in as a transitive dep of ROCm packages
-            # and triggers an interactive "Geographic area:" prompt that hangs
-            # the build forever. Pre-install + pre-configure tzdata so dpkg
-            # never has to ask. (The main 7.2.x install doesn't hit this in
-            # the non-delta path because something else has already pulled
-            # tzdata in by the time amdgpu-install --rocmrelease=DELTA runs.)
-            echo "[rocm_setup] delta-release mode: pre-configuring tzdata to defeat interactive prompt during base install"
-            echo "Etc/UTC" | ${SUDO} tee /etc/timezone > /dev/null
-            ${SUDO} ln -fs /usr/share/zoneinfo/Etc/UTC /etc/localtime
-            ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y tzdata
-            ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive dpkg-reconfigure --frontend=noninteractive tzdata
+            # tzdata pre-configuration to defeat the interactive
+            # "Geographic area:" prompt during the base amdgpu-install is
+            # done unconditionally near the top of this Ubuntu branch (see
+            # the "KNOWN ENV LEAK" block earlier). No per-branch fix needed
+            # here.
 
             echo "[rocm_setup] delta-release mode: pre-installing base ROCm ${BASE_ROCM_VERSION} before ${ROCM_VERSION}"
             ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y \
