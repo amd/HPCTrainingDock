@@ -627,6 +627,86 @@ EOF
          "/opt/rocm-${ROCM_VERSION}/"
       echo "[rocm_setup] removing base tree /opt/rocm-${BASE_ROCM_VERSION} (now merged into /opt/rocm-${ROCM_VERSION})"
       ${SUDO} rm -rf "/opt/rocm-${BASE_ROCM_VERSION}"
+
+      # Delta-merge orphan-shared-lib cleanup. ONLY fires in this
+      # delta-release branch (gated by --base-rocm-version).
+      #
+      # Why this is needed: `rsync --ignore-existing` only suppresses
+      # overwrites of IDENTICALLY NAMED paths. When the base and the
+      # delta SDKs ship the same library at different patch versions --
+      # e.g. ${BASE_ROCM_VERSION}=7.2.1 contributes
+      #   librocm_smi64.so.1.0.70201
+      # and ${ROCM_VERSION}=7.2.2 contributes
+      #   librocm_smi64.so.1.0.70202
+      # -- BOTH versioned files end up side-by-side in the merged lib
+      # dir. The SONAME symlink (librocm_smi64.so.1) resolves to the
+      # DELTA file because the symlink existed in BOTH trees and
+      # --ignore-existing kept delta's. Bazel's rocm_configure glob
+      # then aborts the tensorflow build with
+      #   Error in fail: attribute srcs: Trying to link twice a library
+      #     with the same identifier '.../librocm_smi64.so.1.0',files:
+      #     .../librocm_smi64.so.1.0.70202 and
+      #     .../librocm_smi64.so.1.0.70201
+      # (slurm-9002 / log_tensorflow_05_11_2026.txt:504 from the
+      # 2026-05-11 sweep).
+      #
+      # Walk each canonical ROCm lib dir, follow every SONAME symlink
+      # (form: lib*.so.MAJOR, single integer after .so.) to its real
+      # file, and rm any sibling versioned file (lib*.so.MAJOR.*) that
+      # is NOT the resolved target. Conservative: only files with the
+      # exact same lib-prefix as a live SONAME symlink are considered,
+      # and only real (non-symlink) files are removed.
+      echo ""
+      echo "================================================"
+      echo " Delta-merge orphan-shared-lib cleanup"
+      echo "================================================"
+      stale_total=0
+      for LIB_DIR in \
+         "/opt/rocm-${ROCM_VERSION}/lib" \
+         "/opt/rocm-${ROCM_VERSION}/lib64" \
+         "/opt/rocm-${ROCM_VERSION}/llvm/lib" ; do
+         [ -d "${LIB_DIR}" ] || continue
+         [ -L "${LIB_DIR}" ] && continue   # skip e.g. lib64 -> lib symlink
+         for soname in "${LIB_DIR}"/*.so.*; do
+            [ -L "${soname}" ] || continue
+            bn="$(basename "${soname}")"
+            after_so="${bn#*.so.}"
+            case "${after_so}" in
+               *.*) continue ;;            # multi-component .so.X.Y.* -- not a SONAME symlink
+            esac
+            [[ "${after_so}" =~ ^[0-9]+$ ]] || continue
+            tgt="$(readlink "${soname}")"
+            [ "${tgt:0:1}" = "/" ] || tgt="${LIB_DIR}/${tgt}"
+            _hops=0
+            while [ -L "${tgt}" ] && [ ${_hops} -lt 10 ]; do
+               next="$(readlink "${tgt}")"
+               if [ "${next:0:1}" = "/" ]; then
+                  tgt="${next}"
+               else
+                  tgt="$(dirname "${tgt}")/${next}"
+               fi
+               _hops=$((_hops + 1))
+            done
+            keep="$(basename "${tgt}")"
+            for sib in "${soname}".*; do
+               [ -f "${sib}" ] && [ ! -L "${sib}" ] || continue
+               sibname="$(basename "${sib}")"
+               [ "${sibname}" = "${keep}" ] && continue
+               # Safety filter: only remove pure-numeric-version-suffix
+               # siblings (e.g. librocm_smi64.so.1.0.70201). Skip files
+               # with non-numeric suffixes such as `.orig` (rocm_patches.sh
+               # swap_sdk_lib_symlink rollback backups), `.debug`, etc.
+               suffix="${sib#${soname}.}"
+               [[ "${suffix}" =~ ^[0-9.]+$ ]] || continue
+               echo "[rocm_setup] delta-merge cleanup: rm ${sib}"
+               echo "                                  (SONAME ${bn} -> ${keep})"
+               ${SUDO} rm -f "${sib}"
+               stale_total=$((stale_total + 1))
+            done
+         done
+      done
+      echo "[rocm_setup] delta-merge cleanup: removed ${stale_total} orphan versioned shared-lib file(s)"
+
       echo "[rocm_setup] merged tree size:"
       ${SUDO} du -sh "/opt/rocm-${ROCM_VERSION}" || true
    fi

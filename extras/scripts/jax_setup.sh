@@ -389,7 +389,10 @@ module load ${ROCM_MODULE_NAME}
 if [[ "$AMDGPU_GFXMODEL_INPUT" != "" ]]; then
    AMDGPU_GFXMODEL=$AMDGPU_GFXMODEL_INPUT
 else
-   AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+   # Stderr-silenced + `|| true`: rocminfo can fail when the SDK is built
+   # against a newer glibc than the host (ROCm 7.2.3 binaries need
+   # GLIBC_2.38; jammy has 2.35) and under pipefail would kill the script.
+   AMDGPU_GFXMODEL=$(rocminfo 2>/dev/null | grep gfx | sed -e 's/Name://' | head -1 | sed 's/ //g' || true)
 fi
 
 echo ""

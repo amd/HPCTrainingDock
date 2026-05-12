@@ -11,7 +11,13 @@ LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$
 ROCM_VERSION=6.2.0
 BUILD_TF=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/tensorflow
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+# AMDGPU_GFXMODEL: defer rocminfo autodetect to AFTER arg parsing so that
+# `--amdgpu-gfxmodel ...` callers never trigger rocminfo (it can fail on
+# SDK/host glibc skew, e.g. ROCm 7.2.3 binaries requiring GLIBC_2.38 on
+# jammy's 2.35, which would dump stderr noise and -- in scripts with
+# `set -eo pipefail` -- kill the leaf before main_setup.sh's flag-driven
+# value takes effect). See logs_05_11_2026/rocm-7.2.3_9003/ cascade.
+AMDGPU_GFXMODEL=""
 TF_PATH=/opt/rocmplus-${ROCM_VERSION}/tensorflow
 TF_PATH_INPUT=""
 TENSORFLOW_VERSION="r2.20-rocm-enhanced"
@@ -130,6 +136,15 @@ if [ "${TF_PATH_INPUT}" != "" ]; then
 else
    # override path in case ROCM_VERSION has been supplied as input
    TF_PATH=/opt/rocmplus-${ROCM_VERSION}/tensorflow
+fi
+
+# Fallback gfx autodetect: only fire if --amdgpu-gfxmodel was not supplied.
+# Stderr-silenced + `|| true` so a broken rocminfo (SDK/host glibc skew)
+# can't kill the script. AMDGPU_GFXMODEL stays empty if both autodetect
+# and the flag fail to provide a value; downstream consumers report the
+# real error (`./configure` etc.) rather than a cryptic pipefail rc.
+if [ -z "${AMDGPU_GFXMODEL}" ]; then
+   AMDGPU_GFXMODEL=$(rocminfo 2>/dev/null | grep gfx | sed -e 's/Name://' | head -1 | sed 's/ //g' || true)
 fi
 
 # ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
@@ -423,6 +438,18 @@ else
       mkdir -p "${BAZEL_OUTPUT_BASE}"
       echo "tensorflow: bazel --output_base=${BAZEL_OUTPUT_BASE} (off NFS, per-job)"
 
+      # Bazel build: explicitly capture rc and fail loudly if non-zero.
+      # The leaf-script does NOT use `set -e`, so without this check
+      # a Bazel failure (e.g. the librocm_smi64.so.1.0.* duplicate-
+      # identifier abort in 7.2.2, or the hermetic-clang GLIBC_2.36
+      # abort in 7.2.3) would silently continue into the wheel install,
+      # the wheel-glob would not expand, pip3 would print
+      # `ERROR: tensorflow*.whl is not a valid wheel filename.` and
+      # *still* exit 0 because pip in 22.0.2 treats "no candidates" as
+      # success when -v is set. The script would then write the
+      # modulefile and main_setup.sh would mark tensorflow OK -- a
+      # silent broken install. Audited in slurm-9002 (7.2.2) and
+      # slurm-9003 (7.2.3) sweeps last evening.
       bazel \
          --output_base="${BAZEL_OUTPUT_BASE}" \
          --host_jvm_args=-Xmx16g \
@@ -432,8 +459,38 @@ else
                --action_env=project_name=tensorflow_rocm/ \
                --noexperimental_check_external_repository_files \
                //tensorflow/tools/pip_package:wheel --verbose_failures
+      bazel_rc=$?
+      if [ ${bazel_rc} -ne 0 ]; then
+         echo ""
+         echo "ERROR: bazel build of //tensorflow/tools/pip_package:wheel failed (rc=${bazel_rc})." >&2
+         echo "       Refusing to write a modulefile for a tensorflow install that has no wheel." >&2
+         echo "       See the bazel output above for the failing target. Common causes:" >&2
+         echo "         - duplicate librocm_smi64.so.1.0.* SONAME in the ROCm install (delta merge stale lib)" >&2
+         echo "         - hermetic clang in rocm/llvm/bin requires GLIBC newer than host" >&2
+         exit ${bazel_rc}
+      fi
 
-      pip3 install -v --target=$TF_PATH --upgrade bazel-bin/tensorflow/tools/pip_package/wheel_house/tensorflow*.whl
+      # Wheel-existence guard: glob to a real path BEFORE invoking pip3,
+      # so a missing wheel becomes a hard failure instead of pip3 silently
+      # accepting the literal "tensorflow*.whl" pattern and exiting 0.
+      shopt -s nullglob
+      tf_wheels=(bazel-bin/tensorflow/tools/pip_package/wheel_house/tensorflow*.whl)
+      shopt -u nullglob
+      if [ ${#tf_wheels[@]} -eq 0 ]; then
+         echo "" >&2
+         echo "ERROR: bazel reported success but produced no wheel at" >&2
+         echo "       bazel-bin/tensorflow/tools/pip_package/wheel_house/tensorflow*.whl" >&2
+         exit 1
+      fi
+      echo "tensorflow: built wheel(s): ${tf_wheels[*]}"
+
+      pip3 install -v --target=$TF_PATH --upgrade "${tf_wheels[@]}"
+      pip_rc=$?
+      if [ ${pip_rc} -ne 0 ]; then
+         echo "" >&2
+         echo "ERROR: pip3 install of tensorflow wheel failed (rc=${pip_rc})." >&2
+         exit ${pip_rc}
+      fi
 
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find $TF_PATH -type f -execdir chown root:root "{}" +
