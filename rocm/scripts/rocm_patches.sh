@@ -267,7 +267,23 @@ rocm_version_to_patches() {
       # actually produced for those RC trees.
       7.2.0)            echo "rocprof-sys-1.3.0 rocprof-compute" ;;
       7.2.1)            echo "rocprof-sys-1.3.0 rocprof-compute" ;;
-      7.2.2)            echo "rocprof-compute" ;;
+      # 7.2.2: the 4 vendored rocprof-sys 1.3.0 patches apply cleanly to
+      # the rocm-7.2.2 source tag (same projects/rocprofiler-systems
+      # VERSION 1.3.0 baseline as 7.2.0 / 7.2.1).  Verified by running
+      # the in-tree builder against /shared/apps/ubuntu/opt/rocm-7.2.2
+      # on the AAC6 Ubuntu 22.04 hosts (rocprof-sys SIGSEGV regression
+      # reproducer in MPI_Ghost_Exchange_Ver2_Rocprof-Sys passes
+      # post-overlay; see slurm-9046).
+      7.2.2)            echo "rocprof-sys-1.3.0 rocprof-compute" ;;
+      # 7.2.3: rocprof-sys 1.3.0 patch stack still applies cleanly, but
+      # the ROCm 7.2.3 SDK itself requires GLIBC >= 2.36 / GLIBCXX >=
+      # 3.4.32, which are not satisfied on Ubuntu 22.04 hosts (GLIBC
+      # 2.35 / GLIBCXX 3.4.30). `amdclang` from rocm-7.2.3/llvm/bin
+      # cannot even run there, so the patched .so would be a binary
+      # nobody on this host can load. Keep the rocprof-sys bundle
+      # excluded until either the host OS is upgraded or 7.2.3 is
+      # rebuilt against an older glibc.  See
+      # /shared/apps/ubuntu/opt/rocm-patches-7.2.3/lib/.build-blocked.
       7.2.3)            echo "rocprof-compute" ;;
       6.3.*)            echo "rocprof-compute" ;;
       6.4.*)            echo "rocprof-compute" ;;
@@ -958,8 +974,8 @@ rocprof_compute_detail_block() {
       7.1.1) echo 'Upstream tag `rocm-7.1.1` -- monorepo (rocm-systems @ rocm-7.1.1), `projects/rocprofiler-compute` subtree.' ;;
       7.2.0) echo 'Upstream tag `rocm-7.2.0` -- monorepo (rocm-systems @ rocm-7.2.0), `projects/rocprofiler-compute` subtree.  Builds alongside the rocprof-sys 1.3.0 cherry-pick.' ;;
       7.2.1) echo 'Upstream tag `rocm-7.2.1` -- monorepo (rocm-systems @ rocm-7.2.1), `projects/rocprofiler-compute` subtree.  Builds alongside the rocprof-sys 1.3.0 cherry-pick.' ;;
-      7.2.2) echo 'Upstream tag `rocm-7.2.2` -- monorepo (rocm-systems @ rocm-7.2.2), `projects/rocprofiler-compute` subtree.  No rocprof-sys cherry-pick on this version yet.' ;;
-      7.2.3) echo 'Upstream tag `rocm-7.2.3` -- monorepo (rocm-systems @ rocm-7.2.3), `projects/rocprofiler-compute` subtree.  No rocprof-sys cherry-pick on this version yet.' ;;
+      7.2.2) echo 'Upstream tag `rocm-7.2.2` -- monorepo (rocm-systems @ rocm-7.2.2), `projects/rocprofiler-compute` subtree.  Builds alongside the rocprof-sys 1.3.0 cherry-pick.' ;;
+      7.2.3) echo 'Upstream tag `rocm-7.2.3` -- monorepo (rocm-systems @ rocm-7.2.3), `projects/rocprofiler-compute` subtree.  rocprof-sys 1.3.0 cherry-pick is excluded on this version: the rocm-7.2.3 SDK itself requires GLIBC >= 2.36 / GLIBCXX >= 3.4.32, which Ubuntu 22.04 does not provide, so a patched .so could not be loaded on the only target host class.' ;;
       afar-22.1.0)    echo 'RC tree (no `rocm-afar-22.1.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (afar-22.1.0 ships `167a9576`, upstream VERSION `3.3.0`).' ;;
       afar-22.2.0)    echo 'RC tree (no `rocm-afar-22.2.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (afar-22.2.0 ships `bad92dc4`, upstream VERSION `3.3.0`).' ;;
       therock-23.1.0) echo 'RC tree (no `rocm-therock-23.1.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (when present).' ;;
@@ -1217,25 +1233,47 @@ swap_sdk_lib_symlink() {
 # ─────────────────────────────────────────────────────────────────────
 # patch_module_file
 # -----------------
-# Append, exactly once, an LD_LIBRARY_PATH overlay line to the
-# rocm/${ROCM_VERSION}.lua module file written by rocm_setup.sh.
+# Append, exactly once, two overlay lines to the rocm/${ROCM_VERSION}.lua
+# module file written by rocm_setup.sh:
+#
+#   1. prepend_path("LD_LIBRARY_PATH", "${INSTALL_PREFIX}/lib")
+#        so dlopen() resolves librocprof-sys.so.1.3.0 to our patched
+#        .so ahead of the SDK's own (unpatched) copy.
+#
+#   2. prepend_path("PATH", pathJoin(base, "share/rocprofiler-systems/bin"))
+#        so the rocprof-sys-run wrapper (installed by
+#        install_rocprof_sys_run_wrapper, see below) shadows the SDK's
+#        ${ROCM_PATH}/bin/rocprof-sys-run. The wrapper preloads
+#        librocprof-sys.so.1 to defeat libbfd interposition on hosts
+#        whose system libbfd is older than the binutils version
+#        rocprof-sys statically links.
 #
 # Lmod's prepend_path is LIFO: a later prepend lands FIRST in the
-# resolved path string, so the overlay line MUST be inserted AFTER the
-# original `prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))`.
-# We insert it immediately after that line, idempotently.
+# resolved path string, so the LD_LIBRARY_PATH overlay MUST be inserted
+# AFTER the original `prepend_path("LD_LIBRARY_PATH", pathJoin(base,
+# "lib"))`. We insert it immediately after that line, idempotently.
+# The PATH prepend goes at end-of-file; its position relative to the
+# rocm-7.2.x bin prepend doesn't matter since both share/rocprofiler-systems/bin
+# and bin are SDK-owned (the wrapper just needs to win over <rocm>/bin).
 #
 # Idempotency strategy:
 #
-# We detect a previous overlay edit by looking for ANY reference to
-# `rocm-patches-${ROCM_VERSION}` in the modulefile -- not just our
-# current ${INSTALL_PREFIX}/lib path. This catches:
-#   * a prior run of this same script (same INSTALL_PREFIX) -- skip;
-#   * a hand-applied edit by an admin (different absolute path
-#     prefix, e.g. /shared/apps/.../opt/rocm-patches-X.Y.Z/lib) --
-#     warn that the path differs from this run's INSTALL_PREFIX/lib
-#     but DO NOT add a second line. The hand-applied entry is the
-#     source of truth on that cluster; we don't second-guess it.
+# Two independent idempotency checks, one per inserted block:
+#
+#   * LD_LIBRARY_PATH block: keyed off `rocm-patches-${ROCM_VERSION}`.
+#     Any reference to that string in the modulefile means somebody
+#     (this script on a previous run, or a human admin) has already
+#     wired the overlay. We do NOT add a second entry under any
+#     circumstances. On admin-applied hand edits with a different
+#     absolute path (e.g. /shared/apps/.../opt/rocm-patches-X.Y.Z/lib
+#     vs. our /opt/rocm-patches-X.Y.Z/lib default), we warn but keep
+#     the existing entry as the source of truth.
+#
+#   * PATH block: keyed off the literal token
+#     `share/rocprofiler-systems/bin`. The two blocks are decoupled so
+#     that a re-run can backfill the PATH prepend on modulefiles that
+#     already have the LD_LIBRARY_PATH overlay from an older revision
+#     of this script.
 # ─────────────────────────────────────────────────────────────────────
 patch_module_file() {
    if [ ! -f "${MODULE_FILE}" ]; then
@@ -1249,10 +1287,7 @@ patch_module_file() {
    local overlay="${INSTALL_PREFIX}/lib"
    local marker="rocm-patches-${ROCM_VERSION}"
 
-   # Pattern-based idempotency: any rocm-patches-${ROCM_VERSION} string
-   # in the modulefile means somebody (this script on a previous run,
-   # or a human admin) has already wired the overlay. Don't add a
-   # second entry under any circumstances.
+   # ─── Block 1: LD_LIBRARY_PATH overlay ───────────────────────────
    if grep -Fq "${marker}" "${MODULE_FILE}"; then
       # Try to extract the existing overlay path so we can warn on
       # mismatch with this run's INSTALL_PREFIX/lib.
@@ -1271,14 +1306,12 @@ patch_module_file() {
       else
          echo "[rocm_patches] module file already has overlay entry for ${marker}; nothing to do"
       fi
-      return 0
-   fi
-
-   echo "[rocm_patches] adding LD_LIBRARY_PATH overlay to ${MODULE_FILE}"
-   # Append after the canonical line; if the canonical line is absent
-   # (older module variant) just append at end of file.
-   if grep -q 'prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))' "${MODULE_FILE}"; then
-      ${SUDO} sed -i '/prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))/a\
+   else
+      echo "[rocm_patches] adding LD_LIBRARY_PATH overlay to ${MODULE_FILE}"
+      # Append after the canonical line; if the canonical line is absent
+      # (older module variant) just append at end of file.
+      if grep -q 'prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))' "${MODULE_FILE}"; then
+         ${SUDO} sed -i '/prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))/a\
 \
 \t-- rocm-patches-'"${ROCM_VERSION}"' overlay (cherry-picks of upstream PRs and\
 \t-- vendored fixes for rocprof-sys regressions on this ROCm release line;\
@@ -1286,14 +1319,89 @@ patch_module_file() {
 \t-- is LIFO, so the overlay MUST come AFTER the SDK lib path so it lands\
 \t-- FIRST in the resolved LD_LIBRARY_PATH.\
 \tprepend_path("LD_LIBRARY_PATH", "'"${overlay}"'")' \
-         "${MODULE_FILE}"
-   else
-      ${SUDO} tee -a "${MODULE_FILE}" >/dev/null <<-EOF
+            "${MODULE_FILE}"
+      else
+         ${SUDO} tee -a "${MODULE_FILE}" >/dev/null <<-EOF
 
 	-- rocm-patches-${ROCM_VERSION} overlay (rocprof-sys regression fixes; see ${INSTALL_PREFIX}/doc/)
 	prepend_path("LD_LIBRARY_PATH", "${overlay}")
 EOF
+      fi
    fi
+
+   # ─── Block 2: PATH prepend for the rocprof-sys-run wrapper ──────
+   # The literal `share/rocprofiler-systems/bin` token is unique to
+   # this prepend (rocprof-compute uses share/rocprof-compute/bin or
+   # similar; there is no collision in any of the 6.3.x .. 7.2.x
+   # modulefiles we generate). Append at end-of-file so we don't fight
+   # any specific anchor line.
+   if grep -Fq 'share/rocprofiler-systems/bin' "${MODULE_FILE}"; then
+      echo "[rocm_patches] module file already has rocprof-sys-run wrapper PATH prepend; nothing to do"
+   else
+      echo "[rocm_patches] adding rocprof-sys-run wrapper PATH prepend to ${MODULE_FILE}"
+      ${SUDO} tee -a "${MODULE_FILE}" >/dev/null <<-'EOF'
+
+	-- Place the rocprof-sys-run wrapper (which applies a libbfd LD_PRELOAD
+	-- workaround when the system libbfd is older than the one rocprof-sys
+	-- statically links) first in PATH. The wrapper is a no-op on systems
+	-- where the system libbfd is new enough. See
+	-- install_rocprof_sys_run_wrapper() in rocm_patches.sh for the install
+	-- side, and <rocm>/share/rocprofiler-systems/bin/rocprof-sys-run itself
+	-- for the bug background.
+	prepend_path("PATH", pathJoin(base, "share/rocprofiler-systems/bin"))
+EOF
+   fi
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# install_rocprof_sys_run_wrapper
+# -------------------------------
+# Copy the vendored rocprof-sys-run wrapper into
+# ${ROCM_PATH}/share/rocprofiler-systems/bin/rocprof-sys-run, where it
+# is found ahead of the SDK's own ${ROCM_PATH}/bin/rocprof-sys-run by
+# virtue of the modulefile's share/rocprofiler-systems/bin PATH prepend
+# (added by patch_module_file()).
+#
+# The wrapper exists to defeat a libbfd ABI mismatch: rocprof-sys
+# statically links binutils-2.42 (cherry-pick) but the system libbfd
+# (e.g. Ubuntu 22.04's libbfd-2.38-system.so) is pulled in transitively
+# by OpenMPI/UCX. Without LD_PRELOAD the system 2.38 symbols win
+# resolution and rocprof-sys SegFaults inside
+# _bfd_x86_elf_get_synthetic_symtab() during rocprofiler_configure(),
+# usually during MPI rank static-init. The wrapper preloads
+# librocprof-sys.so.1 so its bundled 2.42 symbols win instead. See the
+# wrapper's own docstring at sources/rocm-patches/rocprof-sys-1.3.0/rocprof-sys-run
+# for the full bug write-up.
+#
+# Idempotent:
+#   * if the destination file is byte-identical to the vendored source,
+#     do nothing;
+#   * if it differs (e.g. an older revision of the wrapper, or a hand
+#     edit), overwrite it. This is what we want when the wrapper itself
+#     is updated in a later commit.
+# ─────────────────────────────────────────────────────────────────────
+install_rocprof_sys_run_wrapper() {
+   local src="${PATCH_SOURCE_DIR}/rocprof-sys-1.3.0/rocprof-sys-run"
+   local dst_dir="${ROCM_PATH}/share/rocprofiler-systems/bin"
+   local dst="${dst_dir}/rocprof-sys-run"
+
+   if [ ! -f "${src}" ]; then
+      echo "[rocm_patches] WARNING: vendored wrapper not found: ${src}"
+      echo "[rocm_patches]          libbfd LD_PRELOAD workaround will NOT be applied;"
+      echo "[rocm_patches]          rocprof-sys-instrumented MPI programs may SegFault"
+      echo "[rocm_patches]          on hosts whose system libbfd is older than 2.42."
+      return 0
+   fi
+
+   if [ -f "${dst}" ] && cmp -s "${src}" "${dst}"; then
+      echo "[rocm_patches] rocprof-sys-run wrapper already up to date at ${dst}"
+      return 0
+   fi
+
+   echo "[rocm_patches] installing rocprof-sys-run wrapper at ${dst}"
+   ${SUDO} install -d -m 0755 "${dst_dir}" || return 1
+   ${SUDO} install -m 0755 "${src}" "${dst}" || return 1
+   return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────
@@ -1365,6 +1473,15 @@ if [ "${MODULE_FILE_ONLY}" -eq 1 ]; then
       exit 1
    fi
    patch_module_file || rc=$?
+   # Install the rocprof-sys-run wrapper alongside the LD_LIBRARY_PATH
+   # overlay so the libbfd LD_PRELOAD workaround fires on the next
+   # `module load rocm/${ROCM_VERSION}; rocprof-sys-run -- ...`.  Both
+   # halves of the wrapper machinery (PATH prepend in patch_module_file
+   # + the wrapper file itself here) are needed for the workaround to
+   # take effect; backfilling either alone leaves a broken state.
+   if [ "${rc}" -eq 0 ]; then
+      install_rocprof_sys_run_wrapper || rc=$?
+   fi
    # Self-heal the patched .so's RUNPATH and ensure libunwind.so.99 is
    # next to it (no-op if already done).  Then swap the SDK's
    # versioned .so to point at the overlay (no-op if already swapped).
@@ -1433,6 +1550,15 @@ done
 # LD_LIBRARY_PATH prepending of ROCPROFSYS_ROOT/lib.
 if [ "${rc}" -eq 0 ] && [ "${built_rocprof_sys}" -eq 1 ]; then
    patch_module_file || rc=$?
+   # install_rocprof_sys_run_wrapper() drops a small bash wrapper at
+   # ${ROCM_PATH}/share/rocprofiler-systems/bin/rocprof-sys-run that
+   # LD_PRELOADs the patched librocprof-sys.so.1 to defeat the system
+   # libbfd vs bundled binutils-2.42 symbol interposition. The
+   # modulefile PATH prepend added by patch_module_file() makes the
+   # wrapper win over ${ROCM_PATH}/bin/rocprof-sys-run at runtime.
+   if [ "${rc}" -eq 0 ]; then
+      install_rocprof_sys_run_wrapper || rc=$?
+   fi
    if [ "${rc}" -eq 0 ]; then
       fix_overlay_runpath_and_libunwind || rc=$?
    fi
