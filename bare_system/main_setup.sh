@@ -33,6 +33,12 @@ fi
 # ---------------------------------------------------------------------
 
 : ${ROCM_VERSION:=""}
+# Delta-release support: when set, BASE_ROCM_VERSION is installed first by
+# rocm_setup.sh and the ROCM_VERSION delta is merged on top. When SUPERSEDES_VERSION
+# is set, a tombstone modulefile is emitted at rocm/<SUPERSEDES_VERSION>.lua
+# that redirects to rocm/<ROCM_VERSION>. See bare_system/rocm_delta_releases.conf.
+: ${BASE_ROCM_VERSION:=""}
+: ${SUPERSEDES_VERSION:=""}
 : ${ROCM_INSTALLPATH:="/opt/"}
 : ${TOP_INSTALL_PATH:="/opt"}
 : ${TOP_MODULE_PATH:="/etc/lmod/modules"}
@@ -149,6 +155,8 @@ usage()
 {
    echo "Usage:"
    echo "  --rocm-version [ ROCM_VERSION ]:  auto-detected from loaded module, or specify explicitly"
+   echo "  --base-rocm-version [ VER ]:  for delta releases, install <VER> first and merge \$ROCM_VERSION on top (default: empty -- consulted from bare_system/rocm_delta_releases.conf when empty)"
+   echo "  --supersedes [ VER ]:  emit a tombstone rocm/<VER>.lua that redirects to rocm/\$ROCM_VERSION (default: empty)"
    echo "  --rocm-install-path [ ROCM_INSTALL_PATH ]:  default is $ROCM_INSTALLPATH"
    echo "  --top-install-path [ TOP_INSTALL_PATH ]:  top-level directory for software installation, default is $TOP_INSTALL_PATH"
    echo "  --top-module-path [ TOP_MODULE_PATH ]:  top-level directory for module files, default is $TOP_MODULE_PATH"
@@ -173,6 +181,16 @@ do
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
+          reset-last
+          ;;
+      "--base-rocm-version")
+          shift
+          BASE_ROCM_VERSION=${1}
+          reset-last
+          ;;
+      "--supersedes")
+          shift
+          SUPERSEDES_VERSION=${1}
           reset-last
           ;;
       "--rocm-install-path")
@@ -892,7 +910,10 @@ if [ "${SKIP_ROCM_INSTALL}" == 0 ]; then
 
    source ~/.bashrc
 
-   run_and_log rocm rocm/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION}
+   ROCM_DELTA_OPTS=""
+   [ -n "${BASE_ROCM_VERSION}" ] && ROCM_DELTA_OPTS="${ROCM_DELTA_OPTS} --base-rocm-version ${BASE_ROCM_VERSION}"
+   [ -n "${SUPERSEDES_VERSION}" ] && ROCM_DELTA_OPTS="${ROCM_DELTA_OPTS} --supersedes ${SUPERSEDES_VERSION}"
+   run_and_log rocm rocm/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION} ${ROCM_DELTA_OPTS}
 
    run_and_log rocm-rocprof-sys rocm/scripts/rocm_rocprof-sys_setup.sh --rocm-version ${ROCM_VERSION}
 

@@ -39,6 +39,12 @@ if [ -z "${REPLACE_EXISTING:-}" ] && [ -n "${FORCE_EXTRACT:-}" ]; then
    REPLACE_EXISTING="${FORCE_EXTRACT}"
 fi
 : ${REPLACE_EXISTING:="0"}
+# Delta-release support (see bare_system/rocm_delta_releases.conf). When set,
+# the base install precedes the ${ROCM_VERSION} install inside the container,
+# and the trees are merged into a single self-contained /opt/rocm-${ROCM_VERSION}.
+# A tombstone modulefile rocm/<SUPERSEDES_VERSION>.lua is also emitted.
+: ${BASE_ROCM_VERSION:=""}
+: ${SUPERSEDES_VERSION:=""}
 BARE_LOG=""
 MAKE_LOG=""
 PATCHES_LOG=""
@@ -65,6 +71,8 @@ usage() {
    echo "  --top-module-path [DIR]:                modules destination; default $TOP_MODULE_PATH"
    echo "  --replace-existing [0 or 1]:            overwrite existing \${TOP_INSTALL_PATH}/rocm-<v> (default $REPLACE_EXISTING)"
    echo "                                          (alias: --force-extract -- deprecated, kept for backward compat)"
+   echo "  --base-rocm-version [VER]:              delta-release base (install <VER> first then merge \${ROCM_VERSION} on top). Default: empty (auto-consulted from bare_system/rocm_delta_releases.conf)"
+   echo "  --supersedes [VER]:                     emit a tombstone rocm/<VER>.lua that redirects to rocm/\${ROCM_VERSION}. Default: empty"
    echo "  --keep-tarballs [N]:                    prune policy; keep N most recent (default $KEEP_TARBALLS)"
    echo "  --skip-extract [0 or 1]:                skip phase 3 (default $SKIP_EXTRACT)"
    echo "  --skip-patches [0 or 1]:                skip phase 3.6 (rocm_patches.sh) (default $SKIP_PATCHES)"
@@ -93,6 +101,8 @@ while [[ $# -gt 0 ]]; do
       "--replace-existing")    shift; REPLACE_EXISTING=${1};   reset-last ;;
       "--force-extract")       shift; REPLACE_EXISTING=${1};   reset-last
                                echo "[run_rocm_build] NOTE: --force-extract is deprecated; use --replace-existing" >&2 ;;
+      "--base-rocm-version")   shift; BASE_ROCM_VERSION=${1};  reset-last ;;
+      "--supersedes")          shift; SUPERSEDES_VERSION=${1}; reset-last ;;
       "--keep-tarballs")       shift; KEEP_TARBALLS=${1};      reset-last ;;
       "--skip-extract")        shift; SKIP_EXTRACT=${1};       reset-last ;;
       "--skip-patches")        shift; SKIP_PATCHES=${1};       reset-last ;;
@@ -113,6 +123,26 @@ else
    PYTHON_VERSION=${PYTHON_VERSION_INPUT}
 fi
 
+# ---------------- Delta-release auto-detect from conf -----------------
+# If the user did not pass --base-rocm-version, consult the registry file
+# bare_system/rocm_delta_releases.conf. When ${ROCM_VERSION} is listed there,
+# the matching base is used and SUPERSEDES_VERSION defaults to that base too.
+# Pass --base-rocm-version explicitly to override.
+DELTA_CONF="$(dirname "$0")/rocm_delta_releases.conf"
+if [[ -z "${BASE_ROCM_VERSION}" && -f "${DELTA_CONF}" ]]; then
+   _conf_base=$(awk -F= -v v="${ROCM_VERSION}" '
+      /^[[:space:]]*#/ {next}
+      /^[[:space:]]*$/ {next}
+      $1 == v {print $2; exit}
+   ' "${DELTA_CONF}")
+   if [[ -n "${_conf_base}" ]]; then
+      echo "[run_rocm_build] delta-release auto-config: ${ROCM_VERSION} is registered as a delta (base=${_conf_base}); setting --base-rocm-version ${_conf_base} --supersedes ${_conf_base}"
+      BASE_ROCM_VERSION="${_conf_base}"
+      [[ -z "${SUPERSEDES_VERSION}" ]] && SUPERSEDES_VERSION="${_conf_base}"
+   fi
+   unset _conf_base
+fi
+
 : ${IMAGE_NAME:="bare-rocm-${ROCM_VERSION}"}
 : ${BARE_LOG:="bare_${ROCM_VERSION}.out"}
 : ${MAKE_LOG:="make_rocm_package_${ROCM_VERSION}.out"}
@@ -122,6 +152,16 @@ AMDGPU_GFXMODEL_STRING=$(echo "${AMDGPU_GFXMODEL}" | sed -e 's/;/_/g')
 CACHE_DIR="CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}"
 TARBALL="${CACHE_DIR}/rocm-${ROCM_VERSION}.tgz"
 mkdir -p "${CACHE_DIR}"
+
+# Delta-release mode: a stale tarball at ${TARBALL} from a previous build
+# (pre-delta-merge) would otherwise be auto-extracted inside the container by
+# rocm_setup.sh's "Installing Cached ROCm" branch, skipping the base+delta+merge
+# work entirely. CacheFiles is bind-mounted into the container at /CacheFiles,
+# so we wipe the host copy here before docker build.
+if [[ -n "${BASE_ROCM_VERSION}" && -f "${TARBALL}" ]]; then
+   echo "[run_rocm_build] delta-release mode: removing stale ${TARBALL} to force a fresh base+delta+merge build"
+   rm -f "${TARBALL}"
+fi
 
 # ---------------- Phase 0: skip-if-installed pre-check ----------------
 if [[ -d "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}" && "${REPLACE_EXISTING}" != "1" ]]; then
@@ -201,6 +241,8 @@ ${BUILDER} build --no-cache ${ADD_OPTIONS} \
              --build-arg AMDGPU_GFXMODEL="${AMDGPU_GFXMODEL}" \
              --build-arg USE_MAKEFILE=${USE_MAKEFILE} \
              --build-arg PYTHON_VERSION=${PYTHON_VERSION} \
+             --build-arg BASE_ROCM_VERSION="${BASE_ROCM_VERSION}" \
+             --build-arg SUPERSEDES_VERSION="${SUPERSEDES_VERSION}" \
              -t ${IMAGE_NAME} \
              -f bare_system/Dockerfile . 2>&1 | tee "${BARE_LOG}"
 

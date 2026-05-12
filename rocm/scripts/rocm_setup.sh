@@ -9,6 +9,15 @@ LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$
 
 # Variables controlling setup process
 : ${ROCM_VERSION:="6.0"}
+# Delta-release support: when set, the named ROCm version is installed FIRST and
+# then ${ROCM_VERSION} is layered on top, merged into /opt/rocm-${ROCM_VERSION}.
+# See: ROCm 7.2.2 release notes (https://github.com/ROCm/ROCm/releases/tag/rocm-7.2.2)
+# for the canonical example of a "delta release" that ships only a few packages
+# and is intended to overlay an existing base install.
+: ${BASE_ROCM_VERSION:=""}
+# When set, a tombstone modulefile is emitted at rocm/${SUPERSEDES_VERSION}.lua
+# that prints a deprecation LmodMessage and load()s rocm/${ROCM_VERSION}.
+: ${SUPERSEDES_VERSION:=""}
 REPLACE=0
 MODULE_PATH=/etc/lmod/modules/ROCm
 #if [[ ! "${MODULEPATH}" == *"/etc/lmod/modules/ROCm"* ]]; then
@@ -47,6 +56,8 @@ usage()
    echo "  --replace default off"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
+   echo "  --base-rocm-version [ VER ] for delta releases: install <VER> first, then merge $ROCM_VERSION on top (default: '')"
+   echo "  --supersedes [ VER ] write a tombstone rocm/<VER>.lua that redirects to rocm/$ROCM_VERSION (default: '')"
    echo "  --python-version [ PYTHON_VERSION ] Python3 minor version, default not set"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
    echo "  --include-tools [INCLUDE_TOOLS] default $INCLUDE_TOOLS "
@@ -90,6 +101,16 @@ do
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
+          reset-last
+          ;;
+      "--base-rocm-version")
+          shift
+          BASE_ROCM_VERSION=${1}
+          reset-last
+          ;;
+      "--supersedes")
+          shift
+          SUPERSEDES_VERSION=${1}
           reset-last
           ;;
       "--python-version")
@@ -144,6 +165,86 @@ version-set()
       fi
       AMDGPU_ROCM_VERSION=${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_PATCH}
    fi
+}
+
+# Resolve the path to the delta-release registry file (checked into the repo
+# at bare_system/rocm_delta_releases.conf). LEAF_SCRIPT_PATH is captured at
+# the top of this file, so this works whether rocm_setup.sh is invoked from
+# the host or from inside the build container (which has the repo ADDed at
+# /home/sysadmin/{bare_system,rocm,...}).
+DELTA_RELEASES_CONF="$(cd "$(dirname "${LEAF_SCRIPT_PATH}")/../../bare_system" 2>/dev/null && pwd)/rocm_delta_releases.conf"
+
+# Look up a ROCm version in the delta-release registry. Echoes the cached base
+# version on stdout if the version is known; returns non-zero otherwise.
+delta-release-lookup()
+{
+   local _ver="$1"
+   [ -f "${DELTA_RELEASES_CONF}" ] || return 1
+   awk -F= -v v="${_ver}" '
+      /^[[:space:]]*#/ {next}
+      /^[[:space:]]*$/ {next}
+      $1 == v {print $2; found=1; exit}
+      END {exit !found}
+   ' "${DELTA_RELEASES_CONF}"
+}
+
+# Informational check: count how many leaf packages AMD's meta-packages would
+# pull for ${ROCM_VERSION}. Full releases land at ~90; delta releases at ~4.
+# Threshold of 20 separates them with a wide safety margin.
+#
+# Reads bare_system/rocm_delta_releases.conf FIRST to avoid an apt query for
+# already-registered versions. When a delta is detected for an unregistered
+# version, prints the exact line to append to the conf file so the next run
+# skips this work.
+#
+# Effects: log lines only. Does not modify build behavior -- the build is
+# driven by --base-rocm-version / --supersedes passed by the caller (the
+# sweep, run_rocm_build.sh, or a human).
+detect_release_type()
+{
+   local _ver="${1:-${ROCM_VERSION}}"
+   local _cached
+   if _cached="$(delta-release-lookup "${_ver}")"; then
+      echo "[rocm_setup] release-type: ${_ver} is a known delta release (base=${_cached}, cached in ${DELTA_RELEASES_CONF})"
+      return 0
+   fi
+
+   # Not in registry; run apt's resolver to count what would actually install.
+   # Only meaningful when apt is configured AND the ${_ver} repo is reachable.
+   if ! command -v apt-get >/dev/null 2>&1; then
+      echo "[rocm_setup] release-type: apt-get not present; skipping resolver check for ${_ver}"
+      return 0
+   fi
+   local _metas=(rocm rocm-dev rocm-hip-sdk rocm-hip-libraries \
+                 rocm-developer-tools rocm-ml-sdk rocm-openmp-sdk \
+                 rocm-opencl-sdk rocm-language-runtime)
+   local _args=()
+   for _m in "${_metas[@]}"; do
+      apt-cache show "${_m}${_ver}" >/dev/null 2>&1 && _args+=("${_m}${_ver}")
+   done
+   if [ ${#_args[@]} -eq 0 ]; then
+      echo "[rocm_setup] release-type: no meta packages found in apt cache for ${_ver}; skipping resolver check"
+      return 0
+   fi
+   local _count
+   _count=$(${PKG_SUDO} apt-get install -s -y "${_args[@]}" 2>/dev/null \
+            | grep -cE "^Inst [^ ]+${_ver}( |\.)")
+   echo "[rocm_setup] release-type: apt resolver would install ${_count} package(s) tagged ${_ver}"
+   if [ "${_count}" -lt 20 ] && [ "${_count}" -gt 0 ]; then
+      # Heuristic for the base: prior patch in the same MAJOR.MINOR series.
+      local _maj _min _pat _base="?"
+      _maj=$(echo "${_ver}" | awk -F. '{print $1}')
+      _min=$(echo "${_ver}" | awk -F. '{print $2}')
+      _pat=$(echo "${_ver}" | awk -F. '{print $3}')
+      if [ -n "${_pat}" ] && [ "${_pat}" -gt 0 ] 2>/dev/null; then
+         _base="${_maj}.${_min}.$((_pat - 1))"
+      fi
+      echo "[rocm_setup] NOTICE: ROCm ${_ver} appears to be a delta release (resolver returned ${_count} packages)."
+      echo "[rocm_setup] To cache this finding, add the following line to bare_system/rocm_delta_releases.conf:"
+      echo "[rocm_setup]     ${_ver}=${_base}"
+      echo "[rocm_setup] Future builds will then skip this detection step."
+   fi
+   return 0
 }
 
 rocm-repo-dist-set()
@@ -252,6 +353,18 @@ fi
 # AMDGPU_INSTALL_VERSION
 version-set
 
+# If the caller did not specify --base-rocm-version, consult the registry.
+# This makes the conf file the single source of truth: a sweep that calls
+# rocm_setup.sh directly (without going through run_rocm_build_sweep.sh) still
+# gets delta-release handling for any version listed in the conf.
+if [ -z "${BASE_ROCM_VERSION}" ]; then
+   if _cached_base="$(delta-release-lookup "${ROCM_VERSION}" 2>/dev/null)"; then
+      echo "[rocm_setup] delta-release auto-config: ROCM_VERSION=${ROCM_VERSION} found in ${DELTA_RELEASES_CONF}; setting BASE_ROCM_VERSION=${_cached_base} SUPERSEDES_VERSION=${_cached_base}"
+      BASE_ROCM_VERSION="${_cached_base}"
+      [ -z "${SUPERSEDES_VERSION}" ] && SUPERSEDES_VERSION="${_cached_base}"
+   fi
+fi
+
 echo ""
 echo "=================================="
 echo "Starting ROCm Install with"
@@ -261,6 +374,8 @@ echo "ROCM_REPO_DIST: $ROCM_REPO_DIST"
 echo "ROCM_VERSION: $ROCM_VERSION"
 echo "AMDGPU_ROCM_VERSION: $AMDGPU_ROCM_VERSION"
 echo "AMDGPU_INSTALL_VERSION: $AMDGPU_INSTALL_VERSION"
+echo "BASE_ROCM_VERSION: ${BASE_ROCM_VERSION:-<none>}"
+echo "SUPERSEDES_VERSION: ${SUPERSEDES_VERSION:-<none>}"
 echo "=================================="
 echo ""
 
@@ -279,7 +394,18 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
       ${SUDO} rm -rf ${INSTALL_PATH}
    fi
 
-   if [[ -f ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz ]]; then
+   # Delta-release mode bypasses the cache: a cached tarball at
+   # ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz may be a previous build that
+   # predates the base+delta merge logic (e.g. ROCm 7.2.2's broken ~8GB
+   # delta-only install), so always go through the fresh amdgpu-install +
+   # merge path when --base-rocm-version is set. Also nuke the stale tarball
+   # so deploy_package.sh rewrites it from the merged tree.
+   if [[ -n "${BASE_ROCM_VERSION}" ]] && [[ -f ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz ]]; then
+      echo "[rocm_setup] delta-release mode: removing stale cached tarball ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz to force a fresh base+delta+merge build"
+      ${SUDO} rm -f "${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz"
+   fi
+
+   if [[ -z "${BASE_ROCM_VERSION}" ]] && [[ -f ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz ]]; then
       echo ""
       echo "============================"
       echo " Installing Cached ROCm"
@@ -334,6 +460,80 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
 
          # Run the amdgpu-install script. We have already installed the kernel driver, so use we use --no-dkms
          ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y --allow-downgrades ./amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+
+         # Delta-release support: install the base version FIRST so the delta
+         # (rocm-llvm + rocm-core + rocm-device-libs only, for the 7.2.2 case)
+         # has a real ROCm tree to layer onto when merged below. amdgpu-install
+         # with --rocmrelease registers the corresponding apt source on the fly.
+         #
+         # KNOWN AMD BUG: The amdgpu-install package for ROCm 7.2.2 adds an
+         # apt source for repo.radeon.com/graphics/7.2.2/ubuntu that returns
+         # 404 (AMD never published a graphics driver tagged "7.2.2"; the
+         # graphics tree is keyed off the AMDGPU driver version like "30.30.2"
+         # instead). This makes every subsequent apt-get update -- including
+         # the one amdgpu-install runs internally during --rocmrelease=<base>
+         # -- fail and abort the install. Disable any broken graphics/<v>
+         # source before running the base install. Safe to leave disabled
+         # since we don't install graphics drivers in this build path.
+         if [ -n "${BASE_ROCM_VERSION}" ]; then
+            # KNOWN AMD BUG #1: The amdgpu-install package for ROCm 7.2.2 adds
+            # an apt source for repo.radeon.com/graphics/7.2.2/ubuntu that
+            # returns 404 (AMD never published a graphics driver tagged "7.2.2";
+            # the graphics tree is keyed off the AMDGPU driver version like
+            # "30.30.2" instead). This makes every subsequent apt-get update
+            # fail. Disable any broken graphics/<v> source. Safe to leave
+            # disabled since we don't install graphics drivers in this path.
+            echo "[rocm_setup] delta-release mode: disabling broken repo.radeon.com/graphics/<v>/ubuntu apt sources before base install"
+            for _src in /etc/apt/sources.list.d/*.list; do
+               [ -f "${_src}" ] || continue
+               if grep -qE 'repo\.radeon\.com/graphics/[^/]+/ubuntu' "${_src}"; then
+                  ${SUDO} sed -i.delta-bak -E \
+                     's|^(deb.*repo\.radeon\.com/graphics/[^/]+/ubuntu.*)$|# disabled by rocm_setup delta-release path: \1|' \
+                     "${_src}"
+                  echo "[rocm_setup]   disabled graphics source in ${_src}"
+               fi
+            done
+            unset _src
+
+            # KNOWN AMD BUG #2: `amdgpu-install --rocmrelease=<base>` does NOT
+            # dynamically add the apt source for <base>. Only the installer's
+            # own tagged version (the DELTA, e.g. 7.2.2) has a configured
+            # source after `apt install amdgpu-install_<delta>.deb`. So we
+            # add the BASE rocm apt source manually before the base install.
+            # The GPG keyring at /etc/apt/keyrings/rocm.gpg was set up by an
+            # earlier block (or by the delta amdgpu-install .deb).
+            echo "[rocm_setup] delta-release mode: adding rocm/apt/${BASE_ROCM_VERSION} apt source for base install"
+            if [ ! -f /etc/apt/keyrings/rocm.gpg ]; then
+               ${SUDO} mkdir -p /etc/apt/keyrings
+               wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | ${SUDO} tee /etc/apt/keyrings/rocm.gpg > /dev/null
+            fi
+            echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${BASE_ROCM_VERSION} ${ROCM_REPO_DIST} main" \
+               | ${SUDO} tee /etc/apt/sources.list.d/rocm-${BASE_ROCM_VERSION}.list > /dev/null
+            ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get update
+
+            # KNOWN ENV LEAK: amdgpu-install internally calls `sudo apt-get
+            # install`, and the inner sudo strips DEBIAN_FRONTEND from the
+            # outer process even though we wrap with `DEBIAN_FRONTEND=... sudo
+            # ...`. tzdata gets pulled in as a transitive dep of ROCm packages
+            # and triggers an interactive "Geographic area:" prompt that hangs
+            # the build forever. Pre-install + pre-configure tzdata so dpkg
+            # never has to ask. (The main 7.2.x install doesn't hit this in
+            # the non-delta path because something else has already pulled
+            # tzdata in by the time amdgpu-install --rocmrelease=DELTA runs.)
+            echo "[rocm_setup] delta-release mode: pre-configuring tzdata to defeat interactive prompt during base install"
+            echo "Etc/UTC" | ${SUDO} tee /etc/timezone > /dev/null
+            ${SUDO} ln -fs /usr/share/zoneinfo/Etc/UTC /etc/localtime
+            ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y tzdata
+            ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive dpkg-reconfigure --frontend=noninteractive tzdata
+
+            echo "[rocm_setup] delta-release mode: pre-installing base ROCm ${BASE_ROCM_VERSION} before ${ROCM_VERSION}"
+            ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive amdgpu-install -q -y \
+               --usecase=hiplibsdk,rocmdev,rocmdevtools,lrt,openclsdk,openmpsdk,mlsdk \
+               --no-dkms --rocmrelease=${BASE_ROCM_VERSION}
+            if [ ! -d "/opt/rocm-${BASE_ROCM_VERSION}" ]; then
+               send-error "Base ROCm install failed: /opt/rocm-${BASE_ROCM_VERSION} not present after amdgpu-install"
+            fi
+         fi
       elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
 	 ${PKG_SUDO} dnf config-manager --set-enabled crb
          ${PKG_SUDO} dnf install -y python3-setuptools python3-wheel python3-devel
@@ -356,6 +556,17 @@ EOF
 
 	 echo "${PKG_SUDO} dnf install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${DISTRO_VERSION}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm"
 	 ${PKG_SUDO} dnf install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_ROCM_VERSION}/rhel/${DISTRO_VERSION}/amdgpu-install-${AMDGPU_INSTALL_VERSION}.el9.noarch.rpm
+
+         # Delta-release support (RHEL-compatible path): see Ubuntu branch above.
+         if [ -n "${BASE_ROCM_VERSION}" ]; then
+            echo "[rocm_setup] delta-release mode: pre-installing base ROCm ${BASE_ROCM_VERSION} before ${ROCM_VERSION}"
+            ${PKG_SUDO} amdgpu-install -q -y \
+               --usecase=hiplibsdk,rocmdev,rocmdevtools,lrt,openclsdk,openmpsdk,mlsdk \
+               --no-dkms --rocmrelease=${BASE_ROCM_VERSION}
+            if [ ! -d "/opt/rocm-${BASE_ROCM_VERSION}" ]; then
+               send-error "Base ROCm install failed: /opt/rocm-${BASE_ROCM_VERSION} not present after amdgpu-install"
+            fi
+         fi
       fi
 # if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
 # if ROCM_VERSION is less than or equal to 6.1.2, the awk command result will be blank
@@ -390,6 +601,35 @@ EOF
       rm -rf amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
    fi
    amdgpu-install -q -y --usecase=rocm,hip,hiplibsdk --no-dkms --rocmrelease=${ROCM_VERSION}
+
+   # Delta-release merge: when --base-rocm-version was supplied, the base was
+   # installed at /opt/rocm-${BASE_ROCM_VERSION} above and the delta packages
+   # have landed at /opt/rocm-${ROCM_VERSION}. Merge the base into the delta
+   # tree with the delta taking precedence (rsync --ignore-existing), then
+   # remove the base tree so deploy_package.sh tarballs only the merged tree.
+   if [ -n "${BASE_ROCM_VERSION}" ] && [ -d "/opt/rocm-${BASE_ROCM_VERSION}" ]; then
+      echo ""
+      echo "================================================"
+      echo " Merging base ROCm ${BASE_ROCM_VERSION} into ${ROCM_VERSION}"
+      echo "================================================"
+      echo ""
+      if ! command -v rsync >/dev/null 2>&1; then
+         if [ "${DISTRO}" == "ubuntu" ]; then
+            ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y rsync
+         elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
+            ${PKG_SUDO} dnf install -y rsync
+         fi
+      fi
+      # --ignore-existing: delta files at /opt/rocm-${ROCM_VERSION} win over
+      # base files of the same relative path. -a preserves perms/symlinks.
+      ${SUDO} rsync -a --ignore-existing \
+         "/opt/rocm-${BASE_ROCM_VERSION}/" \
+         "/opt/rocm-${ROCM_VERSION}/"
+      echo "[rocm_setup] removing base tree /opt/rocm-${BASE_ROCM_VERSION} (now merged into /opt/rocm-${ROCM_VERSION})"
+      ${SUDO} rm -rf "/opt/rocm-${BASE_ROCM_VERSION}"
+      echo "[rocm_setup] merged tree size:"
+      ${SUDO} du -sh "/opt/rocm-${ROCM_VERSION}" || true
+   fi
 #else
 #   echo "DISTRO version ${DISTRO} not recognized or supported"
 #   exit
@@ -532,6 +772,27 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	prepend_path("MODULEPATH", pathJoin(mbase, "rocmplus-${ROCM_VERSION}"))
 	setenv("ROCM_PATH", base)
 	family("GPUSDK")
+EOF
+fi
+
+# Delta-release tombstone: when --supersedes is set, write a deprecation
+# modulefile at rocm/<SUPERSEDES_VERSION>.lua that redirects to the merged
+# tree provided by this build. Overwrites any prior rocm/<SUPERSEDES_VERSION>.lua
+# on the host when the modules tarball is extracted. The tombstone has NO
+# family() call -- load("rocm/${ROCM_VERSION}") inherits family("GPUSDK")
+# from the target module, avoiding family-collision errors.
+if [ -n "${SUPERSEDES_VERSION}" ] && [ "${SUPERSEDES_VERSION}" != "${ROCM_VERSION}" ]; then
+   echo "[rocm_setup] writing tombstone modulefile: rocm/${SUPERSEDES_VERSION} -> rocm/${ROCM_VERSION}"
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${SUPERSEDES_VERSION}.lua
+	whatis("Name: ROCm (DEPRECATED)")
+	whatis("Version: ${SUPERSEDES_VERSION} [superseded by ${ROCM_VERSION}]")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
+	whatis("Category: AMD")
+	whatis("ROCm ${SUPERSEDES_VERSION} is superseded by ${ROCM_VERSION}")
+	whatis("Reason: see https://github.com/ROCm/ROCm/releases/tag/rocm-${ROCM_VERSION}")
+
+	LmodMessage("[NOTICE] rocm/${SUPERSEDES_VERSION} is superseded by rocm/${ROCM_VERSION}; loading rocm/${ROCM_VERSION} instead.")
+	load("rocm/${ROCM_VERSION}")
 EOF
 fi
 

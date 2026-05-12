@@ -81,6 +81,22 @@ if ! sudo -n test -w "${TOP_INSTALL_PATH}" 2>/dev/null; then
    exit 1
 fi
 
+# Delta-release registry: bare_system/rocm_delta_releases.conf maps version
+# to base (e.g. 7.2.2=7.2.1). run_rocm_build.sh auto-consults this file too,
+# so no explicit --base-rocm-version flag is needed here; we just surface the
+# detected delta versions in the summary for visibility.
+DELTA_CONF="${SLURM_SUBMIT_DIR}/bare_system/rocm_delta_releases.conf"
+delta_base_for() {
+   local _v="$1"
+   [[ -f "${DELTA_CONF}" ]] || return 1
+   awk -F= -v v="${_v}" '
+      /^[[:space:]]*#/ {next}
+      /^[[:space:]]*$/ {next}
+      $1 == v {print $2; found=1; exit}
+      END {exit !found}
+   ' "${DELTA_CONF}"
+}
+
 SUMMARY="sweep_summary_$(date +%Y%m%d_%H%M%S)_job${SLURM_JOB_ID}.out"
 {
    echo "=================================================================="
@@ -93,6 +109,13 @@ SUMMARY="sweep_summary_$(date +%Y%m%d_%H%M%S)_job${SLURM_JOB_ID}.out"
    echo " KEEP_TARBALLS:    ${KEEP_TARBALLS}"
    echo " TOP_INSTALL_PATH: ${TOP_INSTALL_PATH}"
    echo " TOP_MODULE_PATH:  ${TOP_MODULE_PATH}"
+   echo " DELTA_CONF:       ${DELTA_CONF}"
+   for _v in "${VERSIONS[@]}"; do
+      if _b=$(delta_base_for "${_v}"); then
+         echo "    delta release: ${_v} (base ${_b})"
+      fi
+   done
+   unset _v _b
    echo "=================================================================="
 } | tee "${SUMMARY}"
 
@@ -103,10 +126,14 @@ for v in "${VERSIONS[@]}"; do
       SKIP+=("${v}")
       continue
    fi
+   BASE_TAG=""
+   if BASE_FOR_V=$(delta_base_for "${v}"); then
+      BASE_TAG="  [DELTA: base=${BASE_FOR_V}]"
+   fi
    {
       echo ""
       echo "=================================================================="
-      echo " [$(date)] BEGIN rocm-${v}"
+      echo " [$(date)] BEGIN rocm-${v}${BASE_TAG}"
       echo "=================================================================="
    } | tee -a "${SUMMARY}"
 

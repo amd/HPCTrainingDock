@@ -498,7 +498,31 @@ If the argument `--rocm-install-path` is specified, installation scripts will fi
 
 **NOTE**: In general, if you are moving the ROCm folder outside of the usual `/opt/`, it is very important not to forget to update the new path in all of its dependencies and module files.
 
-### 2.2.5 Enable VNC Server to Test Bare Metal Scripts
+### 2.2.5 ROCm Delta Releases
+
+Some AMD ROCm point releases (e.g. ROCm 7.2.2) are **delta releases**: their apt/dnf meta-packages resolve to only a small subset of leaf packages (typically 4–10 for the LLVM stack), because the release is intended to overlay an existing prior install rather than stand alone. Running `amdgpu-install --rocmrelease=7.2.2` against a clean machine produces a ~8 GB ROCm tree (vs ~28 GB for a full release) and is missing most of the runtime libraries.
+
+Delta releases are handled transparently by this repo via a checked-in registry at [`bare_system/rocm_delta_releases.conf`](bare_system/rocm_delta_releases.conf). The file uses `version=base` lines (e.g. `7.2.2=7.2.1`). When `run_rocm_build.sh`, `run_rocm_build_sweep.sh`, or `main_setup.sh` sees that the requested `--rocm-version` is registered there, it:
+
+1. Installs the base version first (`/opt/rocm-<base>`)
+2. Installs the delta version (`/opt/rocm-<delta>`, partial tree)
+3. Merges the base into the delta tree using `rsync -a --ignore-existing` so delta files win where they exist
+4. Removes the base tree so `deploy_package.sh` tarballs only one self-contained install
+5. Emits a "tombstone" modulefile at `rocm/<base>.lua` that prints a deprecation notice via `LmodMessage` and `load("rocm/<delta>")`, so anyone who still has `module load rocm/<base>` muscle memory gets the fixed install automatically.
+
+The registry is the single source of truth and is consulted automatically — no extra CLI flags are needed when running a registered version. You can override explicitly with `--base-rocm-version <ver>` (forces the delta-release flow even if the version is not in the registry) and `--supersedes <ver>` (writes the tombstone).
+
+**Adding a new delta release**: ROCm 7.2.2 is the only registered case at the time of writing. When AMD ships a new delta point-release, the build log will emit a notice like:
+
+```
+[rocm_setup] NOTICE: ROCm 7.2.4 appears to be a delta release (resolver returned 4 packages).
+[rocm_setup] To cache this finding, add the following line to bare_system/rocm_delta_releases.conf:
+[rocm_setup]     7.2.4=7.2.3
+```
+
+Copy the suggested line into [`bare_system/rocm_delta_releases.conf`](bare_system/rocm_delta_releases.conf), commit, and future builds will skip the detection step and apply the delta flow automatically.
+
+### 2.2.6 Enable VNC Server to Test Bare Metal Scripts
 
 It is possible to enable the VNC server for the container that is brought up by the `test_install.sh` script. To do so, first add the following to your `.ssh/config`:
 

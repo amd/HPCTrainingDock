@@ -98,7 +98,31 @@ read -r -a VERSIONS_ARR <<< "${ROCM_VERSIONS_NORM}"
 N=${#VERSIONS_ARR[@]}
 (( N == 0 )) && { echo "ERROR: no ROCm versions parsed from '${ROCM_VERSIONS_RAW}'" >&2; exit 1; }
 
-TOTAL_MIN=$(( N * MIN_PER_VERSION + MARGIN_MIN ))
+# ---------------- Delta-release time-budget adjustment ----------------
+# Delta releases (e.g. 7.2.2) require installing both the base version and
+# the delta inside the container before merging, taking ~1.5x the wall time
+# of a regular version. Read bare_system/rocm_delta_releases.conf to identify
+# any delta versions in this sweep and pad the time budget accordingly.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DELTA_CONF="${REPO_ROOT}/bare_system/rocm_delta_releases.conf"
+DELTA_VERSIONS=()
+if [[ -f "${DELTA_CONF}" ]]; then
+   for _v in "${VERSIONS_ARR[@]}"; do
+      _base=$(awk -F= -v v="${_v}" '
+         /^[[:space:]]*#/ {next}
+         /^[[:space:]]*$/ {next}
+         $1 == v {print $2; exit}
+      ' "${DELTA_CONF}")
+      [[ -n "${_base}" ]] && DELTA_VERSIONS+=("${_v}=>${_base}")
+   done
+   unset _v _base
+fi
+
+# Each delta version adds an extra MIN_PER_VERSION/2 minutes to the budget
+# (the base install is roughly half the wall of a full SDK install).
+DELTA_EXTRA_MIN=$(( ${#DELTA_VERSIONS[@]} * MIN_PER_VERSION / 2 ))
+
+TOTAL_MIN=$(( N * MIN_PER_VERSION + DELTA_EXTRA_MIN + MARGIN_MIN ))
 if (( TOTAL_MIN > MAX_TIME_MIN )); then
    echo "WARNING: requested ${TOTAL_MIN}min exceeds partition MaxTime ${MAX_TIME_MIN}min; capping."
    TOTAL_MIN=${MAX_TIME_MIN}
@@ -107,7 +131,6 @@ HH=$(( TOTAL_MIN / 60 ))
 MM=$(( TOTAL_MIN % 60 ))
 TIME_STR=$(printf '%02d:%02d:00' "${HH}" "${MM}")
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SBATCH_FILE="${REPO_ROOT}/bare_system/run_rocm_build_sweep.sbatch"
 [[ -f "${SBATCH_FILE}" ]] || { echo "ERROR: ${SBATCH_FILE} not found" >&2; exit 1; }
 
@@ -117,7 +140,8 @@ cat <<EOF
 ==================================================================
  Partition:        ${PARTITION}
  Versions (${N}):  ${VERSIONS_ARR[*]}
- Per-version est:  ${MIN_PER_VERSION} min
+ Delta versions:   ${DELTA_VERSIONS[*]:-<none>}
+ Per-version est:  ${MIN_PER_VERSION} min (+${DELTA_EXTRA_MIN} min for ${#DELTA_VERSIONS[@]} delta(s))
  Margin:           ${MARGIN_MIN} min
  Total --time:     ${TIME_STR}
  Replace existing: ${REPLACE_EXISTING}
@@ -127,6 +151,7 @@ cat <<EOF
  GFX:              ${AMDGPU_GFXMODEL}
  TOP_INSTALL_PATH: ${TOP_INSTALL_PATH}
  TOP_MODULE_PATH:  ${TOP_MODULE_PATH}
+ Delta registry:   ${DELTA_CONF}
  sbatch file:      ${SBATCH_FILE}
 ==================================================================
 EOF
