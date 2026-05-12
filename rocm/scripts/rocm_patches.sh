@@ -116,6 +116,8 @@ PATCH_SOURCE_DIR=""
 MODULE_FILE_ONLY=0
 ROCM_PATH_OVERRIDE=""
 NOOP_RC=43
+: ${ALLOW_LOGIN_NODE:=0}
+ORIGINAL_ARGS=("$@")
 
 # ── distro / sudo plumbing (matches sibling *_setup.sh) ─────────────
 DISTRO=$(cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]')
@@ -144,6 +146,10 @@ usage() {
    echo "                                        a cluster where the patched .so is already"
    echo "                                        on disk but the rocm/X.Y.Z.lua modulefile"
    echo "                                        was installed before this script existed."
+   echo "  --allow-login-node                    bypass the safety guard that refuses to run"
+   echo "                                        the heavy nuitka build outside a Slurm"
+   echo "                                        allocation (only relevant on shared head"
+   echo "                                        nodes; nuitka peaks ~10 GB RSS)."
    echo "  --help"
    exit 1
 }
@@ -169,6 +175,7 @@ while [[ $# -gt 0 ]]; do
       "--rocm-path")         shift; ROCM_PATH_OVERRIDE=${1}; reset-last ;;
       "--patch-source-dir")  shift; PATCH_SOURCE_DIR=${1};   reset-last ;;
       "--module-file-only")         MODULE_FILE_ONLY=1;      reset-last ;;
+      "--allow-login-node")         ALLOW_LOGIN_NODE=1;      reset-last ;;
       "--*")                 send-error "Unsupported argument at position $((${n}+1)) :: ${1}" ;;
       *)                     last ${1} ;;
    esac
@@ -177,6 +184,39 @@ while [[ $# -gt 0 ]]; do
 done
 
 [ -n "${ROCM_VERSION}" ] || send-error "--rocm-version is required"
+
+# ── safety guard: don't nuke the login node ─────────────────────────
+# The rocprof-compute nuitka onefile build peaks ~10 GB RSS and pegs
+# one core at 100% for ~45 min on the 7.2.x line. Running that on a
+# shared login/head node degrades interactive responsiveness for
+# everyone else, and on memory-constrained head nodes it gets OOM-
+# killed. Refuse to run if we don't appear to be in a Slurm
+# allocation or a container. --module-file-only is light (no nuitka),
+# so it bypasses the guard. --allow-login-node (or ALLOW_LOGIN_NODE=1
+# env) is the explicit override for the rare cases where you really
+# do want to run on the current host (e.g., a private workstation, a
+# one-off recovery on a quiet cluster).
+if [ "${MODULE_FILE_ONLY}" -eq 0 ] \
+   && [ "${ALLOW_LOGIN_NODE}" -eq 0 ] \
+   && [ -z "${SLURM_JOB_ID:-}" ] \
+   && [ ! -f /.dockerenv ] \
+   && [ ! -f /.singularity.d/Singularity ]; then
+   _host="$(hostname -s 2>/dev/null || hostname)"
+   echo "[rocm_patches] REFUSING to run on '${_host}': not inside a Slurm allocation or container." >&2
+   echo "[rocm_patches]   The rocprof-compute nuitka build peaks ~10 GB RSS and pegs a CPU for ~45 min." >&2
+   echo "[rocm_patches]   Running it on a shared head/login node would degrade other users' sessions" >&2
+   echo "[rocm_patches]   and may get OOM-killed." >&2
+   echo "" >&2
+   echo "[rocm_patches]   Wrap your invocation in sbatch, e.g.:" >&2
+   echo "" >&2
+   echo "     sbatch -p sh5_cpx_a -N 1 -J rocm-patches-${ROCM_VERSION} -t 90 \\" >&2
+   echo "       -o slurm-%j-rocm-patches-${ROCM_VERSION}.out \\" >&2
+   echo "       --wrap=\"sudo -E bash ${LEAF_SCRIPT_PATH} ${ORIGINAL_ARGS[*]}\"" >&2
+   echo "" >&2
+   echo "[rocm_patches]   ...or pass --allow-login-node (or set ALLOW_LOGIN_NODE=1) to bypass." >&2
+   exit 1
+fi
+unset _host
 
 # ── version → patch-bundle dispatch ─────────────────────────────────
 # Centralised here so adding new vendored fixes is a one-line edit.
@@ -266,12 +306,34 @@ fi
 # Set unconditionally so --module-file-only mode (which never reads
 # PATCH_BUNDLES or PATCH_SOURCE_DIR) can still resolve INSTALL_PREFIX
 # and MODULE_FILE for the modulefile edit.
-[ -n "${INSTALL_PREFIX}" ] || INSTALL_PREFIX="/opt/rocm-patches-${ROCM_VERSION}"
+INSTALL_PREFIX_EXPLICIT=1
+[ -n "${INSTALL_PREFIX}" ] || { INSTALL_PREFIX="/opt/rocm-patches-${ROCM_VERSION}"; INSTALL_PREFIX_EXPLICIT=0; }
 if [ -n "${ROCM_PATH_OVERRIDE}" ]; then
    ROCM_PATH="${ROCM_PATH_OVERRIDE}"
 else
    ROCM_PATH="/opt/rocm-${ROCM_VERSION}"
 fi
+
+# When the caller passed --rocm-path pointing at a non-default
+# location (e.g. /shared/apps/ubuntu/opt/rocm-7.2.3 from main_setup.sh's
+# rocmplus branch) but did NOT pass --install-prefix, keep the two
+# paths SYNCHRONIZED by deriving INSTALL_PREFIX from ROCM_PATH. By
+# convention rocm-${V} and rocm-patches-${V} are siblings in the
+# same parent dir, so the SDK install and its patches overlay always
+# live together. Without this, INSTALL_PREFIX would stay at the
+# /opt/rocm-patches-${V} default and the idempotency check below
+# would look at the wrong location, triggering a wasteful rebuild
+# (slurm jobs 9000/9001, 2026-05-11).
+if [ "${INSTALL_PREFIX_EXPLICIT}" -eq 0 ] \
+   && [ -n "${ROCM_PATH_OVERRIDE}" ] \
+   && [ "${ROCM_PATH}" != "/opt/rocm-${ROCM_VERSION}" ]; then
+   _derived="$(dirname "${ROCM_PATH}")/rocm-patches-${ROCM_VERSION}"
+   echo "[rocm_patches] auto-derived INSTALL_PREFIX from ROCM_PATH: ${_derived}"
+   echo "[rocm_patches]   (sibling of ${ROCM_PATH}; pass --install-prefix to override)"
+   INSTALL_PREFIX="${_derived}"
+   unset _derived
+fi
+
 MODULE_FILE="${MODULE_PATH}/rocm/${ROCM_VERSION}.lua"
 
 echo ""
@@ -315,6 +377,86 @@ if [ "${MODULE_FILE_ONLY}" -eq 0 ]; then
       exit ${NOOP_RC}
    fi
    [ -d "${PATCH_SOURCE_DIR}" ] || send-error "patch source dir not found (looked next to ${LEAF_DIR})"
+fi
+
+# ── Strengthened idempotency check ──────────────────────────────────
+# Short-circuit the WHOLE script with NOOP_RC when every bundle in
+# PATCH_BUNDLES has all its on-disk artifacts AND a matching modulefile
+# entry already in place, and the caller did not request --replace.
+# This complements the per-bundle skip-if-output-exists checks inside
+# the build_* functions (which only catch "binary present at the
+# CURRENT INSTALL_PREFIX") by ALSO requiring the modulefile to
+# already reference the overlay -- so a stale install dir with no
+# wired-up modulefile still triggers a rebuild.
+#
+# Robustness:
+#   * INSTALL_PREFIX is auto-synchronized to ROCM_PATH above, so the
+#     install-dir check looks at the right location even when the
+#     caller only passed --rocm-path (main_setup.sh's rocmplus
+#     branch). An explicit --install-prefix overrides the auto.
+#   * The modulefile lookup scans a list of candidate locations
+#     (explicit MODULE_PATH + cluster fall-backs) so a modulefile
+#     written to a non-default tree (e.g. /shared/apps/modules/...)
+#     is still found when the caller left MODULE_PATH at the
+#     /etc/lmod/modules/ROCm script default.
+#   * --module-file-only never short-circuits; that mode IS the
+#     modulefile-only work, by definition.
+#   * --replace forces a rebuild unconditionally.
+#
+# Per-bundle artifact + modulefile-line matchers live in the case
+# inside the function. Unknown bundle name -> conservative "force
+# rebuild" (return 1) so adding new bundles cannot silently regress
+# the idempotency check.
+already_installed_check() {
+   [ "${MODULE_FILE_ONLY}" -eq 0 ] || return 1
+   [ "${REPLACE}" -eq 0 ]          || return 1
+   [ -d "${INSTALL_PREFIX}" ]      || return 1
+
+   local -a mf_candidates=(
+      "${MODULE_PATH}/rocm/${ROCM_VERSION}.lua"
+      "${MODULE_PATH}/rocm/${ROCM_VERSION}"
+      "/shared/apps/modules/ubuntu/lmodfiles/base/rocm/${ROCM_VERSION}.lua"
+      "/nfsapps/modules/base/rocm/${ROCM_VERSION}.lua"
+      "/etc/lmod/modules/ROCm/rocm/${ROCM_VERSION}.lua"
+   )
+   local mf=""
+   for cand in "${mf_candidates[@]}"; do
+      if [ -f "${cand}" ]; then mf="${cand}"; break; fi
+   done
+   [ -n "${mf}" ] || return 1
+
+   local bundle bin lib
+   for bundle in ${PATCH_BUNDLES}; do
+      case "${bundle}" in
+         rocprof-compute)
+            bin="${INSTALL_PREFIX}/rocprof-compute/bin/rocprof-compute"
+            [ -e "${bin}" ] || return 1
+            [ -x "${bin}" ] || return 1
+            grep -qE 'prepend_path\(\s*"PATH"\s*,\s*"[^"]+/rocprof-compute/bin"\s*\)' "${mf}" \
+               || return 1
+            ;;
+         rocprof-sys-1.3.0)
+            lib="${INSTALL_PREFIX}/lib/librocprof-sys.so.1.3.0"
+            [ -f "${lib}" ] || return 1
+            grep -qE "rocm-patches-${ROCM_VERSION}/lib" "${mf}" \
+               || return 1
+            ;;
+         *)
+            return 1
+            ;;
+      esac
+   done
+
+   echo "[rocm_patches] all bundles already installed for ROCm ${ROCM_VERSION}:"
+   echo "[rocm_patches]   install dir : ${INSTALL_PREFIX}"
+   echo "[rocm_patches]   modulefile  : ${mf}"
+   echo "[rocm_patches]   bundles     : ${PATCH_BUNDLES}"
+   echo "[rocm_patches] skipping rebuild (use --replace to force)"
+   return 0
+}
+
+if already_installed_check; then
+   exit ${NOOP_RC}
 fi
 
 # ─────────────────────────────────────────────────────────────────────
