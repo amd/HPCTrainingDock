@@ -2,6 +2,12 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-05-13
+
+- ROCm versions:
+    - therock-23.2.0
+
+[Full snapshot](archive/AAC6_system_status_2026-05-13.md)
 ## 2026-05-12
 
 - ROCm default: 7.2.1 → 7.2.0
