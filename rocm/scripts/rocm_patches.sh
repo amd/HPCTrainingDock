@@ -251,10 +251,11 @@ rocm_version_to_patches() {
       # comment that defers to this overlay.)
       #
       # On the 7.2.x line two bundles run back-to-back: the rocprof-sys
-      # cherry-pick (for 7.2.0/7.2.1 only -- 7.2.2/7.2.3 have no rocprof-sys
-      # patch yet) PLUS the rocprof-compute overlay.  build_rocprof_compute()
-      # is invoked after build_rocprof_sys_1_3_0() because the dispatch
-      # iterates PATCH_BUNDLES in order.
+      # cherry-pick (for 7.2.0 / 7.2.1 / 7.2.2 / 7.2.3 -- all four ship
+      # rocprof-sys 1.3.0 from the same source baseline) PLUS the
+      # rocprof-compute overlay.  build_rocprof_compute() is invoked
+      # after build_rocprof_sys_1_3_0() because the dispatch iterates
+      # PATCH_BUNDLES in order.
       #
       # Empirical NOTE (2026-05): for the RC trees afar-22.{1,2}.0 and
       # therock-23.{1,2}.0, the VERSION.sha on disk does NOT resolve to
@@ -275,16 +276,16 @@ rocm_version_to_patches() {
       # reproducer in MPI_Ghost_Exchange_Ver2_Rocprof-Sys passes
       # post-overlay; see slurm-9046).
       7.2.2)            echo "rocprof-sys-1.3.0 rocprof-compute" ;;
-      # 7.2.3: rocprof-sys 1.3.0 patch stack still applies cleanly, but
-      # the ROCm 7.2.3 SDK itself requires GLIBC >= 2.36 / GLIBCXX >=
-      # 3.4.32, which are not satisfied on Ubuntu 22.04 hosts (GLIBC
-      # 2.35 / GLIBCXX 3.4.30). `amdclang` from rocm-7.2.3/llvm/bin
-      # cannot even run there, so the patched .so would be a binary
-      # nobody on this host can load. Keep the rocprof-sys bundle
-      # excluded until either the host OS is upgraded or 7.2.3 is
-      # rebuilt against an older glibc.  See
-      # /shared/apps/ubuntu/opt/rocm-patches-7.2.3/lib/.build-blocked.
-      7.2.3)            echo "rocprof-compute" ;;
+      # 7.2.3: same source baseline as 7.2.0 / 7.2.1 / 7.2.2 (rocm-systems
+      # tag rocm-7.2.3 ships projects/rocprofiler-systems VERSION 1.3.0
+      # and all 4 patches apply cleanly).  An earlier 7.2.3 build of the
+      # ROCm SDK required GLIBC >= 2.36 / GLIBCXX >= 3.4.32 and was
+      # blocked on Ubuntu 22.04 hosts (GLIBC 2.35 / GLIBCXX 3.4.30); the
+      # current 7.2.3 install rebuilt against the older glibc, so
+      # amdclang and the SDK both load cleanly and the in-tree builder
+      # produces a working librocprof-sys.so.1.3.0 against rocm-7.2.3's
+      # rocprofiler-sdk 1.1.0.
+      7.2.3)            echo "rocprof-sys-1.3.0 rocprof-compute" ;;
       6.3.*)            echo "rocprof-compute" ;;
       6.4.*)            echo "rocprof-compute" ;;
       7.0.*)            echo "rocprof-compute" ;;
@@ -975,7 +976,7 @@ rocprof_compute_detail_block() {
       7.2.0) echo 'Upstream tag `rocm-7.2.0` -- monorepo (rocm-systems @ rocm-7.2.0), `projects/rocprofiler-compute` subtree.  Builds alongside the rocprof-sys 1.3.0 cherry-pick.' ;;
       7.2.1) echo 'Upstream tag `rocm-7.2.1` -- monorepo (rocm-systems @ rocm-7.2.1), `projects/rocprofiler-compute` subtree.  Builds alongside the rocprof-sys 1.3.0 cherry-pick.' ;;
       7.2.2) echo 'Upstream tag `rocm-7.2.2` -- monorepo (rocm-systems @ rocm-7.2.2), `projects/rocprofiler-compute` subtree.  Builds alongside the rocprof-sys 1.3.0 cherry-pick.' ;;
-      7.2.3) echo 'Upstream tag `rocm-7.2.3` -- monorepo (rocm-systems @ rocm-7.2.3), `projects/rocprofiler-compute` subtree.  rocprof-sys 1.3.0 cherry-pick is excluded on this version: the rocm-7.2.3 SDK itself requires GLIBC >= 2.36 / GLIBCXX >= 3.4.32, which Ubuntu 22.04 does not provide, so a patched .so could not be loaded on the only target host class.' ;;
+      7.2.3) echo 'Upstream tag `rocm-7.2.3` -- monorepo (rocm-systems @ rocm-7.2.3), `projects/rocprofiler-compute` subtree.  Builds alongside the rocprof-sys 1.3.0 cherry-pick.' ;;
       afar-22.1.0)    echo 'RC tree (no `rocm-afar-22.1.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (afar-22.1.0 ships `167a9576`, upstream VERSION `3.3.0`).' ;;
       afar-22.2.0)    echo 'RC tree (no `rocm-afar-22.2.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (afar-22.2.0 ships `bad92dc4`, upstream VERSION `3.3.0`).' ;;
       therock-23.1.0) echo 'RC tree (no `rocm-therock-23.1.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (when present).' ;;

@@ -50,16 +50,56 @@ fi
 BUILD_PYTORCH=0
 PYTORCH_VERSION=2.9.1
 PYTHON_VERSION=10
-TORCHVISION_VERSION=0.22.1
+# torchvision / torchaudio defaults are placeholders; the resolution
+# block below the arg parser overwrites them from
+# PYTORCH_COMPANION_VERSIONS using PYTORCH_VERSION's major.minor key
+# unless the user explicitly passed --torchvision-version /
+# --torchaudio-version. The values seeded here only get used if
+# PYTORCH_VERSION's major.minor has no row in the table (in which case
+# the script also prints a warning).
+TORCHVISION_VERSION=0.24.1
+TORCHVISION_VERSION_USER_SET=0
+TORCHAUDIO_VERSION=2.9.1
+TORCHAUDIO_VERSION_USER_SET=0
 FLASHATTENTION_VERSION=2.8.3
 TRITON_VERSION=3.4.0
 TRITON_WHEEL_NAME="triton"
-TORCHVISION_HASH="59a3e1f"
-TORCHAUDIO_VERSION=2.7.1
-TORCHAUDIO_HASH="95c61b4"
 PILLOW_VERSION=12.1.1
 SAGEATTENTION_VERSION="1.0.6" #SageAttention 2 does not support ROCm
 DEEPSPEED_VERSION="latest"
+
+# PyTorch ecosystem companion-version table.
+# Keyed on PyTorch major.minor (e.g. "2.9", NOT "2.9.1") so any patch
+# release inherits the .0 row's companions automatically. This matches
+# upstream PyTorch's policy: torchvision / torchaudio releases are
+# pinned to a major.minor of PyTorch core, and patch releases (2.9.0,
+# 2.9.1, ...) ship without bumping companions.
+#
+# Value format: "<torchvision_version>:<torchaudio_version>" (colon-
+# separated; neither version contains a colon, so split is unambiguous).
+# Source for the pairings: pytorch.org/get-started/previous-versions/
+# cross-checked against the user-supplied table at the time this code
+# was added (PT 2.6 ... 2.12). Future-tentative rows (2.11, 2.12) are
+# included so a sweep can drive a build attempt the moment the upstream
+# tag goes live; if the tag doesn't exist yet, wget below fails fast
+# and the per-package summary shows a clear FAILED instead of silently
+# falling back to the previous version's companions.
+#
+# To add a new PyTorch release: add ONE row keyed on its major.minor.
+# To override the table for a specific patch release without editing
+# the table: pass --torchvision-version / --torchaudio-version on the
+# command line (or via the run_and_log_versioned plumbing in
+# main_setup.sh, which forwards --pytorch-version but leaves the
+# companion overrides for direct CLI use).
+declare -A PYTORCH_COMPANION_VERSIONS=(
+   [2.6]="0.21.0:2.6.0"
+   [2.7]="0.22.0:2.7.0"
+   [2.8]="0.22.1:2.7.1"
+   [2.9]="0.24.1:2.9.1"
+   [2.10]="0.25.0:2.10.0"
+   [2.11]="0.26.0:2.11.0"
+   [2.12]="0.27.0:2.12.0"
+)
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/pytorch
 # Versioned install root: /opt/rocmplus-X/pytorch-v${PYTORCH_VERSION}.
 # All companion subdirs (vision, audio, triton, aotriton, transformers,
@@ -107,7 +147,16 @@ usage()
    echo "  WARNING: when specifying --install-path-no-version and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "--amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default is autodetected"
    echo "--build-pytorch [ BUILD_PYTORCH ] set to 1 to build jax default is 0"
-   echo "--pytorch-version [ PYTORCH_VERSION ] version of PyTorch, default is $PYTORCH_VERSION"
+   echo "--pytorch-version [ PYTORCH_VERSION ] version of PyTorch, default is $PYTORCH_VERSION."
+   echo "    Setting --pytorch-version also auto-derives --torchvision-version and --torchaudio-version"
+   echo "    from the PYTORCH_COMPANION_VERSIONS table near the top of this script (lookup by major.minor"
+   echo "    only, e.g. 2.9.1 maps to the '2.9' row). Pass either of those flags explicitly to override."
+   echo "--torchvision-version [ TORCHVISION_VERSION ] version of torchvision."
+   echo "    Default is auto-derived from PYTORCH_VERSION's major.minor row in PYTORCH_COMPANION_VERSIONS;"
+   echo "    set this flag to pin a specific torchvision (e.g. for nightlies or off-table combinations)."
+   echo "--torchaudio-version [ TORCHAUDIO_VERSION ] version of torchaudio."
+   echo "    Default is auto-derived from PYTORCH_VERSION's major.minor row in PYTORCH_COMPANION_VERSIONS;"
+   echo "    set this flag to pin a specific torchaudio. Pairs cleanly with --torchvision-version."
    echo "--python-version [ PYTHON_VERSION ] version of Python, default is $PYTHON_VERSION"
    echo "--install-path-no-version [ INSTALL_PATH ] directory where PyTorch, Torchaudio and Torchvision will be installed, default is $INSTALL_PATH"
    echo "--install-path [ ROCMPLUS_PATH_INPUT ] parent dir; if set (and --install-path-no-version is not), INSTALL_PATH = ROCMPLUS_PATH/pytorch-v\${PYTORCH_VERSION}"
@@ -329,6 +378,18 @@ do
           PYTORCH_VERSION=${1}
 	  reset-last
           ;;
+      "--torchvision-version")
+          shift
+          TORCHVISION_VERSION=${1}
+          TORCHVISION_VERSION_USER_SET=1
+          reset-last
+          ;;
+      "--torchaudio-version")
+          shift
+          TORCHAUDIO_VERSION=${1}
+          TORCHAUDIO_VERSION_USER_SET=1
+          reset-last
+          ;;
       "--module-path")
           shift
           MODULE_PATH=${1}
@@ -366,6 +427,45 @@ do
    n=$((${n} + 1))
    shift
 done
+
+# ── Resolve torchvision / torchaudio versions from PYTORCH_VERSION ────
+# Lookup is by major.minor only (PyTorch's own release-pairing policy:
+# patch releases inherit companions, see PYTORCH_COMPANION_VERSIONS
+# comment block above). User-supplied --torchvision-version /
+# --torchaudio-version always wins; the sentinels TORCHVISION_VERSION_-
+# USER_SET / TORCHAUDIO_VERSION_USER_SET are flipped to 1 in the parser
+# above whenever the operator passed those flags.
+#
+# Argument-order independence: this block runs AFTER the parser loop, so
+# a caller can pass flags in either order and both
+#   --pytorch-version 2.10.0 --torchvision-version 0.99.0
+#   --torchvision-version 0.99.0 --pytorch-version 2.10.0
+# yield the same final state (torchvision pinned to 0.99.0, torchaudio
+# auto-derived to 2.10.0 from the table).
+_PYVER_SHORT=$(echo "${PYTORCH_VERSION}" | cut -f1-2 -d'.')
+_PYTORCH_COMPANION_ROW="${PYTORCH_COMPANION_VERSIONS[${_PYVER_SHORT}]:-}"
+if [ -n "${_PYTORCH_COMPANION_ROW}" ]; then
+   _DERIVED_TV="${_PYTORCH_COMPANION_ROW%%:*}"
+   _DERIVED_TA="${_PYTORCH_COMPANION_ROW#*:}"
+   echo "PyTorch ${PYTORCH_VERSION} -> major.minor ${_PYVER_SHORT} matches PYTORCH_COMPANION_VERSIONS row: torchvision=${_DERIVED_TV}, torchaudio=${_DERIVED_TA}"
+   if [ "${TORCHVISION_VERSION_USER_SET}" -eq 0 ]; then
+      TORCHVISION_VERSION="${_DERIVED_TV}"
+   else
+      echo "  --torchvision-version override active: keeping TORCHVISION_VERSION=${TORCHVISION_VERSION} (table row would have been ${_DERIVED_TV})"
+   fi
+   if [ "${TORCHAUDIO_VERSION_USER_SET}" -eq 0 ]; then
+      TORCHAUDIO_VERSION="${_DERIVED_TA}"
+   else
+      echo "  --torchaudio-version override active: keeping TORCHAUDIO_VERSION=${TORCHAUDIO_VERSION} (table row would have been ${_DERIVED_TA})"
+   fi
+else
+   echo "WARNING: PYTORCH_VERSION=${PYTORCH_VERSION} (major.minor ${_PYVER_SHORT}) has no row in PYTORCH_COMPANION_VERSIONS;"
+   echo "         using TORCHVISION_VERSION=${TORCHVISION_VERSION}, TORCHAUDIO_VERSION=${TORCHAUDIO_VERSION}"
+   echo "         (script defaults or explicit --torchvision-version/--torchaudio-version overrides)."
+   echo "         To make the auto-derivation work, add a major.minor row to PYTORCH_COMPANION_VERSIONS"
+   echo "         near the top of pytorch_setup.sh."
+fi
+unset _PYVER_SHORT _PYTORCH_COMPANION_ROW _DERIVED_TV _DERIVED_TA
 
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
@@ -1333,20 +1433,22 @@ else
       fi
 
       # this block of code is to retry if git clone fails.
-      RETRIES=6
-      DELAY=30
-      COUNT=1
-      while [ $COUNT -lt $RETRIES ]; do
-        git clone --recursive --depth 1 --branch v${PYTORCH_VERSION} https://github.com/pytorch/pytorch
-        if [ $? -eq 0 ]; then
-          RETRIES=0
-          break
-        fi
-        let COUNT=$COUNT+1
-        sleep $DELAY
-      done
+      #RETRIES=6
+      #DELAY=30
+      #COUNT=1
+      #while [ $COUNT -lt $RETRIES ]; do
+      #  git clone --recursive --depth 1 --branch v${PYTORCH_VERSION} https://github.com/pytorch/pytorch
+      #  if [ $? -eq 0 ]; then
+      #    RETRIES=0
+      #    break
+      #  fi
+      #  let COUNT=$COUNT+1
+      #  sleep $DELAY
+      #done
+      wget -q https://github.com/pytorch/pytorch/releases/download/v${PYTORCH_VERSION}/pytorch-v${PYTORCH_VERSION}.tar.gz
+      tar -xzf pytorch-v${PYTORCH_VERSION}.tar.gz
 
-      cd pytorch
+      cd pytorch-v${PYTORCH_VERSION}
 
       # ── MAGMA 2.10+ compatibility (backport of pytorch PR #180388) ───
       # PyTorch v2.9.1 (and earlier) encodes AT_MAGMA_VERSION as
@@ -1683,13 +1785,57 @@ print('  torch.cuda.is_available() =', torch.cuda.is_available())
       fi
 
       # Installing Torchvision
-
-      git clone --recursive --depth 1 --branch v${TORCHVISION_VERSION} https://github.com/pytorch/vision
-      cd vision
+      #
+      # Source acquisition: GitHub auto-generated source tarball for the
+      # release tag (extracts to vision-${TORCHVISION_VERSION}/). This
+      # replaces the prior `git clone --recursive --depth 1 --branch v$V`
+      # for two reasons:
+      #   1. Without a .git tree on disk, torchvision's setup.py does not
+      #      append a "+<git-sha>" local-version-identifier suffix to the
+      #      installed egg directory name. The egg is just
+      #         torchvision-${TORCHVISION_VERSION}-py3.X-linux-x86_64.egg
+      #      which is stable across builds and lets the modulefile
+      #      reference it without hardcoding a per-version git hash.
+      #   2. Tarball downloads are reproducible from a release tag and
+      #      avoid the recursive submodule clone (none of torchvision's
+      #      current submodules are needed for the torchvision-with-ROCm
+      #      build path; system libpng-dev / libjpeg-dev / libavcodec-dev
+      #      satisfy the runtime deps already).
+      # If torchvision later gains a build-required submodule, swap this
+      # block back to git clone --recursive (and update the egg-detection
+      # block below to handle the +sha suffix again).
+      TORCHVISION_TGZ="vision-${TORCHVISION_VERSION}.tar.gz"
+      TORCHVISION_URL="https://github.com/pytorch/vision/archive/refs/tags/v${TORCHVISION_VERSION}.tar.gz"
+      echo "Downloading torchvision v${TORCHVISION_VERSION} from ${TORCHVISION_URL}"
+      wget -q --tries=10 "${TORCHVISION_URL}" -O "${TORCHVISION_TGZ}" || {
+         echo "ERROR: failed to download ${TORCHVISION_URL}"
+         echo "       Check that the upstream tag v${TORCHVISION_VERSION} exists at https://github.com/pytorch/vision/releases"
+         exit 1
+      }
+      tar -xzf "${TORCHVISION_TGZ}"
+      rm -f "${TORCHVISION_TGZ}"
+      cd "vision-${TORCHVISION_VERSION}"
       export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages:$PYTHONPATH
       python3 setup.py install --prefix=${TORCHVISION_PATH}
       cd ..
-      export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchvision-${TORCHVISION_VERSION}+${TORCHVISION_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
+      # Detect the actual installed torchvision egg directory and capture
+      # its basename for both the post-build PYTHONPATH and the
+      # modulefile written near the bottom of this script. This avoids
+      # hardcoding the egg name; setuptools may suffix the version with
+      # "+<sha>" (git build) or "a0" (pre-release tag) depending on the
+      # source acquisition method, and detecting the actual name keeps
+      # the modulefile correct regardless. Same trick PILLOW_VERSION
+      # uses below.
+      TORCHVISION_EGG=$(ls -d "${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchvision-${TORCHVISION_VERSION}"*.egg 2>/dev/null | head -1)
+      if [ -n "${TORCHVISION_EGG}" ]; then
+         TORCHVISION_EGG_NAME=$(basename "${TORCHVISION_EGG}")
+         echo "Detected installed torchvision egg: ${TORCHVISION_EGG_NAME}"
+      else
+         TORCHVISION_EGG_NAME="torchvision-${TORCHVISION_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg"
+         echo "WARNING: no torchvision-${TORCHVISION_VERSION}*.egg found under ${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages"
+         echo "         falling back to expected name '${TORCHVISION_EGG_NAME}' for PYTHONPATH and modulefile (may not exist)"
+      fi
+      export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/${TORCHVISION_EGG_NAME}:$PYTHONPATH
       # Detect the actual installed pillow version from the egg directory name,
       # since torchvision pulls pillow as a dependency and the version may differ
       # from what PILLOW_VERSION specifies.
@@ -1705,12 +1851,39 @@ print('  torch.cuda.is_available() =', torch.cuda.is_available())
       fi
 
       # Installing Torchaudio
-
-      git clone --recursive --depth 1 --branch v${TORCHAUDIO_VERSION} https://github.com/pytorch/audio
-      cd audio
+      #
+      # Source acquisition: GitHub auto-generated source tarball (extracts
+      # to audio-${TORCHAUDIO_VERSION}/). Same rationale as the
+      # torchvision block above: dropping the .git tree eliminates the
+      # "+<sha>" local-version-identifier suffix in the installed egg
+      # name (and historically the "a0" pre-release tag), so the egg
+      # name shape is stable and detectable post-install rather than
+      # version-pinned in the modulefile.
+      TORCHAUDIO_TGZ="audio-${TORCHAUDIO_VERSION}.tar.gz"
+      TORCHAUDIO_URL="https://github.com/pytorch/audio/archive/refs/tags/v${TORCHAUDIO_VERSION}.tar.gz"
+      echo "Downloading torchaudio v${TORCHAUDIO_VERSION} from ${TORCHAUDIO_URL}"
+      wget -q --tries=10 "${TORCHAUDIO_URL}" -O "${TORCHAUDIO_TGZ}" || {
+         echo "ERROR: failed to download ${TORCHAUDIO_URL}"
+         echo "       Check that the upstream tag v${TORCHAUDIO_VERSION} exists at https://github.com/pytorch/audio/releases"
+         exit 1
+      }
+      tar -xzf "${TORCHAUDIO_TGZ}"
+      rm -f "${TORCHAUDIO_TGZ}"
+      cd "audio-${TORCHAUDIO_VERSION}"
       export PYTHONPATH=${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages:$PYTHONPATH
       python3 setup.py install --prefix=${TORCHAUDIO_PATH}
-      export PYTHONPATH=${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
+      # Detect the actual installed torchaudio egg directory; same
+      # pattern as torchvision above, see comment block there.
+      TORCHAUDIO_EGG=$(ls -d "${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}"*.egg 2>/dev/null | head -1)
+      if [ -n "${TORCHAUDIO_EGG}" ]; then
+         TORCHAUDIO_EGG_NAME=$(basename "${TORCHAUDIO_EGG}")
+         echo "Detected installed torchaudio egg: ${TORCHAUDIO_EGG_NAME}"
+      else
+         TORCHAUDIO_EGG_NAME="torchaudio-${TORCHAUDIO_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg"
+         echo "WARNING: no torchaudio-${TORCHAUDIO_VERSION}*.egg found under ${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages"
+         echo "         falling back to expected name '${TORCHAUDIO_EGG_NAME}' for PYTHONPATH and modulefile (may not exist)"
+      fi
+      export PYTHONPATH=${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/${TORCHAUDIO_EGG_NAME}:$PYTHONPATH
       if [[ "${DEBUG}" != 0 ]]; then
          echo "Testing import torchaudio"
          python3 -c 'import torchaudio'
@@ -1857,8 +2030,8 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/flash_attn-${FLASHATTENTION_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","${SAGEATTENTION_PATH}")
 	prepend_path("PYTHONPATH","${TRANSFORMERS_PATH}")
-	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}a0+${TORCHAUDIO_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
-	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchvision-${TORCHVISION_VERSION}+${TORCHVISION_HASH}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
+	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/${TORCHAUDIO_EGG_NAME:-torchaudio-${TORCHAUDIO_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg}")
+	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/${TORCHVISION_EGG_NAME:-torchvision-${TORCHVISION_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg}")
 	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/pillow-${PILLOW_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
 	prepend_path("PYTHONPATH","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages")
 	prepend_path("PYTHONPATH","${PYTORCH_PATH}")

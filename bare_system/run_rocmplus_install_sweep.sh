@@ -125,7 +125,15 @@ Usage: $0 [opts]
    --quick-installs 0|1          skip long-pole packages (default ${QUICK_INSTALLS})
    --replace-existing 0|1        replace existing rocmplus-<v> packages per-pkg (default ${REPLACE_EXISTING})
    --keep-failed-installs 0|1    on per-package failure, keep partial install dirs / modulefiles for post-mortem (default ${KEEP_FAILED_INSTALLS}; default 0 wipes them so retries start clean)
-   --packages "name1 name2 ..."  whitelist (passed verbatim to main_setup.sh --packages); empty = all
+   --packages "name1 name2 ..."  whitelist (passed verbatim to main_setup.sh --packages); empty = all.
+                                 Versioned form name=VERSION is supported for the subset of packages whose
+                                 leaf script accepts a single --<name>-version flag (pytorch, jax, cupy,
+                                 magma, kokkos, ...; see main_setup.sh --help for the full list). Optional
+                                 leading 'v' is stripped (cupy=v13.0.1 == cupy=13.0.1). Repeating the same
+                                 name with different versions (e.g. "pytorch=2.7.1 pytorch=2.8.0") drives
+                                 one build per version inside the same per-ROCm-version sbatch job; each
+                                 lands in its own pkg-vVERSION/ install dir + VERSION.lua module so the
+                                 versions coexist.
    --max-parallel N              cap on simultaneously-RUNNING jobs (default ${MAX_PARALLEL}).
                                  1 = strict serial chain (each job depends on the previous; today's
                                  default behavior). N>1 = sliding window: first N jobs run in parallel
