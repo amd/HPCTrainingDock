@@ -2,6 +2,12 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-05-14
+
+- ROCm versions:
+    + 7.2.3.lua.bak-20260513
+
+[Full snapshot](archive/AAC6_system_status_2026-05-14.md)
 ## 2026-05-13
 
 - ROCm versions:
