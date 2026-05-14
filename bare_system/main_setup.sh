@@ -33,6 +33,12 @@ fi
 # ---------------------------------------------------------------------
 
 : ${ROCM_VERSION:=""}
+# Delta-release support: when set, BASE_ROCM_VERSION is installed first by
+# rocm_setup.sh and the ROCM_VERSION delta is merged on top. When SUPERSEDES_VERSION
+# is set, a tombstone modulefile is emitted at rocm/<SUPERSEDES_VERSION>.lua
+# that redirects to rocm/<ROCM_VERSION>. See bare_system/rocm_delta_releases.conf.
+: ${BASE_ROCM_VERSION:=""}
+: ${SUPERSEDES_VERSION:=""}
 : ${ROCM_INSTALLPATH:="/opt/"}
 : ${TOP_INSTALL_PATH:="/opt"}
 : ${TOP_MODULE_PATH:="/etc/lmod/modules"}
@@ -149,6 +155,8 @@ usage()
 {
    echo "Usage:"
    echo "  --rocm-version [ ROCM_VERSION ]:  auto-detected from loaded module, or specify explicitly"
+   echo "  --base-rocm-version [ VER ]:  for delta releases, install <VER> first and merge \$ROCM_VERSION on top (default: empty -- consulted from bare_system/rocm_delta_releases.conf when empty)"
+   echo "  --supersedes [ VER ]:  emit a tombstone rocm/<VER>.lua that redirects to rocm/\$ROCM_VERSION (default: empty)"
    echo "  --rocm-install-path [ ROCM_INSTALL_PATH ]:  default is $ROCM_INSTALLPATH"
    echo "  --top-install-path [ TOP_INSTALL_PATH ]:  top-level directory for software installation, default is $TOP_INSTALL_PATH"
    echo "  --top-module-path [ TOP_MODULE_PATH ]:  top-level directory for module files, default is $TOP_MODULE_PATH"
@@ -160,7 +168,7 @@ usage()
    echo "  --quick-installs [0 or 1]:  skip packages whose wall >= 20 min (measured from job 8065 sweep): pytorch (91m), tensorflow (70m), jax (34m, when policy gate allows). Also skips ftorch (transitive: needs pytorch) and julia (dormant: no install wired). Threshold raised from 15 -> 20 min after job 8065 audit moved petsc (17m) and scorep (17m) under the cutoff. Default $QUICK_INSTALLS"
    echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf the versioned subdir under \${TOP_INSTALL_PATH} (the version itself lives in the leaf script). Default $REPLACE_EXISTING"
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
-   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, likwid, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs)."
+   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, likwid, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, hpctoolkit, likwid, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hdf5, fftw, petsc, hypre. Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Currently supported only for pytorch; keys are aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build."
    echo "  --rocm-rc-prefix [ FAMILY ]:  release-candidate family name (e.g. 'therock', 'afar'). Auto-detected from \${ROCM_PATH} basename for rocm-{therock,afar}-* trees. Empty for regular releases. When non-empty, install/module dirs become rocmplus-\${FAMILY}-\${ROCM_VERSION}/ instead of rocmplus-\${ROCM_VERSION}/. Default: auto-detected (empty for regular releases)."
    echo "  --help: prints this message"
    exit 1
@@ -173,6 +181,16 @@ do
       "--rocm-version")
           shift
           ROCM_VERSION=${1}
+          reset-last
+          ;;
+      "--base-rocm-version")
+          shift
+          BASE_ROCM_VERSION=${1}
+          reset-last
+          ;;
+      "--supersedes")
+          shift
+          SUPERSEDES_VERSION=${1}
           reset-last
           ;;
       "--rocm-install-path")
@@ -437,6 +455,17 @@ fi
 # every package that IS on the list (overriding any --quick-installs decision
 # that might have turned it off). Order: --quick-installs runs first, then
 # --packages, so explicitly whitelisted packages always build.
+#
+# --packages also accepts a "name=version" suffix for the subset of
+# packages whose leaf script exposes a single --<name>-version flag (see
+# PKG_VER_FLAG below). The version may be given with an optional leading
+# 'v' (e.g. cupy=v13.0.1 and cupy=13.0.1 are equivalent). Repeating the
+# same name with different versions ("pytorch=2.7.1 pytorch=2.8.0") drives
+# one build per version inside the same job; each lands in its own
+# pkg-vVERSION/ install dir + VERSION.lua module so the versions coexist
+# (the leaf scripts already key both on their own version variable). A
+# bare name with no =version uses the leaf script's internal default
+# (unchanged from the original whitelist semantics).
 declare -A PKG_FLAG=(
    [flang-new]=BUILD_FLANGNEW
    [openmpi]=BUILD_OPENMPI
@@ -467,20 +496,207 @@ declare -A PKG_FLAG=(
    [hypre]=BUILD_HYPRE
 )
 
+# Subset of PKG_FLAG entries whose leaf script exposes a single
+# --<name>-version flag. A "--packages name=VER" token is only valid for
+# names in this map; the version is forwarded verbatim to the leaf via
+# this flag (run_and_log_versioned, defined below, does the splice).
+#
+# Excluded on purpose:
+#   * netcdf  -- the leaf script has TWO version flags (--netcdf-c-version
+#                and --netcdf-f-version); a single =VERSION suffix would
+#                be ambiguous. Operators who need to pin netcdf-c/f must
+#                edit netcdf_setup.sh's NETCDF_C_VERSION/NETCDF_F_VERSION
+#                defaults (matches the leaf-owns-its-version convention).
+#   * flang-new, mvapich, rocprof-sys, rocprof-compute, tau, hipifly --
+#                no --<name>-version flag in the leaf script today; pinning
+#                a version means editing the leaf script (these are mostly
+#                track-the-rocm-SDK packages where the version is implicit
+#                in the loaded ROCm module, not an independent dimension).
+declare -A PKG_VER_FLAG=(
+   [openmpi]="--openmpi-version"
+   [mpi4py]="--mpi4py-version"
+   [hpctoolkit]="--hpctoolkit-version"
+   [likwid]="--likwid-version"
+   [scorep]="--scorep-version"
+   [cupy]="--cupy-version"
+   [hip-python]="--hip-python-version"
+   [tensorflow]="--tensorflow-version"
+   [jax]="--jax-version"
+   [ftorch]="--ftorch-version"
+   [pytorch]="--pytorch-version"
+   [magma]="--magma-version"
+   [elpa]="--elpa-version"
+   [kokkos]="--kokkos-version"
+   [miniconda3]="--miniconda3-version"
+   [miniforge3]="--miniforge3-version"
+   [hdf5]="--hdf5-version"
+   [fftw]="--fftw-version"
+   [petsc]="--petsc-version"
+   [hypre]="--hypre-version"
+)
+
+# Per-package list of versions requested via --packages name=VER. Unset
+# for a name that wasn't on the --packages list (or for the no-whitelist
+# default-everything case): run_and_log_versioned then falls back to a
+# single iteration with no --<name>-version flag, so the leaf script's
+# own default version is used. Multiple versions of the same package are
+# stored newline-separated (NOT space-separated, because an empty
+# requested-version "" is a meaningful entry meaning "leaf default" --
+# space-joining would silently coalesce it with adjacent values; mapfile
+# -t on a newline-joined value preserves the empty entry as a distinct
+# array element). run_and_log_versioned iterates over the parsed array,
+# invoking the leaf script once per version.
+declare -A PKG_VERSIONS_REQ=()
+
+# Per-(name, version) inline overrides supplied via the extended
+# --packages token syntax: name=version[:override_key=override_value...].
+# Key:   "${pkg}|${ver}" (the same shape as PYTORCH_STACK_MANIFEST
+#        cells in pytorch_setup.sh, intentional). For a bare-named token
+#        with no =version, the key is "${pkg}|" (empty version segment).
+# Value: newline-separated "--flag-name=value" records. Each record is
+#        the leaf-script flag (resolved by get_override_flag below) and
+#        the user-supplied value. run_and_log_versioned splits each
+#        record on the FIRST '=' and appends the two halves as separate
+#        argv elements to the leaf-script invocation, so values that
+#        themselves contain '=' (rare but valid for some package
+#        version strings) are preserved.
+# Empty for tokens without a ':override' suffix (run_and_log_versioned
+# treats "key unset" as "no overrides", same code path as today).
+declare -A PKG_VERSION_OVERRIDES=()
+
+# ── Override-key dispatch: maps short/long alias -> leaf-script flag ──
+# Only pytorch has a rich override surface today (aotriton, torchvision,
+# torchaudio, triton, flashattention, pillow, sageattention, deepspeed,
+# plus their short aliases tv/ta/flash/sage/ds). Other versioned
+# packages reject any override-key token at parse time: extending them
+# means adding a case branch here AND adding the matching --<key>-version
+# flag in their leaf script.
+#
+# Returns 0 + prints the resolved leaf-script flag on stdout for known
+# (pkg, key) pairs; returns 1 (no stdout) for unknown ones. Callers
+# capture both:
+#   if _flag=$(get_override_flag "${name}" "${k}"); then ... ; fi
+get_override_flag() {
+   local pkg="$1" key="$2"
+   local flag=""
+   case "${pkg}" in
+      pytorch)
+         case "${key}" in
+            aotriton)             flag="--aotriton-version" ;;
+            torchvision|tv)       flag="--torchvision-version" ;;
+            torchaudio|ta)        flag="--torchaudio-version" ;;
+            triton)               flag="--triton-version" ;;
+            flashattention|flash) flag="--flashattention-version" ;;
+            pillow)               flag="--pillow-version" ;;
+            sageattention|sage)   flag="--sageattention-version" ;;
+            deepspeed|ds)         flag="--deepspeed-version" ;;
+         esac
+         ;;
+   esac
+   if [[ -z "${flag}" ]]; then
+      return 1
+   fi
+   echo "${flag}"
+   return 0
+}
+
 PACKAGES_NORM="${PACKAGES_INPUT//,/ }"
 read -r -a PACKAGES_ARR <<< "${PACKAGES_NORM}"
 
 if (( ${#PACKAGES_ARR[@]} > 0 )); then
-   # Validate all requested names first; abort on unknown.
+   # Three-phase validation:
+   #   1. Split each token on the first ':' into (pre, override_str).
+   #      pre is the existing "name[=VERSION]" form; override_str is a
+   #      ':'-separated list of "key=value" pairs (e.g.
+   #      "pytorch=2.8.0:flash=2.7.4:tv=0.22.1"). ':' is safe as a
+   #      separator because PEP 440 / semver versions and PKG_FLAG
+   #      package names never contain ':'.
+   #   2. Split pre at the first '=' into (name, version). Strip a
+   #      leading 'v' from version (cupy=v13.0.1 and cupy=13.0.1 are
+   #      equivalent; v prefix is the user-facing "release tag" form,
+   #      bare semver is what the leaf scripts pass downstream).
+   #   3. Reject any name not in PKG_FLAG, any versioned token whose
+   #      name is not in PKG_VER_FLAG, and any override key that
+   #      get_override_flag doesn't recognize for that package. All
+   #      three error kinds are reported together so a single failed
+   #      run lists every problem.
    UNKNOWN_PKGS=()
+   VER_UNSUPPORTED=()
+   UNKNOWN_OVERRIDES=()
+   declare -a PARSED_NAMES=()
+   declare -a PARSED_VERSIONS=()
+   declare -a PARSED_OVERRIDES=()
    for p in "${PACKAGES_ARR[@]}"; do
-      if [[ -z "${PKG_FLAG[${p}]:-}" ]]; then
-         UNKNOWN_PKGS+=("${p}")
+      if [[ "${p}" == *:* ]]; then
+         _pre="${p%%:*}"
+         _override_str="${p#*:}"
+      else
+         _pre="${p}"
+         _override_str=""
       fi
+      if [[ "${_pre}" == *=* ]]; then
+         _name="${_pre%%=*}"
+         _ver="${_pre#*=}"
+         _ver="${_ver#v}"
+      else
+         _name="${_pre}"
+         _ver=""
+      fi
+      if [[ -z "${PKG_FLAG[${_name}]:-}" ]]; then
+         UNKNOWN_PKGS+=("${p}")
+         continue
+      fi
+      if [[ -n "${_ver}" && -z "${PKG_VER_FLAG[${_name}]:-}" ]]; then
+         VER_UNSUPPORTED+=("${p}")
+         continue
+      fi
+      _override_records=""
+      if [[ -n "${_override_str}" ]]; then
+         declare -a _override_chunks=()
+         IFS=':' read -ra _override_chunks <<< "${_override_str}"
+         for _chunk in "${_override_chunks[@]}"; do
+            [[ -z "${_chunk}" ]] && continue
+            if [[ "${_chunk}" != *=* ]]; then
+               UNKNOWN_OVERRIDES+=("${p}: '${_chunk}' (missing '=')")
+               continue
+            fi
+            _ok="${_chunk%%=*}"
+            _ov="${_chunk#*=}"
+            if _resolved_flag=$(get_override_flag "${_name}" "${_ok}"); then
+               if [[ -z "${_override_records}" ]]; then
+                  _override_records="${_resolved_flag}=${_ov}"
+               else
+                  _override_records+=$'\n'"${_resolved_flag}=${_ov}"
+               fi
+            else
+               UNKNOWN_OVERRIDES+=("${p}: unknown override key '${_ok}' for package '${_name}'")
+            fi
+         done
+      fi
+      PARSED_NAMES+=("${_name}")
+      PARSED_VERSIONS+=("${_ver}")
+      PARSED_OVERRIDES+=("${_override_records}")
    done
-   if (( ${#UNKNOWN_PKGS[@]} > 0 )); then
-      echo "ERROR: --packages contains unknown name(s): ${UNKNOWN_PKGS[*]}" >&2
-      echo "       Recognized names: ${!PKG_FLAG[*]}" >&2
+   if (( ${#UNKNOWN_PKGS[@]} > 0 )) || (( ${#VER_UNSUPPORTED[@]} > 0 )) || (( ${#UNKNOWN_OVERRIDES[@]} > 0 )); then
+      if (( ${#UNKNOWN_PKGS[@]} > 0 )); then
+         echo "ERROR: --packages contains unknown name(s): ${UNKNOWN_PKGS[*]}" >&2
+         echo "       Recognized names: ${!PKG_FLAG[*]}" >&2
+      fi
+      if (( ${#VER_UNSUPPORTED[@]} > 0 )); then
+         echo "ERROR: --packages contains name=VERSION token(s) for packages whose leaf script has no single --<name>-version flag:" >&2
+         echo "       ${VER_UNSUPPORTED[*]}" >&2
+         echo "       Versioned syntax is supported for: ${!PKG_VER_FLAG[*]}" >&2
+      fi
+      if (( ${#UNKNOWN_OVERRIDES[@]} > 0 )); then
+         echo "ERROR: --packages contains unknown override key(s):" >&2
+         for _err in "${UNKNOWN_OVERRIDES[@]}"; do
+            echo "       ${_err}" >&2
+         done
+         echo "       Override keys are recognized only for: pytorch" >&2
+         echo "       Pytorch keys: aotriton, torchvision (alias tv), torchaudio (alias ta)," >&2
+         echo "                     triton, flashattention (alias flash), pillow," >&2
+         echo "                     sageattention (alias sage), deepspeed (alias ds)" >&2
+      fi
       exit 1
    fi
 
@@ -497,25 +713,86 @@ if (( ${#PACKAGES_ARR[@]} > 0 )); then
    for p in "${!PKG_FLAG[@]}"; do
       DESELECTED_BY[${p}]="not-requested"
    done
-   # Then enable the requested ones (overrides --quick-installs).
-   for p in "${PACKAGES_ARR[@]}"; do
-      flag="${PKG_FLAG[${p}]}"
-      printf "  %-18s -> %s=1\n" "${p}" "${flag}"
+   # Then enable the requested ones (overrides --quick-installs). The
+   # PARSED_NAMES / PARSED_VERSIONS / PARSED_OVERRIDES arrays are aligned
+   # (same length, same order) so a single index walks all three.
+   # Repeated names accumulate into PKG_VERSIONS_REQ as a newline-
+   # separated list (with dedup); inline overrides land in
+   # PKG_VERSION_OVERRIDES keyed on "${name}|${ver}" so the same name
+   # can carry different overrides for different versions.
+   for ((_i = 0; _i < ${#PARSED_NAMES[@]}; _i++)); do
+      _name="${PARSED_NAMES[${_i}]}"
+      _ver="${PARSED_VERSIONS[${_i}]}"
+      _ovr="${PARSED_OVERRIDES[${_i}]}"
+      flag="${PKG_FLAG[${_name}]}"
+      if [[ -n "${_ver}" ]]; then
+         if [[ -n "${_ovr}" ]]; then
+            _ovr_count=$(printf '%s\n' "${_ovr}" | grep -c '^--')
+            printf "  %-18s -> %s=1 (version %s, %d override(s))\n" "${_name}" "${flag}" "${_ver}" "${_ovr_count}"
+         else
+            printf "  %-18s -> %s=1 (version %s)\n" "${_name}" "${flag}" "${_ver}"
+         fi
+      else
+         if [[ -n "${_ovr}" ]]; then
+            _ovr_count=$(printf '%s\n' "${_ovr}" | grep -c '^--')
+            printf "  %-18s -> %s=1 (leaf default version, %d override(s))\n" "${_name}" "${flag}" "${_ovr_count}"
+         else
+            printf "  %-18s -> %s=1 (leaf default)\n" "${_name}" "${flag}"
+         fi
+      fi
       eval "${flag}=1"
       # Clear the deselection marker for whitelisted packages so they
       # land in OK / FAILED / SKIPPED depending on the actual outcome.
-      unset "DESELECTED_BY[${p}]"
+      unset "DESELECTED_BY[${_name}]"
+      # Append the requested version (possibly empty) to this package's
+      # list, newline-separated. Empty + concrete versions can coexist:
+      # bare `pytorch` and `pytorch=2.7.1` together yield two builds
+      # (leaf-default + 2.7.1) -- this works because mapfile -t in the
+      # consumer preserves empty entries as distinct array elements.
+      # Dedup on the EXACT (name,version) pair so repeating the same
+      # token is a no-op rather than building twice into the same dir.
+      # The +SET test distinguishes "key never set" from "key set to
+      # empty string" (representing a bare token with no version).
+      if [[ -z "${PKG_VERSIONS_REQ[${_name}]+SET}" ]]; then
+         PKG_VERSIONS_REQ[${_name}]="${_ver}"
+      else
+         _dup=0
+         while IFS= read -r _existing; do
+            if [[ "${_existing}" == "${_ver}" ]]; then
+               _dup=1
+               break
+            fi
+         done <<< "${PKG_VERSIONS_REQ[${_name}]}"
+         if (( _dup == 0 )); then
+            PKG_VERSIONS_REQ[${_name}]+=$'\n'"${_ver}"
+         fi
+      fi
+      # Stash overrides keyed on (name,version). If the same (name,
+      # version) appears more than once with different override sets
+      # (e.g. user typo), the LAST occurrence wins -- consistent with
+      # CLI argument-list semantics where last write wins.
+      if [[ -n "${_ovr}" ]]; then
+         PKG_VERSION_OVERRIDES["${_name}|${_ver}"]="${_ovr}"
+      fi
    done
+   unset _i _name _ver _ovr _ovr_count _existing _dup
    # Sibling-name propagation: a few user-facing names spawn more than
    # one run_and_log entry (e.g. `ftorch` builds both `ftorch` and
    # `ftorch_amdflang` when FTORCH_FC_COMPILER=both). Mirror the
    # deselection state of the canonical name onto its siblings so the
    # per-package summary doesn't surface the verbose 3-line "skipped"
-   # banner for packages the user never asked about.
+   # banner for packages the user never asked about. Also mirror
+   # PKG_VERSIONS_REQ so a versioned `ftorch=0.7` request drives BOTH
+   # the gfortran AND amdflang sibling call sites at the same version
+   # (the user-facing "ftorch" name is one knob; FTORCH_FC_COMPILER
+   # toolchain split is internal).
    if [[ -n "${DESELECTED_BY[ftorch]:-}" ]]; then
       DESELECTED_BY[ftorch_amdflang]="${DESELECTED_BY[ftorch]}"
    else
       unset "DESELECTED_BY[ftorch_amdflang]"
+   fi
+   if [[ -n "${PKG_VERSIONS_REQ[ftorch]:-}" ]]; then
+      PKG_VERSIONS_REQ[ftorch_amdflang]="${PKG_VERSIONS_REQ[ftorch]}"
    fi
    echo ""
 fi
@@ -669,6 +946,96 @@ run_and_log() {
       # place: each setup script.
    fi
    return ${rc}
+}
+
+# Multi-version variant of run_and_log: invokes the leaf script once per
+# requested version of <pkg_name> (consulting the PKG_VERSIONS_REQ map
+# populated by the --packages parser above). Used at the call sites of
+# version-capable packages -- the subset whose names appear in
+# PKG_VER_FLAG (pytorch, jax, cupy, magma, kokkos, ...).
+#
+# Three cases drive the loop body:
+#   * No requested versions for <pkg_name> (bare token, package not in
+#     --packages whitelist, or no --packages given at all): one call
+#     with NO --<name>-version flag and label = "${pkg_name}". This is
+#     byte-identical to the prior single-call wiring; the leaf script
+#     uses its own internal default version. Behavior is preserved for
+#     all existing operator workflows.
+#   * One requested version: one call with "--<pkg>-version VER" appended
+#     and label = "${pkg_name}_v${VER}". Per-package log file becomes
+#     log_<pkg>_v<VER>_<date>.txt; per-package summary line becomes
+#     "OK (1): <pkg>_v<VER>". Install lands in pkg-v${VER}/ (the leaf
+#     scripts already key both the install dir AND the .lua module
+#     filename on their PKG_VERSION variable, so this is purely a
+#     plumbing change at the orchestrator level).
+#   * Multiple requested versions: one call per version, each in
+#     submission order. Each gets its own log file, its own summary
+#     line, and its own install dir + module. A failure in one version
+#     does NOT stop the next from being attempted (run_and_log records
+#     it and returns; we keep iterating).
+#
+# DESELECTED_BY propagation: when the bare name is deselected (BUILD_X=0
+# from --quick-installs or --packages), we mirror the marker to each
+# per-version label so run_and_log's NOOP_RC=43 branch reports the
+# concise one-line "deselected" form for every iteration instead of the
+# verbose 3-line "SKIP" banner. The leaf scripts return NOOP_RC=43 on
+# BUILD_X=0 short-circuit, so all iterations land cleanly in the same
+# bucket.
+#
+# Usage: run_and_log_versioned <pkg_name> <leaf_script> <args...>
+#        (Same calling convention as run_and_log -- args are word-split
+#        at the call site, so unquoted ${COMMON_OPTIONS} expansions etc.
+#        flow through unchanged.)
+run_and_log_versioned() {
+   local pkg_name="$1"; shift
+   local leaf_script="$1"; shift
+   local ver_flag="${PKG_VER_FLAG[${pkg_name}]:-}"
+   local -a versions
+   if [[ -z "${PKG_VERSIONS_REQ[${pkg_name}]+SET}" ]]; then
+      # No --packages whitelist or this name isn't in it: do one call
+      # with no version flag (leaf-default behavior, byte-identical to
+      # the prior single-call wiring).
+      versions=("")
+   else
+      # Parser populated this name's entry as a newline-separated list
+      # of requested versions. mapfile -t preserves empty entries (which
+      # mean "leaf default") as distinct array elements -- bare and
+      # versioned tokens for the same name coexist in the loop.
+      mapfile -t versions <<< "${PKG_VERSIONS_REQ[${pkg_name}]}"
+   fi
+   local v label override_records
+   local -a override_args
+   for v in "${versions[@]}"; do
+      # Look up inline overrides supplied via --packages
+      # name=version:override_key=override_value... The key shape
+      # ("${pkg_name}|${v}") matches PYTORCH_STACK_MANIFEST cells in
+      # pytorch_setup.sh. Each record is "--flag-name=value"; split on
+      # the FIRST '=' so values that themselves contain '=' (rare but
+      # possible) are preserved as a single argv element.
+      override_args=()
+      override_records="${PKG_VERSION_OVERRIDES["${pkg_name}|${v}"]:-}"
+      if [[ -n "${override_records}" ]]; then
+         local _rec _of _ov
+         while IFS= read -r _rec; do
+            [[ -z "${_rec}" ]] && continue
+            _of="${_rec%%=*}"
+            _ov="${_rec#*=}"
+            override_args+=("${_of}" "${_ov}")
+         done <<< "${override_records}"
+      fi
+      if [[ -z "${v}" ]]; then
+         label="${pkg_name}"
+         run_and_log "${label}" "${leaf_script}" "$@" "${override_args[@]}"
+      else
+         label="${pkg_name}_v${v}"
+         # Mirror the deselection marker so run_and_log's NOOP branch
+         # buckets this iteration as DESELECTED, not SKIPPED(no-op).
+         if [[ -n "${DESELECTED_BY[${pkg_name}]:-}" ]]; then
+            DESELECTED_BY[${label}]="${DESELECTED_BY[${pkg_name}]}"
+         fi
+         run_and_log "${label}" "${leaf_script}" "$@" "${ver_flag}" "${v}" "${override_args[@]}"
+      fi
+   done
 }
 
 # Print a per-run summary on EXIT and propagate failure as a non-zero
@@ -892,7 +1259,10 @@ if [ "${SKIP_ROCM_INSTALL}" == 0 ]; then
 
    source ~/.bashrc
 
-   run_and_log rocm rocm/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION}
+   ROCM_DELTA_OPTS=""
+   [ -n "${BASE_ROCM_VERSION}" ] && ROCM_DELTA_OPTS="${ROCM_DELTA_OPTS} --base-rocm-version ${BASE_ROCM_VERSION}"
+   [ -n "${SUPERSEDES_VERSION}" ] && ROCM_DELTA_OPTS="${ROCM_DELTA_OPTS} --supersedes ${SUPERSEDES_VERSION}"
+   run_and_log rocm rocm/scripts/rocm_setup.sh --rocm-version ${ROCM_VERSION} ${ROCM_DELTA_OPTS}
 
    run_and_log rocm-rocprof-sys rocm/scripts/rocm_rocprof-sys_setup.sh --rocm-version ${ROCM_VERSION}
 
@@ -972,13 +1342,13 @@ run_and_log flang-new rocm/scripts/flang-new_setup.sh ${COMMON_OPTIONS} --build-
 # openmpi block also produces xpmem-*, ucx-*, ucc-* under ROCMPLUS.
 # BUILD_OPENMPI=0 opt-out and existence check both live in
 # openmpi_setup.sh; we just thread --build-openmpi through.
-run_and_log openmpi comm/scripts/openmpi_setup.sh ${COMMON_OPTIONS} --build-openmpi ${BUILD_OPENMPI} --build-xpmem 1 ${REPLACE_OPTS} \
+run_and_log_versioned openmpi comm/scripts/openmpi_setup.sh ${COMMON_OPTIONS} --build-openmpi ${BUILD_OPENMPI} --build-xpmem 1 ${REPLACE_OPTS} \
    $(path_args " " rocmplus-${ROCMPLUS_SUFFIX}/openmpi)
 
 # mpi4py owns its own version (see comment block at the version pins
 # above). main_setup.sh passes only --install-path (the parent dir);
 # mpi4py_setup.sh appends mpi4py-v${MPI4PY_VERSION} itself.
-run_and_log mpi4py comm/scripts/mpi4py_setup.sh ${COMMON_OPTIONS} --build-mpi4py ${BUILD_MPI4PY} ${REPLACE_OPTS} \
+run_and_log_versioned mpi4py comm/scripts/mpi4py_setup.sh ${COMMON_OPTIONS} --build-mpi4py ${BUILD_MPI4PY} ${REPLACE_OPTS} \
    $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${ROCMPLUS} --module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/mpi4py")
 
 if [[ "${BUILD_MVAPICH}" == "1" ]] && [[ ! -d ${ROCMPLUS}/mvapich ]]; then
@@ -997,10 +1367,10 @@ run_and_log rocprof-compute tools/scripts/rocprof-compute_setup.sh ${COMMON_OPTI
 #      $(path_args rocprofiler-sdk rocmplus-${ROCMPLUS_SUFFIX}/rocprofiler-sdk)
 #fi
 
-run_and_log likwid tools/scripts/likwid_setup.sh ${COMMON_OPTIONS} --build-likwid ${BUILD_LIKWID} ${REPLACE_OPTS} \
+run_and_log_versioned likwid tools/scripts/likwid_setup.sh ${COMMON_OPTIONS} --build-likwid ${BUILD_LIKWID} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/likwid)
 
-run_and_log hpctoolkit tools/scripts/hpctoolkit_setup.sh ${COMMON_OPTIONS} --build-hpctoolkit ${BUILD_HPCTOOLKIT} ${REPLACE_OPTS} \
+run_and_log_versioned hpctoolkit tools/scripts/hpctoolkit_setup.sh ${COMMON_OPTIONS} --build-hpctoolkit ${BUILD_HPCTOOLKIT} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/hpctoolkit)
 
 # scorep + tau share ${ROCMPLUS}/pdt. Their setup scripts default to
@@ -1015,7 +1385,7 @@ if [[ "${REPLACE_EXISTING}" == "1" && "${BUILD_SCOREP}" == "1" && "${BUILD_TAU}"
    SCOREP_REPLACE_PDT="--replace-pdt 1"
    TAU_REPLACE_PDT="--replace-pdt 1"
 fi
-run_and_log scorep tools/scripts/scorep_setup.sh ${COMMON_OPTIONS} --build-scorep ${BUILD_SCOREP} ${REPLACE_OPTS} ${SCOREP_REPLACE_PDT} \
+run_and_log_versioned scorep tools/scripts/scorep_setup.sh ${COMMON_OPTIONS} --build-scorep ${BUILD_SCOREP} ${REPLACE_OPTS} ${SCOREP_REPLACE_PDT} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/scorep)
 
 #run_and_log grafana tools/scripts/grafana_setup.sh
@@ -1025,10 +1395,10 @@ run_and_log tau tools/scripts/tau_setup.sh ${COMMON_OPTIONS} --build-tau ${BUILD
 
 #run_and_log compiler extras/scripts/compiler_setup.sh
 
-run_and_log cupy extras/scripts/cupy_setup.sh ${COMMON_OPTIONS} --build-cupy ${BUILD_CUPY} ${REPLACE_OPTS} \
+run_and_log_versioned cupy extras/scripts/cupy_setup.sh ${COMMON_OPTIONS} --build-cupy ${BUILD_CUPY} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/cupy)
 
-run_and_log hip-python extras/scripts/hip-python_setup.sh ${COMMON_OPTIONS} --build-hip-python ${BUILD_HIP_PYTHON} ${REPLACE_OPTS} \
+run_and_log_versioned hip-python extras/scripts/hip-python_setup.sh ${COMMON_OPTIONS} --build-hip-python ${BUILD_HIP_PYTHON} ${REPLACE_OPTS} \
    $(path_args hip-python rocmplus-${ROCMPLUS_SUFFIX}/hip-python)
 
 # tensorflow / jax / pytorch / ftorch are the long-pole builds (each
@@ -1037,7 +1407,7 @@ run_and_log hip-python extras/scripts/hip-python_setup.sh ${COMMON_OPTIONS} --bu
 # netcdf, fftw, petsc, hypre) finish first and surface fast in the
 # logs. See the block after `hypre` below for the reordered ML group.
 
-run_and_log magma extras/scripts/magma_setup.sh ${COMMON_OPTIONS} --build-magma ${BUILD_MAGMA} ${REPLACE_OPTS} \
+run_and_log_versioned magma extras/scripts/magma_setup.sh ${COMMON_OPTIONS} --build-magma ${BUILD_MAGMA} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX})
 
 # apps_setup.sh is intentionally disabled. It is not gated by --packages
@@ -1048,7 +1418,7 @@ run_and_log magma extras/scripts/magma_setup.sh ${COMMON_OPTIONS} --build-magma 
 # BUILD_APPS gate first so it can be selected by --packages.
 #run_and_log apps extras/scripts/apps_setup.sh
 
-run_and_log kokkos extras/scripts/kokkos_setup.sh ${COMMON_OPTIONS} --build-kokkos ${BUILD_KOKKOS} ${REPLACE_OPTS} \
+run_and_log_versioned kokkos extras/scripts/kokkos_setup.sh ${COMMON_OPTIONS} --build-kokkos ${BUILD_KOKKOS} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/kokkos)
 
 # miniconda3 / miniforge3 are intentionally exempt from --replace-existing.
@@ -1086,10 +1456,10 @@ run_and_log kokkos extras/scripts/kokkos_setup.sh ${COMMON_OPTIONS} --build-kokk
 # live OUTSIDE the rocmplus tree) and the leaf scripts append the
 # versioned subdir themselves, matching the --install-path = parent +
 # version-append convention used by the migrated leaf scripts.
-run_and_log miniconda3 extras/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniconda3 ${BUILD_MINICONDA3} --python-version ${PYTHON_VERSION} \
+run_and_log_versioned miniconda3 extras/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniconda3 ${BUILD_MINICONDA3} --python-version ${PYTHON_VERSION} \
    $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH} --module-path ${TOP_MODULE_PATH}/LinuxPlus/miniconda3")
 
-run_and_log miniforge3 extras/scripts/miniforge3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniforge3 ${BUILD_MINIFORGE3} \
+run_and_log_versioned miniforge3 extras/scripts/miniforge3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniforge3 ${BUILD_MINIFORGE3} \
    $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH} --module-path ${TOP_MODULE_PATH}/LinuxPlus/miniforge3")
 
 # hipfort: build-from-source intentionally removed. ROCm 6.3+ ships
@@ -1103,24 +1473,24 @@ run_and_log miniforge3 extras/scripts/miniforge3_setup.sh --rocm-version ${ROCM_
 run_and_log hipifly extras/scripts/hipifly_setup.sh --rocm-version ${ROCM_VERSION} --build-hipifly ${BUILD_HIPIFLY} --hipifly-module ${HIPIFLY_MODULE} ${REPLACE_OPTS} \
    $(path_args hipifly rocmplus-${ROCMPLUS_SUFFIX}/hipifly)
 
-run_and_log hdf5 extras/scripts/hdf5_setup.sh ${COMMON_OPTIONS} --build-hdf5 ${BUILD_HDF5} ${REPLACE_OPTS} \
+run_and_log_versioned hdf5 extras/scripts/hdf5_setup.sh ${COMMON_OPTIONS} --build-hdf5 ${BUILD_HDF5} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/hdf5)
 
 run_and_log netcdf extras/scripts/netcdf_setup.sh ${COMMON_OPTIONS} --build-netcdf ${BUILD_NETCDF} ${REPLACE_OPTS} \
    $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${ROCMPLUS} --netcdf-c-module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/netcdf-c --netcdf-f-module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/netcdf-fortran")
 
-run_and_log fftw extras/scripts/fftw_setup.sh ${COMMON_OPTIONS} --build-fftw ${BUILD_FFTW} ${REPLACE_OPTS} \
+run_and_log_versioned fftw extras/scripts/fftw_setup.sh ${COMMON_OPTIONS} --build-fftw ${BUILD_FFTW} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/fftw)
 
 #run_and_log x11vnc extras/scripts/x11vnc_setup.sh --build-x11vnc ${BUILD_X11VNC}
 
-run_and_log petsc extras/scripts/petsc_setup.sh ${COMMON_OPTIONS} --build-petsc ${BUILD_PETSC} ${REPLACE_OPTS} \
+run_and_log_versioned petsc extras/scripts/petsc_setup.sh ${COMMON_OPTIONS} --build-petsc ${BUILD_PETSC} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/petsc)
 
-run_and_log elpa extras/scripts/elpa_setup.sh  ${COMMON_OPTIONS} --build-elpa ${BUILD_ELPA} ${REPLACE_OPTS} \
+run_and_log_versioned elpa extras/scripts/elpa_setup.sh  ${COMMON_OPTIONS} --build-elpa ${BUILD_ELPA} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX})
 
-run_and_log hypre extras/scripts/hypre_setup.sh ${COMMON_OPTIONS} --build-hypre ${BUILD_HYPRE} ${REPLACE_OPTS} \
+run_and_log_versioned hypre extras/scripts/hypre_setup.sh ${COMMON_OPTIONS} --build-hypre ${BUILD_HYPRE} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/hypre)
 
 # ─── Long-pole ML builds (jax, tensorflow, pytorch, ftorch) ───────────
@@ -1131,13 +1501,13 @@ run_and_log hypre extras/scripts/hypre_setup.sh ${COMMON_OPTIONS} --build-hypre 
 #   jax BEFORE tensorflow -- jax is the shorter of the two bazel builds,
 #   pytorch BEFORE ftorch -- ftorch_setup.sh has a preflight that
 
-run_and_log jax extras/scripts/jax_setup.sh ${COMMON_OPTIONS} --build-jax ${BUILD_JAX} ${REPLACE_OPTS} \
+run_and_log_versioned jax extras/scripts/jax_setup.sh ${COMMON_OPTIONS} --build-jax ${BUILD_JAX} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/jax)
 
-run_and_log tensorflow extras/scripts/tensorflow_setup.sh ${COMMON_OPTIONS} --build-tensorflow ${BUILD_TENSORFLOW} ${REPLACE_OPTS} \
+run_and_log_versioned tensorflow extras/scripts/tensorflow_setup.sh ${COMMON_OPTIONS} --build-tensorflow ${BUILD_TENSORFLOW} ${REPLACE_OPTS} \
    $(path_args tensorflow rocmplus-${ROCMPLUS_SUFFIX}/tensorflow)
 
-run_and_log pytorch extras/scripts/pytorch_setup.sh ${COMMON_OPTIONS} --build-pytorch ${BUILD_PYTORCH} --python-version ${PYTHON_VERSION} ${REPLACE_OPTS} \
+run_and_log_versioned pytorch extras/scripts/pytorch_setup.sh ${COMMON_OPTIONS} --build-pytorch ${BUILD_PYTORCH} --python-version ${PYTHON_VERSION} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/pytorch)
 
 # FTorch: dispatch to one or both toolchains per FTORCH_FC_COMPILER.
@@ -1148,13 +1518,13 @@ run_and_log pytorch extras/scripts/pytorch_setup.sh ${COMMON_OPTIONS} --build-py
 # and a failure in one doesn't shadow the other.
 case "${FTORCH_FC_COMPILER}" in
    gfortran|both)
-      run_and_log ftorch extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} --build-ftorch ${BUILD_FTORCH} --fc-compiler gfortran ${REPLACE_OPTS} \
+      run_and_log_versioned ftorch extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} --build-ftorch ${BUILD_FTORCH} --fc-compiler gfortran ${REPLACE_OPTS} \
          $(path_args ftorch rocmplus-${ROCMPLUS_SUFFIX}/ftorch)
       ;;
 esac
 case "${FTORCH_FC_COMPILER}" in
    amdflang|both)
-      run_and_log ftorch_amdflang extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} --build-ftorch ${BUILD_FTORCH} --fc-compiler amdflang ${REPLACE_OPTS} \
+      run_and_log_versioned ftorch_amdflang extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} --build-ftorch ${BUILD_FTORCH} --fc-compiler amdflang ${REPLACE_OPTS} \
          $(path_args ftorch rocmplus-${ROCMPLUS_SUFFIX}/ftorch)
       ;;
 esac

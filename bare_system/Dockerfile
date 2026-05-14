@@ -5,6 +5,13 @@ FROM ${DISTRO}:${DISTRO_VERSION}
 ARG DISTRO
 ARG DISTRO_VERSION
 ARG ROCM_VERSION
+# Delta-release support: pre-install BASE_ROCM_VERSION before ROCM_VERSION and
+# merge into a single tree at /opt/rocm-${ROCM_VERSION}. SUPERSEDES_VERSION
+# triggers a tombstone modulefile that redirects rocm/<SUPERSEDES> to
+# rocm/<ROCM_VERSION>. See bare_system/rocm_delta_releases.conf for the
+# canonical mapping (e.g. 7.2.2 -> base 7.2.1).
+ARG BASE_ROCM_VERSION=""
+ARG SUPERSEDES_VERSION=""
 ARG ROCM_INSTALLPATH
 ARG AMDGPU_GFXMODEL
 ARG PYTHON_VERSION
@@ -83,6 +90,8 @@ ADD extras/image/home /home/sysadmin
 RUN sudo chown -R sysadmin:sysadmin /home/sysadmin
 
 RUN bare_system/main_setup.sh --rocm-version ${ROCM_VERSION} --rocm-install-path ${ROCM_INSTALLPATH} \
-    --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --use-makefile ${USE_MAKEFILE} --python-version ${PYTHON_VERSION}
+    --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --use-makefile ${USE_MAKEFILE} --python-version ${PYTHON_VERSION} \
+    ${BASE_ROCM_VERSION:+--base-rocm-version ${BASE_ROCM_VERSION}} \
+    ${SUPERSEDES_VERSION:+--supersedes ${SUPERSEDES_VERSION}}
 
 ENTRYPOINT ["bash"]

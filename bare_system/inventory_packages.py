@@ -2,8 +2,21 @@
 """inventory_packages.py - generate a presence matrix for rocmplus-* trees.
 
 Surveys every rocmplus-${VERSION} install root under one or more
-top-level paths and emits a Markdown table grouped by ROCm major (6.x
-vs 7.x/therock/afar). For each canonical package family it reports:
+top-level paths and emits a Markdown (or text) table per ROCm bucket.
+There are THREE buckets, emitted in this order:
+
+  1. `ROCm 7.x.x`                  -- numeric 7.x releases (7.0.x, 7.1.x,
+                                      7.2.x, ...). With 7.2.2 + 7.2.3 in
+                                      flight this is the widest bucket
+                                      -- splitting the RC trees out
+                                      keeps it manageable.
+  2. `ROCm RC trees (therock + afar)`
+                                   -- release-candidate flavours
+                                      (`therock-*`, `afar-*`). Always
+                                      narrow (<= 5 columns).
+  3. `ROCm 6.x.x`                  -- numeric 6.x releases.
+
+For each canonical package family it reports:
 
   Y   installed (a directory matching the package's regex exists)
   N = NOT POSSIBLE to build on this SDK or a hard prereq is missing
@@ -21,13 +34,33 @@ vs 7.x/therock/afar). For each canonical package family it reports:
       package is awaiting a future sweep. Inspect the setup logs to
       tell these apart.
 
-In addition to the per-package presence rows, an `amdclang` metadata
-row is emitted below the table reporting the AMD-clang / LLVM version
-shipped with each ROCm SDK column (probed by running `clang --version`
-under `<rocm>/lib/llvm/bin` or `<rocm>/llvm/bin`). Useful for spotting
-toolchain-generation jumps that often correlate with build breakage
-(e.g. clang 18 -> 19 between rocm-6.3.x and rocm-6.4.x; clang 22 on
-rocm-7.x). '-' means the SDK or the clang binary was not found.
+In addition to the per-package presence rows, two metadata rows are
+emitted below the table:
+
+  amdclang     -- AMD-clang / LLVM version shipped with each ROCm SDK
+                  column (probed by running `clang --version` under
+                  `<rocm>/lib/llvm/bin` or `<rocm>/llvm/bin`). Useful
+                  for spotting toolchain-generation jumps that often
+                  correlate with build breakage (e.g. clang 18 -> 19
+                  between rocm-6.3.x and rocm-6.4.x; clang 22 on
+                  rocm-7.x). '-' means the SDK or the clang binary was
+                  not found.
+
+  rocm_patches -- presence of the rocm_patches.sh overlay tree at
+                  `<root>/rocm-patches-<version>/`. 'Y' iff the overlay
+                  has a populated artefact on disk -- either a
+                  `lib/librocprof-sys.so.*` (rocprof-sys overlay) or a
+                  `rocprof-compute/lib/rocprof-compute.bin` (rocprof-
+                  compute overlay). '-' otherwise (no overlay produced,
+                  or only a soft-noop stub for an RC tree whose
+                  VERSION.sha was unresolvable). Under
+                  `--install-provenance`, this row also pulls the
+                  `Built by: rocm_patches.sh@<hash> (<dirty>)` whatis
+                  line out of the SDK metamodule
+                  `<module_path>/base/rocm/<version>.lua` (rocm_patches
+                  edits that file in-place; the line co-exists with
+                  rocm_setup.sh's own Built-by line in the same .lua
+                  and is disambiguated by writer-script name).
 
 Markers are dropped by the per-package setup scripts at the moment
 they take a no-op path (afar-skip / rocm-bundled / ftorch missing
@@ -128,14 +161,35 @@ PKG_LIST = [
 
 
 def discover_versions(roots):
+    """Union of:
+      (a) rocmplus-<v> trees discovered under `roots` (on-top packages exist), and
+      (b) ROCm SDK installs discovered by _rocm_sdk_map() (SDK exists, no on-top
+          packages yet -- e.g. just after the rocm-build sweep, before
+          run_rocmplus_install_sweep.sh has run).
+    Without (b), versions whose SDK was just deployed (7.2.2 / 7.2.3 today) are
+    invisible to the inventory until a rocmplus tree is built.  Both sources
+    return suffixes in the canonical rocmplus-style form (numeric for regular
+    releases; `<family>-<numeric>` for RC trees), so the union is well-defined.
+    `.back` backup dirs and empty-suffix dirs are skipped explicitly.
+    """
     versions = set()
     for r in roots:
         try:
             for d in os.listdir(r):
                 if d.startswith("rocmplus-") and os.path.isdir(os.path.join(r, d)):
-                    versions.add(d[len("rocmplus-"):])
+                    suffix = d[len("rocmplus-"):]
+                    if not suffix or suffix.endswith(".back"):
+                        continue
+                    versions.add(suffix)
         except FileNotFoundError:
             pass
+    # Merge in SDK-only versions.  _rocm_sdk_map handles the RC suffix
+    # translation (rocm-therock-23.2.0 -> therock-7.13.0) so its keys are
+    # directly compatible with the rocmplus-* keys above.
+    try:
+        versions.update(_rocm_sdk_map(roots).keys())
+    except Exception:
+        pass
     return versions
 
 
@@ -217,31 +271,55 @@ def _rocm_sdk_map(roots):
     return sdk_map
 
 
+_CLANG_SYMLINK_MAJOR_RE = re.compile(r"^(?:amd)?clang-(\d+)$")
+
+
 @lru_cache(maxsize=None)
 def _probe_clang(rocm_path):
-    """Run `<rocm>/{lib/llvm,llvm}/bin/clang --version` and parse the
-    version. Returns 'X.Y.Z' (or 'X.Y' / 'X' if upstream omits trailing
-    components) or '-' if the binary is missing / errors / times out.
+    """Resolve the AMD clang version for an SDK install. Returns 'X.Y.Z'
+    (or 'X.Y' / 'X' / 'X.0.0' if only the major is recoverable) or '-'
+    if no signal is available.
 
     therock SDKs put clang under lib/llvm/bin; regular and afar trees
     put it under llvm/bin -- probe lib/llvm first so therock parses
     cleanly even if a stale /llvm symlink exists on the same tree.
+
+    Resolution order per candidate path:
+      1. Execute `<clang> --version` and parse the AMD clang version
+         line (the precise signal -- yields e.g. '22.0.0').
+      2. If exec fails (missing GLIBC on this host -- common when the
+         SDK was built for a newer Ubuntu than the inventory runs on,
+         e.g. 24.04-built clang on a 22.04 admin node; or any other
+         exec error / timeout), fall back to reading the symlink
+         target `clang -> clang-<MAJOR>` (or `amdclang -> amdclang-<MAJOR>`).
+         Yields a less-precise 'X.0.0' but lets the row render.
     """
     candidates = [
         os.path.join(rocm_path, "lib", "llvm", "bin", "clang"),
         os.path.join(rocm_path, "llvm", "bin", "clang"),
     ]
     for cl in candidates:
-        if not os.path.isfile(cl):
+        if not (os.path.isfile(cl) or os.path.islink(cl)):
             continue
+        # 1. exec path
         try:
             out = subprocess.run([cl, "--version"], capture_output=True,
                                  text=True, timeout=5)
+            m = _CLANG_RE.search((out.stdout or "") + (out.stderr or ""))
+            if m:
+                return m.group(1)
         except (OSError, subprocess.TimeoutExpired):
-            return "-"
-        m = _CLANG_RE.search((out.stdout or "") + (out.stderr or ""))
-        if m:
-            return m.group(1)
+            pass  # fall through to symlink fallback
+        # 2. symlink-target fallback (works without exec; survives glibc skew)
+        try:
+            tgt = os.readlink(cl) if os.path.islink(cl) else None
+        except OSError:
+            tgt = None
+        if tgt:
+            tail = os.path.basename(tgt)
+            mm = _CLANG_SYMLINK_MAJOR_RE.match(tail)
+            if mm:
+                return f"{mm.group(1)}.0.0"
     return "-"
 
 
@@ -249,6 +327,72 @@ def clang_version(roots, version):
     """Public lookup used by the renderers. '-' on any miss."""
     sdk = _rocm_sdk_map(roots).get(version)
     return _probe_clang(sdk) if sdk else "-"
+
+
+# ── rocm_patches overlay presence (metadata row, brief mode) ──────────
+# The rocm_patches overlay tree lives next to the matching SDK as
+# <root>/rocm-patches-<sdk-suffix>/ (a sibling of the SDK install at
+# <root>/rocm-<sdk-suffix>/, NOT inside rocmplus-<version>/).
+#
+# For numeric releases the rocmplus column suffix matches the SDK
+# suffix (rocmplus-7.0.0 <-> rocm-patches-7.0.0). For RC trees they
+# differ -- the rocmplus suffix is the numeric token in
+# `<sdk>/.info/version` while the SDK basename keeps the upstream RC
+# tag, so rocmplus-therock-7.13.0 <-> rocm-patches-therock-23.2.0.
+# The amdclang row resolves the same mapping via _rocm_sdk_map; reuse
+# that here so RC columns line up correctly.
+#
+# rocm_patches.sh creates the overlay dir only when it has work to do
+# for the version, but soft no-op runs (build.sh exit 43 for an RC tree
+# without a resolvable VERSION.sha) can leave the dir present-but-empty
+# of artefacts, so we additionally require a populated lib/ or
+# rocprof-compute/ sub-tree before claiming 'Y'.
+def rocm_patches_presence(roots, version):
+    """Y if a populated rocm-patches overlay exists for `version`.
+
+    'Populated' means at least one of:
+      - lib/ contains a librocprof-sys.so.* (rocprof-sys overlay), or
+      - rocprof-compute/lib/rocprof-compute.bin exists (rocprof-compute
+        overlay; can be a real file or a symlink).
+    Returns '-' otherwise (no overlay produced, or only a soft-noop
+    stub on disk).
+    """
+    sdk = _rocm_sdk_map(roots).get(version)
+    if sdk is None:
+        return "-"
+    overlay = os.path.join(os.path.dirname(sdk),
+                           os.path.basename(sdk).replace(
+                               "rocm-", "rocm-patches-", 1))
+    if not os.path.isdir(overlay):
+        return "-"
+    lib = os.path.join(overlay, "lib")
+    try:
+        if os.path.isdir(lib) and any(
+                n.startswith("librocprof-sys.so")
+                for n in os.listdir(lib)):
+            return "Y"
+    except OSError:
+        pass
+    rpc_bin = os.path.join(overlay, "rocprof-compute", "lib",
+                           "rocprof-compute.bin")
+    if os.path.exists(rpc_bin) or os.path.islink(rpc_bin):
+        return "Y"
+    return "-"
+
+
+# rocm_patches provenance also needs the rocmplus-suffix → SDK-suffix
+# mapping: the modulefile the script edits is
+# `<module_path>/base/rocm/<sdk-suffix>.lua`, and on RC trees that's
+# `<module_path>/base/rocm/therock-23.2.0.lua` (NOT `therock-7.13.0.lua`).
+def _sdk_suffix_for_rocmplus(roots, version):
+    """Return the rocm SDK basename suffix that corresponds to a given
+    rocmplus column suffix (matches what `rocm_setup.sh`'s modulefile
+    would be named).  None if no SDK was discovered for this version.
+    """
+    sdk = _rocm_sdk_map(roots).get(version)
+    if sdk is None:
+        return None
+    return os.path.basename(sdk)[len("rocm-"):]
 
 
 def presence(roots, version, pkg, regex):
@@ -431,6 +575,12 @@ def _render_one_md_table(title, versions, roots, versions_mode=False):
     # the other column-summary content.
     clang_row = ["**amdclang**"] + [clang_version(roots, v) for v in versions]
     print("| " + " | ".join(clang_row) + " |")
+    # rocm_patches overlay presence row -- metadata; tracks whether
+    # rocm_patches.sh's overlay tree at <root>/rocm-patches-<v>/ has
+    # any populated artefacts. Sibling of amdclang.
+    rp_row = ["**rocm_patches**"] + [rocm_patches_presence(roots, v)
+                                     for v in versions]
+    print("| " + " | ".join(rp_row) + " |")
     # `count Y` counts presence-positive cells (Y under brief mode, OR a
     # version string under --versions mode); -, N, B do not count.
     counts = ["**count Y**"]
@@ -474,7 +624,7 @@ def render_text_table(title, versions, roots, versions_mode=False):
     aligned without truncation.
     """
     pkg_col = max(len("package"), max(len(p) for p, _, _ in PKG_LIST),
-                  len("count Y"), len("amdclang"))
+                  len("count Y"), len("amdclang"), len("rocm_patches"))
 
     # Pre-compute every cell so we can both size columns AND emit rows
     # without walking the filesystem twice.
@@ -484,22 +634,25 @@ def render_text_table(title, versions, roots, versions_mode=False):
                  for v in versions]
         package_rows.append((pkg, cells))
     clang_cells = [clang_version(roots, v) for v in versions]
+    rp_cells = [rocm_patches_presence(roots, v) for v in versions]
     count_cells = [str(sum(1 for _, cells in package_rows
                            if _cell_is_installed(cells[ci])))
                    for ci in range(len(versions))]
 
-    # Per-column width: max(header, all package cells, clang cell, count cell).
-    # Unconditional lower bound of 6 (matches the pre-versions behavior) so
-    # brief-mode output stays byte-identical -- brief cells are 1 char and
-    # short headers like '7.0.0' (5 chars) would otherwise shrink the column
-    # below 6 and change alignment vs prior runs. versions_mode can still
-    # grow columns above 6 freely to fit '13.6.0 / 14.0.0'-class strings.
+    # Per-column width: max(header, all package cells, metadata cells,
+    # count cell). Unconditional lower bound of 6 (matches the
+    # pre-versions behavior) so brief-mode output stays byte-identical
+    # -- brief cells are 1 char and short headers like '7.0.0' (5
+    # chars) would otherwise shrink the column below 6 and change
+    # alignment vs prior runs. versions_mode can still grow columns
+    # above 6 freely to fit '13.6.0 / 14.0.0'-class strings.
     col_widths = []
     for ci, v in enumerate(versions):
         w = max(len(v), 6)
         for _, cells in package_rows:
             w = max(w, len(cells[ci]))
-        w = max(w, len(clang_cells[ci]), len(count_cells[ci]))
+        w = max(w, len(clang_cells[ci]), len(rp_cells[ci]),
+                len(count_cells[ci]))
         col_widths.append(w)
     sep = "  "  # two-space gutter between columns
 
@@ -515,8 +668,10 @@ def render_text_table(title, versions, roots, versions_mode=False):
     emit_row("-" * pkg_col, ["-" * w for w in col_widths])
     for pkg, cells in package_rows:
         emit_row(pkg, cells)
-    # AMD clang / LLVM version row (metadata, not Y/N).
+    # Metadata rows (not Y/N package cells): clang ships with the SDK;
+    # rocm_patches is the vendored overlay tree applied on top of the SDK.
     emit_row("amdclang", clang_cells)
+    emit_row("rocm_patches", rp_cells)
     emit_row("-" * pkg_col, ["-" * w for w in col_widths])
     emit_row("count Y", count_cells)
     print()
@@ -756,8 +911,13 @@ def _format_provenance_cell(entries, pkg, repo=None,
     parts = []
     for script, h, dirty in entries:
         s = script
+        # Longer suffix first so "rocm_setup.sh" -> "rocm" wins over the
+        # bare "_setup" / ".sh" trims; "rocm_patches.sh" -> "rocm_patches"
+        # via the bare-".sh" branch.
         if s.endswith("_setup.sh"):
             s = s[:-len("_setup.sh")]
+        elif s.endswith(".sh"):
+            s = s[:-len(".sh")]
         payload = _commit_date_cell(repo, h, with_dates, time_too)
         d_short = _DIRTY_GLYPH.get(dirty, dirty)
         if s == pkg:
@@ -768,10 +928,25 @@ def _format_provenance_cell(entries, pkg, repo=None,
 
 
 def collect_provenance(module_path, versions, repo=None,
-                       with_dates=False, time_too=False):
+                       with_dates=False, time_too=False,
+                       roots=None):
     """Return {(version, pkg): cell_string} for every (version, pkg) where
     the module-category dir exists. Cells with no category dir are
     omitted; the renderer fills those with '-'.
+
+    The synthetic pkg name 'rocm_patches' is also populated for every
+    version whose base/rocm/<sdk-suffix>.lua modulefile carries a
+    `Built by: rocm_patches.sh@...` whatis line. That .lua is the SDK
+    metamodule (shared with `rocm_setup.sh`'s own Built-by line); we
+    scan ALL whatis matches in the file and filter for the
+    rocm_patches writer.
+
+    For RC trees the rocmplus column suffix (e.g. `therock-7.13.0`)
+    differs from the SDK basename suffix the modulefile is named with
+    (e.g. `therock-23.2.0.lua`). `roots` is consulted via
+    `_sdk_suffix_for_rocmplus` to bridge that gap; passing roots=None
+    falls back to assuming the column suffix is also the SDK suffix
+    (correct for numeric releases).
 
     `repo`, `with_dates`, `time_too` are threaded into the cell
     formatter; see _format_provenance_cell.
@@ -786,7 +961,57 @@ def collect_provenance(module_path, versions, repo=None,
             out[(v, pkg)] = _format_provenance_cell(
                 entries, pkg, repo=repo,
                 with_dates=with_dates, time_too=time_too)
+        # rocm_patches: not a category dir; read the single SDK .lua
+        # (base/rocm/<sdk-suffix>.lua) and pick out only
+        # `rocm_patches.sh`-authored Built-by lines, so we don't
+        # conflate them with rocm_setup.sh's own line that sits in
+        # the same file.
+        sdk_suffix = (_sdk_suffix_for_rocmplus(roots, v)
+                      if roots else v)
+        if sdk_suffix is None:
+            continue
+        entries = _scan_built_by_in_file(
+            os.path.join(module_path, "base", "rocm",
+                         sdk_suffix + ".lua"),
+            script_filter=("rocm_patches.sh", "rocm_patches"))
+        if entries:
+            out[(v, "rocm_patches")] = _format_provenance_cell(
+                entries, "rocm_patches", repo=repo,
+                with_dates=with_dates, time_too=time_too)
     return out
+
+
+def _scan_built_by_in_file(lua_path, script_filter=None):
+    """Like _scan_built_by but for a single .lua path, returning EVERY
+    matching Built-by line (uses re.finditer, not re.search).
+
+    A file can legitimately carry several Built-by lines when more than
+    one setup script edits it (rocm_setup.sh writes the canonical one
+    near the top; rocm_patches.sh appends its own at the end after
+    applying an overlay). `script_filter`, when provided, is an
+    iterable of acceptable script-name strings; only matching lines
+    are returned. Entries are deduped on (script, hash, dirty).
+    """
+    seen = []
+    seen_keys = set()
+    if not os.path.isfile(lua_path):
+        return seen
+    try:
+        with open(lua_path, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        return seen
+    for m in _BUILT_BY_LINE_RE.finditer(text):
+        script = m.group("script").strip()
+        if script_filter is not None and script not in script_filter:
+            continue
+        h = m.group("hash") or ""
+        dirty = m.group("dirty")
+        key = (script, h, dirty)
+        if key not in seen_keys:
+            seen_keys.add(key)
+            seen.append(key)
+    return seen
 
 
 def _provenance_cell(module_path, version, pkg, scan_cache):
@@ -798,17 +1023,21 @@ def _provenance_cell(module_path, version, pkg, scan_cache):
 
 def render_provenance_text(title, versions, module_path, scan_cache):
     print(f"=== {title} ===")
-    pkg_col = max(len("package"), max(len(p) for p, _, _ in PKG_LIST))
+    pkg_col = max(len("package"), max(len(p) for p, _, _ in PKG_LIST),
+                  len("rocm_patches"))
     cell_rows = []
     for pkg, _pres, _ver in PKG_LIST:
         cells = [_provenance_cell(module_path, v, pkg, scan_cache)
                  for v in versions]
         cell_rows.append((pkg, cells))
+    rp_cells = [_provenance_cell(module_path, v, "rocm_patches", scan_cache)
+                for v in versions]
     col_widths = []
     for ci, v in enumerate(versions):
         w = max(len(v), 6)
         for _, cells in cell_rows:
             w = max(w, len(cells[ci]))
+        w = max(w, len(rp_cells[ci]))
         col_widths.append(w)
     sep = "  "
 
@@ -822,6 +1051,7 @@ def render_provenance_text(title, versions, module_path, scan_cache):
     emit("-" * pkg_col, ["-" * w for w in col_widths])
     for pkg, cells in cell_rows:
         emit(pkg, cells)
+    emit("rocm_patches", rp_cells)
     print()
 
 
@@ -834,6 +1064,12 @@ def _render_provenance_md_one(title, versions, module_path, scan_cache):
         cells = [_provenance_cell(module_path, v, pkg, scan_cache)
                  for v in versions]
         print("| " + " | ".join([pkg] + cells) + " |")
+    # rocm_patches metadata row: same cache as the PKG_LIST rows; the
+    # cache is populated from base/rocm/<v>.lua's `Built by:
+    # rocm_patches.sh@...` whatis line (see collect_provenance).
+    rp_cells = [_provenance_cell(module_path, v, "rocm_patches", scan_cache)
+                for v in versions]
+    print("| " + " | ".join(["**rocm_patches**"] + rp_cells) + " |")
     print()
 
 
@@ -936,10 +1172,9 @@ def main():
         return 1
 
     v6 = [v for v in all_versions if v.startswith("6.")]
-    v7 = [v for v in all_versions
-          if v.startswith("7.")
-          or v.startswith("therock-")
-          or v.startswith("afar-")]
+    v7 = [v for v in all_versions if v.startswith("7.")]
+    vrc = [v for v in all_versions
+           if v.startswith("therock-") or v.startswith("afar-")]
 
     # ── --install-provenance: provenance-only output (exclusive) ────
     if args.install_provenance:
@@ -963,7 +1198,8 @@ def main():
             module_path, all_versions,
             repo=git_repo if args.with_dates else None,
             with_dates=args.with_dates,
-            time_too=args.provenance_time)
+            time_too=args.provenance_time,
+            roots=args.roots)
         # Auto-chunk markdown. Cells widen with date+time, so step
         # --per-table down by one when --provenance-time is on.
         if args.per_table:
@@ -998,8 +1234,11 @@ def main():
                      else ""))
             print()
             if v7:
-                render_provenance_text("ROCm 7.x.x + therock + afar",
-                                       v7, module_path, scan_cache)
+                render_provenance_text("ROCm 7.x.x", v7,
+                                       module_path, scan_cache)
+            if vrc:
+                render_provenance_text("ROCm RC trees (therock + afar)",
+                                       vrc, module_path, scan_cache)
             if v6:
                 render_provenance_text("ROCm 6.x.x", v6,
                                        module_path, scan_cache)
@@ -1023,7 +1262,11 @@ def main():
                   "a `Built by:` line; **`-`** = no module category dir "
                   "for that (version, pkg)." + unresolved_hint + "\n")
             if v7:
-                render_provenance_md("ROCm 7.x.x + therock + afar", v7,
+                render_provenance_md("ROCm 7.x.x", v7,
+                                     module_path, scan_cache,
+                                     per_table=prov_per_table)
+            if vrc:
+                render_provenance_md("ROCm RC trees (therock + afar)", vrc,
                                      module_path, scan_cache,
                                      per_table=prov_per_table)
             if v6:
@@ -1048,10 +1291,12 @@ def main():
               "B = BUNDLED in the ROCm SDK (see <pkg>.BUNDLED marker),  "
               "- = absent / missing (no install, no marker)" + versions_note_text)
         print()
-        if v7: render_text_table("ROCm 7.x.x + therock + afar", v7, args.roots,
-                                 versions_mode=args.versions)
-        if v6: render_text_table("ROCm 6.x.x", v6, args.roots,
-                                 versions_mode=args.versions)
+        if v7:  render_text_table("ROCm 7.x.x", v7, args.roots,
+                                  versions_mode=args.versions)
+        if vrc: render_text_table("ROCm RC trees (therock + afar)", vrc,
+                                  args.roots, versions_mode=args.versions)
+        if v6:  render_text_table("ROCm 6.x.x", v6, args.roots,
+                                  versions_mode=args.versions)
     else:
         print(f"Sources: {', '.join('`' + r + '`' for r in args.roots)}")
         print(f"Generated: "
@@ -1063,12 +1308,15 @@ def main():
               "(see `<pkg>.BUNDLED` marker), "
               "**-** = absent / missing (no install, no marker)."
               + versions_note_md + "\n")
-        if v7: render_table("ROCm 7.x.x + therock + afar", v7,
-                            args.roots, per_table=md_per_table,
-                            versions_mode=args.versions)
-        if v6: render_table("ROCm 6.x.x", v6,
-                            args.roots, per_table=md_per_table,
-                            versions_mode=args.versions)
+        if v7:  render_table("ROCm 7.x.x", v7,
+                             args.roots, per_table=md_per_table,
+                             versions_mode=args.versions)
+        if vrc: render_table("ROCm RC trees (therock + afar)", vrc,
+                             args.roots, per_table=md_per_table,
+                             versions_mode=args.versions)
+        if v6:  render_table("ROCm 6.x.x", v6,
+                             args.roots, per_table=md_per_table,
+                             versions_mode=args.versions)
 
     if args.reasons:
         reasons = collect_marker_reasons(args.roots, all_versions)

@@ -189,13 +189,13 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    # classify this as SKIPPED(no-op), not FAILED. Kept in sync by
    # convention with bare_system/main_setup.sh.
    exit 43
-   ${PKG_SUDO} ${DEB_FRONTEND} apt-get -qqy install alien
+   ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get -qqy install alien
    ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/mvapich
 
    # install the GPU aware version of mvapich using an rpm (MVPlus3.0)
    ${SUDO} wget -q ${MVAPICH_DOWNLOAD_URL}/${MVAPICH_RPM_NAME}
    ls -l ${MVAPICH_RPM_NAME}
-   ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y alien ${MVAPICH_RPM_NAME}
+   ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y alien ${MVAPICH_RPM_NAME}
    /opt/rocmplus-${ROCM_VERSION}/mvapich/bin/mpicc --show
    rm -rf ${MVAPICH_RPM_NAME}
 elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then

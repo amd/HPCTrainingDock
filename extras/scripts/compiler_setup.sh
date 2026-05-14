@@ -52,7 +52,7 @@ fi
 unset _leaf_dir
 
 ${PKG_SUDO} apt-get update
-${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y software-properties-common
+${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common
 ${PKG_SUDO} add-apt-repository -y ppa:ubuntu-toolchain-r/test
 
 # autodetecting default version for distro and getting available gcc version list
@@ -61,7 +61,7 @@ GCC_BASE_VERSION=`ls /usr/bin/gcc-* | cut -f2 -d'-' | grep '^[[:digit:]]' | head
 GCC_VERSION_LIST=""
 echo "GCC_BASE_VERSION is ${GCC_BASE_VERSION}, GCC_VERSION_LIST is ${GCC_VERSION_LIST}"
 
-${PKG_SUDO} ${DEB_FRONTEND} apt-get -qy install gcc-$GCC_BASE_VERSION-offload-amdgcn
+${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get -qy install gcc-$GCC_BASE_VERSION-offload-amdgcn
 
 MODULE_PATH=/etc/lmod/modules/Linux/gcc
 ${SUDO} mkdir -p ${MODULE_PATH}
@@ -75,13 +75,13 @@ do
       continue
    fi
    echo "Adding GCC_VERSION $GCC_VERSION"
-   ${PKG_SUDO} ${DEB_FRONTEND} apt-get -qqy install gcc-$GCC_VERSION g++-$GCC_VERSION gfortran-$GCC_VERSION libstdc++-$GCC_VERSION-dev
+   ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get -qqy install gcc-$GCC_VERSION g++-$GCC_VERSION gfortran-$GCC_VERSION libstdc++-$GCC_VERSION-dev
    ${SUDO} update-alternatives \
          --install /usr/bin/gcc      gcc      /usr/bin/gcc-$GCC_VERSION      $val \
          --slave   /usr/bin/g++      g++      /usr/bin/g++-$GCC_VERSION           \
          --slave   /usr/bin/gfortran gfortran /usr/bin/gfortran-$GCC_VERSION      \
          --slave   /usr/bin/gcov     gcov     /usr/bin/gcov-$GCC_VERSION
-   ${PKG_SUDO} ${DEB_FRONTEND} apt-get -qy install gcc-$GCC_VERSION-offload-amdgcn
+   ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get -qy install gcc-$GCC_VERSION-offload-amdgcn
    val=$((val - 5))
 # The - option suppresses tabs
    cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${GCC_VERSION}.lua
@@ -125,7 +125,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/.version
 EOF
 
 # Install the default clang version before getting the base version for the distro
-${PKG_SUDO} ${DEB_FRONTEND} apt-get -q install -y clang
+${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get -q install -y clang
 CLANG_BASE_VERSION=`ls /usr/bin/clang-* | cut -f2 -d'-' | grep '^[[:digit:]]'`
 #CLANG_VERSION_LIST=`apt list |grep '^clang-[[:digit:]]*\/' |cut -f2 -d'-' | cut -f1 -d'/' | sort -n | tr '\n' ' '`
 CLANG_VERSION_LIST=""
@@ -140,7 +140,7 @@ do
    if [ "$CLANG_VERSION" -lt "$CLANG_BASE_VERSION" ]; then
       continue
    fi
-   ${PKG_SUDO} apt-get -qq update && ${PKG_SUDO} ${DEB_FRONTEND} apt-get -q install -y clang-$CLANG_VERSION libomp-$CLANG_VERSION-dev
+   ${PKG_SUDO} apt-get -qq update && ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get -q install -y clang-$CLANG_VERSION libomp-$CLANG_VERSION-dev
    ${SUDO} update-alternatives \
 	 --install /usr/bin/clang     clang     /usr/bin/clang-$CLANG_VERSION      $val \
 	 --slave   /usr/bin/clang++   clang++   /usr/bin/clang++-$CLANG_VERSION         \

@@ -52,7 +52,15 @@
 : ${DISTRO:="ubuntu"}
 : ${DISTRO_VERSION:="24.04"}
 
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+# Skip rocminfo autodetect if --amdgpu-gfxmodel was supplied. Under
+# `set -eo pipefail`, an unguarded rocminfo can kill the script when
+# the SDK is built against a newer glibc than the host (ROCm 7.2.3
+# binaries need GLIBC_2.38; jammy has 2.35). Audited in 7.2.3 sweep.
+if [[ " $* " == *" --amdgpu-gfxmodel "* ]]; then
+   AMDGPU_GFXMODEL=""
+else
+   AMDGPU_GFXMODEL=$(rocminfo 2>/dev/null | grep gfx | sed -e 's/Name://' | head -1 | sed 's/ //g' || true)
+fi
 
 tolower()
 {

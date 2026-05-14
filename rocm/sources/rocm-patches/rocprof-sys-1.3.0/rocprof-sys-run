@@ -1,0 +1,70 @@
+#!/bin/bash
+# Wrapper for rocprof-sys-run that works around a libbfd ABI mismatch between
+# rocprof-sys's statically linked libbfd and the system libbfd loaded by
+# OpenMPI/UCX on systems with old binutils (e.g. Ubuntu 22.04 ships binutils
+# 2.38 while rocprof-sys bundles 2.42).
+#
+# Without this wrapper, the system libbfd-<ver>-system.so that libucs.so drags
+# in interposes rocprof-sys's internal BFD symbols, causing a SegFault in
+# _bfd_x86_elf_get_synthetic_symtab() during rocprofiler_configure().
+#
+# The wrapper preloads librocprof-sys.so.1 only for the rocprof-sys-run
+# invocation itself, so its own BFD 2.42 symbols win global resolution.
+# The LD_PRELOAD is inherited by the profiled child process and (via OpenMPI's
+# default env propagation) by MPI ranks, but does not leak into other shell
+# commands, including compilers such as gcc/as which themselves link against
+# libbfd-2.38 and would otherwise abort with "libbfd ABI mismatch".
+#
+# This wrapper is installed in <rocm>/share/rocprofiler-systems/bin and is
+# placed first in PATH by the rocprofiler-systems module. The real binary
+# lives at <rocm>/bin/rocprof-sys-run.
+
+set -e
+
+wrapper_dir="$(dirname "$(readlink -f "$0")")"
+real_bin="$(readlink -f "${wrapper_dir}/../../../bin/rocprof-sys-run")"
+
+if [ ! -x "${real_bin}" ]; then
+    echo "rocprof-sys-run wrapper: unable to locate real binary (looked for ${real_bin})" >&2
+    exit 127
+fi
+
+rocprofsys_so="$(dirname "${real_bin}")/../lib/librocprof-sys.so.1"
+
+# Detect the system libbfd major.minor if present.
+#
+# We try filesystem globbing first because the canonical Ubuntu 22.04
+# binutils package always ships /usr/lib/x86_64-linux-gnu/libbfd-<ver>-system.so
+# whereas `ldconfig -p` can silently return nothing on compute nodes whose
+# /etc/ld.so.cache is stale or rebuilt without that path (we hit this on
+# the SLURM compute nodes -- ldconfig -p returned empty there even though
+# /lib/x86_64-linux-gnu/libbfd-2.38-system.so was clearly present). The
+# old ldconfig-only probe would then silently no-op the LD_PRELOAD
+# workaround and the test would crash exactly the way this wrapper was
+# meant to prevent. ldconfig -p stays as a secondary fallback for distros
+# that put libbfd in a non-standard location.
+sys_bfd_lib=""
+for cand in /lib/x86_64-linux-gnu/libbfd-*-system.so \
+            /usr/lib/x86_64-linux-gnu/libbfd-*-system.so ; do
+    if [ -e "${cand}" ]; then
+        sys_bfd_lib="${cand}"
+        break
+    fi
+done
+if [ -z "${sys_bfd_lib}" ]; then
+    sys_bfd_lib="$(ldconfig -p 2>/dev/null \
+        | awk '/libbfd-[0-9][^-]*-system\.so/ { print $NF; exit }')"
+fi
+sys_bfd_ver="$(printf '%s\n' "${sys_bfd_lib}" \
+    | sed -n 's|.*libbfd-\([0-9][0-9.]*\)-system\.so.*|\1|p')"
+
+if [ -e "${rocprofsys_so}" ] && [ -n "${sys_bfd_ver}" ] \
+   && [ "$(printf '%s\n' '2.39' "${sys_bfd_ver}" | sort -V | head -n1)" = "${sys_bfd_ver}" ]; then
+    # The user may opt out of the workaround by setting
+    # ROCPROFSYS_NO_LIBBFD_WORKAROUND=1 in the environment.
+    if [ -z "${ROCPROFSYS_NO_LIBBFD_WORKAROUND:-}" ]; then
+        export LD_PRELOAD="${rocprofsys_so}${LD_PRELOAD:+:${LD_PRELOAD}}"
+    fi
+fi
+
+exec "${real_bin}" "$@"

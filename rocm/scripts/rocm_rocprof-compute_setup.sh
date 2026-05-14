@@ -110,7 +110,7 @@ if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
    echo "ROCm built-in ${TOOL_NAME_MC} already installed"
 else
    if [ "${DISTRO}" == "ubuntu" ]; then
-      ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -q -y ${TOOL_NAME}
+      ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y ${TOOL_NAME}
    fi
 fi
 

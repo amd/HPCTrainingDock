@@ -67,7 +67,7 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    # these are for slurm   :  libpmi2-0-dev 
    ${PKG_SUDO} apt-get update -y
    ${PKG_SUDO} apt-cache search libpmi*
-   ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y libpmi2-0-dev \
+   ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y libpmi2-0-dev \
                            slurmd slurmctld
 
    apt-get -q clean && ${SUDO} rm -rf /var/lib/apt/lists/*

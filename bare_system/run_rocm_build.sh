@@ -4,7 +4,7 @@
 #
 # Phases:
 #   0.  Pre-check: skip cleanly (exit 0) if /nfsapps/opt/rocm-<v> already exists
-#       and --force-extract is not set.
+#       and --replace-existing is not set.
 #   1.  docker build (mirrors bare_system/test_install.sh's build phase).
 #   2.  container run -- make rocm && make rocm_package && make rocm_module_package
 #       (and any future <pkg>_package / <pkg>_module_package added to the chain).
@@ -23,14 +23,31 @@ set -eo pipefail
 : ${IMAGE_NAME:=""}
 : ${DISTRO:="ubuntu"}
 : ${DISTRO_VERSION:="24.04"}
-: ${NFSAPPS_OPT:="/nfsapps/opt"}
-: ${NFSAPPS_MODULES:="/nfsapps/modules"}
+: ${TOP_INSTALL_PATH:="/nfsapps/opt"}
+: ${TOP_MODULE_PATH:="/nfsapps/modules"}
 : ${KEEP_TARBALLS:="3"}
 : ${SKIP_EXTRACT:="0"}
 : ${SKIP_PRUNE:="0"}
-: ${FORCE_EXTRACT:="0"}
+: ${SKIP_PATCHES:="0"}
+# --replace-existing is the rocm-sweep analog of run_rocmplus_install_sweep.sh's
+# flag of the same name: when set, the existing /opt/rocm-<v> tree (and the
+# matching modulefiles) are deleted and re-extracted from a fresh tarball.
+# For backwards compatibility we still honour the old FORCE_EXTRACT env var if
+# the caller set it without setting REPLACE_EXISTING.
+if [ -z "${REPLACE_EXISTING:-}" ] && [ -n "${FORCE_EXTRACT:-}" ]; then
+   echo "[run_rocm_build] NOTE: FORCE_EXTRACT is deprecated; map to REPLACE_EXISTING=${FORCE_EXTRACT}" >&2
+   REPLACE_EXISTING="${FORCE_EXTRACT}"
+fi
+: ${REPLACE_EXISTING:="0"}
+# Delta-release support (see bare_system/rocm_delta_releases.conf). When set,
+# the base install precedes the ${ROCM_VERSION} install inside the container,
+# and the trees are merged into a single self-contained /opt/rocm-${ROCM_VERSION}.
+# A tombstone modulefile rocm/<SUPERSEDES_VERSION>.lua is also emitted.
+: ${BASE_ROCM_VERSION:=""}
+: ${SUPERSEDES_VERSION:=""}
 BARE_LOG=""
 MAKE_LOG=""
+PATCHES_LOG=""
 
 AMDGPU_GFXMODEL=$(rocminfo 2>/dev/null | grep gfx | sed -e 's/Name://' | head -1 | sed 's/ //g' || true)
 
@@ -49,11 +66,16 @@ usage() {
    echo "  --use-makefile [0 or 1]:                default $USE_MAKEFILE"
    echo "  --bare-log [PATH]:                      docker build log; default bare_\${ROCM_VERSION}.out"
    echo "  --make-log [PATH]:                      make-phase log; default make_rocm_package_\${ROCM_VERSION}.out"
-   echo "  --nfsapps-opt [DIR]:                    extract destination; default $NFSAPPS_OPT"
-   echo "  --nfsapps-modules [DIR]:                modules destination; default $NFSAPPS_MODULES"
-   echo "  --force-extract [0 or 1]:               overwrite existing /nfsapps/opt/rocm-<v> (default $FORCE_EXTRACT)"
+   echo "  --patches-log [PATH]:                   rocm_patches.sh log; default patches_\${ROCM_VERSION}.out"
+   echo "  --top-install-path [DIR]:               extract destination; default $TOP_INSTALL_PATH"
+   echo "  --top-module-path [DIR]:                modules destination; default $TOP_MODULE_PATH"
+   echo "  --replace-existing [0 or 1]:            overwrite existing \${TOP_INSTALL_PATH}/rocm-<v> (default $REPLACE_EXISTING)"
+   echo "                                          (alias: --force-extract -- deprecated, kept for backward compat)"
+   echo "  --base-rocm-version [VER]:              delta-release base (install <VER> first then merge \${ROCM_VERSION} on top). Default: empty (auto-consulted from bare_system/rocm_delta_releases.conf)"
+   echo "  --supersedes [VER]:                     emit a tombstone rocm/<VER>.lua that redirects to rocm/\${ROCM_VERSION}. Default: empty"
    echo "  --keep-tarballs [N]:                    prune policy; keep N most recent (default $KEEP_TARBALLS)"
    echo "  --skip-extract [0 or 1]:                skip phase 3 (default $SKIP_EXTRACT)"
+   echo "  --skip-patches [0 or 1]:                skip phase 3.6 (rocm_patches.sh) (default $SKIP_PATCHES)"
    echo "  --skip-prune [0 or 1]:                  skip phase 4 (default $SKIP_PRUNE)"
    echo "  --help"
    exit 1
@@ -73,11 +95,17 @@ while [[ $# -gt 0 ]]; do
       "--use-makefile")        shift; USE_MAKEFILE=${1};       reset-last ;;
       "--bare-log")            shift; BARE_LOG=${1};           reset-last ;;
       "--make-log")            shift; MAKE_LOG=${1};           reset-last ;;
-      "--nfsapps-opt")         shift; NFSAPPS_OPT=${1};        reset-last ;;
-      "--nfsapps-modules")     shift; NFSAPPS_MODULES=${1};    reset-last ;;
-      "--force-extract")       shift; FORCE_EXTRACT=${1};      reset-last ;;
+      "--patches-log")         shift; PATCHES_LOG=${1};        reset-last ;;
+      "--top-install-path")    shift; TOP_INSTALL_PATH=${1};   reset-last ;;
+      "--top-module-path")     shift; TOP_MODULE_PATH=${1};    reset-last ;;
+      "--replace-existing")    shift; REPLACE_EXISTING=${1};   reset-last ;;
+      "--force-extract")       shift; REPLACE_EXISTING=${1};   reset-last
+                               echo "[run_rocm_build] NOTE: --force-extract is deprecated; use --replace-existing" >&2 ;;
+      "--base-rocm-version")   shift; BASE_ROCM_VERSION=${1};  reset-last ;;
+      "--supersedes")          shift; SUPERSEDES_VERSION=${1}; reset-last ;;
       "--keep-tarballs")       shift; KEEP_TARBALLS=${1};      reset-last ;;
       "--skip-extract")        shift; SKIP_EXTRACT=${1};       reset-last ;;
+      "--skip-patches")        shift; SKIP_PATCHES=${1};       reset-last ;;
       "--skip-prune")          shift; SKIP_PRUNE=${1};         reset-last ;;
       "--help")                usage ;;
       *)                       last ${1} ;;
@@ -95,19 +123,50 @@ else
    PYTHON_VERSION=${PYTHON_VERSION_INPUT}
 fi
 
+# ---------------- Delta-release auto-detect from conf -----------------
+# If the user did not pass --base-rocm-version, consult the registry file
+# bare_system/rocm_delta_releases.conf. When ${ROCM_VERSION} is listed there,
+# the matching base is used and SUPERSEDES_VERSION defaults to that base too.
+# Pass --base-rocm-version explicitly to override.
+DELTA_CONF="$(dirname "$0")/rocm_delta_releases.conf"
+if [[ -z "${BASE_ROCM_VERSION}" && -f "${DELTA_CONF}" ]]; then
+   _conf_base=$(awk -F= -v v="${ROCM_VERSION}" '
+      /^[[:space:]]*#/ {next}
+      /^[[:space:]]*$/ {next}
+      $1 == v {print $2; exit}
+   ' "${DELTA_CONF}")
+   if [[ -n "${_conf_base}" ]]; then
+      echo "[run_rocm_build] delta-release auto-config: ${ROCM_VERSION} is registered as a delta (base=${_conf_base}); setting --base-rocm-version ${_conf_base} --supersedes ${_conf_base}"
+      BASE_ROCM_VERSION="${_conf_base}"
+      [[ -z "${SUPERSEDES_VERSION}" ]] && SUPERSEDES_VERSION="${_conf_base}"
+   fi
+   unset _conf_base
+fi
+
 : ${IMAGE_NAME:="bare-rocm-${ROCM_VERSION}"}
 : ${BARE_LOG:="bare_${ROCM_VERSION}.out"}
 : ${MAKE_LOG:="make_rocm_package_${ROCM_VERSION}.out"}
+: ${PATCHES_LOG:="patches_${ROCM_VERSION}.out"}
 
 AMDGPU_GFXMODEL_STRING=$(echo "${AMDGPU_GFXMODEL}" | sed -e 's/;/_/g')
 CACHE_DIR="CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}"
 TARBALL="${CACHE_DIR}/rocm-${ROCM_VERSION}.tgz"
 mkdir -p "${CACHE_DIR}"
 
+# Delta-release mode: a stale tarball at ${TARBALL} from a previous build
+# (pre-delta-merge) would otherwise be auto-extracted inside the container by
+# rocm_setup.sh's "Installing Cached ROCm" branch, skipping the base+delta+merge
+# work entirely. CacheFiles is bind-mounted into the container at /CacheFiles,
+# so we wipe the host copy here before docker build.
+if [[ -n "${BASE_ROCM_VERSION}" && -f "${TARBALL}" ]]; then
+   echo "[run_rocm_build] delta-release mode: removing stale ${TARBALL} to force a fresh base+delta+merge build"
+   rm -f "${TARBALL}"
+fi
+
 # ---------------- Phase 0: skip-if-installed pre-check ----------------
-if [[ -d "${NFSAPPS_OPT}/rocm-${ROCM_VERSION}" && "${FORCE_EXTRACT}" != "1" ]]; then
-   echo "[$(date)] SKIP rocm-${ROCM_VERSION}: ${NFSAPPS_OPT}/rocm-${ROCM_VERSION} already exists"
-   echo "         Pass --force-extract 1 to rebuild & re-install."
+if [[ -d "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}" && "${REPLACE_EXISTING}" != "1" ]]; then
+   echo "[$(date)] SKIP rocm-${ROCM_VERSION}: ${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION} already exists"
+   echo "         Pass --replace-existing 1 to rebuild & re-install."
    exit 0
 fi
 
@@ -148,9 +207,9 @@ trap prune_cache EXIT
 # possible so Phase 3's sudo tar can write. No-op on hosts where rw is already
 # granted or where we can't write regardless.
 if [[ "${SKIP_EXTRACT}" != "1" ]]; then
-   if ! sudo -n test -w "${NFSAPPS_OPT}" 2>/dev/null; then
-      echo "Attempting to remount ${NFSAPPS_OPT%/*} rw..."
-      sudo mount -o remount,rw "${NFSAPPS_OPT%/*}" 2>/dev/null || true
+   if ! sudo -n test -w "${TOP_INSTALL_PATH}" 2>/dev/null; then
+      echo "Attempting to remount ${TOP_INSTALL_PATH%/*} rw..."
+      sudo mount -o remount,rw "${TOP_INSTALL_PATH%/*}" 2>/dev/null || true
    fi
 fi
 
@@ -182,6 +241,8 @@ ${BUILDER} build --no-cache ${ADD_OPTIONS} \
              --build-arg AMDGPU_GFXMODEL="${AMDGPU_GFXMODEL}" \
              --build-arg USE_MAKEFILE=${USE_MAKEFILE} \
              --build-arg PYTHON_VERSION=${PYTHON_VERSION} \
+             --build-arg BASE_ROCM_VERSION="${BASE_ROCM_VERSION}" \
+             --build-arg SUPERSEDES_VERSION="${SUPERSEDES_VERSION}" \
              -t ${IMAGE_NAME} \
              -f bare_system/Dockerfile . 2>&1 | tee "${BARE_LOG}"
 
@@ -220,30 +281,30 @@ ${BUILDER} run --device=/dev/kfd --device=/dev/dri \
 # ---------------- Phase 3: extract tarballs ---------------------------
 if [[ "${SKIP_EXTRACT}" != "1" ]]; then
    echo "============================================================"
-   echo "  Phase 3a: extract ${TARBALL} -> ${NFSAPPS_OPT}/"
+   echo "  Phase 3a: extract ${TARBALL} -> ${TOP_INSTALL_PATH}/"
    echo "============================================================"
    if [[ ! -f "${TARBALL}" ]]; then
       echo "ERROR: expected tarball not found: ${TARBALL}" >&2
       exit 1
    fi
-   if [[ ! -d "${NFSAPPS_OPT}" ]]; then
-      echo "Creating missing ${NFSAPPS_OPT}"
-      sudo install -d -o root -g root -m 0755 "${NFSAPPS_OPT}"
+   if [[ ! -d "${TOP_INSTALL_PATH}" ]]; then
+      echo "Creating missing ${TOP_INSTALL_PATH}"
+      sudo install -d -o root -g root -m 0755 "${TOP_INSTALL_PATH}"
    fi
-   if [[ -d "${NFSAPPS_OPT}/rocm-${ROCM_VERSION}" ]]; then
-      echo "Removing existing ${NFSAPPS_OPT}/rocm-${ROCM_VERSION} for re-extract (--force-extract was set)"
-      sudo rm -rf "${NFSAPPS_OPT}/rocm-${ROCM_VERSION}"
+   if [[ -d "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}" ]]; then
+      echo "Removing existing ${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION} for re-extract (--replace-existing was set)"
+      sudo rm -rf "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}"
    fi
-   sudo tar -xzpf "${TARBALL}" -C "${NFSAPPS_OPT}/"
-   sudo chown -R root:root "${NFSAPPS_OPT}/rocm-${ROCM_VERSION}"
-   sudo chmod 755 "${NFSAPPS_OPT}/rocm-${ROCM_VERSION}"
-   echo "Extracted: ${NFSAPPS_OPT}/rocm-${ROCM_VERSION}"
+   sudo tar -xzpf "${TARBALL}" -C "${TOP_INSTALL_PATH}/"
+   sudo chown -R root:root "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}"
+   sudo chmod 755 "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}"
+   echo "Extracted: ${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}"
 
    echo "============================================================"
-   echo "  Phase 3b: extract every *-modules-${ROCM_VERSION}.tgz -> ${NFSAPPS_MODULES}/"
+   echo "  Phase 3b: extract every *-modules-${ROCM_VERSION}.tgz -> ${TOP_MODULE_PATH}/"
    echo "============================================================"
-   if [[ ! -d "${NFSAPPS_MODULES}" ]]; then
-      sudo mkdir -p "${NFSAPPS_MODULES}"
+   if [[ ! -d "${TOP_MODULE_PATH}" ]]; then
+      sudo mkdir -p "${TOP_MODULE_PATH}"
    fi
    shopt -s nullglob
    MOD_TARBALLS=( "${CACHE_DIR}"/*-modules-"${ROCM_VERSION}".tgz )
@@ -255,29 +316,29 @@ if [[ "${SKIP_EXTRACT}" != "1" ]]; then
       pkg=$(basename "${MTGZ}")
       pkg=${pkg%-modules-${ROCM_VERSION}.tgz}
       echo "Extracting modules for ${pkg}: ${MTGZ}"
-      if [[ "${FORCE_EXTRACT}" == "1" ]]; then
-         sudo rm -f "${NFSAPPS_MODULES}/base/${pkg}/${ROCM_VERSION}.lua" 2>/dev/null || true
-         [[ "${pkg}" == "rocm" ]] && sudo rm -f "${NFSAPPS_MODULES}/base/rocm/${ROCM_VERSION}.lua" 2>/dev/null || true
-         sudo rm -rf "${NFSAPPS_MODULES}/rocm-${ROCM_VERSION}/${pkg}" 2>/dev/null || true
-         sudo rm -rf "${NFSAPPS_MODULES}/rocmplus-${ROCM_VERSION}/${pkg}" 2>/dev/null || true
+      if [[ "${REPLACE_EXISTING}" == "1" ]]; then
+         sudo rm -f "${TOP_MODULE_PATH}/base/${pkg}/${ROCM_VERSION}.lua" 2>/dev/null || true
+         [[ "${pkg}" == "rocm" ]] && sudo rm -f "${TOP_MODULE_PATH}/base/rocm/${ROCM_VERSION}.lua" 2>/dev/null || true
+         sudo rm -rf "${TOP_MODULE_PATH}/rocm-${ROCM_VERSION}/${pkg}" 2>/dev/null || true
+         sudo rm -rf "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/${pkg}" 2>/dev/null || true
       fi
-      sudo tar -xzpf "${MTGZ}" -C "${NFSAPPS_MODULES}/"
+      sudo tar -xzpf "${MTGZ}" -C "${TOP_MODULE_PATH}/"
    done
 
    # Normalize ownership/perms on extracted module trees: the tarball entries
    # may be owned by the in-container builder UID and/or carry mode 0700 on the
    # top-level dir. Make everything root:root, dirs 755, files 644, and ensure
-   # /nfsapps/modules itself is world-traversable so non-root users can `ls` it.
-   for d in "${NFSAPPS_MODULES}/base" \
-            "${NFSAPPS_MODULES}/rocm-${ROCM_VERSION}" \
-            "${NFSAPPS_MODULES}/rocmplus-${ROCM_VERSION}" ; do
+   # ${TOP_MODULE_PATH} itself is world-traversable so non-root users can `ls` it.
+   for d in "${TOP_MODULE_PATH}/base" \
+            "${TOP_MODULE_PATH}/rocm-${ROCM_VERSION}" \
+            "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}" ; do
       [[ -e "${d}" ]] || continue
       sudo chown -R root:root "${d}"
       sudo find "${d}" -type d -exec chmod 755 {} +
       sudo find "${d}" -type f -exec chmod 644 {} +
    done
-   sudo chown root:root "${NFSAPPS_MODULES}"
-   sudo chmod 755 "${NFSAPPS_MODULES}"
+   sudo chown root:root "${TOP_MODULE_PATH}"
+   sudo chmod 755 "${TOP_MODULE_PATH}"
 
    # ---------------- Phase 3.5: rewrite container-form paths ----------
    echo "============================================================"
@@ -285,36 +346,94 @@ if [[ "${SKIP_EXTRACT}" != "1" ]]; then
    echo "============================================================"
    LUA_TARGETS=()
    for cand in \
-      "${NFSAPPS_MODULES}/base/rocm/${ROCM_VERSION}.lua" \
-      "${NFSAPPS_MODULES}/rocm-${ROCM_VERSION}" \
-      "${NFSAPPS_MODULES}/rocmplus-${ROCM_VERSION}" ; do
+      "${TOP_MODULE_PATH}/base/rocm/${ROCM_VERSION}.lua" \
+      "${TOP_MODULE_PATH}/rocm-${ROCM_VERSION}" \
+      "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}" ; do
       [[ -e "${cand}" ]] && LUA_TARGETS+=("${cand}")
    done
    for MTGZ in "${MOD_TARBALLS[@]}"; do
       pkg=$(basename "${MTGZ}")
       pkg=${pkg%-modules-${ROCM_VERSION}.tgz}
       [[ "${pkg}" == "rocm" ]] && continue
-      cand="${NFSAPPS_MODULES}/base/${pkg}/${ROCM_VERSION}.lua"
+      cand="${TOP_MODULE_PATH}/base/${pkg}/${ROCM_VERSION}.lua"
       [[ -e "${cand}" ]] && LUA_TARGETS+=("${cand}")
    done
    if (( ${#LUA_TARGETS[@]} > 0 )); then
       sudo find "${LUA_TARGETS[@]}" -name '*.lua' -print0 | sudo xargs -0 sed -i \
-         -e "s|/opt/rocm-${ROCM_VERSION}|${NFSAPPS_OPT}/rocm-${ROCM_VERSION}|g" \
-         -e "s|local mbase = \" /etc/lmod/modules/ROCm/rocm\"|local mbase = \"${NFSAPPS_MODULES}\"|" \
-         -e "s|local mbase = \"/etc/lmod/modules/ROCm/rocm\"|local mbase = \"${NFSAPPS_MODULES}\"|" \
-         -e "s|/etc/lmod/modules/ROCm/rocm|${NFSAPPS_MODULES}/base/rocm|g" \
-         -e "s|/etc/lmod/modules/ROCmPlus-MPI|${NFSAPPS_MODULES}/rocmplus-${ROCM_VERSION}|g" \
-         -e "s|/etc/lmod/modules/ROCmPlus-AI|${NFSAPPS_MODULES}/rocmplus-${ROCM_VERSION}|g" \
-         -e "s|/etc/lmod/modules/ROCmPlus-AMDResearchTools|${NFSAPPS_MODULES}/rocmplus-${ROCM_VERSION}|g" \
-         -e "s|/etc/lmod/modules/ROCmPlus-LatestCompilers|${NFSAPPS_MODULES}/rocmplus-${ROCM_VERSION}|g" \
-         -e "s|/etc/lmod/modules/ROCmPlus|${NFSAPPS_MODULES}/rocmplus-${ROCM_VERSION}|g" \
-         -e "s|/etc/lmod/modules/ROCm|${NFSAPPS_MODULES}/rocm-${ROCM_VERSION}|g" \
-         -e "s|/etc/lmod/modules/LinuxPlus|${NFSAPPS_MODULES}/base|g" \
-         -e "s|/etc/lmod/modules/misc|${NFSAPPS_MODULES}/rocmplus-${ROCM_VERSION}|g" \
-         -e "s|/etc/lmod/modules|${NFSAPPS_MODULES}|g"
+         -e "s|/opt/rocm-${ROCM_VERSION}|${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}|g" \
+         -e "s|local mbase = \" /etc/lmod/modules/ROCm/rocm\"|local mbase = \"${TOP_MODULE_PATH}\"|" \
+         -e "s|local mbase = \"/etc/lmod/modules/ROCm/rocm\"|local mbase = \"${TOP_MODULE_PATH}\"|" \
+         -e "s|/etc/lmod/modules/ROCm/rocm|${TOP_MODULE_PATH}/base/rocm|g" \
+         -e "s|/etc/lmod/modules/ROCmPlus-MPI|${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}|g" \
+         -e "s|/etc/lmod/modules/ROCmPlus-AI|${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}|g" \
+         -e "s|/etc/lmod/modules/ROCmPlus-AMDResearchTools|${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}|g" \
+         -e "s|/etc/lmod/modules/ROCmPlus-LatestCompilers|${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}|g" \
+         -e "s|/etc/lmod/modules/ROCmPlus|${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}|g" \
+         -e "s|/etc/lmod/modules/ROCm|${TOP_MODULE_PATH}/rocm-${ROCM_VERSION}|g" \
+         -e "s|/etc/lmod/modules/LinuxPlus|${TOP_MODULE_PATH}/base|g" \
+         -e "s|/etc/lmod/modules/misc|${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}|g" \
+         -e "s|/etc/lmod/modules|${TOP_MODULE_PATH}|g"
       echo "Path rewrite complete."
    else
       echo "WARNING: no deployed module targets found to rewrite."
+   fi
+fi
+
+# ---------------- Phase 3.6: apply vendored ROCm patches --------------
+# Run rocm/scripts/rocm_patches.sh on the host against the just-extracted
+# SDK tree at ${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION} and the path-rewritten
+# modulefile at ${TOP_MODULE_PATH}/base/rocm/${ROCM_VERSION}.lua.
+#
+# The script is selective by ROCM_VERSION (see rocm_version_to_patches()
+# in rocm/scripts/rocm_patches.sh):
+#   * 7.2.0 / 7.2.1                 -> rocprof-sys-1.3.0 cherry-pick + build (~30 min)
+#   * 6.3.x / 6.4.x / 7.0.x / 7.1.x -> rocprof-compute nuitka build (~25-30 min)
+#   * afar-22.x / therock-23.2.0    -> rocprof-compute, usually soft-noop 43
+#   * everything else               -> exit 43 (NOOP_RC, fast no-op)
+#
+# Exit codes (rocm_patches.sh):
+#   0  -- patches applied (or already up to date)
+#   43 -- intentional no-op (no vendored fix for this version)
+#   *  -- hard error
+#
+# Writes:
+#   * ${TOP_INSTALL_PATH}/rocm-patches-${ROCM_VERSION}/        overlay tree
+#   * appends LD_LIBRARY_PATH/PATH prepend to
+#     ${TOP_MODULE_PATH}/base/rocm/${ROCM_VERSION}.lua    (idempotent)
+#   * swaps ${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}/lib/librocprof-sys.so.X.Y.Z
+#     to a symlink into the overlay; original preserved as .orig
+#
+# Gated by SKIP_EXTRACT (no tree to patch if we skipped extract) and
+# SKIP_PATCHES (operator opt-out). PATCH_SOURCE_DIR is auto-detected
+# next to rocm/scripts/rocm_patches.sh (repo layout).
+if [[ "${SKIP_EXTRACT}" != "1" && "${SKIP_PATCHES}" != "1" ]]; then
+   echo "============================================================"
+   echo "  Phase 3.6: rocm_patches.sh on ${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION} (-> ${PATCHES_LOG})"
+   echo "============================================================"
+   PATCHES_RC=0
+   set +e
+   rocm/scripts/rocm_patches.sh \
+         --rocm-version    "${ROCM_VERSION}" \
+         --rocm-path       "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}" \
+         --install-prefix  "${TOP_INSTALL_PATH}/rocm-patches-${ROCM_VERSION}" \
+         --module-path     "${TOP_MODULE_PATH}/base" \
+         2>&1 | tee "${PATCHES_LOG}"
+   PATCHES_RC=${PIPESTATUS[0]}
+   set -e
+   if [[ "${PATCHES_RC}" -eq 43 ]]; then
+      echo "[Phase 3.6] rocm_patches.sh returned 43 (NOOP_RC) -- no vendored fix for ROCm ${ROCM_VERSION}; treating as success"
+   elif [[ "${PATCHES_RC}" -ne 0 ]]; then
+      echo "ERROR: rocm_patches.sh failed for ROCm ${ROCM_VERSION} (rc=${PATCHES_RC})" >&2
+      exit "${PATCHES_RC}"
+   else
+      # Normalize ownership/perms on the overlay tree so it matches the
+      # SDK tree extracted in Phase 3a (root:root, dirs 755, files
+      # preserved by `install -m 0755` inside the script).
+      if [[ -d "${TOP_INSTALL_PATH}/rocm-patches-${ROCM_VERSION}" ]]; then
+         sudo chown -R root:root "${TOP_INSTALL_PATH}/rocm-patches-${ROCM_VERSION}"
+         sudo find "${TOP_INSTALL_PATH}/rocm-patches-${ROCM_VERSION}" -type d -exec chmod 755 {} +
+      fi
+      echo "[Phase 3.6] patches applied for ROCm ${ROCM_VERSION}"
    fi
 fi
 

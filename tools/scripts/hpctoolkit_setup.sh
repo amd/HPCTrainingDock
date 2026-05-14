@@ -44,7 +44,15 @@ preflight_modules() {
 }
 
 # Variables controlling setup process
-AMDGPU_GFXMODEL=`rocminfo | grep gfx | sed -e 's/Name://' | head -1 |sed 's/ //g'`
+# Skip rocminfo autodetect if --amdgpu-gfxmodel was supplied. Under
+# `set -eo pipefail`, an unguarded rocminfo can kill the script when
+# the SDK is built against a newer glibc than the host (ROCm 7.2.3
+# binaries need GLIBC_2.38; jammy has 2.35). Audited in 7.2.3 sweep.
+if [[ " $* " == *" --amdgpu-gfxmodel "* ]]; then
+   AMDGPU_GFXMODEL=""
+else
+   AMDGPU_GFXMODEL=$(rocminfo 2>/dev/null | grep gfx | sed -e 's/Name://' | head -1 | sed 's/ //g' || true)
+fi
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/hpctoolkit
 BUILD_HPCTOOLKIT=0
 HPCTOOLKIT_VERSION=2025.1.2
@@ -429,7 +437,7 @@ else
       # callers shouldn't rely on that. See openmpi_setup.sh /
       # audit_2026_05_01.md Issue 2.
       PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
-      ${PKG_SUDO} ${DEB_FRONTEND} apt-get install -q -y pipx libboost-all-dev liblzma-dev libgtk-3-dev
+      ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y pipx libboost-all-dev liblzma-dev libgtk-3-dev
 
       # Per-job throwaway build dir for the hpctoolkit clone.
       # Replaces a fixed `cd /tmp; rm -rf /tmp/hpctoolkit` pattern

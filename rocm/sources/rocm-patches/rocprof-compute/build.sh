@@ -128,10 +128,172 @@ if [ -n "$RC_FLAVOUR" ]; then
         exit 43
     fi
 else
-    echo "[build] cloning rocprofiler-compute @ rocm-${ROCM_VERSION} ..." | tee -a "$LOG"
-    git clone --depth 1 --branch "rocm-${ROCM_VERSION}" \
-        https://github.com/ROCm/rocprofiler-compute.git 2>&1 | tail -3 | tee -a "$LOG"
-    cd rocprofiler-compute
+    # Official release line: rocm-7.1.0+ moved the rocprofiler-compute
+    # tree into the rocm-systems monorepo at `projects/rocprofiler-compute`.
+    # rocm-7.0.x and older still live in the standalone repo.
+    if [ "$(printf '%s\n' "7.1.0" "$ROCM_VERSION" | sort -V | head -n1)" = "7.1.0" ]; then
+        echo "[build] cloning rocm-systems @ rocm-${ROCM_VERSION} (sparse subtree projects/rocprofiler-compute) ..." | tee -a "$LOG"
+        git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git 2>&1 | tail -3 | tee -a "$LOG"
+        cd rocm-systems
+        git sparse-checkout init --cone
+        git sparse-checkout set projects/rocprofiler-compute
+        git -c advice.detachedHead=false checkout "rocm-${ROCM_VERSION}" 2>&1 | tail -3 | tee -a "$LOG"
+        cd projects/rocprofiler-compute
+    else
+        echo "[build] cloning rocprofiler-compute @ rocm-${ROCM_VERSION} ..." | tee -a "$LOG"
+        git clone --depth 1 --branch "rocm-${ROCM_VERSION}" \
+            https://github.com/ROCm/rocprofiler-compute.git 2>&1 | tail -3 | tee -a "$LOG"
+        cd rocprofiler-compute
+    fi
+fi
+
+# Pin Python deps for ROCm 7.1.0+ official releases.  Mirror of the
+# locked list that lived in rocm/scripts/rocm_setup.sh up to 2026-05
+# (the original home of the nuitka build, now retired in favour of
+# this script).  Without the pin, transitive dep drift in upstream's
+# loose `requirements.txt` periodically broke the build.  No override
+# for RC trees (afar-*/therock-*): they pin to arbitrary historical
+# commits with their own requirements -- let upstream's req file win
+# there.
+if [ -z "$RC_FLAVOUR" ] \
+   && [ "$(printf '%s\n' "7.1.0" "$ROCM_VERSION" | sort -V | head -n1)" = "7.1.0" ]; then
+    DISTRO_ID="$(. /etc/os-release && echo "${ID:-unknown}")"
+    if [ "$DISTRO_ID" = "ubuntu" ]; then
+        echo "[build] pinning requirements.txt for ubuntu / ROCm $ROCM_VERSION" | tee -a "$LOG"
+        mv requirements.txt requirements.txt.upstream
+        cat > requirements.txt <<'EOF'
+astunparse==1.6.2
+blinker==1.9.0
+certifi==2026.1.4
+charset-normalizer==3.4.4
+click==8.3.1
+colorlover==0.3.0
+contourpy==1.3.2
+cycler==0.12.1
+dash==3.3.0
+dash-bootstrap-components==2.0.4
+dash-svg==0.0.12
+dnspython==2.8.0
+Flask==3.1.2
+fonttools==4.61.1
+greenlet==3.3.0
+idna==3.11
+importlib_metadata==8.7.1
+itsdangerous==2.2.0
+Jinja2==3.1.6
+kaleido==0.2.1
+kiwisolver==1.4.9
+linkify-it-py==2.0.3
+markdown-it-py==4.0.0
+MarkupSafe==3.0.3
+matplotlib==3.10.8
+mdit-py-plugins==0.5.0
+mdurl==0.1.2
+narwhals==2.15.0
+nest-asyncio==1.6.0
+Nuitka==2.6
+numpy==2.2.6
+ordered-set==4.1.0
+packaging==25.0
+pandas==2.3.3
+patchelf==0.17.2.4
+pillow==12.1.0
+platformdirs==4.5.1
+plotext==5.3.2
+plotille==5.0.0
+plotly==6.5.1
+Pygments==2.19.2
+pymongo==4.16.0
+pyparsing==3.3.1
+python-dateutil==2.9.0
+pytz==2025.2
+PyYAML==6.0.3
+requests==2.32.5
+retrying==1.4.2
+rich==14.2.0
+six==1.17.0
+SQLAlchemy==2.0.45
+tabulate==0.9.0
+textual==7.0.1
+textual-fspicker==0.6.0
+textual-plotext==1.0.1
+tqdm==4.67.1
+typing_extensions==4.15.0
+tzdata==2025.3
+uc-micro-py==1.0.3
+urllib3==2.6.3
+Werkzeug==3.1.5
+zipp==3.23.0
+zstandard==0.25.0
+EOF
+    elif [ "$DISTRO_ID" = "rhel" ] || [ "$DISTRO_ID" = "rocky" ] || [ "$DISTRO_ID" = "almalinux" ] || [ "$DISTRO_ID" = "centos" ]; then
+        echo "[build] pinning requirements.txt for RHEL-family / ROCm $ROCM_VERSION" | tee -a "$LOG"
+        mv requirements.txt requirements.txt.upstream
+        cat > requirements.txt <<'EOF'
+astunparse==1.6.2
+blinker==1.9.0
+certifi==2026.1.4
+charset-normalizer==3.4.4
+click==8.1.8
+colorlover==0.3.0
+contourpy==1.3.0
+cycler==0.12.1
+dash==3.4.0
+dash-bootstrap-components==2.0.4
+dash-svg==0.0.12
+dnspython==2.7.0
+Flask==3.1.2
+fonttools==4.60.2
+greenlet==3.2.4
+idna==3.11
+importlib_metadata==8.7.1
+importlib_resources==6.5.2
+itsdangerous==2.2.0
+Jinja2==3.1.6
+kaleido==0.2.1
+kiwisolver==1.4.7
+linkify-it-py==2.0.3
+markdown-it-py==3.0.0
+MarkupSafe==3.0.3
+matplotlib==3.9.4
+mdit-py-plugins==0.4.2
+mdurl==0.1.2
+narwhals==2.15.0
+nest-asyncio==1.6.0
+Nuitka==2.6
+numpy==2.0.2
+packaging==26.0
+pandas==2.3.3
+patchelf==0.17.2.4
+pillow==11.3.0
+platformdirs==4.4.0
+plotext==5.3.2
+plotille==5.0.0
+plotly==6.5.2
+Pygments==2.19.2
+pymongo==4.16.0
+pyparsing==3.3.2
+python-dateutil==2.9.0.post0
+pytz==2025.2
+PyYAML==6.0.3
+requests==2.32.5
+retrying==1.4.2
+rich==14.3.1
+six==1.17.0
+SQLAlchemy==2.0.46
+tabulate==0.9.0
+textual==7.5.0
+textual-fspicker==0.6.0
+textual-plotext==1.0.1
+tqdm==4.67.1
+typing_extensions==4.15.0
+tzdata==2025.3
+uc-micro-py==1.0.3
+urllib3==2.6.3
+Werkzeug==3.1.5
+zipp==3.23.0
+EOF
+    fi
 fi
 
 python3 -m pip install nuitka==2.6 patchelf 2>&1 | tail -3 | tee -a "$LOG"

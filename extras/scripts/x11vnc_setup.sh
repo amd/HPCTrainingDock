@@ -61,7 +61,7 @@ do
 done
 
 ${PKG_SUDO} apt-get update
-${PKG_SUDO} ${DEB_FRONTEND} apt-get install -y xserver-xorg-video-dummy \
+${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y xserver-xorg-video-dummy \
         lxde \
         x11-xserver-utils xdotool \
         xterm \
