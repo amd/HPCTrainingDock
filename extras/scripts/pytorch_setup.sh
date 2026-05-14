@@ -61,12 +61,25 @@ TORCHVISION_VERSION=0.24.1
 TORCHVISION_VERSION_USER_SET=0
 TORCHAUDIO_VERSION=2.9.1
 TORCHAUDIO_VERSION_USER_SET=0
+# AOTRITON_VERSION default is "" (empty); resolve_pytorch_stack_versions
+# below populates it from the PYTORCH_STACK_MANIFEST cell hit, or from
+# resolve_aotriton_for_pt_only() (the historical PT-major.minor table)
+# when the manifest cell has no aotriton field. The user can pin via
+# --aotriton-version. AOTRITON_VERSION_USER_SET=1 means the user passed
+# the flag; the resolver respects that and skips both fallbacks.
+AOTRITON_VERSION=""
+AOTRITON_VERSION_USER_SET=0
 FLASHATTENTION_VERSION=2.8.3
+FLASHATTENTION_VERSION_USER_SET=0
 TRITON_VERSION=3.4.0
+TRITON_VERSION_USER_SET=0
 TRITON_WHEEL_NAME="triton"
 PILLOW_VERSION=12.1.1
+PILLOW_VERSION_USER_SET=0
 SAGEATTENTION_VERSION="1.0.6" #SageAttention 2 does not support ROCm
+SAGEATTENTION_VERSION_USER_SET=0
 DEEPSPEED_VERSION="latest"
+DEEPSPEED_VERSION_USER_SET=0
 
 # PyTorch ecosystem companion-version table.
 # Keyed on PyTorch major.minor (e.g. "2.9", NOT "2.9.1") so any patch
@@ -100,6 +113,331 @@ declare -A PYTORCH_COMPANION_VERSIONS=(
    [2.11]="0.26.0:2.11.0"
    [2.12]="0.27.0:2.12.0"
 )
+
+# ── PyTorch stack manifest: (PT major.minor, ROCm major.minor) → all pins ──
+# Single source of truth for every version pin in the PyTorch ecosystem
+# for combinations we have evidence for. Cells are looked up by the
+# resolver below (resolve_pytorch_stack_versions) using the key
+# "${PT_MAJOR_MINOR}|${ROCM_MAJOR_MINOR}" (e.g. "2.9|7.1"). Patch
+# releases on either axis inherit from the major.minor row (PyTorch
+# 2.9.1 + rocm 7.1.1 → cell "2.9|7.1"), matching upstream's release-
+# pairing policy.
+#
+# Value format: ";"-separated "key=value" records. Keys (no aliases here;
+# parser may accept short aliases at the CLI):
+#   aotriton, torchvision, torchaudio, triton, flashattention,
+#   pillow, sageattention, deepspeed
+# Every cell SHOULD list every key (resolver tolerates partial cells but
+# warns; missing keys fall through to PT-only fallback / file default).
+#
+# Resolution priority (per pin, highest first):
+#   1. user CLI flag (e.g. --aotriton-version) — *_USER_SET=1
+#   2. manifest cell value for that pin
+#   3. PT-only fallback (resolve_aotriton_for_pt_only / PYTORCH_COMPANION_VERSIONS)
+#   4. file-default constant near the top of this script
+#
+# Leniency: a (PT, ROCm) combination not in the manifest does NOT fail
+# the build — the resolver warns loudly and falls through to PT-only
+# fallbacks. The user can pass --aotriton-version / --triton-version /
+# etc. to pin specific versions for off-table combinations.
+#
+# How to add a row: pick the (PT major.minor, ROCm major.minor) pair,
+# fill in every pin from a known-good build (see logs_*/rocm-X.Y.Z_*/
+# log_pytorch*.txt for evidence). Alphabetize within the row so diffs
+# stay readable.
+declare -A PYTORCH_STACK_MANIFEST=(
+   ["2.7|6.2"]="aotriton=0.9.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.7|6.3"]="aotriton=0.9.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.7|6.4"]="aotriton=0.9.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   # 2.7|7.1 and 2.8|7.1 are shim cells (NOT canonical PT/AOTriton pairings).
+   # Canonical AOTriton for PT 2.7 is 0.9.2b and for PT 2.8 is 0.10b. Both
+   # bundle Triton 3.2.0, whose generated HSA code-object metadata is
+   # rejected by the host /usr/bin/ld.lld on the rocm-7.x build hosts:
+   #   ld.lld: error: unknown abi version:
+   #   ERROR: aotriton ninja install failed (rc=1)
+   # See slurm-9316/9319/9323-rocmplus-7.1.1.{out,err} for the regression.
+   # We bump aotriton -> 0.11.2b (which bundles Triton 3.4.0, accepted by
+   # the same lld) so `--packages "pytorch=2.7.1 pytorch=2.8.0"` resolves
+   # to a working stack on rocm-7.1 without requiring an inline override.
+   # PT-version-appropriate companions (torchvision/torchaudio/flash/etc.)
+   # are kept at their PT-2.7 / PT-2.8 values; only the AOTriton+Triton
+   # axis is bumped. Caveat: AOTriton 0.11.2b's CMake API was developed
+   # against PyTorch 2.9 and there is a known risk that the link step
+   # against torch._inductor symbols mismatches when used with PT 2.7/2.8.
+   # First successful build of these combos will validate the pairing;
+   # if it fails at a different (post-lld) step, revisit Option 3 (PATH
+   # fix in pytorch_setup.sh aotriton stage).
+   ["2.7|7.1"]="aotriton=0.11.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.8|6.3"]="aotriton=0.10b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.8|6.4"]="aotriton=0.10b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.8|7.1"]="aotriton=0.11.2b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.9|7.0"]="aotriton=0.11.2b;torchvision=0.24.1;torchaudio=2.9.1;triton=3.4.0;flashattention=2.8.3;pillow=12.1.1;sageattention=1.0.6;deepspeed=latest"
+   ["2.9|7.1"]="aotriton=0.11.2b;torchvision=0.24.1;torchaudio=2.9.1;triton=3.4.0;flashattention=2.8.3;pillow=12.1.1;sageattention=1.0.6;deepspeed=latest"
+   ["2.9|7.2"]="aotriton=0.11.2b;torchvision=0.24.1;torchaudio=2.9.1;triton=3.4.0;flashattention=2.8.3;pillow=12.1.1;sageattention=1.0.6;deepspeed=latest"
+)
+
+# ── PT-only AOTriton fallback (extracted from the historical if/else) ─
+# Returns the canonical AOTriton release for a PyTorch major.minor.
+# Used by resolve_pytorch_stack_versions when the manifest cell is
+# missing or has no aotriton field. Empty stdout means "no canonical
+# pairing for this PT version" -- the resolver treats that as a fatal
+# error unless the user passed --aotriton-version.
+#
+# Provenance of each pairing: each historical row corresponds to the
+# AOTriton release published by ROCm/aotriton with PyTorch 2.X release
+# notes naming it as the matched bundle. See
+# https://github.com/ROCm/aotriton/releases . The earliest supported
+# PT line is 2.3 (AOTriton 0.4b); older PTs predate AOTriton entirely.
+resolve_aotriton_for_pt_only() {
+   local pt_short="$1"
+   case "${pt_short}" in
+      2.9)  echo "0.11.2b" ;;
+      2.8)  echo "0.10b"   ;;
+      2.7)  echo "0.9.2b"  ;;
+      2.6)  echo "0.8b"    ;;
+      2.5)  echo "0.7b"    ;;
+      2.4)  echo "0.6b"    ;;
+      2.3)  echo "0.4b"    ;;
+      *)    echo ""        ;;
+   esac
+}
+
+# ── AOTriton CMake flags keyed off AOTRITON_VERSION (not PT) ──────────
+# AOTriton's CMake API changed between releases:
+#   * 0.11.2b+: new -DAOTRITON_TARGET_ARCH/-DAOTRITON_OVERRIDE_TARGET_GPUS
+#               + -DAOTRITON_USE_TORCH=0 (skip torch as a build dep -- the
+#               aotriton SDK is what we're producing FOR torch; the cyclic
+#               dependency in the build was resolved upstream by carving
+#               out a torch-free build path).
+#   * 0.10b/0.11b: new -DAOTRITON_TARGET_ARCH/-DAOTRITON_OVERRIDE_TARGET_GPUS
+#               (no USE_TORCH yet; the build still wants torch as input).
+#   * 0.9.2b and older: legacy -DTARGET_GPUS only.
+# Keying off AOTRITON_VERSION (not PT) means the user can pass
+# --aotriton-version 0.11.2b on PT 2.7/2.8 and the right CMake API gets
+# selected, even though the canonical PT-major.minor pairing would have
+# picked an older AOTriton.
+#
+# AMDGPU_GFXMODEL and AMDGPU_GFXMODEL_MOD0 must be set in the caller's
+# scope before invoking this; same for TARGET_GPUS (used only by the
+# legacy branch).
+resolve_aotriton_extra_cmake_flags() {
+   local av="$1"
+   case "${av}" in
+      0.11.2b|0.11.3b|0.11.4b|0.12*|0.13*)
+         echo "-DAOTRITON_TARGET_ARCH=${AMDGPU_GFXMODEL} -DAOTRITON_OVERRIDE_TARGET_GPUS=${AMDGPU_GFXMODEL_MOD0} -DAOTRITON_USE_TORCH=0"
+         ;;
+      0.10b|0.10.1b|0.11b)
+         echo "-DAOTRITON_TARGET_ARCH=${AMDGPU_GFXMODEL} -DAOTRITON_OVERRIDE_TARGET_GPUS=${AMDGPU_GFXMODEL_MOD0}"
+         ;;
+      *)
+         echo "-DTARGET_GPUS=${TARGET_GPUS}"
+         ;;
+   esac
+}
+
+# ── Whole-stack resolver: walks user > manifest > PT-fallback > defaults ──
+# Inputs (globals): PYTORCH_VERSION, ROCM_VERSION, plus all
+#   <PIN>_VERSION + <PIN>_VERSION_USER_SET globals seeded near the top
+#   of this script and updated by the arg parser.
+# Outputs (globals): every <PIN>_VERSION is set to its resolved value;
+#   every <PIN>_VERSION_SOURCE is set to a human-readable attribution
+#   string (used by _print_pytorch_stack_audit_table). PT_MAJOR_MINOR,
+#   ROCM_MAJOR_MINOR, MANIFEST_CELL_KEY, MANIFEST_CELL_HIT (0|1) are
+#   also exported so the audit print can reuse them.
+# Side effect: prints the audit table to stdout via
+#   _print_pytorch_stack_audit_table.
+# Idempotent: re-running just rewrites globals to the same values.
+resolve_pytorch_stack_versions() {
+   PT_MAJOR_MINOR=$(echo "${PYTORCH_VERSION}" | cut -f1-2 -d'.')
+   ROCM_MAJOR_MINOR=$(echo "${ROCM_VERSION}" | cut -f1-2 -d'.')
+   MANIFEST_CELL_KEY="${PT_MAJOR_MINOR}|${ROCM_MAJOR_MINOR}"
+   local cell_value="${PYTORCH_STACK_MANIFEST[${MANIFEST_CELL_KEY}]:-}"
+   if [[ -n "${cell_value}" ]]; then
+      MANIFEST_CELL_HIT=1
+   else
+      MANIFEST_CELL_HIT=0
+   fi
+
+   # Parse cell into per-pin manifest_<pin> locals. Format: ";"-separated
+   # "key=value" records; an unrecognised key is a non-fatal warning so
+   # the manifest can grow new pins without breaking older sweeps that
+   # haven't been redeployed.
+   local manifest_aotriton="" manifest_torchvision="" manifest_torchaudio="" \
+         manifest_triton="" manifest_flashattention="" manifest_pillow="" \
+         manifest_sageattention="" manifest_deepspeed=""
+   if [[ ${MANIFEST_CELL_HIT} -eq 1 ]]; then
+      local _kvs _kv _k _v
+      IFS=';' read -ra _kvs <<< "${cell_value}"
+      for _kv in "${_kvs[@]}"; do
+         [[ -z "${_kv}" ]] && continue
+         if [[ "${_kv}" != *"="* ]]; then
+            echo "ERROR: corrupt PYTORCH_STACK_MANIFEST cell '${MANIFEST_CELL_KEY}' (entry '${_kv}' missing '=')" >&2
+            exit 1
+         fi
+         _k="${_kv%%=*}"
+         _v="${_kv#*=}"
+         case "${_k}" in
+            aotriton)       manifest_aotriton="${_v}"       ;;
+            torchvision)    manifest_torchvision="${_v}"    ;;
+            torchaudio)     manifest_torchaudio="${_v}"     ;;
+            triton)         manifest_triton="${_v}"         ;;
+            flashattention) manifest_flashattention="${_v}" ;;
+            pillow)         manifest_pillow="${_v}"         ;;
+            sageattention) manifest_sageattention="${_v}"   ;;
+            deepspeed)      manifest_deepspeed="${_v}"      ;;
+            *) echo "WARNING: unknown key '${_k}' in PYTORCH_STACK_MANIFEST cell '${MANIFEST_CELL_KEY}'; ignoring" ;;
+         esac
+      done
+   fi
+
+   # PYTORCH (always user-or-default; manifest never overrides what was
+   # asked for explicitly because PT version is the LOOKUP key, not a
+   # field inside the cell).
+   PYTORCH_VERSION_SOURCE="user --pytorch-version or file default"
+
+   # AOTRITON: user > manifest > PT-fallback > error.
+   if [[ "${AOTRITON_VERSION_USER_SET}" -eq 1 ]]; then
+      AOTRITON_VERSION_SOURCE="user --aotriton-version"
+   elif [[ -n "${manifest_aotriton}" ]]; then
+      AOTRITON_VERSION="${manifest_aotriton}"
+      AOTRITON_VERSION_SOURCE="manifest cell '${MANIFEST_CELL_KEY}'"
+   else
+      AOTRITON_VERSION=$(resolve_aotriton_for_pt_only "${PT_MAJOR_MINOR}")
+      if [[ -z "${AOTRITON_VERSION}" ]]; then
+         echo "ERROR: No AOTriton release known for PyTorch ${PYTORCH_VERSION} (major.minor ${PT_MAJOR_MINOR})." >&2
+         echo "       Either add a row to PYTORCH_STACK_MANIFEST for cell '${MANIFEST_CELL_KEY}'" >&2
+         echo "       (near the top of pytorch_setup.sh), or pass --aotriton-version explicitly." >&2
+         echo "       Upstream AOTriton releases: https://github.com/ROCm/aotriton/releases" >&2
+         exit 1
+      fi
+      AOTRITON_VERSION_SOURCE="PT-only fallback (resolve_aotriton_for_pt_only ${PT_MAJOR_MINOR} -> ${AOTRITON_VERSION})"
+   fi
+
+   # TORCHVISION: user > manifest > PYTORCH_COMPANION_VERSIONS > file default.
+   if [[ "${TORCHVISION_VERSION_USER_SET}" -eq 1 ]]; then
+      TORCHVISION_VERSION_SOURCE="user --torchvision-version"
+   elif [[ -n "${manifest_torchvision}" ]]; then
+      TORCHVISION_VERSION="${manifest_torchvision}"
+      TORCHVISION_VERSION_SOURCE="manifest cell '${MANIFEST_CELL_KEY}'"
+   else
+      local _row="${PYTORCH_COMPANION_VERSIONS[${PT_MAJOR_MINOR}]:-}"
+      if [[ -n "${_row}" ]]; then
+         TORCHVISION_VERSION="${_row%%:*}"
+         TORCHVISION_VERSION_SOURCE="PT-only fallback (PYTORCH_COMPANION_VERSIONS '${PT_MAJOR_MINOR}')"
+      else
+         TORCHVISION_VERSION_SOURCE="file default (no companion row for PT ${PT_MAJOR_MINOR})"
+      fi
+   fi
+
+   # TORCHAUDIO: same pattern as torchvision but reads the second
+   # colon-separated field of the companion row.
+   if [[ "${TORCHAUDIO_VERSION_USER_SET}" -eq 1 ]]; then
+      TORCHAUDIO_VERSION_SOURCE="user --torchaudio-version"
+   elif [[ -n "${manifest_torchaudio}" ]]; then
+      TORCHAUDIO_VERSION="${manifest_torchaudio}"
+      TORCHAUDIO_VERSION_SOURCE="manifest cell '${MANIFEST_CELL_KEY}'"
+   else
+      local _row2="${PYTORCH_COMPANION_VERSIONS[${PT_MAJOR_MINOR}]:-}"
+      if [[ -n "${_row2}" ]]; then
+         TORCHAUDIO_VERSION="${_row2#*:}"
+         TORCHAUDIO_VERSION_SOURCE="PT-only fallback (PYTORCH_COMPANION_VERSIONS '${PT_MAJOR_MINOR}')"
+      else
+         TORCHAUDIO_VERSION_SOURCE="file default (no companion row for PT ${PT_MAJOR_MINOR})"
+      fi
+   fi
+
+   # TRITON / FLASHATTENTION / PILLOW / SAGEATTENTION / DEEPSPEED: user
+   # > manifest > file default (no PT-only fallback table for these --
+   # they're either pinned per-cell or the file default is reasonable).
+   if [[ "${TRITON_VERSION_USER_SET}" -eq 1 ]]; then
+      TRITON_VERSION_SOURCE="user --triton-version"
+   elif [[ -n "${manifest_triton}" ]]; then
+      TRITON_VERSION="${manifest_triton}"
+      TRITON_VERSION_SOURCE="manifest cell '${MANIFEST_CELL_KEY}'"
+   else
+      TRITON_VERSION_SOURCE="file default"
+   fi
+
+   if [[ "${FLASHATTENTION_VERSION_USER_SET}" -eq 1 ]]; then
+      FLASHATTENTION_VERSION_SOURCE="user --flashattention-version"
+   elif [[ -n "${manifest_flashattention}" ]]; then
+      FLASHATTENTION_VERSION="${manifest_flashattention}"
+      FLASHATTENTION_VERSION_SOURCE="manifest cell '${MANIFEST_CELL_KEY}'"
+   else
+      FLASHATTENTION_VERSION_SOURCE="file default"
+   fi
+
+   if [[ "${PILLOW_VERSION_USER_SET}" -eq 1 ]]; then
+      PILLOW_VERSION_SOURCE="user --pillow-version"
+   elif [[ -n "${manifest_pillow}" ]]; then
+      PILLOW_VERSION="${manifest_pillow}"
+      PILLOW_VERSION_SOURCE="manifest cell '${MANIFEST_CELL_KEY}'"
+   else
+      PILLOW_VERSION_SOURCE="file default"
+   fi
+
+   if [[ "${SAGEATTENTION_VERSION_USER_SET}" -eq 1 ]]; then
+      SAGEATTENTION_VERSION_SOURCE="user --sageattention-version"
+   elif [[ -n "${manifest_sageattention}" ]]; then
+      SAGEATTENTION_VERSION="${manifest_sageattention}"
+      SAGEATTENTION_VERSION_SOURCE="manifest cell '${MANIFEST_CELL_KEY}'"
+   else
+      SAGEATTENTION_VERSION_SOURCE="file default"
+   fi
+
+   if [[ "${DEEPSPEED_VERSION_USER_SET}" -eq 1 ]]; then
+      DEEPSPEED_VERSION_SOURCE="user --deepspeed-version"
+   elif [[ -n "${manifest_deepspeed}" ]]; then
+      DEEPSPEED_VERSION="${manifest_deepspeed}"
+      DEEPSPEED_VERSION_SOURCE="manifest cell '${MANIFEST_CELL_KEY}'"
+   else
+      DEEPSPEED_VERSION_SOURCE="file default"
+   fi
+
+   _print_pytorch_stack_audit_table
+}
+
+# ── Audit table: source attribution per pin (FACT/INFERENCE discipline) ──
+# Printed once by resolve_pytorch_stack_versions. Format mirrors the
+# Installation Configuration Summary used in main_setup.sh -- 80-col
+# rule, two columns "name value [source]".
+_print_pytorch_stack_audit_table() {
+   local cell_status
+   if [[ ${MANIFEST_CELL_HIT} -eq 1 ]]; then
+      cell_status="HIT"
+   else
+      cell_status="MISSING -> PT-only fallback for AOTriton + companions"
+   fi
+   echo
+   echo "======================================================"
+   echo "  Resolved PyTorch stack versions"
+   echo "    PyTorch:        ${PYTORCH_VERSION} (major.minor ${PT_MAJOR_MINOR})"
+   echo "    ROCm:           ${ROCM_VERSION} (major.minor ${ROCM_MAJOR_MINOR})"
+   echo "    Manifest cell:  ${MANIFEST_CELL_KEY} [${cell_status}]"
+   echo "======================================================"
+   printf "  %-16s %-20s [%s]\n" "pytorch"        "${PYTORCH_VERSION}"        "${PYTORCH_VERSION_SOURCE}"
+   printf "  %-16s %-20s [%s]\n" "aotriton"       "${AOTRITON_VERSION}"       "${AOTRITON_VERSION_SOURCE}"
+   printf "  %-16s %-20s [%s]\n" "torchvision"    "${TORCHVISION_VERSION}"    "${TORCHVISION_VERSION_SOURCE}"
+   printf "  %-16s %-20s [%s]\n" "torchaudio"     "${TORCHAUDIO_VERSION}"     "${TORCHAUDIO_VERSION_SOURCE}"
+   printf "  %-16s %-20s [%s]\n" "triton"         "${TRITON_VERSION}"         "${TRITON_VERSION_SOURCE}"
+   printf "  %-16s %-20s [%s]\n" "flashattention" "${FLASHATTENTION_VERSION}" "${FLASHATTENTION_VERSION_SOURCE}"
+   printf "  %-16s %-20s [%s]\n" "pillow"         "${PILLOW_VERSION}"         "${PILLOW_VERSION_SOURCE}"
+   printf "  %-16s %-20s [%s]\n" "sageattention"  "${SAGEATTENTION_VERSION}"  "${SAGEATTENTION_VERSION_SOURCE}"
+   printf "  %-16s %-20s [%s]\n" "deepspeed"      "${DEEPSPEED_VERSION}"      "${DEEPSPEED_VERSION_SOURCE}"
+   echo "======================================================"
+   if [[ ${MANIFEST_CELL_HIT} -eq 0 ]]; then
+      echo "  WARNING: no PYTORCH_STACK_MANIFEST cell for '${MANIFEST_CELL_KEY}'."
+      echo "  Build is proceeding with leniency: AOTriton from PT-only table,"
+      echo "  companions (torchvision/torchaudio) from PYTORCH_COMPANION_VERSIONS,"
+      echo "  remainder from file defaults. Pass --aotriton-version /"
+      echo "  --triton-version / etc. to pin specific versions, or add a row"
+      echo "  to PYTORCH_STACK_MANIFEST near the top of pytorch_setup.sh once"
+      echo "  this combination is validated."
+      echo "======================================================"
+   fi
+   echo
+}
+
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/pytorch
 # Versioned install root: /opt/rocmplus-X/pytorch-v${PYTORCH_VERSION}.
 # All companion subdirs (vision, audio, triton, aotriton, transformers,
@@ -157,6 +495,28 @@ usage()
    echo "--torchaudio-version [ TORCHAUDIO_VERSION ] version of torchaudio."
    echo "    Default is auto-derived from PYTORCH_VERSION's major.minor row in PYTORCH_COMPANION_VERSIONS;"
    echo "    set this flag to pin a specific torchaudio. Pairs cleanly with --torchvision-version."
+   echo "--aotriton-version [ AOTRITON_VERSION ] AOTriton release tag (e.g. 0.10b, 0.11.2b)."
+   echo "    Default: PYTORCH_STACK_MANIFEST cell hit if (PT major.minor, ROCm major.minor) is in"
+   echo "    the manifest, else resolve_aotriton_for_pt_only() (the canonical PT->AOTriton table)."
+   echo "    Override to try a newer AOTriton on an older PyTorch (e.g. AOTriton 0.11.2b on PT 2.8"
+   echo "    if the canonical AOTriton 0.10b's bundled triton 3.2.0 fails on the host's lld)."
+   echo "--triton-version [ TRITON_VERSION ] post-build triton wheel version (default $TRITON_VERSION)."
+   echo "    This is the standalone triton installed via 'pip install triton==VER' AFTER pytorch is"
+   echo "    built, NOT the triton vendored inside aotriton (which is implicit via --aotriton-version)."
+   echo "--flashattention-version [ FLASHATTENTION_VERSION ] flash-attention release tag (default $FLASHATTENTION_VERSION)."
+   echo "--pillow-version [ PILLOW_VERSION ] Pillow version (default $PILLOW_VERSION)."
+   echo "--sageattention-version [ SAGEATTENTION_VERSION ] SageAttention version (default $SAGEATTENTION_VERSION)."
+   echo "--deepspeed-version [ DEEPSPEED_VERSION ] DeepSpeed version (default $DEEPSPEED_VERSION; 'latest' = unpinned)."
+   echo ""
+   echo "  Resolution priority for every pin above (highest first):"
+   echo "    1. user CLI flag (e.g. --aotriton-version)"
+   echo "    2. PYTORCH_STACK_MANIFEST cell '\${PT_MM}|\${ROCM_MM}' (e.g. '2.9|7.1')"
+   echo "    3. PT-only fallback (resolve_aotriton_for_pt_only / PYTORCH_COMPANION_VERSIONS)"
+   echo "    4. file-default constant near the top of this script"
+   echo "  resolve_pytorch_stack_versions runs after the arg parser and prints an audit table"
+   echo "  attributing each resolved value to its source. Off-table (PT, ROCm) combinations"
+   echo "  trigger a warning + per-pin fallback (lenient: build proceeds, user can pin via flags)."
+   echo ""
    echo "--python-version [ PYTHON_VERSION ] version of Python, default is $PYTHON_VERSION"
    echo "--install-path-no-version [ INSTALL_PATH ] directory where PyTorch, Torchaudio and Torchvision will be installed, default is $INSTALL_PATH"
    echo "--install-path [ ROCMPLUS_PATH_INPUT ] parent dir; if set (and --install-path-no-version is not), INSTALL_PATH = ROCMPLUS_PATH/pytorch-v\${PYTORCH_VERSION}"
@@ -390,6 +750,42 @@ do
           TORCHAUDIO_VERSION_USER_SET=1
           reset-last
           ;;
+      "--aotriton-version")
+          shift
+          AOTRITON_VERSION=${1}
+          AOTRITON_VERSION_USER_SET=1
+          reset-last
+          ;;
+      "--triton-version")
+          shift
+          TRITON_VERSION=${1}
+          TRITON_VERSION_USER_SET=1
+          reset-last
+          ;;
+      "--flashattention-version")
+          shift
+          FLASHATTENTION_VERSION=${1}
+          FLASHATTENTION_VERSION_USER_SET=1
+          reset-last
+          ;;
+      "--pillow-version")
+          shift
+          PILLOW_VERSION=${1}
+          PILLOW_VERSION_USER_SET=1
+          reset-last
+          ;;
+      "--sageattention-version")
+          shift
+          SAGEATTENTION_VERSION=${1}
+          SAGEATTENTION_VERSION_USER_SET=1
+          reset-last
+          ;;
+      "--deepspeed-version")
+          shift
+          DEEPSPEED_VERSION=${1}
+          DEEPSPEED_VERSION_USER_SET=1
+          reset-last
+          ;;
       "--module-path")
           shift
           MODULE_PATH=${1}
@@ -428,44 +824,19 @@ do
    shift
 done
 
-# ── Resolve torchvision / torchaudio versions from PYTORCH_VERSION ────
-# Lookup is by major.minor only (PyTorch's own release-pairing policy:
-# patch releases inherit companions, see PYTORCH_COMPANION_VERSIONS
-# comment block above). User-supplied --torchvision-version /
-# --torchaudio-version always wins; the sentinels TORCHVISION_VERSION_-
-# USER_SET / TORCHAUDIO_VERSION_USER_SET are flipped to 1 in the parser
-# above whenever the operator passed those flags.
+# ── Resolve every version pin in the PyTorch stack ────────────────────
+# resolve_pytorch_stack_versions walks (highest priority first):
+#   1. user CLI flag (e.g. --aotriton-version)         <PIN>_VERSION_USER_SET=1
+#   2. manifest cell PYTORCH_STACK_MANIFEST[PT_MM|ROCm_MM]
+#   3. PT-only fallback (resolve_aotriton_for_pt_only / PYTORCH_COMPANION_VERSIONS)
+#   4. file-default constant near the top of this script
+# and prints an audit table that attributes each pin to its source.
 #
 # Argument-order independence: this block runs AFTER the parser loop, so
-# a caller can pass flags in either order and both
-#   --pytorch-version 2.10.0 --torchvision-version 0.99.0
-#   --torchvision-version 0.99.0 --pytorch-version 2.10.0
-# yield the same final state (torchvision pinned to 0.99.0, torchaudio
-# auto-derived to 2.10.0 from the table).
-_PYVER_SHORT=$(echo "${PYTORCH_VERSION}" | cut -f1-2 -d'.')
-_PYTORCH_COMPANION_ROW="${PYTORCH_COMPANION_VERSIONS[${_PYVER_SHORT}]:-}"
-if [ -n "${_PYTORCH_COMPANION_ROW}" ]; then
-   _DERIVED_TV="${_PYTORCH_COMPANION_ROW%%:*}"
-   _DERIVED_TA="${_PYTORCH_COMPANION_ROW#*:}"
-   echo "PyTorch ${PYTORCH_VERSION} -> major.minor ${_PYVER_SHORT} matches PYTORCH_COMPANION_VERSIONS row: torchvision=${_DERIVED_TV}, torchaudio=${_DERIVED_TA}"
-   if [ "${TORCHVISION_VERSION_USER_SET}" -eq 0 ]; then
-      TORCHVISION_VERSION="${_DERIVED_TV}"
-   else
-      echo "  --torchvision-version override active: keeping TORCHVISION_VERSION=${TORCHVISION_VERSION} (table row would have been ${_DERIVED_TV})"
-   fi
-   if [ "${TORCHAUDIO_VERSION_USER_SET}" -eq 0 ]; then
-      TORCHAUDIO_VERSION="${_DERIVED_TA}"
-   else
-      echo "  --torchaudio-version override active: keeping TORCHAUDIO_VERSION=${TORCHAUDIO_VERSION} (table row would have been ${_DERIVED_TA})"
-   fi
-else
-   echo "WARNING: PYTORCH_VERSION=${PYTORCH_VERSION} (major.minor ${_PYVER_SHORT}) has no row in PYTORCH_COMPANION_VERSIONS;"
-   echo "         using TORCHVISION_VERSION=${TORCHVISION_VERSION}, TORCHAUDIO_VERSION=${TORCHAUDIO_VERSION}"
-   echo "         (script defaults or explicit --torchvision-version/--torchaudio-version overrides)."
-   echo "         To make the auto-derivation work, add a major.minor row to PYTORCH_COMPANION_VERSIONS"
-   echo "         near the top of pytorch_setup.sh."
-fi
-unset _PYVER_SHORT _PYTORCH_COMPANION_ROW _DERIVED_TV _DERIVED_TA
+# any combination of --pytorch-version / --rocm-version / --aotriton-version /
+# --torchvision-version / etc. resolves to the same final state regardless
+# of CLI ordering.
+resolve_pytorch_stack_versions
 
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
@@ -711,7 +1082,6 @@ else
       exit 1
    fi
   
-   AOTRITON_EXTRA_CMAKE_FLAGS="-DTARGET_GPUS=${TARGET_GPUS}"
    # aotriton's gpu_targets.py requires the `_mod0` suffix on EVERY entry
    # in --target_gpus (e.g. gfx942_mod0;gfx90a_mod0). The previous
    # `${AMDGPU_GFXMODEL}_mod0` only appended the suffix to the last
@@ -721,39 +1091,17 @@ else
    # log_pytorch_05_01_2026.txt). The sed expression below rewrites
    # each ;-separated arch token to <token>_mod0.
    AMDGPU_GFXMODEL_MOD0=$(echo "${AMDGPU_GFXMODEL}" | sed -e 's/[^;][^;]*/&_mod0/g')
-   PYTORCH_SHORT_VERSION=`echo ${PYTORCH_VERSION} | cut -f1-2 -d'.'`
-   if [ "${PYTORCH_SHORT_VERSION}" == "2.9" ]; then
-      # Was 0.11b. Bumped to 0.11.2b (2026-01-28) because 0.11b's
-      # v3python/ld_script.py emits an `INSERT AFTER .comment;` directive
-      # on a SECTIONS block that itself contains a `.comment` rule, which
-      # is rejected by ROCm 7.2.1's bundled lld 22.0.0:
-      #   ld.lld: error: unable to insert .comment after .comment
-      # (verify: log_pytorch_05_02_2026.txt:4631 in
-      # logs_05_02_2026/rocm-7.2.1_8014/). Upstream 0.11.2b replaces the
-      # linker-script trick with v3python/comment_only_asm, an .s source
-      # compiled into the SO -- bypasses the lld self-reference check
-      # entirely. Same beta line, gfx1151/1152/1153 also enabled,
-      # explicit precompiled runtime for ROCm 7.2 included.
-      AOTRITON_VERSION="0.11.2b"
-      AOTRITON_EXTRA_CMAKE_FLAGS="-DAOTRITON_TARGET_ARCH=${AMDGPU_GFXMODEL} -DAOTRITON_OVERRIDE_TARGET_GPUS=${AMDGPU_GFXMODEL_MOD0} -DAOTRITON_USE_TORCH=0"
-   elif [ "${PYTORCH_SHORT_VERSION}" == "2.8" ]; then
-      AOTRITON_VERSION="0.10b"
-      AOTRITON_EXTRA_CMAKE_FLAGS="-DAOTRITON_TARGET_ARCH=${AMDGPU_GFXMODEL} -DAOTRITON_OVERRIDE_TARGET_GPUS=${AMDGPU_GFXMODEL_MOD0}"
-   elif [ "${PYTORCH_SHORT_VERSION}" == "2.7" ]; then
-      AOTRITON_VERSION="0.9.2b"
-   elif [ "${PYTORCH_SHORT_VERSION}" == "2.6" ]; then
-      AOTRITON_VERSION="0.8b"
-   elif [ "${PYTORCH_SHORT_VERSION}" == "2.5" ]; then
-      AOTRITON_VERSION="0.7b"
-   elif [ "${PYTORCH_SHORT_VERSION}" == "2.4" ]; then
-      AOTRITON_VERSION="0.6b"
-   elif [ "${PYTORCH_SHORT_VERSION}" == "2.3" ]; then
-      AOTRITON_VERSION="0.4b"
-   else
-      echo " No AOTriton support for requested PyTorch version: https://github.com/ROCm/aotriton "
-      echo " Build aborted, please select a PyTorch version >= 2.3 "
-      exit 1
-   fi
+
+   # AOTRITON_VERSION was already resolved by resolve_pytorch_stack_versions
+   # (user CLI > manifest cell > resolve_aotriton_for_pt_only fallback).
+   # Compute AOTRITON_EXTRA_CMAKE_FLAGS keyed off the resolved AOTriton
+   # release so the right CMake API surface is selected (see comments on
+   # resolve_aotriton_extra_cmake_flags). Historical AOTriton<->PT 2.9
+   # bump rationale (0.11b -> 0.11.2b for the lld INSERT-AFTER-.comment
+   # bug on rocm-7.2.1, audit log_pytorch_05_02_2026.txt:4631 in
+   # logs_05_02_2026/rocm-7.2.1_8014/) is preserved by the manifest
+   # cells "2.9|7.0|7.1|7.2" pinning aotriton=0.11.2b.
+   AOTRITON_EXTRA_CMAKE_FLAGS=$(resolve_aotriton_extra_cmake_flags "${AOTRITON_VERSION}")
 
    echo ""
    echo "======================================"
@@ -878,10 +1226,13 @@ else
          ROCM_VERSION_WHEEL=`echo ${ROCM_VERSION} | cut -f1-2 -d'.'`
       fi
 
-      if [[ "${ROCM_VERSION}" == "6.4.2" || "${ROCM_VERSION}" == "6.4.3" ]]; then
-         TRITON_VERSION=3.2.0
-      fi
-
+      # TRITON_VERSION was resolved by resolve_pytorch_stack_versions
+      # (manifest cells "2.X|6.4" pin triton=3.2.0 because the rocm-rel-6.4
+      # wheel index only ships 3.2.0; "2.9|7.x" pins triton=3.4.0). The
+      # historical ROCm 6.4.2/6.4.3 conditional that hard-coded 3.2.0 is
+      # subsumed by those manifest rows. For off-table combos the
+      # resolver warns + falls through to the file default; the user can
+      # pin via --triton-version.
       if [ "$(printf '%s\n' "$ROCM_VERSION" "7.0" | sort -V | head -n1)" = "$ROCM_VERSION" ]; then
         TRITON_WHEEL_NAME="pytorch_triton_rocm"
       fi
@@ -1902,10 +2253,8 @@ print('  torch.cuda.is_available() =', torch.cuda.is_available())
          ROCM_VERSION_WHEEL=`echo ${ROCM_VERSION} | cut -f1-2 -d'.'`
       fi
 
-      if [[ "${ROCM_VERSION}" == "6.4.2" || "${ROCM_VERSION}" == "6.4.3" ]]; then
-         TRITON_VERSION=3.2.0
-      fi
-
+      # TRITON_VERSION was resolved by resolve_pytorch_stack_versions
+      # (see comment in the source-build branch above; same rationale).
       if [ "$(printf '%s\n' "$ROCM_VERSION" "7.0" | sort -V | head -n1)" = "$ROCM_VERSION" ]; then
         TRITON_WHEEL_NAME="pytorch_triton_rocm"
       fi

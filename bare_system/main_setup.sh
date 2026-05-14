@@ -168,7 +168,7 @@ usage()
    echo "  --quick-installs [0 or 1]:  skip packages whose wall >= 20 min (measured from job 8065 sweep): pytorch (91m), tensorflow (70m), jax (34m, when policy gate allows). Also skips ftorch (transitive: needs pytorch) and julia (dormant: no install wired). Threshold raised from 15 -> 20 min after job 8065 audit moved petsc (17m) and scorep (17m) under the cutoff. Default $QUICK_INSTALLS"
    echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf the versioned subdir under \${TOP_INSTALL_PATH} (the version itself lives in the leaf script). Default $REPLACE_EXISTING"
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
-   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, likwid, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, hpctoolkit, likwid, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hdf5, fftw, petsc, hypre. Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version."
+   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, likwid, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, hpctoolkit, likwid, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hdf5, fftw, petsc, hypre. Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Currently supported only for pytorch; keys are aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build."
    echo "  --rocm-rc-prefix [ FAMILY ]:  release-candidate family name (e.g. 'therock', 'afar'). Auto-detected from \${ROCM_PATH} basename for rocm-{therock,afar}-* trees. Empty for regular releases. When non-empty, install/module dirs become rocmplus-\${FAMILY}-\${ROCM_VERSION}/ instead of rocmplus-\${ROCM_VERSION}/. Default: auto-detected (empty for regular releases)."
    echo "  --help: prints this message"
    exit 1
@@ -548,29 +548,98 @@ declare -A PKG_VER_FLAG=(
 # invoking the leaf script once per version.
 declare -A PKG_VERSIONS_REQ=()
 
+# Per-(name, version) inline overrides supplied via the extended
+# --packages token syntax: name=version[:override_key=override_value...].
+# Key:   "${pkg}|${ver}" (the same shape as PYTORCH_STACK_MANIFEST
+#        cells in pytorch_setup.sh, intentional). For a bare-named token
+#        with no =version, the key is "${pkg}|" (empty version segment).
+# Value: newline-separated "--flag-name=value" records. Each record is
+#        the leaf-script flag (resolved by get_override_flag below) and
+#        the user-supplied value. run_and_log_versioned splits each
+#        record on the FIRST '=' and appends the two halves as separate
+#        argv elements to the leaf-script invocation, so values that
+#        themselves contain '=' (rare but valid for some package
+#        version strings) are preserved.
+# Empty for tokens without a ':override' suffix (run_and_log_versioned
+# treats "key unset" as "no overrides", same code path as today).
+declare -A PKG_VERSION_OVERRIDES=()
+
+# ── Override-key dispatch: maps short/long alias -> leaf-script flag ──
+# Only pytorch has a rich override surface today (aotriton, torchvision,
+# torchaudio, triton, flashattention, pillow, sageattention, deepspeed,
+# plus their short aliases tv/ta/flash/sage/ds). Other versioned
+# packages reject any override-key token at parse time: extending them
+# means adding a case branch here AND adding the matching --<key>-version
+# flag in their leaf script.
+#
+# Returns 0 + prints the resolved leaf-script flag on stdout for known
+# (pkg, key) pairs; returns 1 (no stdout) for unknown ones. Callers
+# capture both:
+#   if _flag=$(get_override_flag "${name}" "${k}"); then ... ; fi
+get_override_flag() {
+   local pkg="$1" key="$2"
+   local flag=""
+   case "${pkg}" in
+      pytorch)
+         case "${key}" in
+            aotriton)             flag="--aotriton-version" ;;
+            torchvision|tv)       flag="--torchvision-version" ;;
+            torchaudio|ta)        flag="--torchaudio-version" ;;
+            triton)               flag="--triton-version" ;;
+            flashattention|flash) flag="--flashattention-version" ;;
+            pillow)               flag="--pillow-version" ;;
+            sageattention|sage)   flag="--sageattention-version" ;;
+            deepspeed|ds)         flag="--deepspeed-version" ;;
+         esac
+         ;;
+   esac
+   if [[ -z "${flag}" ]]; then
+      return 1
+   fi
+   echo "${flag}"
+   return 0
+}
+
 PACKAGES_NORM="${PACKAGES_INPUT//,/ }"
 read -r -a PACKAGES_ARR <<< "${PACKAGES_NORM}"
 
 if (( ${#PACKAGES_ARR[@]} > 0 )); then
-   # Two-phase validation:
-   #   1. Split each token at the first '=' into (name, version). Strip
-   #      a leading 'v' from version (cupy=v13.0.1 and cupy=13.0.1 are
+   # Three-phase validation:
+   #   1. Split each token on the first ':' into (pre, override_str).
+   #      pre is the existing "name[=VERSION]" form; override_str is a
+   #      ':'-separated list of "key=value" pairs (e.g.
+   #      "pytorch=2.8.0:flash=2.7.4:tv=0.22.1"). ':' is safe as a
+   #      separator because PEP 440 / semver versions and PKG_FLAG
+   #      package names never contain ':'.
+   #   2. Split pre at the first '=' into (name, version). Strip a
+   #      leading 'v' from version (cupy=v13.0.1 and cupy=13.0.1 are
    #      equivalent; v prefix is the user-facing "release tag" form,
    #      bare semver is what the leaf scripts pass downstream).
-   #   2. Reject any name not in PKG_FLAG, AND any versioned token whose
-   #      name is not in PKG_VER_FLAG. Both kinds are reported together
-   #      so a single failed run lists every problem.
+   #   3. Reject any name not in PKG_FLAG, any versioned token whose
+   #      name is not in PKG_VER_FLAG, and any override key that
+   #      get_override_flag doesn't recognize for that package. All
+   #      three error kinds are reported together so a single failed
+   #      run lists every problem.
    UNKNOWN_PKGS=()
    VER_UNSUPPORTED=()
+   UNKNOWN_OVERRIDES=()
    declare -a PARSED_NAMES=()
    declare -a PARSED_VERSIONS=()
+   declare -a PARSED_OVERRIDES=()
    for p in "${PACKAGES_ARR[@]}"; do
-      if [[ "${p}" == *=* ]]; then
-         _name="${p%%=*}"
-         _ver="${p#*=}"
-         _ver="${_ver#v}"   # strip optional leading 'v'
+      if [[ "${p}" == *:* ]]; then
+         _pre="${p%%:*}"
+         _override_str="${p#*:}"
       else
-         _name="${p}"
+         _pre="${p}"
+         _override_str=""
+      fi
+      if [[ "${_pre}" == *=* ]]; then
+         _name="${_pre%%=*}"
+         _ver="${_pre#*=}"
+         _ver="${_ver#v}"
+      else
+         _name="${_pre}"
          _ver=""
       fi
       if [[ -z "${PKG_FLAG[${_name}]:-}" ]]; then
@@ -581,10 +650,34 @@ if (( ${#PACKAGES_ARR[@]} > 0 )); then
          VER_UNSUPPORTED+=("${p}")
          continue
       fi
+      _override_records=""
+      if [[ -n "${_override_str}" ]]; then
+         declare -a _override_chunks=()
+         IFS=':' read -ra _override_chunks <<< "${_override_str}"
+         for _chunk in "${_override_chunks[@]}"; do
+            [[ -z "${_chunk}" ]] && continue
+            if [[ "${_chunk}" != *=* ]]; then
+               UNKNOWN_OVERRIDES+=("${p}: '${_chunk}' (missing '=')")
+               continue
+            fi
+            _ok="${_chunk%%=*}"
+            _ov="${_chunk#*=}"
+            if _resolved_flag=$(get_override_flag "${_name}" "${_ok}"); then
+               if [[ -z "${_override_records}" ]]; then
+                  _override_records="${_resolved_flag}=${_ov}"
+               else
+                  _override_records+=$'\n'"${_resolved_flag}=${_ov}"
+               fi
+            else
+               UNKNOWN_OVERRIDES+=("${p}: unknown override key '${_ok}' for package '${_name}'")
+            fi
+         done
+      fi
       PARSED_NAMES+=("${_name}")
       PARSED_VERSIONS+=("${_ver}")
+      PARSED_OVERRIDES+=("${_override_records}")
    done
-   if (( ${#UNKNOWN_PKGS[@]} > 0 )) || (( ${#VER_UNSUPPORTED[@]} > 0 )); then
+   if (( ${#UNKNOWN_PKGS[@]} > 0 )) || (( ${#VER_UNSUPPORTED[@]} > 0 )) || (( ${#UNKNOWN_OVERRIDES[@]} > 0 )); then
       if (( ${#UNKNOWN_PKGS[@]} > 0 )); then
          echo "ERROR: --packages contains unknown name(s): ${UNKNOWN_PKGS[*]}" >&2
          echo "       Recognized names: ${!PKG_FLAG[*]}" >&2
@@ -593,6 +686,16 @@ if (( ${#PACKAGES_ARR[@]} > 0 )); then
          echo "ERROR: --packages contains name=VERSION token(s) for packages whose leaf script has no single --<name>-version flag:" >&2
          echo "       ${VER_UNSUPPORTED[*]}" >&2
          echo "       Versioned syntax is supported for: ${!PKG_VER_FLAG[*]}" >&2
+      fi
+      if (( ${#UNKNOWN_OVERRIDES[@]} > 0 )); then
+         echo "ERROR: --packages contains unknown override key(s):" >&2
+         for _err in "${UNKNOWN_OVERRIDES[@]}"; do
+            echo "       ${_err}" >&2
+         done
+         echo "       Override keys are recognized only for: pytorch" >&2
+         echo "       Pytorch keys: aotriton, torchvision (alias tv), torchaudio (alias ta)," >&2
+         echo "                     triton, flashattention (alias flash), pillow," >&2
+         echo "                     sageattention (alias sage), deepspeed (alias ds)" >&2
       fi
       exit 1
    fi
@@ -611,18 +714,31 @@ if (( ${#PACKAGES_ARR[@]} > 0 )); then
       DESELECTED_BY[${p}]="not-requested"
    done
    # Then enable the requested ones (overrides --quick-installs). The
-   # PARSED_NAMES / PARSED_VERSIONS arrays are aligned (same length, same
-   # order) so a single index walks both. Repeated names accumulate into
-   # PKG_VERSIONS_REQ as a space-separated list (with dedup), which the
-   # run_and_log_versioned helper later consumes one entry at a time.
+   # PARSED_NAMES / PARSED_VERSIONS / PARSED_OVERRIDES arrays are aligned
+   # (same length, same order) so a single index walks all three.
+   # Repeated names accumulate into PKG_VERSIONS_REQ as a newline-
+   # separated list (with dedup); inline overrides land in
+   # PKG_VERSION_OVERRIDES keyed on "${name}|${ver}" so the same name
+   # can carry different overrides for different versions.
    for ((_i = 0; _i < ${#PARSED_NAMES[@]}; _i++)); do
       _name="${PARSED_NAMES[${_i}]}"
       _ver="${PARSED_VERSIONS[${_i}]}"
+      _ovr="${PARSED_OVERRIDES[${_i}]}"
       flag="${PKG_FLAG[${_name}]}"
       if [[ -n "${_ver}" ]]; then
-         printf "  %-18s -> %s=1 (version %s)\n" "${_name}" "${flag}" "${_ver}"
+         if [[ -n "${_ovr}" ]]; then
+            _ovr_count=$(printf '%s\n' "${_ovr}" | grep -c '^--')
+            printf "  %-18s -> %s=1 (version %s, %d override(s))\n" "${_name}" "${flag}" "${_ver}" "${_ovr_count}"
+         else
+            printf "  %-18s -> %s=1 (version %s)\n" "${_name}" "${flag}" "${_ver}"
+         fi
       else
-         printf "  %-18s -> %s=1 (leaf default)\n" "${_name}" "${flag}"
+         if [[ -n "${_ovr}" ]]; then
+            _ovr_count=$(printf '%s\n' "${_ovr}" | grep -c '^--')
+            printf "  %-18s -> %s=1 (leaf default version, %d override(s))\n" "${_name}" "${flag}" "${_ovr_count}"
+         else
+            printf "  %-18s -> %s=1 (leaf default)\n" "${_name}" "${flag}"
+         fi
       fi
       eval "${flag}=1"
       # Clear the deselection marker for whitelisted packages so they
@@ -651,8 +767,15 @@ if (( ${#PACKAGES_ARR[@]} > 0 )); then
             PKG_VERSIONS_REQ[${_name}]+=$'\n'"${_ver}"
          fi
       fi
+      # Stash overrides keyed on (name,version). If the same (name,
+      # version) appears more than once with different override sets
+      # (e.g. user typo), the LAST occurrence wins -- consistent with
+      # CLI argument-list semantics where last write wins.
+      if [[ -n "${_ovr}" ]]; then
+         PKG_VERSION_OVERRIDES["${_name}|${_ver}"]="${_ovr}"
+      fi
    done
-   unset _i _name _ver _existing _dup
+   unset _i _name _ver _ovr _ovr_count _existing _dup
    # Sibling-name propagation: a few user-facing names spawn more than
    # one run_and_log entry (e.g. `ftorch` builds both `ftorch` and
    # `ftorch_amdflang` when FTORCH_FC_COMPILER=both). Mirror the
@@ -880,11 +1003,29 @@ run_and_log_versioned() {
       # versioned tokens for the same name coexist in the loop.
       mapfile -t versions <<< "${PKG_VERSIONS_REQ[${pkg_name}]}"
    fi
-   local v label
+   local v label override_records
+   local -a override_args
    for v in "${versions[@]}"; do
+      # Look up inline overrides supplied via --packages
+      # name=version:override_key=override_value... The key shape
+      # ("${pkg_name}|${v}") matches PYTORCH_STACK_MANIFEST cells in
+      # pytorch_setup.sh. Each record is "--flag-name=value"; split on
+      # the FIRST '=' so values that themselves contain '=' (rare but
+      # possible) are preserved as a single argv element.
+      override_args=()
+      override_records="${PKG_VERSION_OVERRIDES["${pkg_name}|${v}"]:-}"
+      if [[ -n "${override_records}" ]]; then
+         local _rec _of _ov
+         while IFS= read -r _rec; do
+            [[ -z "${_rec}" ]] && continue
+            _of="${_rec%%=*}"
+            _ov="${_rec#*=}"
+            override_args+=("${_of}" "${_ov}")
+         done <<< "${override_records}"
+      fi
       if [[ -z "${v}" ]]; then
          label="${pkg_name}"
-         run_and_log "${label}" "${leaf_script}" "$@"
+         run_and_log "${label}" "${leaf_script}" "$@" "${override_args[@]}"
       else
          label="${pkg_name}_v${v}"
          # Mirror the deselection marker so run_and_log's NOOP branch
@@ -892,7 +1033,7 @@ run_and_log_versioned() {
          if [[ -n "${DESELECTED_BY[${pkg_name}]:-}" ]]; then
             DESELECTED_BY[${label}]="${DESELECTED_BY[${pkg_name}]}"
          fi
-         run_and_log "${label}" "${leaf_script}" "$@" "${ver_flag}" "${v}"
+         run_and_log "${label}" "${leaf_script}" "$@" "${ver_flag}" "${v}" "${override_args[@]}"
       fi
    done
 }
