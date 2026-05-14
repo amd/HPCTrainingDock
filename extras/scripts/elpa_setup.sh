@@ -362,6 +362,40 @@ else
    cd elpa
    git reset --hard ${ELPA_GIT_COMMIT}
 
+   # ── ELPA alignment patch: tridiag_gpu.h memcpy through char* ─────
+   # Upstream commit 81fb8d0c replaced "*xf_host_or_dev" with std::memcpy
+   # to fix a Fortran<->C++ alignment mismatch for complex datatype
+   # pointers, but the parameter is typed T* with alignof(T) == 16
+   # (HIP_vector_type<double,2u>) so Clang/hipcc folds the memcpy back
+   # into a 16-byte aligned MOVAPS pair. The Fortran caller, on the
+   # useCCL=.false. branch (>1 rank/GPU), passes loc(xf) where xf is a
+   # COMPLEX(real64) scalar -- only 8-byte aligned per the Fortran ABI
+   # -- and the load SIGSEGVs. Laundering the source through char*
+   # forces movups (unaligned), which is correct on x86_64 and the
+   # only thing the kernel actually needs since the value is then
+   # passed by value into the GPU kernel.
+   #
+   # Three call sites in src/elpa1/GPU/tridiag_gpu.h:
+   #   gpu_set_e_vec_scale_set_one_store_v_row -> xf_host_or_dev
+   #   gpu_store_u_v_in_uv_vu                  -> vav_host_or_dev, tau_host_or_dev
+   #
+   # If ELPA_GIT_COMMIT is bumped past the upstream fix for this issue,
+   # this patch will fail to apply (no matching lines) and the verify
+   # block below will exit 1 -- re-validate against the new commit.
+   sed -i \
+      -e 's|std::memcpy(&xf_host_value, xf_host_or_dev, sizeof(T));|std::memcpy(\&xf_host_value, reinterpret_cast<const char*>(xf_host_or_dev), sizeof(T));|' \
+      -e 's|std::memcpy(&vav_host_value, vav_host_or_dev, sizeof(T));|std::memcpy(\&vav_host_value, reinterpret_cast<const char*>(vav_host_or_dev), sizeof(T));|' \
+      -e 's|std::memcpy(&tau_host_value, tau_host_or_dev, sizeof(T));|std::memcpy(\&tau_host_value, reinterpret_cast<const char*>(tau_host_or_dev), sizeof(T));|' \
+      src/elpa1/GPU/tridiag_gpu.h
+
+   _n=$(grep -c 'reinterpret_cast<const char\*>' src/elpa1/GPU/tridiag_gpu.h)
+   if [ "${_n}" != "3" ]; then
+      echo "ERROR: ELPA alignment patch did not apply (got ${_n} hits in tridiag_gpu.h, expected 3)"
+      echo "       The file may have changed at ${ELPA_GIT_COMMIT}; re-validate the patch."
+      exit 1
+   fi
+   unset _n
+
    ./autogen.sh
    mkdir build && cd build
 
