@@ -2249,64 +2249,153 @@ else
             ;;
       esac
 
-      # ── Root-cause patch: C10_WARP_SIZE on ROCm 7.x  (Failure D) ──
-      # The block_reduce.cuh patch above narrowly fixes ONE constexpr
-      # use of C10_WARP_SIZE, but the underlying problem is broader:
-      # on ROCm 7.x the bare token `warpSize` (defined as a struct
-      # with operator int() that calls __builtin_amdgcn_wavefrontsize)
-      # is illegal in ANY host translation-unit context, because
-      # clang -- when it hits the host pass -- cannot lower the
-      # amdgcn builtin and emits:
-      #   error: cannot compile this builtin function yet
-      #   note: 'warpSize' definition is here
-      # First observed in slurm 9422 PT 2.7.1 (rocm-7.2.3), failing
-      # three .hip sources simultaneously:
-      #   Embedding.hip           (via cub.cuh -> hipcub::DeviceSelect)
-      #   Normalization.hip       (via thrust/HIPLoops -> reduce)
-      #   MultinomialKernel.hip   (via thrust::transform)
-      # Each one expanded C10_WARP_SIZE (= warpSize) inside an
-      # at::cuda::cub::* template instantiation whose body referenced
-      # warpSize. The narrow block_reduce.cuh patch does not help here.
+      # ── Root-cause patch: warpSize / C10_WARP_SIZE on ROCm 7.x ──
+      # (covers Failure D, E, and F, all observed across the 2026-05-13
+      #  to 2026-05-15 sweeps; see audit_2026_05_15.md for the matrix)
       #
-      # PT 2.9+ replaced `#define C10_WARP_SIZE warpSize` with a real
-      # runtime helper (`at::cuda::warp_size()` etc.) so the bug is
-      # absent there. For PT 2.7 / 2.8 we redefine C10_WARP_SIZE to
-      # the clang preprocessor constant __AMDGCN_WAVEFRONT_SIZE, which:
-      #   * is a true compile-time integer literal (64 for gfx9, 32 for
-      #     gfx10/11/12), set by clang's --offload-arch driver flag --
-      #     so EVERY downstream constexpr/template/array-bound use of
-      #     C10_WARP_SIZE becomes a valid constant expression;
-      #   * stays correct on both device AND host passes (clang sets
-      #     __AMDGCN_WAVEFRONT_SIZE in the host pass too because the
-      #     value is per-translation-unit, not per-pass);
-      #   * is what `static constexpr int warpSize = __AMDGCN_WAVEFRONT_SIZE;`
-      #     on ROCm 6.x's amd_warp_functions.h:#else branch already does;
-      #   * matches the original comment on the C10_WARP_SIZE line
-      #     ("= 64 or 32 (Defined in hip_runtime.h)").
-      # We patch c10/macros/Macros.h once, and the change propagates to
-      # every .cpp/.hip/.cuh/.h transitively-including this header.
-      # The block_reduce.cuh patch above is now belt-and-suspenders
-      # (it converts the symbol to `static const` so the value is
-      # captured at runtime even if some future PT version reverts
-      # the C10_WARP_SIZE macro to `warpSize`).
+      # Background. PT 2.7 / 2.8 sources reference the wavefront size in
+      # three distinct ways:
+      #   (a) `warpSize`                          (host-illegal builtin)
+      #   (b) `C10_WARP_SIZE`  (= warpSize macro) (host-illegal, same)
+      #   (c) `__AMDGCN_WAVEFRONT_SIZE`           (clang-defined int macro)
+      # And ROCm has THREE distinct compiler regimes:
+      #   ROCm 6.x      : both (a) and (c) work; (c) is a constexpr-int
+      #                   macro set by --offload-arch.
+      #   ROCm 7.0/7.1  : (a) host-illegal (Failure D); (c) declared but
+      #                   no longer constexpr-evaluable in CK template
+      #                   contexts (Failure E in third_party/CK headers).
+      #   ROCm 7.2.x    : (a) host-illegal; (c) UNDECLARED in the host
+      #                   compile pass (Failure F in DepthwiseConv3d.hip
+      #                   when reached via the C10_WARP_SIZE redirect).
+      # PT 2.9+ replaced `#define C10_WARP_SIZE warpSize` with a runtime
+      # helper (`at::cuda::warp_size()` etc.) so all of D/E/F are gone
+      # there; this patch is gated to PT major.minor in {2.7, 2.8}.
       #
-      # The grep guard is conservative: PT 2.6 has the same macro,
-      # but we only gate on 2.7|2.8 because those are the only PTs
-      # we currently sweep that suffer from this on ROCm 7.x.
+      # Why a literal `64` and not __AMDGCN_WAVEFRONT_SIZE.
+      # The 2026-05-14 staging swap (Fix 3 v1) redirected
+      #   #define C10_WARP_SIZE  warpSize    ->    __AMDGCN_WAVEFRONT_SIZE
+      # which fixed Failure D on rocm-7.0/7.1 but UNMASKED Failure F on
+      # rocm-7.2.x (DepthwiseConv3d.hip line 221: 'use of undeclared
+      # identifier __AMDGCN_WAVEFRONT_SIZE') and did nothing for the
+      # CK-third_party Failure E on either rocm-7.0 or rocm-7.1. Both
+      # symbols (warpSize, __AMDGCN_WAVEFRONT_SIZE) are moving targets
+      # across rocm-7 minors. The literal `64` is stable across all
+      # three regimes and yields a valid constant expression in EVERY
+      # constexpr/template/array-bound use site.
+      #
+      # Why this is safe.
+      # We sweep gfx942;gfx90a only, both gfx9 (wavefront size 64).
+      # Clang's --offload-arch=gfx9* already implies __AMDGCN_WAVEFRONT_SIZE=64
+      # so this substitution does NOT change runtime semantics for any
+      # supported target. If the sweep ever extends to gfx10/11/12
+      # (wavefront 32), gate this block on AMDGPU_GFXMODEL containing
+      # only gfx9, or compute the literal from AMDGPU_GFXMODEL at patch
+      # time. The block_reduce.cuh `constexpr -> static const` patch
+      # above remains belt-and-suspenders for the same reason.
+      #
+      # Two patch sites:
+      #   (1) c10/macros/Macros.h         -- redirect C10_WARP_SIZE -> 64
+      #                                      (closes D in PT-core sources
+      #                                       and F in DepthwiseConv3d.hip)
+      #   (2) third_party/composable_kernel/include/ck/**/*.hpp
+      #                                   -- substitute the literal 64
+      #                                      everywhere CK references
+      #                                      __AMDGCN_WAVEFRONT_SIZE
+      #                                      (closes E)
+      _GFX_LIT=64   # gfx9 wavefront size (literal); see "Why this is safe" above
       _MACROS_H=c10/macros/Macros.h
       case "${PT_MAJOR_MINOR}" in
          2.7|2.8)
             if [ -f "${_MACROS_H}" ] && grep -qE '^#define[[:space:]]+C10_WARP_SIZE[[:space:]]+warpSize' "${_MACROS_H}"; then
-               echo "Patching ${_MACROS_H} C10_WARP_SIZE -> __AMDGCN_WAVEFRONT_SIZE for ROCm 7.x (PT ${PYTORCH_VERSION}, Failure D)"
-               sed -i -E 's|^(#define[[:space:]]+C10_WARP_SIZE[[:space:]]+)warpSize|\1__AMDGCN_WAVEFRONT_SIZE|' "${_MACROS_H}"
+               echo "Patching ${_MACROS_H} C10_WARP_SIZE -> ${_GFX_LIT} (literal) for ROCm 7.x (PT ${PYTORCH_VERSION}, Failures D+F)"
+               sed -i -E "s|^(#define[[:space:]]+C10_WARP_SIZE[[:space:]]+)warpSize|\\1${_GFX_LIT}|" "${_MACROS_H}"
                echo "  -> patched (verify):"
                grep -nE 'C10_WARP_SIZE' "${_MACROS_H}" | sed 's/^/    /'
             else
                echo "Skipping ${_MACROS_H} C10_WARP_SIZE patch (file missing or already patched)"
             fi
+
+            # ── (2) composable_kernel third_party headers (Failure E) ──
+            # CK template parameter computations (WgpPerCU,
+            # FullMemBandPrefetchStages, PrefetchStages, GlobalBufferNum,
+            # plus a chain of constexpr-if conditions in
+            # device_batched_gemm_multiple_d_xdl_cshuffle_v3.hpp) all
+            # transitively call ck::get_warp_size() in
+            # third_party/composable_kernel/include/ck/utility/get_id.hpp:
+            #   __host__ __device__ constexpr index_t get_warp_size()
+            #   {
+            #       return warpSize;            // <-- the culprit
+            #   }
+            # On rocm-7.0.x and rocm-7.1.x clang, `warpSize` is a
+            # struct with a non-constexpr `operator int()`
+            # (= __builtin_amdgcn_wavefrontsize), so the constexpr
+            # function "never produces a constant expression". The
+            # cascade was observed in slurm-9479 PT 2.7.1 (rocm-7.1.1),
+            # slurm-9480 PT 2.7.1 + PT 2.8.0 (rocm-7.0.2), and most
+            # recently slurm-9694 PT 2.7.1 + PT 2.8.0 (rocm-7.0.2):
+            # get_id.hpp:10:39 + 13:12, blockwise_gemm_pipeline*
+            # :143-148, device_batched_gemm_multiple_d* :486-684, and
+            # gridwise_gemm_xdl_cshuffle_v3_multi_d* :1336.
+            #
+            # Fix-3 v2 (2026-05-15) only sed'd __AMDGCN_WAVEFRONT_SIZE
+            # in CK headers and skipped CK with "no __AMDGCN_WAVEFRONT_SIZE
+            # references" -- correctly, since CK doesn't use that symbol;
+            # it uses bare `warpSize`. Slurm-9694 confirmed the skip and
+            # that PT 2.7.1 + PT 2.8.0 still failed in the same
+            # constexpr-cascade as before.
+            #
+            # Fix-3 v3 (this block): substitute `warpSize` (with `\b`
+            # word boundaries to avoid clobbering identifiers like
+            # `someWarpSizeBoundary`) AND keep the historical
+            # __AMDGCN_WAVEFRONT_SIZE substitution as a defensive
+            # belt-and-suspenders for any future CK pin that introduces
+            # the symbol. Both map to the same literal 64 (gfx9-only
+            # sweep; see "Why this is safe" comment above the c10
+            # redirect for the gfx-extension story). Idempotent
+            # (already-patched headers have zero occurrences of either
+            # symbol and the grep returns an empty file list).
+            # NB: use `#` as the sed delimiter (NOT `|`) -- the regex
+            # contains an alternation `\b(A|B)\b`, and a `|` delimiter
+            # would terminate the pattern at the first `|` of the
+            # alternation, producing
+            #   sed: -e expression #1, char 44: unknown option to `s'
+            # silently failing to patch anything. (Verified live in
+            # slurm-9703/9704 PT 2.7.1+2.8.0 logs: sed errored, the
+            # subsequent `grep` showed all `warpSize` references intact,
+            # and the build hit the identical Failure-E cascade.) `#`
+            # appears nowhere in the regex, replacement, or input lines
+            # so it's safe.
+            _CK_DIR=third_party/composable_kernel/include/ck
+            if [ -d "${_CK_DIR}" ]; then
+               # shellcheck disable=SC2207
+               _CK_FILES=( $(grep -rlE --include='*.hpp' --include='*.h' \
+                                '\b(__AMDGCN_WAVEFRONT_SIZE|warpSize)\b' \
+                                "${_CK_DIR}" 2>/dev/null || true) )
+               if [ "${#_CK_FILES[@]}" -gt 0 ]; then
+                  echo "Patching ${#_CK_FILES[@]} composable_kernel header(s) under ${_CK_DIR}: {warpSize, __AMDGCN_WAVEFRONT_SIZE} -> ${_GFX_LIT} (Failure E)"
+                  if ! sed -i -E "s#\\b(__AMDGCN_WAVEFRONT_SIZE|warpSize)\\b#${_GFX_LIT}#g" "${_CK_FILES[@]}"; then
+                     echo "ERROR: sed substitution on CK headers FAILED (rc=$?). Refusing to continue -- the constexpr cascade will not be closed and the wheel build is destined to fail." >&2
+                     exit 1
+                  fi
+                  _CK_RESID=$(grep -rnE --include='*.hpp' --include='*.h' \
+                               '\b(__AMDGCN_WAVEFRONT_SIZE|warpSize)\b' "${_CK_DIR}" 2>/dev/null || true)
+                  if [ -z "${_CK_RESID}" ]; then
+                     echo "  -> patched ${#_CK_FILES[@]} files (0 residual occurrences -- OK)"
+                  else
+                     echo "ERROR: ${#_CK_FILES[@]} CK headers patched but residual {warpSize, __AMDGCN_WAVEFRONT_SIZE} occurrences remain (sed escape / boundary mismatch). Aborting." >&2
+                     echo "${_CK_RESID}" | sed 's/^/    /' >&2
+                     exit 1
+                  fi
+               else
+                  echo "Skipping ${_CK_DIR} CK header patch (no warpSize / __AMDGCN_WAVEFRONT_SIZE references; either upstream-fixed or already patched)"
+               fi
+            else
+               echo "Skipping ${_CK_DIR} CK header patch (directory missing -- PT ${PYTORCH_VERSION} likely vendors CK at a different path)"
+            fi
             ;;
          *)
             echo "Skipping ${_MACROS_H} C10_WARP_SIZE patch (PT ${PYTORCH_VERSION} not in {2.7, 2.8} gate; PT 2.9+ has the upstream fix via at::cuda::warp_size())"
+            echo "Skipping composable_kernel CK header patch (PT ${PYTORCH_VERSION} not in {2.7, 2.8} gate)"
             ;;
       esac
 
