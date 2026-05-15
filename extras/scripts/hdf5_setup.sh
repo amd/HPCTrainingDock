@@ -355,7 +355,28 @@ else
 
       # --depth=1 to skip ~10 years of history we don't need; the
       # branch tag pins us to the exact release.
-      git clone --depth=1 --branch hdf5_${HDF5_VERSION} https://github.com/HDFGroup/hdf5.git
+      #
+      # Tag-name probe: the HDF Group used `hdf5_X.Y.Z` for the 1.14
+      # series (e.g. hdf5_1.14.6) but for HDF5 2.1.1 ship the bare
+      # numeric tag `2.1.1`. Probe both forms and use whichever
+      # exists; fail hard if neither does so we don't silently land
+      # on the default branch (which would float past the requested
+      # release on every build).
+      HDF5_TAG=""
+      for _cand in "hdf5_${HDF5_VERSION}" "${HDF5_VERSION}"; do
+         if git ls-remote --exit-code --tags https://github.com/HDFGroup/hdf5.git \
+               "refs/tags/${_cand}" >/dev/null 2>&1; then
+            HDF5_TAG="${_cand}"
+            break
+         fi
+      done
+      unset _cand
+      if [ -z "${HDF5_TAG}" ]; then
+         echo "ERROR: no git tag matching HDF5 ${HDF5_VERSION} (tried 'hdf5_${HDF5_VERSION}' and '${HDF5_VERSION}')." >&2
+         exit 1
+      fi
+      echo "HDF5: using git tag '${HDF5_TAG}'"
+      git clone --depth=1 --branch "${HDF5_TAG}" https://github.com/HDFGroup/hdf5.git
       cd hdf5
 
       # install dependencies
@@ -410,6 +431,61 @@ else
       cd ..
       mkdir build && cd build
 
+      # HDF5 2.0+ renamed the CMake parallel-build variable from
+      # HDF5_ENABLE_PARALLEL to HDF5_PROVIDES_PARALLEL (see HDF5
+      # 2.0.0 release notes: https://support.hdfgroup.org/releases/
+      # hdf5/v2_0/v2_0_0/downloads/). Without this rename, the 2.x
+      # build silently produces a SERIAL libhdf5 even when mpicc is
+      # on PATH and ENABLE_PARALLEL=ON, breaking PnetCDF/netcdf-c
+      # downstream.  Use sort -V to detect HDF5_VERSION >= 2.0.0;
+      # any other comparison form would be tripped by the
+      # 1.14.6 -> 2.0.0 transition (lexicographic '1.14' > '2.0').
+      HDF5_PARALLEL_VAR="HDF5_ENABLE_PARALLEL"
+      HDF5_IS_2X=0
+      if [ "$(printf '%s\n%s\n' "2.0.0" "${HDF5_VERSION}" | sort -V | head -n1)" = "2.0.0" ]; then
+         HDF5_PARALLEL_VAR="HDF5_PROVIDES_PARALLEL"
+         HDF5_IS_2X=1
+      fi
+      echo "HDF5: parallel CMake var = ${HDF5_PARALLEL_VAR} (HDF5_VERSION=${HDF5_VERSION})"
+
+      # ZLIB enable: HDF5 2.x no longer honors ZLIB_ROOT (CMake
+      # "Manually-specified variables were not used" warning, audited
+      # in slurm 9711). The 2.x knobs (per the AutotoolsToCMakeOptions
+      # migration guide for HDF5 2.0.0 and issue HDFGroup/hdf5#5155):
+      #   HDF5_ENABLE_ZLIB_SUPPORT=ON     -- enable zlib filter
+      #   ZLIB_USE_EXTERNAL=OFF           -- "OFF" tells HDF5 to use an
+      #                                      installed/external zlib
+      #                                      rather than build one
+      #                                      in-tree
+      #   HDF5_ALLOW_EXTERNAL_SUPPORT=NO  -- don't FetchContent zlib
+      #   H5_ZLIB_INCLUDE_DIR / H5_ZLIB_LIBRARY -- point at the zlib
+      #                                      we just built under
+      #                                      ${HDF5_PATH}/zlib/
+      # Without H5_HAVE_ZLIB_H landing in H5public.h, netcdf-c 4.10.0
+      # configure aborts with "HDF5 was built without zlib." For HDF5
+      # 1.x we keep ZLIB_ROOT (which 1.x's FindZLIB.cmake honors).
+      HDF5_ZLIB_CMAKE_ARGS=()
+      if [ "${HDF5_IS_2X}" = "1" ]; then
+         # Prefer the shared library (.so.1.3.1 from our zlib build).
+         _h5_zlib_so="$(ls "${HDF5_PATH}/zlib/lib/"libz.so.* 2>/dev/null | head -n1)"
+         if [ -z "${_h5_zlib_so}" ] || [ ! -f "${_h5_zlib_so}" ]; then
+            _h5_zlib_so="${HDF5_PATH}/zlib/lib/libz.a"
+         fi
+         HDF5_ZLIB_CMAKE_ARGS=(
+            -DHDF5_ENABLE_ZLIB_SUPPORT:BOOL=ON
+            -DZLIB_USE_EXTERNAL:BOOL=OFF
+            -DHDF5_ALLOW_EXTERNAL_SUPPORT:STRING=NO
+            -DH5_ZLIB_INCLUDE_DIR:PATH="${HDF5_PATH}/zlib/include"
+            -DH5_ZLIB_LIBRARY:FILEPATH="${_h5_zlib_so}"
+            -DZLIB_INCLUDE_DIR:PATH="${HDF5_PATH}/zlib/include"
+            -DZLIB_LIBRARY:FILEPATH="${_h5_zlib_so}"
+         )
+         echo "HDF5: zlib hint = ${_h5_zlib_so}"
+         unset _h5_zlib_so
+      else
+         HDF5_ZLIB_CMAKE_ARGS=( -DZLIB_ROOT="${HDF5_PATH}/zlib" )
+      fi
+
       # -fPIC for the Fortran compile + CMAKE_POSITION_INDEPENDENT_CODE for
       # HDF5's own libs: required because Ubuntu 22.04 ships a PIE-default
       # toolchain (gcc/g++ links executables -fPIE), and on rocm 6.4.x
@@ -426,7 +502,7 @@ else
       # gfortran (also no-op since only used for static libs here).
       cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE:STRING=Release \
   			        -DHDF5_BUILD_TOOLS:BOOL=ON -DCMAKE_INSTALL_PREFIX=${HDF5_PATH} \
-                                -DZLIB_ROOT=${HDF5_PATH}/zlib \
+                                "${HDF5_ZLIB_CMAKE_ARGS[@]}" \
 				-DHDF5_ENABLE_SZIP_SUPPORT:BOOL=OFF \
                                 -DCMAKE_CXX_COMPILER=${CXX_COMPILER} \
                                 -DCMAKE_C_COMPILER=${C_COMPILER} \
@@ -434,7 +510,7 @@ else
 				-DCMAKE_Fortran_FLAGS="-fPIC" \
 				-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON \
 				-DBUILD_TESTING:BOOL=OFF \
-				-DHDF5_ENABLE_PARALLEL:BOOL=${ENABLE_PARALLEL} \
+				-D${HDF5_PARALLEL_VAR}:BOOL=${ENABLE_PARALLEL} \
 				-DHDF5_BUILD_FORTRAN:BOOL=ON ..
 
 

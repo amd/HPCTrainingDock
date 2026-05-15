@@ -59,7 +59,21 @@ CXX_COMPILER_INPUT=""
 F_COMPILER=gfortran
 F_COMPILER_INPUT=""
 NETCDF_C_VERSION="4.9.3"
-NETCDF_F_VERSION="4.6.2"
+# NETCDF_F_VERSION is auto-derived from NETCDF_C_VERSION via the
+# NETCDF_C_TO_F map below unless the operator passes
+# --netcdf-f-version explicitly (which writes NETCDF_F_VERSION_INPUT).
+# The map keeps the leaf script as the single source of truth for the
+# C->F compatibility matrix; main_setup.sh exposes only --netcdf-c-version
+# as the sweep-CLI knob (see bare_system/main_setup.sh PKG_VER_FLAG).
+NETCDF_F_VERSION=""
+NETCDF_F_VERSION_INPUT=""
+NETCDF_F_VERSION_FALLBACK="4.6.2"
+# C->F compatibility map. Update when netcdf-fortran releases catch up.
+# netcdf-fortran tracks netcdf-c slowly, so most C bumps share an F.
+declare -A NETCDF_C_TO_F=(
+   [4.9.3]="4.6.2"
+   [4.10.0]="4.6.2"
+)
 HDF5_MODULE="hdf5"
 # netcdf depends on hdf5, which itself depends on openmpi. Without
 # loading openmpi explicitly here, the only MPI on the build path was
@@ -118,7 +132,7 @@ usage()
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --rocm-module [ ROCM_MODULE ] default $ROCM_MODULE"
    echo "  --netcdf-c-version [ NETCDF_C_VERSION ] default $NETCDF_C_VERSION"
-   echo "  --netcdf-f-version [ NETCDF_F_VERSION ] default $NETCDF_F_VERSION"
+   echo "  --netcdf-f-version [ NETCDF_F_VERSION ] auto-derived from NETCDF_C_VERSION via NETCDF_C_TO_F map; pass explicitly to override (fallback: $NETCDF_F_VERSION_FALLBACK)"
    echo "  --netcdf-c-module-path [ NETCDF_C_MODULE_PATH ] default $NETCDF_C_MODULE_PATH"
    echo "  --netcdf-f-module-path [ NETCDF_F_MODULE_PATH ] default $NETCDF_F_MODULE_PATH"
    echo "  --hdf5-module [ HDF5_MODULE ] default $HDF5_MODULE"
@@ -223,7 +237,7 @@ do
           ;;
       "--netcdf-f-version")
           shift
-          NETCDF_F_VERSION=${1}
+          NETCDF_F_VERSION_INPUT=${1}
           reset-last
           ;;
       "--replace")
@@ -261,6 +275,28 @@ do
    n=$((${n} + 1))
    shift
 done
+
+# ── Auto-derive NETCDF_F_VERSION from NETCDF_C_VERSION ────────────────
+# Single sweep-CLI knob is --netcdf-c-version (see main_setup.sh
+# PKG_VER_FLAG[netcdf]); the matching netcdf-fortran release is looked
+# up in NETCDF_C_TO_F above. An explicit --netcdf-f-version (passed
+# directly to this leaf script) still wins. If the C version is not in
+# the map we fall back to NETCDF_F_VERSION_FALLBACK with a loud
+# warning -- silently picking a stale F version against a new C would
+# produce broken modulefiles that fail at link time, not build time.
+if [ -n "${NETCDF_F_VERSION_INPUT}" ]; then
+   NETCDF_F_VERSION="${NETCDF_F_VERSION_INPUT}"
+   echo "netcdf: using operator-supplied netcdf-fortran version ${NETCDF_F_VERSION} (NETCDF_C_VERSION=${NETCDF_C_VERSION})"
+elif [ -n "${NETCDF_C_TO_F[${NETCDF_C_VERSION}]:-}" ]; then
+   NETCDF_F_VERSION="${NETCDF_C_TO_F[${NETCDF_C_VERSION}]}"
+   echo "netcdf: auto-picked netcdf-fortran ${NETCDF_F_VERSION} for netcdf-c ${NETCDF_C_VERSION} (from NETCDF_C_TO_F map)"
+else
+   echo "WARNING: no netcdf-fortran version mapped for netcdf-c ${NETCDF_C_VERSION};" >&2
+   echo "         falling back to ${NETCDF_F_VERSION_FALLBACK}. Add an entry to" >&2
+   echo "         NETCDF_C_TO_F in netcdf_setup.sh, or pass --netcdf-f-version" >&2
+   echo "         to override explicitly." >&2
+   NETCDF_F_VERSION="${NETCDF_F_VERSION_FALLBACK}"
+fi
 
 if [ "${NETCDF_INSTALL_BASE_INPUT}" != "" ]; then
    NETCDF_INSTALL_BASE=${NETCDF_INSTALL_BASE_INPUT}
@@ -421,17 +457,29 @@ else
       #source /etc/profile.d/lmod.sh
       #source /etc/profile.d/z00_lmod.sh
 
-      # don't use sudo if user has write access to install base
+      # don't use sudo if user has actual write access to the install base.
+      #
+      # Real touch probe instead of the bash `[ -w ]` test: on /nfsapps
+      # (NFSv4 + ACLs) `[ -w root-owned-755-dir ]` returned TRUE on the
+      # compute node for a non-root user, but real writes still hit
+      # EACCES. Same lying-probe failure mode the modulefile-write
+      # PKG_SUDO_MOD pattern below already replaced (job 8063 audit).
+      # Probe with mktemp -p (creates a uniquely-named file under
+      # NETCDF_INSTALL_BASE); cleans up regardless of outcome.
       if [ -d "$NETCDF_INSTALL_BASE" ]; then
-         # don't use sudo if user has write access to install base
-         if [ -w ${NETCDF_INSTALL_BASE} ]; then
+         _probe=""
+         _probe=$(mktemp --tmpdir="${NETCDF_INSTALL_BASE}" .netcdf-write-probe.XXXXXX 2>/dev/null) || true
+         if [ -n "${_probe}" ] && [ -f "${_probe}" ]; then
+            rm -f "${_probe}"
             SUDO=""
+            echo "netcdf: ${NETCDF_INSTALL_BASE} is user-writable (probe succeeded); SUDO cleared."
          else
-            echo "WARNING: using an install path that requires sudo"
+            echo "WARNING: ${NETCDF_INSTALL_BASE} exists but is not user-writable (probe failed); using sudo"
          fi
+         unset _probe
       else
          # if install path does not exist yet, the check on write access will fail
-         echo "WARNING: using sudo, make sure you have sudo privileges"
+         echo "WARNING: ${NETCDF_INSTALL_BASE} does not exist yet; using sudo, make sure you have sudo privileges"
       fi
 
       # install libcurl. PKG_SUDO: apt/yum need root regardless of the
@@ -646,7 +694,21 @@ else
 
       git clone --branch v${NETCDF_C_VERSION} https://github.com/Unidata/netcdf-c.git
       cd netcdf-c
-      sed -i 's/if\ (H5FD_HTTP_g)/if\ (H5FD_HTTP_g\ \&\&\ (H5Iis_valid(H5FD_HTTP_g)\ >\ 0))/g' libhdf5/H5FDhttp.c
+      # H5FDhttp.c plugin-handle guard. The original patch wrapped the
+      # `if (H5FD_HTTP_g)` test with `H5Iis_valid(...) > 0` to avoid
+      # touching a stale id on the HDF5 1.14 plugin path (netcdf-c
+      # 4.9.x). netcdf-c 4.10.0 refactored libhdf5/H5FDhttp.c for HDF5
+      # 2.0.0 compat (PR #3237: H5FD_class_t versioning, H5FD_http_term
+      # finalizer), and the original `if (H5FD_HTTP_g)` pattern no longer
+      # appears in unaltered form. Apply only when the exact pre-patch
+      # line is still present so this is a no-op on 4.10.0+ (rather than
+      # silently mangling some other call site).
+      if [ -f libhdf5/H5FDhttp.c ] && grep -q 'if (H5FD_HTTP_g)' libhdf5/H5FDhttp.c; then
+         sed -i 's/if\ (H5FD_HTTP_g)/if\ (H5FD_HTTP_g\ \&\&\ (H5Iis_valid(H5FD_HTTP_g)\ >\ 0))/g' libhdf5/H5FDhttp.c
+         echo "netcdf-c: applied H5FDhttp.c plugin-handle guard patch"
+      else
+         echo "netcdf-c: H5FDhttp.c plugin-handle guard not applicable (file refactored or pattern absent at netcdf-c v${NETCDF_C_VERSION})"
+      fi
       mkdir build && cd build
 
       cmake -DCMAKE_INSTALL_PREFIX=${NETCDF_C_PATH} \
@@ -740,6 +802,35 @@ else
    PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
    ${PKG_SUDO_MOD} mkdir -p ${NETCDF_C_MODULE_PATH}
 
+   # Pin the hdf5 modulefile version that this netcdf-c was built
+   # against. Without the pin, the netcdf-c modulefile emits a bare
+   # `load("hdf5")` which Lmod resolves to whichever hdf5 version is
+   # "default" at load time -- a problem once multiple hdf5 versions
+   # coexist on the same rocmplus-<v> tree (e.g. 1.14.6 alongside
+   # 2.1.1 on rocmplus-7.2.3). Loading netcdf-c 4.10.0 (built against
+   # HDF5 2.1.1) under a default-resolved hdf5/1.14.6 would give an
+   # ABI mismatch.
+   #
+   # HDF5_ROOT is set by hdf5_setup.sh's modulefile to
+   #   ${HDF5_PATH}/HDF_Group/HDF5/${HDF5_VERSION}
+   # (see extras/scripts/hdf5_setup.sh, modulefile heredoc), so the
+   # trailing path component is the version we just built against.
+   # Defensive fallback to bare `load("hdf5")` if the layout changes.
+   HDF5_BUILT_AGAINST=""
+   if [ -n "${HDF5_ROOT:-}" ] && [[ "${HDF5_ROOT}" == */HDF_Group/HDF5/* ]]; then
+      HDF5_BUILT_AGAINST="${HDF5_ROOT##*/HDF_Group/HDF5/}"
+      # Strip any trailing slash component (defensive; HDF5_ROOT should
+      # be the leaf dir itself, not a parent).
+      HDF5_BUILT_AGAINST="${HDF5_BUILT_AGAINST%%/*}"
+   fi
+   if [ -n "${HDF5_BUILT_AGAINST}" ]; then
+      NETCDF_C_HDF5_LOAD="load(\"${HDF5_MODULE}/${HDF5_BUILT_AGAINST}\")"
+      echo "netcdf-c modulefile: pinning hdf5 dependency to ${HDF5_MODULE}/${HDF5_BUILT_AGAINST}"
+   else
+      NETCDF_C_HDF5_LOAD="load(\"${HDF5_MODULE}\")"
+      echo "WARNING: could not extract HDF5 version from HDF5_ROOT='${HDF5_ROOT:-<unset>}'; falling back to unpinned load(\"${HDF5_MODULE}\")" >&2
+   fi
+
    # Provenance: capture this leaf script's git state for the modulefile
    # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
    # at the top of this script before any cd) so this works even after
@@ -768,7 +859,7 @@ else
 	whatis("Netcdf-c Library")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
-        load("hdf5")
+        ${NETCDF_C_HDF5_LOAD}
         local base = "${NETCDF_C_PATH}"
         local base_pnetcdf = "${PNETCDF_PATH}"
         prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))

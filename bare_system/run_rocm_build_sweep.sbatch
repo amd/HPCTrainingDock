@@ -44,39 +44,66 @@ DISTRO="${DISTRO:-ubuntu}"
 DISTRO_VERSION="${DISTRO_VERSION:-24.04}"
 AMDGPU_GFXMODEL="${AMDGPU_GFXMODEL:-gfx942;gfx90a}"
 TOP_INSTALL_PATH="${TOP_INSTALL_PATH:-/nfsapps/opt}"
+TOP_MODULE_PATH="${TOP_MODULE_PATH:-/nfsapps/modules}"
+THEROCK_AMDGPU_FAMILY="${THEROCK_AMDGPU_FAMILY:-gfx94X-dcgpu}"
+SITE="${SITE:-}"
 
-# Defensive remount of /nfsapps as rw on this compute node. The login node
-# exports it rw to sh5 admin nodes via /etc/exports.d/nfsapps_sh5_rw.exports,
-# but the warewulf-managed fstab still says ro by default.
-INSTALL_PARENT="${TOP_INSTALL_PATH%/*}"   # e.g. /nfsapps
-if ! sudo -n test -w "${INSTALL_PARENT}" 2>/dev/null; then
-   echo "Attempting to remount ${INSTALL_PARENT} rw..."
-   sudo mount -o remount,rw "${INSTALL_PARENT}" 2>/dev/null || \
-      { sudo umount "${INSTALL_PARENT}" 2>/dev/null && \
-        sudo mount -o rw,defaults,_netdev,nofail -t nfs warewulf:/nfsapps "${INSTALL_PARENT}"; } || true
-fi
+# ── Defensive /nfsapps remount block (compute-node side) ──────────────
+# Only relevant when TOP_INSTALL_PATH or TOP_MODULE_PATH actually live
+# under /nfsapps. Previously this block computed
+# `INSTALL_PARENT="${TOP_INSTALL_PATH%/*}"` and unconditionally tried to
+# remount it -- which works for the legacy /nfsapps/opt layout
+# (INSTALL_PARENT=/nfsapps == the real NFS mount), but breaks for
+# nested test trees like /nfsapps/ubuntu-22.04/opt (INSTALL_PARENT
+# becomes /nfsapps/ubuntu-22.04, which is NOT a mount point, so the
+# `mount -o remount` call no-ops/fails and the subsequent `umount`
+# attempt is unsafe).
+#
+# Correct shape:
+#   * Detect whether TOP_INSTALL_PATH or TOP_MODULE_PATH starts with
+#     /nfsapps. If neither does, skip remount entirely (e.g. --site
+#     opt or --site shared-apps installs don't touch /nfsapps).
+#   * If they do, remount the /nfsapps mount root itself -- not the
+#     directly-enclosing dir -- since /nfsapps is the only mount point
+#     in the chain; everything below it is just directories on the
+#     same NFS export.
+NEED_NFSAPPS_RW=0
+case "${TOP_INSTALL_PATH}" in /nfsapps|/nfsapps/*) NEED_NFSAPPS_RW=1 ;; esac
+case "${TOP_MODULE_PATH}"  in /nfsapps|/nfsapps/*) NEED_NFSAPPS_RW=1 ;; esac
 
-if ! sudo -n test -w "${INSTALL_PARENT}" 2>/dev/null; then
-   echo "ERROR: ${INSTALL_PARENT} is not writable on $(hostname); aborting." >&2
-   mount | grep nfsapps || true
-   exit 1
+if [[ ${NEED_NFSAPPS_RW} -eq 1 ]]; then
+   NFS_MOUNT_ROOT="/nfsapps"
+   if ! sudo -n test -w "${NFS_MOUNT_ROOT}" 2>/dev/null; then
+      echo "Attempting to remount ${NFS_MOUNT_ROOT} rw..."
+      sudo mount -o remount,rw "${NFS_MOUNT_ROOT}" 2>/dev/null || \
+         { sudo umount "${NFS_MOUNT_ROOT}" 2>/dev/null && \
+           sudo mount -o rw,defaults,_netdev,nofail -t nfs warewulf:/nfsapps "${NFS_MOUNT_ROOT}"; } || true
+   fi
+
+   if ! sudo -n test -w "${NFS_MOUNT_ROOT}" 2>/dev/null; then
+      echo "ERROR: ${NFS_MOUNT_ROOT} is not writable on $(hostname); aborting." >&2
+      mount | grep nfsapps || true
+      exit 1
+   fi
 fi
 
 # Self-heal: if the install destinations were cleaned up, recreate them so the
 # build script's pre-checks (and ${TOP_INSTALL_PATH}/${TOP_MODULE_PATH}/* extracts)
-# don't trip on a missing parent. Owner root:root, mode 0755 to match prior
-# layout.
-TOP_MODULE_PATH="${TOP_MODULE_PATH:-/nfsapps/modules}"
+# don't trip on a missing parent. Walks the path from / down and `install -d`s
+# every missing intermediate component, so nested layouts like
+# /nfsapps/ubuntu-22.04/opt work without pre-staging the parent dirs.
+# Owner root:root, mode 0755 to match prior layout.
 for d in "${TOP_INSTALL_PATH}" "${TOP_MODULE_PATH}"; do
    if ! sudo -n test -d "${d}" 2>/dev/null; then
-      echo "Creating missing ${d}"
+      echo "Creating missing ${d} (with parents)"
+      # `install -d` already creates all parent components per coreutils.
       sudo install -d -o root -g root -m 0755 "${d}"
    fi
 done
 
 if ! sudo -n test -w "${TOP_INSTALL_PATH}" 2>/dev/null; then
    echo "ERROR: ${TOP_INSTALL_PATH} still not writable after self-heal on $(hostname); aborting." >&2
-   sudo ls -la "${INSTALL_PARENT}" 2>&1 || true
+   sudo ls -la "$(dirname "${TOP_INSTALL_PATH}")" 2>&1 || true
    mount | grep nfsapps || true
    exit 1
 fi
@@ -107,8 +134,11 @@ SUMMARY="sweep_summary_$(date +%Y%m%d_%H%M%S)_job${SLURM_JOB_ID}.out"
    echo " REPLACE_EXISTING: ${REPLACE_EXISTING}"
    echo " SKIP_PATCHES:     ${SKIP_PATCHES}"
    echo " KEEP_TARBALLS:    ${KEEP_TARBALLS}"
+   echo " SITE:             ${SITE:-<none>}"
    echo " TOP_INSTALL_PATH: ${TOP_INSTALL_PATH}"
    echo " TOP_MODULE_PATH:  ${TOP_MODULE_PATH}"
+   echo " NFSAPPS_REMOUNT:  ${NEED_NFSAPPS_RW}  (1 = at least one path is under /nfsapps)"
+   echo " THEROCK_FAMILY:   ${THEROCK_AMDGPU_FAMILY}"
    echo " DELTA_CONF:       ${DELTA_CONF}"
    for _v in "${VERSIONS[@]}"; do
       if _b=$(delta_base_for "${_v}"); then
@@ -121,11 +151,111 @@ SUMMARY="sweep_summary_$(date +%Y%m%d_%H%M%S)_job${SLURM_JOB_ID}.out"
 
 OK=(); SKIP=(); FAIL=()
 for v in "${VERSIONS[@]}"; do
-   if [[ -d "${TOP_INSTALL_PATH}/rocm-${v}" && "${REPLACE_EXISTING}" != "1" ]]; then
-      echo "[$(date)] SKIP rocm-${v} (already in ${TOP_INSTALL_PATH})" | tee -a "${SUMMARY}"
+   # The skip-if-installed pre-check has THREE shapes here, one per
+   # token bucket -- the install-dir basename rule differs:
+   #   * numeric (v=7.2.1)       -> rocm-7.2.1            (token verbatim)
+   #   * AFAR    (v=afar-22.2.0) -> rocm-afar-22.2.0      (token verbatim;
+   #                                                       .info/version
+   #                                                       7.2.0 only feeds
+   #                                                       rocmplus-afar-7.2.0)
+   #   * TheRock (v=therock-7.13 OR therock-7.13.0)
+   #                             -> rocm-therock-${.info/version}
+   #                                e.g. rocm-therock-7.13.0 for both inputs.
+   # We don't read .info/version here (we'd have to download the tarball
+   # to learn it), so the TheRock pre-check is a glob match against both
+   # the literal token and the X.Y -> X.Y.0 auto-extension. This mirrors
+   # the Phase 0 logic in run_rocm_therock_install.sh so the sweep and
+   # the helper agree on what counts as "already installed".
+   _skip_match=""
+   if [[ "${v}" == therock-* ]]; then
+      _trel="${v#therock-}"
+      for _cand in "${TOP_INSTALL_PATH}/rocm-therock-${_trel}" \
+                   "${TOP_INSTALL_PATH}/rocm-therock-${_trel}.0"; do
+         if [[ -d "${_cand}" ]]; then
+            _skip_match="${_cand}"
+            break
+         fi
+      done
+      unset _cand _trel
+   else
+      [[ -d "${TOP_INSTALL_PATH}/rocm-${v}" ]] && _skip_match="${TOP_INSTALL_PATH}/rocm-${v}"
+   fi
+   if [[ -n "${_skip_match}" && "${REPLACE_EXISTING}" != "1" ]]; then
+      echo "[$(date)] SKIP rocm-${v} (already at ${_skip_match})" | tee -a "${SUMMARY}"
       SKIP+=("${v}")
+      unset _skip_match
       continue
    fi
+   unset _skip_match
+
+   # ── TheRock branch: download + extract, no docker/make/patches ───
+   # TheRock releases are pre-built distro-agnostic ROCm SDK tarballs
+   # at https://repo.amd.com/rocm/tarball/. The helper handles URL
+   # auto-discovery (X.Y -> X.Y.0 extension + listing fallback for
+   # alpha/RC tarballs), extracts directly into the install dir
+   # (no wrapper segment to drop), reads .info/version to derive the
+   # final install-dir basename (rocm-therock-<numeric>), and writes
+   # a GPUSDK-shaped modulefile under base/rocm/therock-<token>.lua.
+   if [[ "${v}" == therock-* ]]; then
+      THEROCK_REL="${v#therock-}"
+      {
+         echo ""
+         echo "=================================================================="
+         echo " [$(date)] BEGIN rocm-${v}  [TheRock extract-only, family=${THEROCK_AMDGPU_FAMILY}]"
+         echo "=================================================================="
+      } | tee -a "${SUMMARY}"
+
+      if bare_system/run_rocm_therock_install.sh \
+            --therock-release "${THEROCK_REL}" \
+            --amdgpu-family   "${THEROCK_AMDGPU_FAMILY}" \
+            --distro "${DISTRO}" --distro-version "${DISTRO_VERSION}" \
+            --top-install-path "${TOP_INSTALL_PATH}" \
+            --top-module-path  "${TOP_MODULE_PATH}" \
+            --replace-existing "${REPLACE_EXISTING}"
+      then
+         echo "[$(date)] OK   rocm-${v}" | tee -a "${SUMMARY}"
+         OK+=("${v}")
+      else
+         rc=$?
+         echo "[$(date)] FAIL rocm-${v} (rc=${rc})" | tee -a "${SUMMARY}"
+         FAIL+=("${v}")
+      fi
+      continue
+   fi
+
+   # ── AFAR branch: extract-only, no docker/make/patches ────────────
+   # AFAR drops are pre-built ROCm SDK tarballs that we download from
+   # repo.radeon.com/rocm/misc/flang/ and untar in place; there is no
+   # apt/dnf install path the docker-build pipeline could use. The
+   # helper auto-discovers the AMD-internal AFAR build number from the
+   # upstream directory listing and writes a GPUSDK-shaped modulefile.
+   if [[ "${v}" == afar-* ]]; then
+      AFAR_VER="${v#afar-}"
+      {
+         echo ""
+         echo "=================================================================="
+         echo " [$(date)] BEGIN rocm-${v}  [AFAR extract-only]"
+         echo "=================================================================="
+      } | tee -a "${SUMMARY}"
+
+      if bare_system/run_rocm_afar_install.sh \
+            --flang-release-number "${AFAR_VER}" \
+            --distro "${DISTRO}" --distro-version "${DISTRO_VERSION}" \
+            --top-install-path "${TOP_INSTALL_PATH}" \
+            --top-module-path  "${TOP_MODULE_PATH}" \
+            --replace-existing "${REPLACE_EXISTING}"
+      then
+         echo "[$(date)] OK   rocm-${v}" | tee -a "${SUMMARY}"
+         OK+=("${v}")
+      else
+         rc=$?
+         echo "[$(date)] FAIL rocm-${v} (rc=${rc})" | tee -a "${SUMMARY}"
+         FAIL+=("${v}")
+      fi
+      continue
+   fi
+
+   # ── Numeric ROCm branch: full docker + make + extract + patches ──
    BASE_TAG=""
    if BASE_FOR_V=$(delta_base_for "${v}"); then
       BASE_TAG="  [DELTA: base=${BASE_FOR_V}]"

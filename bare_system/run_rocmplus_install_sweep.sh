@@ -55,9 +55,27 @@ fi
 # cluster, set AMDGPU_GFXMODEL explicitly via --amdgpu-gfxmodel; do NOT
 # autodetect from rocminfo (the build node may not have the target hardware).
 : ${AMDGPU_GFXMODEL:="gfx942;gfx90a"}
-: ${TOP_INSTALL_PATH:="/nfsapps/opt"}
-: ${TOP_MODULE_PATH:="/nfsapps/modules"}
-: ${ROCM_INSTALLPATH:="/nfsapps/opt"}
+# Path knobs. Resolution priority (also documented in main_setup.sh:
+# search for "Path resolution"):
+#   1. CLI primitive (--top-install-path, --top-module-path,
+#      --rocm-install-path, --rocm-path) -- always wins.
+#   2. --site preset (opt | nfsapps | shared-apps) -- applied below
+#      after CLI parsing, only fills values the operator did not set
+#      explicitly.
+#   3. Legacy /nfsapps default -- fires when neither (1) nor (2) was
+#      given, so existing sweep commands that pass nothing keep working
+#      exactly as before. Migrate via `--site nfsapps` (explicit) or
+#      `--site shared-apps` (live tree) or `--site opt` (vanilla /opt).
+#   4. (only when the operator picks --site / explicit paths that
+#      resolve to /opt) main_setup.sh's MODULEPATH-derive + module-show
+#      ROCM_PATH derive kicks in on the compute node before any build.
+# Initial values left empty; the legacy default is applied conditionally
+# at the bottom of this block.
+: ${TOP_INSTALL_PATH:=""}
+: ${TOP_MODULE_PATH:=""}
+: ${ROCM_INSTALLPATH:=""}
+: ${ROCM_PATH:=""}
+: ${SITE:=""}
 # PYTHON_VERSION: empty -> auto-detect on the compute node from /etc/os-release
 # (Ubuntu 22.04 -> 10, 24.04 -> 12). Passed through verbatim if user supplies it.
 : ${PYTHON_VERSION:=""}
@@ -118,9 +136,19 @@ Usage: $0 [opts]
    --partition NAME              Slurm partition (default ${PARTITION})
    --time HH:MM:SS               walltime per version (default ${TIME_PER_JOB})
    --amdgpu-gfxmodel GFX         default ${AMDGPU_GFXMODEL}
-   --top-install-path PATH       default ${TOP_INSTALL_PATH}
-   --top-module-path PATH        default ${TOP_MODULE_PATH}
-   --rocm-install-path PATH      default ${ROCM_INSTALLPATH}
+   --top-install-path PATH       parent dir for rocm-<v>/ + rocmplus-<v>/ installs. Default: --site preset (if given), else /nfsapps/opt (legacy default; will switch to /opt-derived once all commands have migrated to --site)
+   --top-module-path PATH        parent dir for base/, rocm-<v>/, rocmplus-<v>/ modulefile trees. Default: --site preset (if given), else /nfsapps/modules (legacy default)
+   --rocm-install-path PATH      parent dir for rocm SDK install (where amdgpu-install lays down rocm-<v>/). Default: --site preset (if given), else /nfsapps/opt (legacy default)
+   --rocm-path PATH              full path to the rocm SDK (e.g. /shared/apps/ubuntu/opt/rocm-7.2.3); threaded through to main_setup.sh as --rocm-path. Default: auto-derived on the compute node from \`module show rocm/<v>\`.
+   --site PRESET|/ABS/PATH       shorthand for the four path flags above.
+                                   Named presets:
+                                     opt          -> /opt + /opt/modules                       (standard system install; default for fresh /opt dev machines once legacy defaults are removed)
+                                     nfsapps      -> /nfsapps/opt + /nfsapps/modules           (NFS test tree; Ubuntu 24.04 builds)
+                                     shared-apps  -> /shared/apps/ubuntu/opt + /shared/apps/modules/ubuntu/lmodfiles  (LIVE cluster tree; Ubuntu 22.04 -- writes are visible to all users immediately)
+                                   Absolute path form: any value starting with '/' is treated as a parent prefix, expanded to PREFIX/opt + PREFIX/modules.
+                                     e.g. --site /nfsapps/ubuntu-22.04 -> /nfsapps/ubuntu-22.04/opt + /nfsapps/ubuntu-22.04/modules
+                                     (useful for distro-segregated test trees that don't fit the named presets)
+                                 Any explicit --top-* / --rocm-* flag overrides the corresponding preset value (so e.g. \`--site nfsapps --rocm-install-path /opt\` is valid).
    --python-version N            python3 minor release (default: distro-native -- 10 on Ubuntu 22.04, 12 on 24.04)
    --quick-installs 0|1          skip long-pole packages (default ${QUICK_INSTALLS})
    --replace-existing 0|1        replace existing rocmplus-<v> packages per-pkg (default ${REPLACE_EXISTING})
@@ -182,6 +210,8 @@ while [[ $# -gt 0 ]]; do
       --top-install-path)  shift; TOP_INSTALL_PATH=${1} ;;
       --top-module-path)   shift; TOP_MODULE_PATH=${1} ;;
       --rocm-install-path) shift; ROCM_INSTALLPATH=${1} ;;
+      --rocm-path)         shift; ROCM_PATH=${1} ;;
+      --site)              shift; SITE=${1} ;;
       --python-version)    shift; PYTHON_VERSION=${1} ;;
       --quick-installs)    shift; QUICK_INSTALLS=${1} ;;
       --replace-existing)  shift; REPLACE_EXISTING=${1} ;;
@@ -198,6 +228,54 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -z "${ROCM_VERSIONS_RAW}" ]] && { echo "ERROR: --rocm-versions is required" >&2; usage; }
+
+# ── --site preset application ─────────────────────────────────────────
+# Same resolution shape as main_setup.sh (see "Path resolution" block
+# there): CLI primitives win, --site preset fills the gaps, and a
+# final legacy /nfsapps default fires when neither was specified so
+# pre-existing sweep commands keep working byte-identically.
+SITE_SUMMARY="<unset>"
+if [[ -n "${SITE}" ]]; then
+   case "${SITE}" in
+      opt)
+         _SITE_TOP_INSTALL="/opt"
+         _SITE_TOP_MODULE="/opt/modules"
+         ;;
+      nfsapps)
+         _SITE_TOP_INSTALL="/nfsapps/opt"
+         _SITE_TOP_MODULE="/nfsapps/modules"
+         ;;
+      shared-apps)
+         _SITE_TOP_INSTALL="/shared/apps/ubuntu/opt"
+         _SITE_TOP_MODULE="/shared/apps/modules/ubuntu/lmodfiles"
+         ;;
+      /*)
+         # Absolute-path PREFIX form (e.g. --site /nfsapps/ubuntu-22.04):
+         # symmetric layout PREFIX/opt + PREFIX/modules. See the matching
+         # block in main_setup.sh for the design rationale.
+         _SITE_PREFIX="${SITE%/}"
+         _SITE_TOP_INSTALL="${_SITE_PREFIX}/opt"
+         _SITE_TOP_MODULE="${_SITE_PREFIX}/modules"
+         unset _SITE_PREFIX
+         ;;
+      *)
+         echo "ERROR: --site must be a named preset (opt | nfsapps | shared-apps) or an absolute path starting with '/' (got '${SITE}')" >&2
+         exit 1
+         ;;
+   esac
+   [[ -z "${TOP_INSTALL_PATH}" ]] && TOP_INSTALL_PATH="${_SITE_TOP_INSTALL}"
+   [[ -z "${TOP_MODULE_PATH}"  ]] && TOP_MODULE_PATH="${_SITE_TOP_MODULE}"
+   [[ -z "${ROCM_INSTALLPATH}" ]] && ROCM_INSTALLPATH="${_SITE_TOP_INSTALL}"
+   SITE_SUMMARY="${SITE}"
+   unset _SITE_TOP_INSTALL _SITE_TOP_MODULE
+fi
+
+# Legacy /nfsapps fallback — fires ONLY when both CLI primitives AND
+# --site were absent. Preserves byte-identical behavior for current
+# operator commands like `./run_rocmplus_install_sweep.sh --rocm-versions ...`.
+: ${TOP_INSTALL_PATH:="/nfsapps/opt"}
+: ${TOP_MODULE_PATH:="/nfsapps/modules"}
+: ${ROCM_INSTALLPATH:="/nfsapps/opt"}
 
 # Walltime sanity check vs partition MaxTime.
 IFS=':' read -r THH TMM TSS <<< "${TIME_PER_JOB}"
@@ -251,9 +329,11 @@ cat <<EOF
  Time per version:  ${TIME_PER_JOB}
  Versions (${N}):     ${VERSIONS_ARR[*]}   (mixed numeric + RC-flavor tokens OK; RC trees install to rocmplus-<prefix>-<numeric>/)
  GFX:               ${AMDGPU_GFXMODEL}
+ Site preset:       ${SITE_SUMMARY}
  TOP_INSTALL_PATH:  ${TOP_INSTALL_PATH}
  TOP_MODULE_PATH:   ${TOP_MODULE_PATH}
  ROCM_INSTALLPATH:  ${ROCM_INSTALLPATH}
+ ROCM_PATH:         ${ROCM_PATH:-<auto: module show rocm/<v> on compute node>}
  PYTHON_VERSION:    ${PYTHON_VERSION:+3.}${PYTHON_VERSION:-<auto: distro-native on compute node>}
  QUICK_INSTALLS:    ${QUICK_INSTALLS}
  REPLACE_EXISTING:  ${REPLACE_EXISTING}
@@ -313,6 +393,10 @@ for v in "${VERSIONS_ARR[@]}"; do
    EXPORT_VARS+=",TOP_INSTALL_PATH=${TOP_INSTALL_PATH}"
    EXPORT_VARS+=",TOP_MODULE_PATH=${TOP_MODULE_PATH}"
    EXPORT_VARS+=",ROCM_INSTALLPATH=${ROCM_INSTALLPATH}"
+   # SITE and ROCM_PATH only added when set, so the sbatch sees their
+   # absence as "not specified" (lets main_setup.sh's auto-derive fire).
+   [[ -n "${SITE}"      ]] && EXPORT_VARS+=",SITE=${SITE}"
+   [[ -n "${ROCM_PATH}" ]] && EXPORT_VARS+=",ROCM_PATH=${ROCM_PATH}"
    EXPORT_VARS+=",PYTHON_VERSION=${PYTHON_VERSION}"
    EXPORT_VARS+=",QUICK_INSTALLS=${QUICK_INSTALLS}"
    EXPORT_VARS+=",REPLACE_EXISTING=${REPLACE_EXISTING}"

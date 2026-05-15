@@ -57,9 +57,27 @@ cd "${SLURM_SUBMIT_DIR}"
 
 ROCM_VERSION="${ROCM_VERSION:?ROCM_VERSION must be set via --export=ALL,ROCM_VERSION=...}"
 AMDGPU_GFXMODEL="${AMDGPU_GFXMODEL:-gfx942;gfx90a}"
+# Path knobs: the sweep submitter
+# (bare_system/run_rocmplus_install_sweep.sh) is responsible for
+# resolving --site presets and legacy /nfsapps defaults, so by the
+# time we get here, TOP_INSTALL_PATH / TOP_MODULE_PATH / ROCM_INSTALLPATH
+# are either the operator's CLI values, the --site preset values, or
+# the legacy /nfsapps defaults -- in all three cases NON-EMPTY. The
+# ":-" defaults here only matter for the rare case of a direct
+# `sbatch run_rocmplus_install.sbatch` invocation that bypasses the
+# sweep submitter; for that path we still fall back to /nfsapps to
+# preserve byte-identical historical behavior (operators who hit this
+# path will keep getting /nfsapps writes until they migrate).
 TOP_INSTALL_PATH="${TOP_INSTALL_PATH:-/nfsapps/opt}"
 TOP_MODULE_PATH="${TOP_MODULE_PATH:-/nfsapps/modules}"
 ROCM_INSTALLPATH="${ROCM_INSTALLPATH:-/nfsapps/opt}"
+# SITE and ROCM_PATH are optional pass-throughs; when set, they are
+# forwarded to main_setup.sh as --site / --rocm-path. When unset,
+# main_setup.sh will auto-derive ROCM_PATH from `module show rocm/<v>`
+# (and TOP_INSTALL_PATH from its dirname) -- but only if the operator
+# also did not pass --top-install-path, which the sweep always does.
+SITE="${SITE:-}"
+ROCM_PATH="${ROCM_PATH:-}"
 PYTHON_VERSION="${PYTHON_VERSION:-}"
 QUICK_INSTALLS="${QUICK_INSTALLS:-0}"
 REPLACE_EXISTING="${REPLACE_EXISTING:-0}"
@@ -95,9 +113,11 @@ NFSAPPS_PARENT="/nfsapps"
 echo "=================================================================="
 echo " rocmplus install job ${SLURM_JOB_ID} starting at $(date) on $(hostname)"
 echo " ROCM_VERSION:     ${ROCM_VERSION}"
+echo " SITE preset:      ${SITE:-<unset>}"
 echo " TOP_INSTALL_PATH: ${TOP_INSTALL_PATH}"
 echo " TOP_MODULE_PATH:  ${TOP_MODULE_PATH}"
 echo " ROCM_INSTALLPATH: ${ROCM_INSTALLPATH}"
+echo " ROCM_PATH:        ${ROCM_PATH:-<auto-derive on compute node>}"
 echo " AMDGPU_GFXMODEL:  ${AMDGPU_GFXMODEL}"
 echo " PYTHON_VERSION:   3.${PYTHON_VERSION}"
 echo " QUICK_INSTALLS:   ${QUICK_INSTALLS}"
@@ -110,16 +130,26 @@ echo "=================================================================="
 # The login node exports /nfsapps rw to sh5 nodes via
 # /etc/exports.d/nfsapps_sh5_rw.exports, but the warewulf-managed fstab
 # still says ro by default, so this defensive remount is required.
-if ! sudo -n test -w "${NFSAPPS_PARENT}" 2>/dev/null; then
-   echo "Attempting to remount ${NFSAPPS_PARENT} rw..."
-   sudo mount -o remount,rw "${NFSAPPS_PARENT}" 2>/dev/null || \
-      { sudo umount "${NFSAPPS_PARENT}" 2>/dev/null && \
-        sudo mount -o rw,defaults,_netdev,nofail -t nfs warewulf:/nfsapps "${NFSAPPS_PARENT}"; } || true
-fi
-if ! sudo -n test -w "${NFSAPPS_PARENT}" 2>/dev/null; then
-   echo "ERROR: ${NFSAPPS_PARENT} is not writable on $(hostname); aborting." >&2
-   mount | grep nfsapps || true
-   exit 1
+# Only run this block when at least one of the target dirs actually
+# lives under /nfsapps; --site opt and --site shared-apps targets do
+# not need it and the abort-on-non-writable would be a false-positive
+# failure for those targets.
+if [[ "${TOP_INSTALL_PATH}" == "${NFSAPPS_PARENT}"* || \
+      "${TOP_MODULE_PATH}"  == "${NFSAPPS_PARENT}"* || \
+      "${ROCM_INSTALLPATH}" == "${NFSAPPS_PARENT}"* ]]; then
+   if ! sudo -n test -w "${NFSAPPS_PARENT}" 2>/dev/null; then
+      echo "Attempting to remount ${NFSAPPS_PARENT} rw..."
+      sudo mount -o remount,rw "${NFSAPPS_PARENT}" 2>/dev/null || \
+         { sudo umount "${NFSAPPS_PARENT}" 2>/dev/null && \
+           sudo mount -o rw,defaults,_netdev,nofail -t nfs warewulf:/nfsapps "${NFSAPPS_PARENT}"; } || true
+   fi
+   if ! sudo -n test -w "${NFSAPPS_PARENT}" 2>/dev/null; then
+      echo "ERROR: ${NFSAPPS_PARENT} is not writable on $(hostname); aborting." >&2
+      mount | grep nfsapps || true
+      exit 1
+   fi
+else
+   echo "Skipping /nfsapps remount: install/module/SDK targets are not under ${NFSAPPS_PARENT}."
 fi
 
 # ── 2. Self-heal install/module roots if missing ─────────────────────
@@ -234,12 +264,20 @@ if [[ -n "${PACKAGES_LIST}" ]]; then
    PACKAGES_ARGS=( --packages "${PACKAGES_LIST}" )
 fi
 
+# --site / --rocm-path are optional pass-throughs (forwarded only when
+# the operator set them at sweep submission time). Omitted args let
+# main_setup.sh's auto-derivation rungs fire on the compute node.
+SITE_ARGS=()
+[[ -n "${SITE}"      ]] && SITE_ARGS+=( --site      "${SITE}"      )
+[[ -n "${ROCM_PATH}" ]] && SITE_ARGS+=( --rocm-path "${ROCM_PATH}" )
+
 bare_system/main_setup.sh \
    --rocm-version         "${ROCM_NUMERIC}" \
    --rocm-rc-prefix       "${ROCM_RC_PREFIX}" \
    --rocm-install-path    "${ROCM_INSTALLPATH}" \
    --top-install-path     "${TOP_INSTALL_PATH}" \
    --top-module-path      "${TOP_MODULE_PATH}" \
+   "${SITE_ARGS[@]}" \
    --amdgpu-gfxmodel      "${AMDGPU_GFXMODEL}" \
    --python-version       "${PYTHON_VERSION}" \
    --quick-installs       "${QUICK_INSTALLS}" \

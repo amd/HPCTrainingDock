@@ -42,6 +42,27 @@ fi
 : ${ROCM_INSTALLPATH:="/opt/"}
 : ${TOP_INSTALL_PATH:="/opt"}
 : ${TOP_MODULE_PATH:="/etc/lmod/modules"}
+: ${ROCM_PATH:=""}
+: ${SITE:=""}
+# Resolution-source sentinels: flipped to 1 by the CLI parser when the
+# corresponding flag is passed explicitly. Used by the post-CLI
+# resolve_paths block to honor priority:
+#   1. CLI primitives (--top-install-path/--top-module-path/--rocm-path/
+#      --rocm-install-path) always win.
+#   2. --site preset fills in any value not already set by CLI.
+#   3. Auto-derive: TOP_MODULE_PATH from MODULEPATH (find '*/base' with
+#      a 'rocm/' subdir, parent = TOP_MODULE_PATH); ROCM_PATH from
+#      `module show rocm/<v>` (grep setenv ROCM_PATH); TOP_INSTALL_PATH
+#      = dirname($ROCM_PATH).
+#   4. Final fallback: /opt + /opt/modules.
+# All four flags remain functional unchanged for callers that always
+# pass them (the sbatch wrapper still does, so existing sweep behavior
+# is byte-identical when the operator does not pass --site).
+TOP_INSTALL_PATH_CLI=0
+TOP_MODULE_PATH_CLI=0
+ROCM_INSTALLPATH_CLI=0
+ROCM_PATH_CLI=0
+SITE_CLI=0
 : ${BUILD_PYTORCH:="1"}
 : ${BUILD_CUPY:="1"}
 : ${BUILD_HIP_PYTHON:="1"}
@@ -157,9 +178,11 @@ usage()
    echo "  --rocm-version [ ROCM_VERSION ]:  auto-detected from loaded module, or specify explicitly"
    echo "  --base-rocm-version [ VER ]:  for delta releases, install <VER> first and merge \$ROCM_VERSION on top (default: empty -- consulted from bare_system/rocm_delta_releases.conf when empty)"
    echo "  --supersedes [ VER ]:  emit a tombstone rocm/<VER>.lua that redirects to rocm/\$ROCM_VERSION (default: empty)"
-   echo "  --rocm-install-path [ ROCM_INSTALL_PATH ]:  default is $ROCM_INSTALLPATH"
-   echo "  --top-install-path [ TOP_INSTALL_PATH ]:  top-level directory for software installation, default is $TOP_INSTALL_PATH"
-   echo "  --top-module-path [ TOP_MODULE_PATH ]:  top-level directory for module files, default is $TOP_MODULE_PATH"
+   echo "  --rocm-install-path [ ROCM_INSTALL_PATH ]:  parent dir for the rocm SDK install (e.g. /opt -> /opt/rocm-<v>). Default is $ROCM_INSTALLPATH"
+   echo "  --rocm-path [ ROCM_PATH ]:  full path to the rocm SDK (e.g. /shared/apps/ubuntu/opt/rocm-7.2.3). Default: auto-derived from a loaded rocm module's setenv(ROCM_PATH) or from \`module show rocm/<v>\`. CLI value overrides any derived value."
+   echo "  --top-install-path [ TOP_INSTALL_PATH ]:  top-level directory for software installation (parent of rocmplus-<v>/). Default: --site preset, else dirname(\$ROCM_PATH), else $TOP_INSTALL_PATH"
+   echo "  --top-module-path [ TOP_MODULE_PATH ]:  top-level directory for module files (parent of base/, rocm-<v>/, rocmplus-<v>/). Default: --site preset, else derived from \$MODULEPATH (entry ending in '/base' with a rocm/ subdir, parent), else /opt/modules"
+   echo "  --site [ opt | nfsapps | shared-apps | /ABS/PATH ]:  shorthand preset for the three path flags above. Named presets: opt = /opt + /opt/modules; nfsapps = /nfsapps/opt + /nfsapps/modules (test tree); shared-apps = /shared/apps/ubuntu/opt + /shared/apps/modules/ubuntu/lmodfiles (live cluster tree, Ubuntu 22.04). Absolute path form: any value starting with '/' is treated as a parent prefix, expanded to PREFIX/opt + PREFIX/modules (e.g. --site /nfsapps/ubuntu-22.04 -> /nfsapps/ubuntu-22.04/opt + /nfsapps/ubuntu-22.04/modules) -- useful for distro-segregated test trees. Any --top-* / --rocm-* CLI flag overrides the corresponding preset value."
    echo "  --python-version [ PYTHON_VERSION ]: python3 minor release, default is $PYTHON_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ]: auto-detected via rocminfo, can specify multiple separated by semicolons (e.g. gfx942;gfx90a)"
    echo "  --install-rocprof-compute-from-source [0 or 1]:  default is $INSTALL_ROCPROF_COMPUTE_FROM_SOURCE (false)"
@@ -168,7 +191,7 @@ usage()
    echo "  --quick-installs [0 or 1]:  skip packages whose wall >= 20 min (measured from job 8065 sweep): pytorch (91m), tensorflow (70m), jax (34m, when policy gate allows). Also skips ftorch (transitive: needs pytorch) and julia (dormant: no install wired). Threshold raised from 15 -> 20 min after job 8065 audit moved petsc (17m) and scorep (17m) under the cutoff. Default $QUICK_INSTALLS"
    echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf the versioned subdir under \${TOP_INSTALL_PATH} (the version itself lives in the leaf script). Default $REPLACE_EXISTING"
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
-   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, likwid, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, hpctoolkit, likwid, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hdf5, fftw, petsc, hypre. Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Currently supported only for pytorch; keys are aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build."
+   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, likwid, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, hpctoolkit, likwid, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Currently supported only for pytorch; keys are aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build."
    echo "  --rocm-rc-prefix [ FAMILY ]:  release-candidate family name (e.g. 'therock', 'afar'). Auto-detected from \${ROCM_PATH} basename for rocm-{therock,afar}-* trees. Empty for regular releases. When non-empty, install/module dirs become rocmplus-\${FAMILY}-\${ROCM_VERSION}/ instead of rocmplus-\${ROCM_VERSION}/. Default: auto-detected (empty for regular releases)."
    echo "  --help: prints this message"
    exit 1
@@ -196,16 +219,31 @@ do
       "--rocm-install-path")
           shift
           ROCM_INSTALLPATH=${1}
+          ROCM_INSTALLPATH_CLI=1
+          reset-last
+          ;;
+      "--rocm-path")
+          shift
+          ROCM_PATH=${1}
+          ROCM_PATH_CLI=1
           reset-last
           ;;
       "--top-install-path")
           shift
           TOP_INSTALL_PATH=${1}
+          TOP_INSTALL_PATH_CLI=1
           reset-last
           ;;
       "--top-module-path")
           shift
           TOP_MODULE_PATH=${1}
+          TOP_MODULE_PATH_CLI=1
+          reset-last
+          ;;
+      "--site")
+          shift
+          SITE=${1}
+          SITE_CLI=1
           reset-last
           ;;
       "--python-version")
@@ -269,6 +307,164 @@ do
    n=$((${n} + 1))
    shift
 done
+
+# ── Path resolution (--site preset, MODULEPATH/module-show derive) ────
+# Priority cascade for each of TOP_INSTALL_PATH, TOP_MODULE_PATH,
+# ROCM_PATH, ROCM_INSTALLPATH:
+#   1. CLI primitive (--top-install-path, --top-module-path, --rocm-path,
+#      --rocm-install-path) -- if its _CLI sentinel is 1, the value is
+#      already final and this block is a no-op for it.
+#   2. --site preset (opt | nfsapps | shared-apps).
+#   3. Auto-derive from the loaded module env: MODULEPATH -> '*/base'
+#      parent for TOP_MODULE_PATH; `module show rocm/<v>` setenv
+#      ROCM_PATH for ROCM_PATH (and its dirname for TOP_INSTALL_PATH).
+#   4. Hard-coded /opt + /opt/modules fallback.
+#
+# *_SOURCE strings record which rung fired so the info block below
+# can show the operator exactly where each path came from.
+TOP_INSTALL_PATH_SOURCE=""
+TOP_MODULE_PATH_SOURCE=""
+ROCM_PATH_SOURCE=""
+ROCM_INSTALLPATH_SOURCE=""
+
+[ "${TOP_INSTALL_PATH_CLI}" = "1" ] && TOP_INSTALL_PATH_SOURCE="--top-install-path"
+[ "${TOP_MODULE_PATH_CLI}"  = "1" ] && TOP_MODULE_PATH_SOURCE="--top-module-path"
+[ "${ROCM_PATH_CLI}"        = "1" ] && ROCM_PATH_SOURCE="--rocm-path"
+[ "${ROCM_INSTALLPATH_CLI}" = "1" ] && ROCM_INSTALLPATH_SOURCE="--rocm-install-path"
+# ROCM_PATH may also have been inherited from the calling environment
+# (e.g. an interactive shell with `module load rocm/<v>` already
+# active). Treat that as an explicit external source rather than
+# overwriting it via derive below.
+if [ "${ROCM_PATH_CLI}" = "0" ] && [ -n "${ROCM_PATH}" ]; then
+   ROCM_PATH_SOURCE="\$ROCM_PATH (inherited env)"
+fi
+
+# Step 2: --site preset
+if [ -n "${SITE}" ]; then
+   case "${SITE}" in
+      opt)
+         _SITE_TOP_INSTALL="/opt"
+         _SITE_TOP_MODULE="/opt/modules"
+         ;;
+      nfsapps)
+         _SITE_TOP_INSTALL="/nfsapps/opt"
+         _SITE_TOP_MODULE="/nfsapps/modules"
+         ;;
+      shared-apps)
+         _SITE_TOP_INSTALL="/shared/apps/ubuntu/opt"
+         _SITE_TOP_MODULE="/shared/apps/modules/ubuntu/lmodfiles"
+         ;;
+      /*)
+         # Absolute-path PREFIX form (e.g. --site /nfsapps/ubuntu-22.04):
+         # symmetric layout PREFIX/opt + PREFIX/modules. Matches the
+         # /opt and /nfsapps presets in shape, just with an arbitrary
+         # parent (useful for distro-segregated test trees like
+         # /nfsapps/ubuntu-22.04 vs /nfsapps/ubuntu-24.04). Trailing
+         # slashes are tolerated. shared-apps's irregular
+         # /shared/apps/ubuntu/opt + /shared/apps/modules/ubuntu/lmodfiles
+         # layout is NOT reproduced by this form; if the operator needs
+         # that exact split they should use --site shared-apps or pass
+         # --top-install-path + --top-module-path explicitly.
+         _SITE_PREFIX="${SITE%/}"
+         _SITE_TOP_INSTALL="${_SITE_PREFIX}/opt"
+         _SITE_TOP_MODULE="${_SITE_PREFIX}/modules"
+         unset _SITE_PREFIX
+         ;;
+      *)
+         echo "ERROR: --site must be a named preset (opt | nfsapps | shared-apps) or an absolute path prefix starting with '/' (got '${SITE}')" >&2
+         exit 1
+         ;;
+   esac
+   if [ "${TOP_INSTALL_PATH_CLI}" = "0" ]; then
+      TOP_INSTALL_PATH="${_SITE_TOP_INSTALL}"
+      TOP_INSTALL_PATH_SOURCE="--site ${SITE}"
+   fi
+   if [ "${TOP_MODULE_PATH_CLI}" = "0" ]; then
+      TOP_MODULE_PATH="${_SITE_TOP_MODULE}"
+      TOP_MODULE_PATH_SOURCE="--site ${SITE}"
+   fi
+   if [ "${ROCM_INSTALLPATH_CLI}" = "0" ]; then
+      # ROCM_INSTALLPATH is the parent dir of where rocm-<v> would be
+      # laid down by amdgpu-install / extracted by run_rocm_build.sh.
+      # For all three presets we co-locate it with TOP_INSTALL_PATH
+      # (same parent dir contains rocm-<v> and rocmplus-<v>).
+      ROCM_INSTALLPATH="${_SITE_TOP_INSTALL}"
+      ROCM_INSTALLPATH_SOURCE="--site ${SITE}"
+   fi
+   unset _SITE_TOP_INSTALL _SITE_TOP_MODULE
+fi
+
+# Step 3a: derive TOP_MODULE_PATH from $MODULEPATH (find '*/base' entry
+# whose directory contains a rocm/ subdir; the parent of that entry is
+# TOP_MODULE_PATH). On a 22.04 cluster login node with rocm/<v> already
+# active, this yields the canonical
+# /shared/apps/modules/ubuntu/lmodfiles automatically.
+if [ "${TOP_MODULE_PATH_CLI}" = "0" ] && [ -z "${SITE}" ] && [ -n "${MODULEPATH:-}" ]; then
+   _derived_mod=""
+   _IFS_BAK="${IFS}"
+   IFS=':'
+   set -- ${MODULEPATH}
+   IFS="${_IFS_BAK}"
+   for _e in "$@"; do
+      if [[ "${_e}" == */base ]] && [ -d "${_e}/rocm" ]; then
+         _derived_mod="${_e%/base}"
+         break
+      fi
+   done
+   if [ -n "${_derived_mod}" ]; then
+      TOP_MODULE_PATH="${_derived_mod}"
+      TOP_MODULE_PATH_SOURCE="derived from \$MODULEPATH (${_e})"
+   fi
+   unset _derived_mod _IFS_BAK _e
+fi
+
+# Step 3b: derive ROCM_PATH from `module show rocm/<v>` if still empty.
+# Per spec: scan the modulefile body for setenv("ROCM_PATH", "..."), and
+# take the value. Works even when rocm/<v> is not currently loaded.
+if [ "${ROCM_PATH_CLI}" = "0" ] && [ -z "${ROCM_PATH}" ] && [ -n "${ROCM_VERSION}" ]; then
+   if type module >/dev/null 2>&1; then
+      _show=$(module show rocm/${ROCM_VERSION} 2>&1 || true)
+      # Lua form:  setenv("ROCM_PATH", "/some/path")
+      # Tcl form:  setenv      ROCM_PATH       /some/path
+      _rp=$(echo "${_show}" | sed -n 's|.*setenv("ROCM_PATH"[[:space:]]*,[[:space:]]*"\([^"]*\)").*|\1|p' | head -1)
+      [ -z "${_rp}" ] && _rp=$(echo "${_show}" | sed -n 's|^[[:space:]]*setenv[[:space:]]\+ROCM_PATH[[:space:]]\+\(.*\)$|\1|p' | head -1)
+      if [ -n "${_rp}" ] && [ -d "${_rp}" ]; then
+         ROCM_PATH="${_rp}"
+         ROCM_PATH_SOURCE="module show rocm/${ROCM_VERSION} (setenv ROCM_PATH)"
+      fi
+      unset _show _rp
+   fi
+fi
+
+# Step 3c: derive TOP_INSTALL_PATH from $ROCM_PATH if still unset.
+if [ "${TOP_INSTALL_PATH_CLI}" = "0" ] && [ -z "${SITE}" ]; then
+   if [ -n "${ROCM_PATH}" ] && [ -d "${ROCM_PATH}" ]; then
+      TOP_INSTALL_PATH="$(dirname "${ROCM_PATH}")"
+      TOP_INSTALL_PATH_SOURCE="dirname(\$ROCM_PATH)"
+   fi
+fi
+
+# Step 4: final /opt fallback. The `: ${VAR:=default}` at top of file
+# already gave us /opt + /etc/lmod/modules; here we upgrade
+# /etc/lmod/modules -> /opt/modules to match the documented "/opt prefix
+# for /opt/rocm-<ver> and /opt/modules/base" convention. /etc/lmod/modules
+# remains a valid CLI value (just no longer a default).
+if [ "${TOP_INSTALL_PATH_CLI}" = "0" ] && [ -z "${SITE}" ] && [ -z "${TOP_INSTALL_PATH_SOURCE}" ]; then
+   TOP_INSTALL_PATH_SOURCE="default (/opt)"
+fi
+if [ "${TOP_MODULE_PATH_CLI}" = "0" ] && [ -z "${SITE}" ] && [ -z "${TOP_MODULE_PATH_SOURCE}" ]; then
+   if [ "${TOP_MODULE_PATH}" = "/etc/lmod/modules" ]; then
+      TOP_MODULE_PATH="/opt/modules"
+   fi
+   TOP_MODULE_PATH_SOURCE="default (/opt/modules)"
+fi
+# ROCM_INSTALLPATH: if still untouched, default to TOP_INSTALL_PATH so
+# rocm-<v> and rocmplus-<v> land in the same parent dir (matches every
+# preset above + matches the legacy /opt/ default's intent).
+if [ "${ROCM_INSTALLPATH_CLI}" = "0" ] && [ -z "${SITE}" ]; then
+   ROCM_INSTALLPATH="${TOP_INSTALL_PATH}"
+   ROCM_INSTALLPATH_SOURCE="= TOP_INSTALL_PATH"
+fi
 
 # ── Detect ROCm version + RC prefix from loaded module (if any) ──────
 # ROCM_MODULE_VERSION is the SDK numeric (from .info/version), used for
@@ -502,11 +698,6 @@ declare -A PKG_FLAG=(
 # this flag (run_and_log_versioned, defined below, does the splice).
 #
 # Excluded on purpose:
-#   * netcdf  -- the leaf script has TWO version flags (--netcdf-c-version
-#                and --netcdf-f-version); a single =VERSION suffix would
-#                be ambiguous. Operators who need to pin netcdf-c/f must
-#                edit netcdf_setup.sh's NETCDF_C_VERSION/NETCDF_F_VERSION
-#                defaults (matches the leaf-owns-its-version convention).
 #   * flang-new, mvapich, rocprof-sys, rocprof-compute, tau, hipifly --
 #                no --<name>-version flag in the leaf script today; pinning
 #                a version means editing the leaf script (these are mostly
@@ -530,6 +721,12 @@ declare -A PKG_VER_FLAG=(
    [miniconda3]="--miniconda3-version"
    [miniforge3]="--miniforge3-version"
    [hdf5]="--hdf5-version"
+   # netcdf: single sweep-CLI knob is --netcdf-c-version. The leaf
+   # netcdf_setup.sh auto-derives NETCDF_F_VERSION from NETCDF_C_VERSION
+   # via its NETCDF_C_TO_F map (single source of truth for the C->F
+   # compatibility matrix). Pass --netcdf-f-version directly to the leaf
+   # if you need to override.
+   [netcdf]="--netcdf-c-version"
    [fftw]="--fftw-version"
    [petsc]="--petsc-version"
    [hypre]="--hypre-version"
@@ -1102,34 +1299,64 @@ final_summary() {
 trap final_summary EXIT
 
 # ── Configuration summary ────────────────────────────────────────────
+# Computed early (also recomputed below at the canonical ROCMPLUS_SUFFIX
+# assignment so the existing dependent code stays unchanged). Needed
+# here so the info block can show the concrete destination paths the
+# operator is about to write to.
+_RPS_PREVIEW="${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCM_VERSION}"
+
 echo ""
-echo "=============================================="
-echo "  Installation Configuration Summary"
-echo "=============================================="
-echo "  TOP_INSTALL_PATH : ${TOP_INSTALL_PATH}"
-echo "  TOP_MODULE_PATH  : ${TOP_MODULE_PATH}"
-echo "  ROCM_VERSION     : ${ROCM_VERSION}"
-echo "  ROCM_RC_PREFIX   : '${ROCM_RC_PREFIX}'  (install dir suffix: rocmplus-${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCM_VERSION})"
-echo "  AMDGPU_GFXMODEL  : ${AMDGPU_GFXMODEL}"
-echo "  PYTHON_VERSION   : 3.${PYTHON_VERSION}"
-echo "  ROCM_INSTALLPATH : ${ROCM_INSTALLPATH}"
-echo "  DISTRO           : ${DISTRO} ${DISTRO_VERSION}"
-echo "  LOG_DIR          : ${LOG_DIR}"
-echo "  QUICK_INSTALLS   : ${QUICK_INSTALLS}"
-echo "  REPLACE_EXISTING : ${REPLACE_EXISTING}"
-echo "  KEEP_FAILED      : ${KEEP_FAILED_INSTALLS}"
-echo "  PACKAGES         : ${PACKAGES_INPUT:-<all>}"
-echo "=============================================="
+echo "=================================================================="
+echo "  rocmplus install plan"
+echo "=================================================================="
+echo "  ROCm version      : ${ROCM_VERSION}"
+echo "  ROCM_RC_PREFIX    : '${ROCM_RC_PREFIX}'   (install/module suffix: rocmplus-${_RPS_PREVIEW})"
+echo "  AMDGPU_GFXMODEL   : ${AMDGPU_GFXMODEL}"
+echo "  PYTHON_VERSION    : 3.${PYTHON_VERSION}"
+echo "  DISTRO            : ${DISTRO} ${DISTRO_VERSION}"
 echo ""
-echo -n "Does this look correct? [Y/n] (default Y, continuing in 30s) "
-if read -r -t 30 CONFIRM; then
-   if [[ "${CONFIRM}" =~ ^[Nn]$ ]]; then
-      echo "Aborting."
-      exit 1
+echo "  --- Path resolution (CLI > --site preset > derived > default) ---"
+printf "  %-22s %s\n" "--site"               "${SITE:-<unset>}${SITE_CLI:+ (CLI)}"
+printf "  %-22s %s\n" "--rocm-path"          "${ROCM_PATH:-<unset>}   (${ROCM_PATH_SOURCE:-<none>})"
+printf "  %-22s %s\n" "--top-install-path"   "${TOP_INSTALL_PATH}   (${TOP_INSTALL_PATH_SOURCE:-default})"
+printf "  %-22s %s\n" "--top-module-path"    "${TOP_MODULE_PATH}   (${TOP_MODULE_PATH_SOURCE:-default})"
+printf "  %-22s %s\n" "--rocm-install-path"  "${ROCM_INSTALLPATH}   (${ROCM_INSTALLPATH_SOURCE:-default})"
+echo ""
+echo "  --- Where things will be written ---"
+echo "    rocmplus packages -> ${TOP_INSTALL_PATH}/rocmplus-${_RPS_PREVIEW}/<pkg>-v<ver>/"
+echo "    rocmplus modules  -> ${TOP_MODULE_PATH}/rocmplus-${_RPS_PREVIEW}/<pkg>/<ver>.lua"
+echo "    rocm SDK (if rebuilt) -> ${ROCM_INSTALLPATH}/rocm-${ROCM_VERSION}/"
+echo "    LinuxPlus shared modules -> ${TOP_MODULE_PATH}/LinuxPlus/  (miniconda3, miniforge3)"
+echo "    Per-job log dir     -> ${LOG_DIR}"
+echo ""
+echo "  --- Knobs ---"
+printf "  %-22s %s\n" "QUICK_INSTALLS"   "${QUICK_INSTALLS}"
+printf "  %-22s %s\n" "REPLACE_EXISTING" "${REPLACE_EXISTING}"
+printf "  %-22s %s\n" "KEEP_FAILED"      "${KEEP_FAILED_INSTALLS}"
+printf "  %-22s %s\n" "PACKAGES"         "${PACKAGES_INPUT:-<all>}"
+echo "=================================================================="
+echo ""
+
+unset _RPS_PREVIEW
+
+# The interactive confirmation prompt is skipped when stdin is not a
+# TTY (i.e. when invoked from sbatch / a pipe), because there's no one
+# to answer it -- the previous behavior was to ECHO the prompt and
+# then wait 30s for a read() that could never return on /dev/null
+# input, which just added 30s of misleading log spam to every batch
+# job. When invoked interactively (e.g. ssh login + direct
+# main_setup.sh) the prompt still fires.
+if [ -t 0 ]; then
+   echo -n "Does this look correct? [Y/n] (default Y, continuing in 30s) "
+   if read -r -t 30 CONFIRM; then
+      if [[ "${CONFIRM}" =~ ^[Nn]$ ]]; then
+         echo "Aborting."
+         exit 1
+      fi
+   else
+      echo ""
+      echo "No response received, assuming yes..."
    fi
-else
-   echo ""
-   echo "No response received, assuming yes..."
 fi
 
 # ── Derived paths ────────────────────────────────────────────────────
@@ -1144,6 +1371,57 @@ fi
 # 'afar-' family prefix).
 ROCMPLUS_SUFFIX="${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCM_VERSION}"
 ROCMPLUS="${TOP_INSTALL_PATH}/rocmplus-${ROCMPLUS_SUFFIX}"
+
+# ── Bring the destination rocmplus-<v> modulefile dir to the front of ─
+# MODULEPATH so freshly-built modules win over any pre-existing copies
+# of the same package elsewhere on MODULEPATH (e.g. a legacy
+# /shared/apps/.../rocmplus-${ROCM_VERSION} tree that the rocm/<v>
+# system modulefile added). Without this, an unversioned
+# `module load hdf5` inside a leaf script (netcdf_setup.sh, petsc_setup.sh,
+# etc.) can resolve to an older hdf5 from a different tree and link
+# the downstream package against it -- exact failure mode: job 9712,
+# netcdf-c v4.10.0 unintentionally linked against
+# /shared/apps/.../hdf5-v1.14.6 because the system rocm/7.2.3
+# modulefile added that tree before /nfsapps/.../rocmplus-7.2.3 was
+# anywhere on MODULEPATH.
+#
+# Direct env-var prepend (not `module use`) for portability: this script
+# is re-exec'd via `/bin/bash` at the top-of-file self-copy guard, which
+# can drop the `module` shell function. Lmod reads MODULEPATH from the
+# environment, so prepending here is equivalent to `module use` and
+# survives the re-exec. Each leaf script source's lmod.sh again
+# (see hdf5_setup.sh / netcdf_setup.sh preflight blocks) so the
+# `module` function is re-created at use-time downstream.
+# Inline USE_CUSTOM_PATHS check: same condition computed below at line
+# ~1221, but evaluated here because we must prepend MODULEPATH BEFORE
+# any leaf script (rocm-patches, openmpi, etc.) does `module load`. The
+# canonical USE_CUSTOM_PATHS assignment below stays unchanged so all
+# downstream sites that read it work as before.
+if [[ "${TOP_INSTALL_PATH}" != "/opt" || "${TOP_MODULE_PATH}" != "/etc/lmod/modules" ]]; then
+   _rocmplus_moddir="${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}"
+   if [ ! -d "${_rocmplus_moddir}" ]; then
+      # Pre-create so the first leaf script that writes a modulefile
+      # under it lands in a dir that's already on MODULEPATH. Otherwise
+      # subsequent leaf scripts in the same job would still miss the
+      # freshly-built modules (Lmod only walks MODULEPATH entries that
+      # exist as directories at startup time of each `module` call).
+      PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+      ${PKG_SUDO} install -d -m 0755 "${_rocmplus_moddir}" 2>/dev/null || true
+   fi
+   if [ -d "${_rocmplus_moddir}" ]; then
+      # Only prepend if not already at the front (idempotent across
+      # nested sources / re-runs).
+      case ":${MODULEPATH:-}:" in
+         ":${_rocmplus_moddir}:"*) ;;
+         *) export MODULEPATH="${_rocmplus_moddir}${MODULEPATH:+:${MODULEPATH}}" ;;
+      esac
+      echo "main_setup: MODULEPATH prepend -> ${_rocmplus_moddir}"
+      echo "main_setup: MODULEPATH=${MODULEPATH}"
+   else
+      echo "WARNING: could not create ${_rocmplus_moddir}; freshly-built modules may not be visible to subsequent leaf scripts" >&2
+   fi
+   unset _rocmplus_moddir
+fi
 
 # ── --replace-existing + --keep-failed-installs ──────────────────────
 #
@@ -1476,7 +1754,7 @@ run_and_log hipifly extras/scripts/hipifly_setup.sh --rocm-version ${ROCM_VERSIO
 run_and_log_versioned hdf5 extras/scripts/hdf5_setup.sh ${COMMON_OPTIONS} --build-hdf5 ${BUILD_HDF5} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/hdf5)
 
-run_and_log netcdf extras/scripts/netcdf_setup.sh ${COMMON_OPTIONS} --build-netcdf ${BUILD_NETCDF} ${REPLACE_OPTS} \
+run_and_log_versioned netcdf extras/scripts/netcdf_setup.sh ${COMMON_OPTIONS} --build-netcdf ${BUILD_NETCDF} ${REPLACE_OPTS} \
    $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${ROCMPLUS} --netcdf-c-module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/netcdf-c --netcdf-f-module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/netcdf-fortran")
 
 run_and_log_versioned fftw extras/scripts/fftw_setup.sh ${COMMON_OPTIONS} --build-fftw ${BUILD_FFTW} ${REPLACE_OPTS} \
