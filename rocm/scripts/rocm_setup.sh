@@ -1141,58 +1141,22 @@ EOF
          ${SUDO} chmod go-w /opt/rocm-${ROCM_VERSION}
       fi
 
-      # if ROCM_VERSION is greater than or equal to 7.1.0, the sort by version will give the smaller ROCM_VERSION number
-      if [ "$(printf '%s\n' "7.1.0" "$ROCM_VERSION" | sort -V | head -n1)" != "7.1.0" ]; then
-         if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
-            export MODULE_PATH=/etc/lmod/modules/ROCm/${TOOL_NAME}
-            ${SUDO} mkdir -p ${MODULE_PATH}
-            # The - option suppresses tabs
-         cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
-	local help_message = [[
-
-	${TOOL_NAME_MC} is an open-source performance analysis tool for profiling
-	machine learning/HPC workloads running on AMD MI GPUs.
-
-	Version ${ROCM_VERSION}
-	]]
-
-	help(help_message,"\n")
-
-	whatis("Name: ${TOOL_NAME}")
-	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
-	whatis("Version: ${ROCM_VERSION}")
-	whatis("Keywords: Profiling, Performance, GPU")
-	whatis("Description: tool for GPU performance profiling")
-	whatis("URL: https://github.com/ROCm/${TOOL_NAME}")
-
-	-- Export environmental variables
-	local topDir="/opt/rocm-${ROCM_VERSION}"
-	local binDir="/opt/rocm-${ROCM_VERSION}/bin"
-	local shareDir="/opt/rocm-${ROCM_VERSION}/share/${TOOL_NAME}"
-	local pythonDeps="/opt/rocm-${ROCM_VERSION}/libexec/${TOOL_NAME}/python-libs"
-	-- no need to set: local roofline="${ROOFLINE_BIN}"
-
-	setenv("${TOOL_NAME_UC}_DIR",topDir)
-	setenv("${TOOL_NAME_UC}_BIN",binDir)
-	setenv("${TOOL_NAME_UC}_SHARE",shareDir)
-	-- no need to set: setenv("ROOFLINE_BIN",roofline)
-
-	-- Update relevant PATH variables
-	prepend_path("PATH",binDir)
-	if ( pythonDeps  ~= "" ) then
-	prepend_path("PYTHONPATH",pythonDeps)
-	end
-
-	-- Site-specific additions
-	-- depends_on "python"
-	-- depends_on "rocm"
-	prereq(atleast("rocm","${ROCM_VERSION}"))
-	--  prereq("mongodb-tools")
-	local home = os.getenv("HOME")
-	setenv("MPLCONFIGDIR",pathJoin(home,".matplotlib"))
-
-EOF
-         fi
-      fi
+      # The legacy ROCm/rocprofiler-compute/${ROCM_VERSION}.lua submodule
+      # generation has been retired (2026-05-14).  The base rocm/${ROCM_VERSION}
+      # modulefile already provides rocprof-compute via:
+      #   1.  prepend_path("PATH", pathJoin(base, "bin"))  -- the SDK's
+      #       /opt/rocm-${ROCM_VERSION}/bin (a nuitka onefile for 7.x,
+      #       a Python wrapper for 6.x), and
+      #   2.  (when the rocm_patches.sh rocprof-compute overlay is
+      #       installed for this ROCm release) prepend_path("PATH",
+      #       <rocm-patches-X.Y.Z>/rocprof-compute/bin), which lands FIRST
+      #       in resolved PATH and supplies the patched nuitka onefile.
+      # The submodule was a workaround from the Python-rocprof-compute era
+      # (PYTHONPATH=<rocm>/libexec/rocprofiler-compute/python-libs) and is
+      # now strictly vestigial: every test or user script that did
+      # `module load rocprofiler-compute` only relied on it to put
+      # rocprof-compute on PATH, which the base rocm module already does.
+      # See HPCTrainingExamples tests/rocprof-compute_*_check.sh for the
+      # corresponding test-side cleanup.
    fi
 fi

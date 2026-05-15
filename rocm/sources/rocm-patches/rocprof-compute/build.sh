@@ -147,6 +147,118 @@ else
     fi
 fi
 
+# ------------------------------------------------------------------ #
+# Site patch: guard the second amd-smi static --json call against
+# empty stdout (ROCm 7.1.x only).
+#
+# Upstream src/rocprof_compute_soc/soc_base.py calls
+#   static_data = json.loads(
+#       run(["amd-smi","static","--gpu=0","--json"], exit_on_error=True))
+# WITHOUT a try/except.  On this cluster's compute nodes amd-smi
+# returns an empty stdout (rc=2) when invoked this way under ROCm
+# 7.1.x, which crashes the entire profiler at startup with
+#   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+#
+# The first amd-smi call (src/utils/specs.py:255-264) is already
+# guarded the same way; this patch mirrors that style.  Upstream
+# commit a7bbe0c5d2 ("Use amd-smi Python API instead of CLI",
+# #1334) replaces both sites with the amdsmi Python bindings in
+# rocm-7.2.x, so we narrow this patch to 7.1.x only.
+#
+# The fix is functional only: when amd-smi returns nothing, we
+# leave self._mspec.max_mclk unset (the same behaviour as upstream
+# when amd-smi reports no frequency_levels).  --no-roof workloads
+# such as the HPCTrainingExamples Rocprof-compute_ROCm_*_Check
+# tests do not consume max_mclk.
+#
+# Implemented as a python in-place rewrite (rather than a unified
+# diff) so the substitution is line-number-independent and idempotent.
+# ------------------------------------------------------------------ #
+if [ -z "$RC_FLAVOUR" ] && [[ "$ROCM_VERSION" =~ ^7\.1\. ]]; then
+    echo "[build] applying site patch (soc_base.py: guard amd-smi static json.loads) for ${ROCM_VERSION}" | tee -a "$LOG"
+    python3 - <<'PYEOF' 2>&1 | tee -a "$LOG"
+import sys
+src = "src/rocprof_compute_soc/soc_base.py"
+with open(src) as f:
+    content = f.read()
+
+OLD = (
+'        # Parse json from amd-smi static --clock\n'
+'        static_data = json.loads(\n'
+'            run(["amd-smi", "static", "--gpu=0", "--json"], exit_on_error=True)\n'
+'        )\n'
+'\n'
+'        # Extract GPU data\n'
+'        gpu_list = (\n'
+'            static_data\n'
+'            if isinstance(static_data, list)\n'
+'            else static_data.get("gpu_data", [])\n'
+'        )\n'
+'        gpu_data = gpu_list[0] if gpu_list else {}\n'
+'\n'
+'        frequency_levels = (\n'
+'            gpu_data.get("clock", {}).get("mem", {}).get("frequency_levels")\n'
+'        )\n'
+'        if frequency_levels:\n'
+'            # Extract max memory clock frequency\n'
+'            amd_smi_mclk = frequency_levels[max(frequency_levels.keys())]\n'
+'            # 100 Mhz -> 100\n'
+'            self._mspec.max_mclk = amd_smi_mclk.split()[0]\n'
+)
+
+NEW = (
+'        # Parse json from amd-smi static --clock.  Site patch (ROCm 7.1.x):\n'
+'        # amd-smi can return empty stdout (rc=2) on some hosts; the first\n'
+'        # amd-smi call in utils/specs.py:255-264 is already guarded the\n'
+'        # same way.  Upstream commit a7bbe0c5d2 (#1334) replaces both call\n'
+'        # sites with the amdsmi Python API in rocm-7.2.x.\n'
+'        static_output = run(\n'
+'            ["amd-smi", "static", "--gpu=0", "--json"], exit_on_error=True\n'
+'        )\n'
+'        try:\n'
+'            static_data = json.loads(static_output) if static_output else None\n'
+'        except json.JSONDecodeError as e:\n'
+'            console_warning(\n'
+'                f"Failed to parse amd-smi static output in soc_base: {e}"\n'
+'            )\n'
+'            static_data = None\n'
+'\n'
+'        if static_data is not None:\n'
+'            # Extract GPU data\n'
+'            gpu_list = (\n'
+'                static_data\n'
+'                if isinstance(static_data, list)\n'
+'                else static_data.get("gpu_data", [])\n'
+'            )\n'
+'            gpu_data = gpu_list[0] if gpu_list else {}\n'
+'\n'
+'            frequency_levels = (\n'
+'                gpu_data.get("clock", {}).get("mem", {}).get("frequency_levels")\n'
+'            )\n'
+'            if frequency_levels:\n'
+'                # Extract max memory clock frequency\n'
+'                amd_smi_mclk = frequency_levels[max(frequency_levels.keys())]\n'
+'                # 100 Mhz -> 100\n'
+'                self._mspec.max_mclk = amd_smi_mclk.split()[0]\n'
+)
+
+if NEW in content:
+    print(f"[patch] {src} already patched -- no-op")
+    sys.exit(0)
+
+n = content.count(OLD)
+if n != 1:
+    print(f"[patch] ERROR: expected exactly 1 match in {src}, found {n}", file=sys.stderr)
+    sys.exit(2)
+
+content = content.replace(OLD, NEW)
+with open(src, 'w') as f:
+    f.write(content)
+print(f"[patch] OK: rewrote {src}")
+PYEOF
+    echo "[build] site patch applied cleanly" | tee -a "$LOG"
+fi
+
 # Pin Python deps for ROCm 7.1.0+ official releases.  Mirror of the
 # locked list that lived in rocm/scripts/rocm_setup.sh up to 2026-05
 # (the original home of the nuitka build, now retired in favour of

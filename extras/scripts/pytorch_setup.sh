@@ -48,7 +48,17 @@ else
    AMDGPU_GFXMODEL=$(rocminfo 2>/dev/null | grep gfx | sed -e 's/Name://' | head -1 | sed 's/ //g' || true)
 fi
 BUILD_PYTORCH=0
+# PYTORCH_VERSION's role: this 2.9.1 default is only the LAST-RESORT
+# fallback. The runtime default is auto-derived by
+# default_pytorch_version_for_rocm() (defined further below) from the
+# loaded/--rocm-version ROCm major.minor — e.g. ROCm 6.2 -> 2.6.0,
+# ROCm 7.1 -> 2.10.0, ROCm 7.3+ -> 2.12.0. The auto-derive runs inside
+# resolve_pytorch_stack_versions when PYTORCH_VERSION_USER_SET=0.
+# Passing --pytorch-version flips the sentinel to 1 and bypasses the
+# auto-derive. The 2.9.1 here is what sticks if the resolver runs with
+# an unrecognised ROCm.
 PYTORCH_VERSION=2.9.1
+PYTORCH_VERSION_USER_SET=0
 PYTHON_VERSION=10
 # torchvision / torchaudio defaults are placeholders; the resolution
 # block below the arg parser overwrites them from
@@ -146,31 +156,71 @@ declare -A PYTORCH_COMPANION_VERSIONS=(
 # log_pytorch*.txt for evidence). Alphabetize within the row so diffs
 # stay readable.
 declare -A PYTORCH_STACK_MANIFEST=(
-   ["2.7|6.2"]="aotriton=0.9.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
-   ["2.7|6.3"]="aotriton=0.9.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
-   ["2.7|6.4"]="aotriton=0.9.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
-   # 2.7|7.1 and 2.8|7.1 are shim cells (NOT canonical PT/AOTriton pairings).
-   # Canonical AOTriton for PT 2.7 is 0.9.2b and for PT 2.8 is 0.10b. Both
-   # bundle Triton 3.2.0, whose generated HSA code-object metadata is
-   # rejected by the host /usr/bin/ld.lld on the rocm-7.x build hosts:
+   # ── PT 2.7 / 2.8 stack pins (ALL shim cells, NOT canonical) ──
+   # Canonical upstream PT/AOTriton pairings are:
+   #   PT 2.7 -> aotriton 0.9.2b + Triton 3.2.0
+   #   PT 2.8 -> aotriton 0.10b  + Triton 3.2.0
+   # We do NOT use those canonical pins on any sh5 build host. Reason:
+   # the HSA code-object metadata that Triton 3.2.0 emits is rejected
+   # by the system /usr/bin/ld.lld with:
    #   ld.lld: error: unknown abi version:
    #   ERROR: aotriton ninja install failed (rc=1)
-   # See slurm-9316/9319/9323-rocmplus-7.1.1.{out,err} for the regression.
-   # We bump aotriton -> 0.11.2b (which bundles Triton 3.4.0, accepted by
-   # the same lld) so `--packages "pytorch=2.7.1 pytorch=2.8.0"` resolves
-   # to a working stack on rocm-7.1 without requiring an inline override.
-   # PT-version-appropriate companions (torchvision/torchaudio/flash/etc.)
-   # are kept at their PT-2.7 / PT-2.8 values; only the AOTriton+Triton
-   # axis is bumped. Caveat: AOTriton 0.11.2b's CMake API was developed
-   # against PyTorch 2.9 and there is a known risk that the link step
-   # against torch._inductor symbols mismatches when used with PT 2.7/2.8.
-   # First successful build of these combos will validate the pairing;
-   # if it fails at a different (post-lld) step, revisit Option 3 (PATH
-   # fix in pytorch_setup.sh aotriton stage).
+   # /usr/bin/ld.lld is the SYSTEM lld -- it is NOT shipped by ROCm
+   # and is therefore the SAME binary regardless of which rocm/X.Y.Z
+   # module is loaded. So the bug is host-side, not ROCm-version-side.
+   # Confirmed across the entire rocm-6.x..7.x range:
+   #   rocm-6.4.3   : slurm-9334 PT 2.7.1 & PT 2.8.0 leaves (2026-05-14
+   #                  04:30 CDT, log_pytorch_v2.7.1 line 280 + log_pytorch
+   #                  line 3956)
+   #   rocm-7.0.2   : slurm-9333 PT 2.7.1 leaf hit the same bug BEFORE
+   #                  the 7.0 shim cell was added (now superseded by
+   #                  the unified 0.11.2b pin below)
+   #   rocm-7.1.1   : slurm-9316/9319/9323 (the original regression)
+   #   rocm-7.2.3   : slurm-9331 PT 2.7.1 leaf
+   # See logs_05_{13,14}_2026/rocm-*_93{16,19,23,31,33,34}/
+   # log_pytorch_v*.txt for the full traces.
+   #
+   # Fix: pin EVERY PT-2.7 and PT-2.8 cell to
+   #   aotriton=0.11.2b ; triton=3.4.0
+   # 0.11.2b bundles Triton 3.4.0, whose metadata the same system lld
+   # accepts. PT-version-appropriate companions (torchvision/torchaudio/
+   # flashattention/pillow/sageattention/deepspeed) are kept at their
+   # PT-2.7 or PT-2.8 values; only the AOTriton+Triton axis is bumped.
+   # Cells are listed (PT, ROCm) in increasing-ROCm order within each PT
+   # to keep diffs readable. All 11 cells (3 ROCm-6.x + 3 ROCm-7.x for
+   # PT 2.7, plus 2 ROCm-6.x + 3 ROCm-7.x for PT 2.8) carry the
+   # IDENTICAL aotriton/triton pin set; companions split on PT only.
+   #
+   # Caveat: AOTriton 0.11.2b's CMake API was developed against PyTorch
+   # 2.9, and the linker step against torch._inductor symbols may
+   # mismatch when used with PT 2.7/2.8. 2026-05-13/14 sweep evidence:
+   # the 7.1-shim cells unblocked the AOTriton stage but exposed
+   # downstream PT-source-tree issues that surface DURING the pytorch
+   # wheel build, not at the link step:
+   #   amd_warp_functions.h:{90,115} 'cannot compile this builtin yet'
+   #   in Embedding.hip + Normalization.hip
+   # which is a clang-builtin-not-implemented bug, distinct from the
+   # constexpr family my block_reduce.cuh sed patch fixed. Those need
+   # additional source-tree patches to fully unblock PT 2.7/2.8 on
+   # rocm-7.x; the AOTriton stage itself is no longer the failure
+   # boundary for any of these cells.
+   #
+   # Forward path: if a future rocm-X.Y minor changes the lld
+   # behaviour (either by accepting older Triton 3.2.0 metadata, or by
+   # breaking the newer 3.4.0 metadata), split that minor's cell off
+   # from this block with its own pinned aotriton/triton pair and a
+   # comment explaining the divergence.
+   ["2.7|6.2"]="aotriton=0.11.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.7|6.3"]="aotriton=0.11.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.7|6.4"]="aotriton=0.11.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.7|7.0"]="aotriton=0.11.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
    ["2.7|7.1"]="aotriton=0.11.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
-   ["2.8|6.3"]="aotriton=0.10b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
-   ["2.8|6.4"]="aotriton=0.10b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.7|7.2"]="aotriton=0.11.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.8|6.3"]="aotriton=0.11.2b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.8|6.4"]="aotriton=0.11.2b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.8|7.0"]="aotriton=0.11.2b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
    ["2.8|7.1"]="aotriton=0.11.2b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.8|7.2"]="aotriton=0.11.2b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
    ["2.9|7.0"]="aotriton=0.11.2b;torchvision=0.24.1;torchaudio=2.9.1;triton=3.4.0;flashattention=2.8.3;pillow=12.1.1;sageattention=1.0.6;deepspeed=latest"
    ["2.9|7.1"]="aotriton=0.11.2b;torchvision=0.24.1;torchaudio=2.9.1;triton=3.4.0;flashattention=2.8.3;pillow=12.1.1;sageattention=1.0.6;deepspeed=latest"
    ["2.9|7.2"]="aotriton=0.11.2b;torchvision=0.24.1;torchaudio=2.9.1;triton=3.4.0;flashattention=2.8.3;pillow=12.1.1;sageattention=1.0.6;deepspeed=latest"
@@ -191,6 +241,45 @@ declare -A PYTORCH_STACK_MANIFEST=(
 resolve_aotriton_for_pt_only() {
    local pt_short="$1"
    case "${pt_short}" in
+      # 2.10..2.12 added per the user-supplied "Version Alignment Matrix"
+      # (PT 2.10+) table:
+      #   PT 2.12 -> AOTriton 0.13b / 0.14b   (Experimental, upcoming)
+      #   PT 2.11 -> AOTriton 0.12b           (Active Release)
+      #   PT 2.10 -> AOTriton 0.11b           (Stable Standard; we use
+      #                                       the 0.11.2b patch tag,
+      #                                       same as PT 2.9 since both
+      #                                       leverage the 0.11 line)
+      #
+      # ── 2026-05-13 demotion: PT 2.11 / 2.12 -> 0.11.2b ────────────────
+      # The matrix-prescribed AOTriton tags 0.12b (PT 2.11) and 0.13b /
+      # 0.14b (PT 2.12) DO NOT EXIST upstream as of this commit:
+      #   $ git ls-remote --heads --tags https://github.com/ROCm/aotriton.git
+      #   <highest is refs/tags/0.11.210b ; refs/heads/release/0.11.50 ;
+      #    refs/tags/0.11.2b ; nothing in the 0.12.x or 0.13.x series>
+      # Symptom we hit (slurm-9331-rocmplus-7.2.3, log_pytorch_05_13_2026.txt):
+      #   ROCm 7.2.3 + bare-default PT 2.11.0 sweep
+      #   -> default_pytorch_version_for_rocm("7.2") returns 2.11.0
+      #   -> manifest "2.11|7.2" missing -> PT-only fallback runs
+      #   -> resolve_aotriton_for_pt_only("2.11") returned 0.12b (this row)
+      #   -> aotriton stage: `git clone --branch 0.12b ...` fails:
+      #      warning: Could not find remote branch 0.12b to clone.
+      #      fatal: Remote branch 0.12b not found in upstream origin
+      #      ERROR: aotriton cmake configure failed (rc=1)
+      # We DEMOTE both rows to 0.11.2b (the highest existing release line).
+      # 0.11.2b bundles Triton 3.4.0, which the rocm-7.x ld.lld accepts
+      # (same property that makes the 7.x manifest shims for PT 2.7/2.8
+      # work, see PYTORCH_STACK_MANIFEST below).
+      # Caveat: 0.11.2b's CMake API was developed against PT 2.9 and there
+      # is a known risk that PT 2.11 / 2.12 link steps mismatch against
+      # torch._inductor symbols. First successful build of these combos
+      # will validate the pairing; if it fails at a post-clone step,
+      # add a (PT, ROCm) cell to PYTORCH_STACK_MANIFEST with a working
+      # explicit pin (or pass --aotriton-version on the CLI).
+      # ACTION ITEM: when upstream cuts 0.12b / 0.13b / 0.14b, flip these
+      # rows back to the matrix-prescribed values. Both are non-breaking.
+      2.12) echo "0.11.2b" ;;   # was 0.13b (matrix); upstream tag missing
+      2.11) echo "0.11.2b" ;;   # was 0.12b (matrix); upstream tag missing
+      2.10) echo "0.11.2b" ;;
       2.9)  echo "0.11.2b" ;;
       2.8)  echo "0.10b"   ;;
       2.7)  echo "0.9.2b"  ;;
@@ -199,6 +288,57 @@ resolve_aotriton_for_pt_only() {
       2.4)  echo "0.6b"    ;;
       2.3)  echo "0.4b"    ;;
       *)    echo ""        ;;
+   esac
+}
+
+# ── Per-ROCm default PyTorch version (auto-derive when user omits flag) ──
+# Returns a sensible default PYTORCH_VERSION (full M.m.p tag) for the
+# given ROCm major.minor. Called by resolve_pytorch_stack_versions when
+# PYTORCH_VERSION_USER_SET=0. Empty stdout means "no canonical pairing"
+# and the caller falls through to the file-default constant
+# (PYTORCH_VERSION=2.9.1 near the top of this script).
+#
+# Source tables (both supplied by the maintainer; merged here):
+#   Table 1 ("PyTorch Version / ROCm Version / AOTriton" rows 2.3..2.9):
+#     2.9 -> ROCm 7.1+
+#     2.8 -> ROCm 6.3 - 7.0
+#     2.7 -> ROCm 6.3
+#     2.6 -> ROCm 6.2
+#     2.5 -> ROCm 6.1
+#     2.4 -> ROCm 6.0
+#     2.3 -> ROCm 5.7
+#   Table 2 ("Version Alignment Matrix (PyTorch 2.10+)"):
+#     2.12 -> ROCm 7.3+ (Experimental)
+#     2.11 -> ROCm 7.2
+#     2.10 -> ROCm 7.1
+#
+# Overlap-resolution rule: where multiple PT versions cover the same
+# ROCm (e.g. PT 2.9 says "7.1+" and PT 2.10 says "7.1"; PT 2.7 and PT 2.8
+# both list 6.3), pick the NEWEST PT — that's the upstream "latest stable
+# pairing" intent.
+#
+# Patch tags ('M.m.p') reflect the maintainer's stated "valid versions
+# at this time": 2.6.0, 2.7.1, 2.8.0, 2.9.1, 2.10.0, 2.11.0, 2.12.0.
+# 2.5.0 / 2.4.0 / 2.3.0 use .0 since no patch was specified.
+#
+# Off-table ROCm: rocm < 5.7 -> 2.3.0 (oldest known); rocm > 7.x not
+# explicitly listed -> 2.12.0 (newest known). Both branches print the
+# normal "Manifest cell missing" warning further downstream so the user
+# is reminded to validate.
+default_pytorch_version_for_rocm() {
+   local rocm_mm="$1"
+   case "${rocm_mm}" in
+      5.7)                                  echo "2.3.0"  ;;
+      6.0)                                  echo "2.4.0"  ;;
+      6.1)                                  echo "2.5.0"  ;;
+      6.2)                                  echo "2.6.0"  ;;
+      6.3|6.4|6.5|6.6|6.7|6.8|6.9|7.0)      echo "2.8.0"  ;;
+      7.1)                                  echo "2.10.0" ;;
+      7.2)                                  echo "2.11.0" ;;
+      7.3|7.4|7.5|7.6|7.7|7.8|7.9)          echo "2.12.0" ;;
+      # Off-table guards: too-old / too-new ROCm. Empty stdout means
+      # "I don't know" and the resolver keeps the file-default (2.9.1).
+      *)                                    echo ""       ;;
    esac
 }
 
@@ -248,8 +388,55 @@ resolve_aotriton_extra_cmake_flags() {
 #   _print_pytorch_stack_audit_table.
 # Idempotent: re-running just rewrites globals to the same values.
 resolve_pytorch_stack_versions() {
-   PT_MAJOR_MINOR=$(echo "${PYTORCH_VERSION}" | cut -f1-2 -d'.')
    ROCM_MAJOR_MINOR=$(echo "${ROCM_VERSION}" | cut -f1-2 -d'.')
+
+   # Auto-derive PYTORCH_VERSION from the loaded ROCm if the user didn't
+   # pass --pytorch-version. The mapping is in
+   # default_pytorch_version_for_rocm() (defined above). User flag wins
+   # (PYTORCH_VERSION_USER_SET=1 short-circuits this branch); off-table
+   # ROCm leaves the file-default 2.9.1 untouched.
+   if [[ "${PYTORCH_VERSION_USER_SET}" -eq 1 ]]; then
+      PYTORCH_VERSION_SOURCE="user --pytorch-version"
+   else
+      local _pt_default
+      _pt_default=$(default_pytorch_version_for_rocm "${ROCM_MAJOR_MINOR}")
+      if [[ -n "${_pt_default}" ]]; then
+         PYTORCH_VERSION="${_pt_default}"
+         PYTORCH_VERSION_SOURCE="auto-derived from ROCm ${ROCM_MAJOR_MINOR} (default_pytorch_version_for_rocm -> ${PYTORCH_VERSION})"
+      else
+         PYTORCH_VERSION_SOURCE="file default (no auto-derive row for ROCm ${ROCM_MAJOR_MINOR})"
+      fi
+   fi
+
+   PT_MAJOR_MINOR=$(echo "${PYTORCH_VERSION}" | cut -f1-2 -d'.')
+   # PYTORCH_SHORT_VERSION is the legacy name for the same value
+   # (PT_MAJOR_MINOR was introduced later by the manifest plumbing).
+   # Four pre-existing gates in this script reference PYTORCH_SHORT_VERSION
+   # but the variable was NEVER assigned anywhere in the repo (silent
+   # latent bug; verified with `grep -rE 'PYTORCH_SHORT_VERSION\s*=' .`).
+   # Concrete consequences for the 2026-05-13 overnight sweep:
+   #   pytorch_setup.sh:2016  USE_FBGEMM_GENAI=0 kill-switch never fired
+   #                          -> PT 2.9.1 on ROCm 7.x hit
+   #                          third_party/fbgemm/external/composable_kernel/
+   #                          include/ck/utility/get_id.hpp:10: error:
+   #                          constexpr function never produces a constant
+   #                          expression
+   #                          (slurm-9332 + slurm-9333, both PT 2.9.1 leaves)
+   #   pytorch_setup.sh:2241  PT 2.4 jit/ir/ir.cpp USE_ROCM workaround dead
+   #   pytorch_setup.sh:2251  PT 2.9 third_party CMakeLists 3.5-bump dead
+   #   pytorch_setup.sh:2314  PT 2.9 pip-redirect install COPY dead, so
+   #                          torch wheel never lands in
+   #                          ${PYTORCH_PATH}/lib/python3.X/site-packages
+   #                          -> "hollow install": script returns rc=0 and
+   #                          writes the modulefile, but the install tree's
+   #                          pytorch/ subdir is an empty 4 KB stub. First
+   #                          observed in 9334 PT 2.9.1 on ROCm 6.4.3 last
+   #                          night (only build of the sweep that didn't
+   #                          hit one of the upstream build failures and
+   #                          therefore exposed this latent paper-PASS).
+   # All four gates expect the major.minor form ("2.4", "2.9", ...), which
+   # is exactly what PT_MAJOR_MINOR holds, so the fix is one assignment.
+   PYTORCH_SHORT_VERSION="${PT_MAJOR_MINOR}"
    MANIFEST_CELL_KEY="${PT_MAJOR_MINOR}|${ROCM_MAJOR_MINOR}"
    local cell_value="${PYTORCH_STACK_MANIFEST[${MANIFEST_CELL_KEY}]:-}"
    if [[ -n "${cell_value}" ]]; then
@@ -290,10 +477,11 @@ resolve_pytorch_stack_versions() {
       done
    fi
 
-   # PYTORCH (always user-or-default; manifest never overrides what was
-   # asked for explicitly because PT version is the LOOKUP key, not a
-   # field inside the cell).
-   PYTORCH_VERSION_SOURCE="user --pytorch-version or file default"
+   # PYTORCH_VERSION + PYTORCH_VERSION_SOURCE are already populated above
+   # (auto-derive from ROCm OR user --pytorch-version OR file default).
+   # The audit table prints whichever attribution applied. PT version is
+   # the LOOKUP key for the manifest cell, not a field inside the cell,
+   # so the manifest never overrides PT — only the per-pin pins below.
 
    # AOTRITON: user > manifest > PT-fallback > error.
    if [[ "${AOTRITON_VERSION_USER_SET}" -eq 1 ]]; then
@@ -394,6 +582,17 @@ resolve_pytorch_stack_versions() {
       DEEPSPEED_VERSION_SOURCE="file default"
    fi
 
+   # Export manifest values as globals so compute_pytorch_install_suffix
+   # (defined below) can compare user-overridden values against the
+   # canonical manifest pin and only emit a suffix on actual divergence.
+   # Only the curated-set keys (aotriton, triton, flashattention) need to
+   # leak out; the other pins use the canonical install path regardless.
+   # Empty value means "manifest had no opinion" — any user-set value is
+   # treated as a divergence from canonical (suffix emitted).
+   MANIFEST_AOTRITON="${manifest_aotriton}"
+   MANIFEST_TRITON="${manifest_triton}"
+   MANIFEST_FLASHATTENTION="${manifest_flashattention}"
+
    _print_pytorch_stack_audit_table
 }
 
@@ -438,6 +637,57 @@ _print_pytorch_stack_audit_table() {
    echo
 }
 
+# ── Variant-suffix builder for INSTALL_PATH / modulefile name ─────────
+# Modelled on the openmpi naming convention
+# (openmpi-5.0.10-ucc-1.6.0-ucx-1.19.1-xpmem-2.7.4): emit a "-key-value"
+# segment per build-time-linked dep that the user overrode AWAY from the
+# canonical manifest pin. Lets multiple variants of the same PT version
+# coexist on disk, e.g.
+#   pytorch=2.8.0                     -> pytorch-v2.8.0
+#   pytorch=2.8.0:aotriton=0.10b      -> pytorch-v2.8.0-aotriton-0.10b
+#                                        (when manifest cell pins 0.11.2b)
+#   pytorch=2.8.0:aotriton=0.11.2b    -> pytorch-v2.8.0
+#                                        (matches manifest, no divergence)
+#
+# Curated set: aotriton, triton, flashattention. These are the linked-
+# in-at-build-time deps that materially change runtime behavior (SDPA
+# performance, codegen backend, attention impl) — the PyTorch analogues
+# of openmpi's ucc/ucx/xpmem. Excluded:
+#   * pillow / sageattention / deepspeed: peripheral.
+#   * torchvision / torchaudio: tightly version-coupled to PT core; a
+#     standalone override is rare and the resolver auto-derives them
+#     from PT version anyway.
+# Extending the set later means adding a stanza below AND making sure
+# the new dep's _USER_SET sentinel + MANIFEST_<KEY> global are wired up
+# in resolve_pytorch_stack_versions.
+#
+# Divergence rule: emit a suffix segment iff the user passed the flag
+# (*_VERSION_USER_SET=1) AND the resulting *_VERSION differs from the
+# manifest cell value (MANIFEST_<KEY>). Empty MANIFEST_<KEY> (cell
+# missed or pin not in cell) counts as divergence — without a manifest
+# value to compare to, "user passed it" implies "user knows what they
+# want", so we encode it. Order is alphabetical (aotriton, flash, triton)
+# so suffixes are stable across runs and easy to grep for.
+#
+# Returns the suffix on stdout (empty string for the canonical case).
+# Caller uses it as ${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.
+compute_pytorch_install_suffix() {
+   local suffix=""
+   if [[ "${AOTRITON_VERSION_USER_SET}" -eq 1 ]] \
+      && [[ "${AOTRITON_VERSION}" != "${MANIFEST_AOTRITON}" ]]; then
+      suffix+="-aotriton-${AOTRITON_VERSION}"
+   fi
+   if [[ "${FLASHATTENTION_VERSION_USER_SET}" -eq 1 ]] \
+      && [[ "${FLASHATTENTION_VERSION}" != "${MANIFEST_FLASHATTENTION}" ]]; then
+      suffix+="-flashattention-${FLASHATTENTION_VERSION}"
+   fi
+   if [[ "${TRITON_VERSION_USER_SET}" -eq 1 ]] \
+      && [[ "${TRITON_VERSION}" != "${MANIFEST_TRITON}" ]]; then
+      suffix+="-triton-${TRITON_VERSION}"
+   fi
+   echo "${suffix}"
+}
+
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/pytorch
 # Versioned install root: /opt/rocmplus-X/pytorch-v${PYTORCH_VERSION}.
 # All companion subdirs (vision, audio, triton, aotriton, transformers,
@@ -460,7 +710,7 @@ DEBUG=0
 # transformers, flashattention, sageattention, deepspeed) are installed
 # as subdirectories under one ${INSTALL_PATH} root, so a single
 # --replace flag cleans the whole stack. Two modulefiles get written:
-# ${PYTORCH_VERSION}.lua and ${PYTORCH_VERSION}_tunableop_enabled.lua.
+# ${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua and ${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua.
 # --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
 REPLACE=0
 KEEP_FAILED_INSTALLS=0
@@ -485,10 +735,28 @@ usage()
    echo "  WARNING: when specifying --install-path-no-version and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "--amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default is autodetected"
    echo "--build-pytorch [ BUILD_PYTORCH ] set to 1 to build jax default is 0"
-   echo "--pytorch-version [ PYTORCH_VERSION ] version of PyTorch, default is $PYTORCH_VERSION."
-   echo "    Setting --pytorch-version also auto-derives --torchvision-version and --torchaudio-version"
-   echo "    from the PYTORCH_COMPANION_VERSIONS table near the top of this script (lookup by major.minor"
-   echo "    only, e.g. 2.9.1 maps to the '2.9' row). Pass either of those flags explicitly to override."
+   echo "--pytorch-version [ PYTORCH_VERSION ] version of PyTorch."
+   echo "    Default is auto-derived from the loaded ROCm major.minor by"
+   echo "    default_pytorch_version_for_rocm() (see top of this script). Mapping:"
+   echo "      ROCm 5.7         -> PT 2.3.0   (PT-only fallback, AOTriton 0.4b)"
+   echo "      ROCm 6.0         -> PT 2.4.0   (PT-only fallback, AOTriton 0.6b)"
+   echo "      ROCm 6.1         -> PT 2.5.0   (PT-only fallback, AOTriton 0.7b)"
+   echo "      ROCm 6.2         -> PT 2.6.0   (PT-only fallback, AOTriton 0.8b)"
+   echo "      ROCm 6.3 - 7.0   -> PT 2.8.0   (validated: '2.8|6.3' '2.8|6.4'; AOTriton 0.10b)"
+   echo "      ROCm 7.1         -> PT 2.10.0  (PT-only fallback, AOTriton 0.11.2b)"
+   echo "      ROCm 7.2         -> PT 2.11.0  (PT-only fallback, AOTriton 0.12b)"
+   echo "      ROCm 7.3+        -> PT 2.12.0  (PT-only fallback, AOTriton 0.13b — Experimental)"
+   echo "      anything else    -> file default ${PYTORCH_VERSION} (last-resort)"
+   echo "    Pass --pytorch-version VER to override the auto-derive. Recognised explicit values:"
+   echo "      2.3.0  2.4.0  2.5.0  2.6.0  2.7.1  2.8.0  2.9.1  2.10.0  2.11.0  2.12.0"
+   echo "    Validated (manifest cell) (PT, ROCm) combinations — bare-default sweeps land on these:"
+   echo "      '2.7|6.2'  '2.7|6.3'  '2.7|6.4'  '2.7|7.1'"
+   echo "      '2.8|6.3'  '2.8|6.4'  '2.8|7.1'"
+   echo "      '2.9|7.0'  '2.9|7.1'  '2.9|7.2'"
+   echo "    Off-table (PT, ROCm) combos warn and fall back to the PT-only AOTriton table; the"
+   echo "    build still proceeds. Setting --pytorch-version also auto-derives --torchvision-version"
+   echo "    and --torchaudio-version from PYTORCH_COMPANION_VERSIONS by major.minor (e.g. 2.9.1 -> '2.9'"
+   echo "    row). Pass either of those flags explicitly to override."
    echo "--torchvision-version [ TORCHVISION_VERSION ] version of torchvision."
    echo "    Default is auto-derived from PYTORCH_VERSION's major.minor row in PYTORCH_COMPANION_VERSIONS;"
    echo "    set this flag to pin a specific torchvision (e.g. for nightlies or off-table combinations)."
@@ -519,7 +787,10 @@ usage()
    echo ""
    echo "--python-version [ PYTHON_VERSION ] version of Python, default is $PYTHON_VERSION"
    echo "--install-path-no-version [ INSTALL_PATH ] directory where PyTorch, Torchaudio and Torchvision will be installed, default is $INSTALL_PATH"
-   echo "--install-path [ ROCMPLUS_PATH_INPUT ] parent dir; if set (and --install-path-no-version is not), INSTALL_PATH = ROCMPLUS_PATH/pytorch-v\${PYTORCH_VERSION}"
+   echo "--install-path [ ROCMPLUS_PATH_INPUT ] parent dir; if set (and --install-path-no-version is not), INSTALL_PATH ="
+   echo "    ROCMPLUS_PATH/pytorch-v\${PYTORCH_VERSION}\${PYTORCH_INSTALL_SUFFIX}, where the suffix is empty for"
+   echo "    canonical (manifest-pinned) builds and -aotriton-X-flashattention-Y-triton-Z when an inline override"
+   echo "    diverges from the manifest cell. Lets variants coexist on disk (modeled on openmpi naming)."
    echo "--mpi-module [ MPI_MODULE ] mpi module to build pytorch with, default is $MPI_MODULE"
    echo "--help: this usage information"
    echo "--module-path [ MODULE_PATH ] default $MODULE_PATH"
@@ -736,6 +1007,7 @@ do
       "--pytorch-version")
           shift
           PYTORCH_VERSION=${1}
+          PYTORCH_VERSION_USER_SET=1
 	  reset-last
           ;;
       "--torchvision-version")
@@ -838,16 +1110,33 @@ done
 # of CLI ordering.
 resolve_pytorch_stack_versions
 
+# Variant-suffix from curated overrides (aotriton/triton/flashattention).
+# Empty for canonical (manifest-pinned) builds; "-aotriton-X-..." when
+# the user pinned a non-canonical value via :override or --flag. See
+# compute_pytorch_install_suffix() above for the divergence rule.
+PYTORCH_INSTALL_SUFFIX=$(compute_pytorch_install_suffix)
+if [[ -n "${PYTORCH_INSTALL_SUFFIX}" ]]; then
+   echo "[pytorch variant] override-driven install-suffix active: '${PYTORCH_INSTALL_SUFFIX}'"
+   echo "[pytorch variant]   install dir + modulefile name will include this suffix so this"
+   echo "[pytorch variant]   variant coexists with the canonical pytorch-v${PYTORCH_VERSION} build."
+fi
+
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
+   # --install-path-no-version: caller passed the FULL leaf dir, so it
+   # already encodes whatever variant naming the caller wants. Leave
+   # PYTORCH_INSTALL_SUFFIX out of this branch -- the caller is in
+   # charge of disambiguation. (The modulefile naming further down
+   # still uses ${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua because
+   # those live under MODULE_PATH, which is independent.)
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 elif [ "${ROCMPLUS_PATH_INPUT}" != "" ]; then
    # Orchestrator-friendly: caller passes the rocmplus parent dir;
-   # this script appends pytorch-v${PYTORCH_VERSION} from its own default.
-   # Lets main_setup.sh stay version-agnostic for pytorch.
-   INSTALL_PATH=${ROCMPLUS_PATH_INPUT}/pytorch-v${PYTORCH_VERSION}
+   # this script appends pytorch-v${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}
+   # from its own default. Lets main_setup.sh stay version-agnostic.
+   INSTALL_PATH=${ROCMPLUS_PATH_INPUT}/pytorch-v${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}
 else
    # override path in case ROCM_VERSION or PYTORCH_VERSION has been supplied as input
-   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch-v${PYTORCH_VERSION}
+   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/pytorch-v${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}
 fi
 
 TRANSFORMERS_PATH=$INSTALL_PATH/transformers
@@ -864,8 +1153,8 @@ DEEPSPEED_PATH=$INSTALL_PATH/deepspeed
 # All companion subdirs live under ${INSTALL_PATH}, so a single rm -rf
 # of the root cleans pytorch + aotriton + triton + vision + audio +
 # transformers + flashattention + sageattention + deepspeed in one go.
-# Two modulefiles need cleaning: ${PYTORCH_VERSION}.lua and
-# ${PYTORCH_VERSION}_tunableop_enabled.lua.
+# Two modulefiles need cleaning: ${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua and
+# ${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua.
 # ── BUILD_PYTORCH=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
 NOOP_RC=43
 if [ "${BUILD_PYTORCH}" = "0" ]; then
@@ -911,7 +1200,7 @@ if [[ "${ROCM_PATH:-}" == *afar* ]]; then
          echo "[pytorch afar-skip] removing stale from-source install: ${INSTALL_PATH}"
          ${SUDO} rm -rf "${INSTALL_PATH}"
       fi
-      for _mf in "${MODULE_PATH}/${PYTORCH_VERSION}.lua" "${MODULE_PATH}/${PYTORCH_VERSION}_tunableop_enabled.lua"; do
+      for _mf in "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua" "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua"; do
          if [ -f "${_mf}" ]; then
             echo "[pytorch afar-skip] removing stale modulefile: ${_mf}"
             ${SUDO} rm -f "${_mf}"
@@ -950,11 +1239,11 @@ fi
 if [ "${REPLACE}" = "1" ]; then
    echo "[pytorch --replace 1] removing prior install + modulefiles if present"
    echo "  install dir:        ${INSTALL_PATH}"
-   echo "  modulefile:         ${MODULE_PATH}/${PYTORCH_VERSION}.lua"
-   echo "  modulefile (tunop): ${MODULE_PATH}/${PYTORCH_VERSION}_tunableop_enabled.lua"
+   echo "  modulefile:         ${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua"
+   echo "  modulefile (tunop): ${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua"
    ${SUDO} rm -rf "${INSTALL_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/${PYTORCH_VERSION}.lua" \
-                  "${MODULE_PATH}/${PYTORCH_VERSION}_tunableop_enabled.lua"
+   ${SUDO} rm -f  "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua" \
+                  "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua"
 fi
 
 # ── Existence guard: skip if already installed (see hypre_setup.sh) ──
@@ -979,8 +1268,8 @@ _pytorch_on_exit() {
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[pytorch fail-cleanup] rc=${rc}: removing partial install + modulefiles"
       ${SUDO:-sudo} rm -rf "${INSTALL_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${PYTORCH_VERSION}.lua" \
-                           "${MODULE_PATH}/${PYTORCH_VERSION}_tunableop_enabled.lua"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua" \
+                           "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua"
    elif [ ${rc} -ne 0 ]; then
       echo "[pytorch fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -1124,7 +1413,7 @@ else
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   if [ -f ${CACHE_FILES}/pytorch-v${PYTORCH_VERSION}.tgz ]; then
+   if [ -f ${CACHE_FILES}/pytorch-v${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.tgz ]; then
       echo ""
       echo "============================"
       echo " Installing Cached Pytorch v${PYTORCH_VERSION}"
@@ -1136,10 +1425,10 @@ else
       # -- matches the versioned INSTALL_PATH layout the from-source
       # branch writes to, so multiple pytorch releases coexist on disk.
       cd /opt/rocmplus-${ROCM_VERSION}
-      ${SUDO} tar -xzf ${CACHE_FILES}/pytorch-v${PYTORCH_VERSION}.tgz
+      ${SUDO} tar -xzf ${CACHE_FILES}/pytorch-v${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.tgz
       ${SUDO} chown -R root:root ${INSTALL_PATH}
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm ${CACHE_FILES}/pytorch-v${PYTORCH_VERSION}.tgz
+         ${SUDO} rm ${CACHE_FILES}/pytorch-v${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.tgz
       fi
 
    elif [ "${USE_WHEEL}" == "1" ]; then
@@ -1779,25 +2068,96 @@ else
       export PYTORCH_ROCM_ARCH=${AMDGPU_GFXMODEL}
       export PYTORCH_INSTALL_DIR=${PYTORCH_PATH}
       export AOTRITON_INSTALLED_PREFIX=${AOTRITON_PATH}
-      if [ "${PYTORCH_SHORT_VERSION}" == "2.9" ] && [[ "${AMDGPU_GFXMODEL}" == *"gfx942"* ]]; then
-         export USE_FBGEMM_GENAI=0
-      fi
+      # ── PT 2.9+ fbgemm_genai kill-switch ───────────────────────────
+      # fbgemm_genai is an experimental feature introduced in PT 2.9
+      # and carried forward to PT 2.10/2.11/2.12. It pulls in
+      # third_party/fbgemm/external/composable_kernel headers. On
+      # ROCm 7.x those headers fail to compile:
+      #   ck/utility/get_id.hpp:10: error: constexpr function never
+      #     produces a constant expression
+      #   ck/tensor_operation/gpu/block/blockwise_gemm_pipeline_xdlops_v2.hpp:
+      #     {143,145,148,633,635}: error: constexpr variable must be
+      #     initialized by a constant expression
+      #   ck/tensor_operation/gpu/device/impl/
+      #     device_grouped_gemm_multiple_d_xdl_cshuffle_tile_loop.hpp:208:
+      #     error: reference to __host__ variable in __global__ function
+      # First observed in slurm-9332-rocmplus-7.1.1 PT 2.9.1 leaf
+      # (log line 50085) and slurm-9333-rocmplus-7.0.2 PT 2.9.1 leaf
+      # (log line 50109) on 2026-05-13/14.
+      #
+      # Arch match expanded from *gfx942* to *gfx9* on 2026-05-14:
+      # the original gate was written when only gfx942 was tested. The
+      # sweep on 2026-05-13 ran with AMDGPU_GFXMODEL='gfx942;gfx90a'
+      # and the failure was identical -- composable_kernel's constexpr/
+      # builtin-non-constant issue is a HOST-side compile error that
+      # fires regardless of the gfx target, but the fbgemm_genai source
+      # only ever compiles when at least one gfx9-class arch is
+      # requested (it's CDNA-only code). Matching the whole gfx9 family
+      # (gfx906/908/90a/942/950) is the future-proof minimum; RDNA
+      # (gfx10/11/12) is untested here and stays enabled.
+      #
+      # PT version gate widened from "2.9" to "2.9|2.10|2.11|2.12" on
+      # 2026-05-14: the 2026-05-14 sweep showed PT 2.11 on ROCm 7.2.3
+      # (slurm 9422 default PT) reached `Successfully built torch` /
+      # `Finished setup.py install` and falsely passed the C1 import
+      # check, then produced a hollow install (pytorch/ subdir 4 KB,
+      # libtorch_cpu.so missing) -- exactly the same upstream
+      # pip-redirect symptom that motivated the PT 2.9 gate. Until
+      # upstream restores `setup.py install` semantics this gate must
+      # cover all post-PT-2.9 versions.
+      case "${PYTORCH_SHORT_VERSION}" in
+         2.9|2.10|2.11|2.12)
+            if [[ "${AMDGPU_GFXMODEL}" == *"gfx9"* ]]; then
+               export USE_FBGEMM_GENAI=0
+            fi
+            ;;
+      esac
 
-      # this block of code is to retry if git clone fails.
-      #RETRIES=6
-      #DELAY=30
-      #COUNT=1
-      #while [ $COUNT -lt $RETRIES ]; do
-      #  git clone --recursive --depth 1 --branch v${PYTORCH_VERSION} https://github.com/pytorch/pytorch
-      #  if [ $? -eq 0 ]; then
-      #    RETRIES=0
-      #    break
-      #  fi
-      #  let COUNT=$COUNT+1
-      #  sleep $DELAY
-      #done
-      wget -q https://github.com/pytorch/pytorch/releases/download/v${PYTORCH_VERSION}/pytorch-v${PYTORCH_VERSION}.tar.gz
-      tar -xzf pytorch-v${PYTORCH_VERSION}.tar.gz
+      # ── PyTorch CORE source: shallow recursive git clone ─────────────
+      # We previously used `wget` of the GitHub release tarball
+      # (https://github.com/pytorch/pytorch/releases/download/v${VER}/
+      # pytorch-v${VER}.tar.gz). That is faster (~smaller, no .git/) but
+      # the release tarball OMITS the .ci/ directory -- it is in the git
+      # tree only. PT 2.7.x's tools/build_pytorch_libs.py:97
+      # read_nccl_pin() unconditionally opens
+      #   .ci/docker/ci_commit_pins/nccl-cu12.txt
+      # so setup.py install fails with
+      #   FileNotFoundError: [Errno 2] ... .ci/docker/ci_commit_pins/nccl-cu12.txt
+      # First seen in slurm 9324 + 9326 (PT 2.7.1 on rocm-7.1.1, after the
+      # ld.lld shim cells were added). PT 2.8+ does not call
+      # read_nccl_pin() so it would not have hit this codepath, but
+      # reverting CORE to git clone is the smallest version-agnostic fix
+      # and matches the historical (commented-out) shape this script used
+      # before the wget switch.
+      #
+      # The wget-based downloads for torchvision and torchaudio (further
+      # down) STAY: those projects do not have .ci/-style ancillary files
+      # and the smaller tarball saves on each companion build.
+      #
+      # We clone INTO the directory name pytorch-v${PYTORCH_VERSION} so
+      # the rest of this script (cd, source-tree patches, modulefile
+      # naming) is unchanged from the wget+tar flow.
+      #
+      # Retry loop guards against transient github.com flakes; matches
+      # the shape used by openmpi_setup.sh / magma_setup.sh.
+      RETRIES=6
+      DELAY=30
+      COUNT=1
+      while [ ${COUNT} -le ${RETRIES} ]; do
+         git clone --recursive --depth 1 --branch v${PYTORCH_VERSION} \
+            https://github.com/pytorch/pytorch pytorch-v${PYTORCH_VERSION}
+         if [ $? -eq 0 ]; then
+            break
+         fi
+         if [ ${COUNT} -eq ${RETRIES} ]; then
+            echo "ERROR: git clone of pytorch v${PYTORCH_VERSION} failed after ${RETRIES} attempts"
+            exit 1
+         fi
+         echo "git clone attempt ${COUNT} failed; sleeping ${DELAY}s and retrying..."
+         ${SUDO} rm -rf "pytorch-v${PYTORCH_VERSION}"
+         COUNT=$((COUNT + 1))
+         sleep ${DELAY}
+      done
 
       cd pytorch-v${PYTORCH_VERSION}
 
@@ -1834,6 +2194,121 @@ else
       else
          echo "Skipping ${_BLA} MAGMA 2.10+ patch (file missing or already patched)"
       fi
+
+      # ── kCUDABlockReduceMaxThreads constexpr fix (PT 2.7/2.8 + ROCm 7.x)
+      # On ROCm 7.1.1+, /opt/rocm/include/hip/amd_detail/amd_warp_functions.h
+      # declares warpSize as
+      #   __device__ __attribute__((always_inline, const))
+      #     operator int() const noexcept { ... }
+      # i.e. a runtime device function (because RDNA wave32 vs CDNA
+      # wave64 is per-target and HIP refuses to commit to a literal at
+      # compile time). c10/macros/Macros.h:315 then has
+      #   #define C10_WARP_SIZE warpSize
+      # so any constexpr expression that multiplies C10_WARP_SIZE is no
+      # longer a constant expression.
+      # PT 2.7 + 2.8 ship aten/src/ATen/native/cuda/block_reduce.cuh:17
+      #   constexpr int kCUDABlockReduceMaxThreads = C10_WARP_SIZE * C10_WARP_SIZE;
+      # which -- on ROCm 7.x -- fails to compile with
+      #   error: constexpr variable 'kCUDABlockReduceMaxThreads' must be
+      #   initialized by a constant expression
+      #   note: non-constexpr function 'operator int' cannot be used in
+      #   a constant expression
+      # First seen in slurm 9324 (PT 2.8.0 on rocm-7.1.1, ninja step
+      # 6967/7867 ~ 88% through HIP compilation; the same header is
+      # included by DepthwiseConv2d, DistanceKernel, and ~20 other .hip
+      # sources, so the same diagnostic fires repeatedly).
+      # Upstream PT 2.9+ rewrote this to use a runtime constant
+      # (at::cuda::warp_size() etc.) so the bug is gone there -- hence
+      # this gate is restricted to PT major.minor in {2.7, 2.8}.
+      # Fix: relax `constexpr` -> `static const`. The two consumers
+      # (BlockReduceSum, BlockReduce in ATen) use this as a kernel size
+      # hint; nothing here is a template parameter or array-bound that
+      # requires constexpr semantics on a non-device translation unit.
+      # We patch the CUDA source -- hipify regenerates the HIP variant
+      # from this CUDA source at build time, so the patch propagates to
+      # aten/src/ATen/native/hip/block_reduce.cuh automatically (same
+      # propagation pattern as the MAGMA patch above).
+      # The grep guard makes this idempotent and a no-op on PT 2.9+ or
+      # any future PT that has already been fixed upstream. The (Max|Num)
+      # alternation is forward-defensive: PT 2.8 has only Max, but if a
+      # future-but-still-pre-2.9 patch adds a Num twin, both get caught.
+      _BR=aten/src/ATen/native/cuda/block_reduce.cuh
+      case "${PT_MAJOR_MINOR}" in
+         2.7|2.8)
+            if [ -f "${_BR}" ] && grep -qE '^[[:space:]]*constexpr[[:space:]]+int[[:space:]]+kCUDABlockReduce(Max|Num)Threads' "${_BR}"; then
+               echo "Patching ${_BR} for ROCm 7.x warpSize-not-constexpr (PT ${PYTORCH_VERSION})"
+               sed -i -E 's#^([[:space:]]*)constexpr([[:space:]]+)int([[:space:]]+)kCUDABlockReduce(Max|Num)Threads#\1static const\2int\3kCUDABlockReduce\4Threads#' "${_BR}"
+               echo "  -> patched (verify):"
+               grep -nE 'kCUDABlockReduce(Max|Num)Threads' "${_BR}" | sed 's/^/    /'
+            else
+               echo "Skipping ${_BR} constexpr patch (file missing or already patched)"
+            fi
+            ;;
+         *)
+            echo "Skipping ${_BR} constexpr patch (PT ${PYTORCH_VERSION} not in {2.7, 2.8} gate; PT 2.9+ has the upstream fix)"
+            ;;
+      esac
+
+      # ── Root-cause patch: C10_WARP_SIZE on ROCm 7.x  (Failure D) ──
+      # The block_reduce.cuh patch above narrowly fixes ONE constexpr
+      # use of C10_WARP_SIZE, but the underlying problem is broader:
+      # on ROCm 7.x the bare token `warpSize` (defined as a struct
+      # with operator int() that calls __builtin_amdgcn_wavefrontsize)
+      # is illegal in ANY host translation-unit context, because
+      # clang -- when it hits the host pass -- cannot lower the
+      # amdgcn builtin and emits:
+      #   error: cannot compile this builtin function yet
+      #   note: 'warpSize' definition is here
+      # First observed in slurm 9422 PT 2.7.1 (rocm-7.2.3), failing
+      # three .hip sources simultaneously:
+      #   Embedding.hip           (via cub.cuh -> hipcub::DeviceSelect)
+      #   Normalization.hip       (via thrust/HIPLoops -> reduce)
+      #   MultinomialKernel.hip   (via thrust::transform)
+      # Each one expanded C10_WARP_SIZE (= warpSize) inside an
+      # at::cuda::cub::* template instantiation whose body referenced
+      # warpSize. The narrow block_reduce.cuh patch does not help here.
+      #
+      # PT 2.9+ replaced `#define C10_WARP_SIZE warpSize` with a real
+      # runtime helper (`at::cuda::warp_size()` etc.) so the bug is
+      # absent there. For PT 2.7 / 2.8 we redefine C10_WARP_SIZE to
+      # the clang preprocessor constant __AMDGCN_WAVEFRONT_SIZE, which:
+      #   * is a true compile-time integer literal (64 for gfx9, 32 for
+      #     gfx10/11/12), set by clang's --offload-arch driver flag --
+      #     so EVERY downstream constexpr/template/array-bound use of
+      #     C10_WARP_SIZE becomes a valid constant expression;
+      #   * stays correct on both device AND host passes (clang sets
+      #     __AMDGCN_WAVEFRONT_SIZE in the host pass too because the
+      #     value is per-translation-unit, not per-pass);
+      #   * is what `static constexpr int warpSize = __AMDGCN_WAVEFRONT_SIZE;`
+      #     on ROCm 6.x's amd_warp_functions.h:#else branch already does;
+      #   * matches the original comment on the C10_WARP_SIZE line
+      #     ("= 64 or 32 (Defined in hip_runtime.h)").
+      # We patch c10/macros/Macros.h once, and the change propagates to
+      # every .cpp/.hip/.cuh/.h transitively-including this header.
+      # The block_reduce.cuh patch above is now belt-and-suspenders
+      # (it converts the symbol to `static const` so the value is
+      # captured at runtime even if some future PT version reverts
+      # the C10_WARP_SIZE macro to `warpSize`).
+      #
+      # The grep guard is conservative: PT 2.6 has the same macro,
+      # but we only gate on 2.7|2.8 because those are the only PTs
+      # we currently sweep that suffer from this on ROCm 7.x.
+      _MACROS_H=c10/macros/Macros.h
+      case "${PT_MAJOR_MINOR}" in
+         2.7|2.8)
+            if [ -f "${_MACROS_H}" ] && grep -qE '^#define[[:space:]]+C10_WARP_SIZE[[:space:]]+warpSize' "${_MACROS_H}"; then
+               echo "Patching ${_MACROS_H} C10_WARP_SIZE -> __AMDGCN_WAVEFRONT_SIZE for ROCm 7.x (PT ${PYTORCH_VERSION}, Failure D)"
+               sed -i -E 's|^(#define[[:space:]]+C10_WARP_SIZE[[:space:]]+)warpSize|\1__AMDGCN_WAVEFRONT_SIZE|' "${_MACROS_H}"
+               echo "  -> patched (verify):"
+               grep -nE 'C10_WARP_SIZE' "${_MACROS_H}" | sed 's/^/    /'
+            else
+               echo "Skipping ${_MACROS_H} C10_WARP_SIZE patch (file missing or already patched)"
+            fi
+            ;;
+         *)
+            echo "Skipping ${_MACROS_H} C10_WARP_SIZE patch (PT ${PYTORCH_VERSION} not in {2.7, 2.8} gate; PT 2.9+ has the upstream fix via at::cuda::warp_size())"
+            ;;
+      esac
 
       # ── HIP bf16 host-compat patch for therock-23.2.0+ ────────────────
       # SDK-level patch (NOT in pytorch source tree) -- see the function
@@ -1930,11 +2405,34 @@ else
          sed -i '/FILES_MATCHING PATTERN \"\*\.py")/s/^/#/g' caffe2/CMakeLists.txt
       fi
 
-      if [ "${PYTORCH_SHORT_VERSION}" == "2.9" ]; then
-         cd third_party
-	 find . -name 'CMakeLists.txt' -exec sed -i 's/^CMAKE_MINIMUM_REQUIRED(VERSION .*/CMAKE_MINIMUM_REQUIRED(VERSION 3.5)/' {} +
-	 cd ..
-      fi
+      # ── PT 2.9+ third_party cmake_minimum_required patch ──────────
+      # Some bundled third_party submodules (notably the `six` python
+      # package that NNPACK's confu fetcher pulls in) ship a top-level
+      # CMakeLists.txt whose first line is
+      #   cmake_minimum_required(VERSION 2.6)
+      # Modern cmake (>= 4.x) hard-errors on this with:
+      #   CMake Error at CMakeLists.txt:1 (CMAKE_MINIMUM_REQUIRED):
+      #     Compatibility with CMake < 3.5 has been removed from CMake.
+      #   ...
+      #   -- Configuring incomplete, errors occurred!
+      #   Error: could not find CMAKE_PROJECT_NAME in Cache
+      # PyTorch's NNPACK build silently falls back when this fetch
+      # fails (verified in slurm 9422 PT 2.11 / 9423 PT 2.10 logs
+      # where the error appears at the cmake configure stage but the
+      # build proceeds to `Successfully built torch`), so the patch
+      # is purely about silencing scary-looking error messages in the
+      # logs that mask the real failure modes during triage.
+      #
+      # Gate widened from "2.9" to "2.9|2.10|2.11|2.12" on 2026-05-14
+      # after observing the same CMAKE_PROJECT_NAME error in PT 2.10/
+      # 2.11 logs (slurm 9422, 9423).
+      case "${PYTORCH_SHORT_VERSION}" in
+         2.9|2.10|2.11|2.12)
+            cd third_party
+            find . -name 'CMakeLists.txt' -exec sed -i 's/^CMAKE_MINIMUM_REQUIRED(VERSION .*/CMAKE_MINIMUM_REQUIRED(VERSION 3.5)/' {} +
+            cd ..
+            ;;
+      esac
 
       # Ensure PyTorch's bundled flatbuffers headers are found before any
       # ROCm-provided flatbuffers headers to avoid version mismatches.
@@ -1991,39 +2489,69 @@ else
       fi
       cd ..
       rm -rf pytorch
-      # With PyTorch 2.9.1:
-      # WARNING: Redirecting 'python setup.py install' to 'pip install . -v --no-build-isolation', for more info see https://github.com/pytorch/pytorch/issues/152276
-      if [ "${PYTORCH_SHORT_VERSION}" == "2.9" ]; then
-        PYTORCH_PATH_SITE_PACKAGES=${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages
-	${SUDO} mkdir -p ${PYTORCH_PATH_SITE_PACKAGES}
-        ${SUDO} cp -a lib/python*/site-packages/* ${PYTORCH_PATH_SITE_PACKAGES}
-	${SUDO} mkdir -p ${PYTORCH_PATH}/bin
-	# ── Shebang rewrite ────────────────────────────────────────────
-	# pip console_script wrappers (cmake/ninja/ctest/torchrun/pip/...)
-	# get baked with `#!${PYTORCH_BUILD_DIR}/bin/python3` -- a /tmp
-	# path that disappears with the EXIT trap at end-of-job. Without
-	# rewriting, every PATH-resolved cmake/ninja/etc under `module
-	# load pytorch` fails with "bad interpreter: No such file or
-	# directory" (verified slurm 8161 cmake breakage on rocm-7.2.1;
-	# same pattern was present on all 13 installed pytorch trees,
-	# hot-fixed by bare_system/fix_python_venv_shebangs.sh on 2026-05-07).
-	#
-	# The PRIOR rewrite used `which python3` while the venv was still
-	# active, so PYTHON3_PATH resolved to the SAME /tmp path that was
-	# already in the shebang -> no-op sed. Switching the rewrite
-	# target to `/usr/bin/env python3` is correct because:
-	#   (1) the modulefile prepends ${PYTORCH_PATH}/lib/python3.X/
-	#       site-packages onto PYTHONPATH, so `from cmake import cmake`
-	#       (and ninja, torch, etc.) resolves under the system python3
-	#       once `module load pytorch/...` is in effect.
-	#   (2) the modulefile also prepends ${PYTORCH_PATH}/bin onto PATH,
-	#       so `env python3` finds ${PYTORCH_PATH}/bin/python3 (a
-	#       symlink to /usr/bin/python3 placed there by `cp -a` below).
-	# Tested end-to-end: cmake --version returns 4.3.2 on rocm-7.2.1.
-	${SUDO} find bin/ -maxdepth 1 -type f ! -name 'python*' \
-	   -exec sed -i '1s|^#!.*python3.*$|#!/usr/bin/env python3|' {} +
-	${SUDO} cp -a bin/* ${PYTORCH_PATH}/bin
-      fi
+      # ── PT 2.9+ site-packages copy (hollow-install fix) ────────────
+      # PyTorch 2.9 introduced an upstream pip-redirect:
+      #   WARNING: Redirecting 'python setup.py install' to
+      #            'pip install . -v --no-build-isolation'
+      # see https://github.com/pytorch/pytorch/issues/152276
+      # Effect: the torch wheel lands in the VENV's
+      # ${PYTORCH_BUILD_DIR}/lib/python3.X/site-packages/, NOT in
+      # ${PYTORCH_PATH}/lib/python3.X/site-packages/ (which is what
+      # the modulefile prepends to PYTHONPATH).
+      # Without the copy step below:
+      #   1) setup.py install returns rc=0
+      #   2) the C1 `import torch` validation falsely PASSES because
+      #      the venv's sys.path is still active during the leaf script
+      #   3) the C2 RUNPATH patch step finds libtorch_cpu.so missing
+      #      and warns-but-does-not-fail (see Fix 2 in this patch)
+      #   4) the modulefile gets written
+      #   5) `du -sh ${PYTORCH_PATH}` shows 4 KB -- a hollow install
+      # Anyone who `module load`s the resulting modulefile gets
+      # everything EXCEPT torch itself (satellites are populated).
+      #
+      # Gate widened from "2.9" to "2.9|2.10|2.11|2.12" on 2026-05-14
+      # after slurm 9422 default PT (PT 2.11.0 on ROCm 7.2.3) reproduced
+      # the hollow-install symptom: `Successfully built torch` +
+      # `Finished setup.py install` + C1 PASS, but pytorch/ subdir on
+      # disk was 4.0 KB and libtorch_cpu.so was missing. PT 2.10 on
+      # 9423 was cancelled at flash-attention build but had the same
+      # pip-redirect upstream so would have produced the same hollow
+      # install if allowed to finish. Until upstream restores
+      # `setup.py install` semantics, the copy step must cover all
+      # post-PT-2.9 versions.
+      case "${PYTORCH_SHORT_VERSION}" in
+         2.9|2.10|2.11|2.12)
+            PYTORCH_PATH_SITE_PACKAGES=${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages
+            ${SUDO} mkdir -p ${PYTORCH_PATH_SITE_PACKAGES}
+            ${SUDO} cp -a lib/python*/site-packages/* ${PYTORCH_PATH_SITE_PACKAGES}
+            ${SUDO} mkdir -p ${PYTORCH_PATH}/bin
+            # ── Shebang rewrite ─────────────────────────────────────
+            # pip console_script wrappers (cmake/ninja/ctest/torchrun/pip/...)
+            # get baked with `#!${PYTORCH_BUILD_DIR}/bin/python3` -- a /tmp
+            # path that disappears with the EXIT trap at end-of-job. Without
+            # rewriting, every PATH-resolved cmake/ninja/etc under `module
+            # load pytorch` fails with "bad interpreter: No such file or
+            # directory" (verified slurm 8161 cmake breakage on rocm-7.2.1;
+            # same pattern was present on all 13 installed pytorch trees,
+            # hot-fixed by bare_system/fix_python_venv_shebangs.sh on 2026-05-07).
+            #
+            # The PRIOR rewrite used `which python3` while the venv was still
+            # active, so PYTHON3_PATH resolved to the SAME /tmp path that was
+            # already in the shebang -> no-op sed. Switching the rewrite
+            # target to `/usr/bin/env python3` is correct because:
+            #   (1) the modulefile prepends ${PYTORCH_PATH}/lib/python3.X/
+            #       site-packages onto PYTHONPATH, so `from cmake import cmake`
+            #       (and ninja, torch, etc.) resolves under the system python3
+            #       once `module load pytorch/...` is in effect.
+            #   (2) the modulefile also prepends ${PYTORCH_PATH}/bin onto PATH,
+            #       so `env python3` finds ${PYTORCH_PATH}/bin/python3 (a
+            #       symlink to /usr/bin/python3 placed there by `cp -a` below).
+            # Tested end-to-end: cmake --version returns 4.3.2 on rocm-7.2.1.
+            ${SUDO} find bin/ -maxdepth 1 -type f ! -name 'python*' \
+               -exec sed -i '1s|^#!.*python3.*$|#!/usr/bin/env python3|' {} +
+            ${SUDO} cp -a bin/* ${PYTORCH_PATH}/bin
+            ;;
+      esac
       echo ""
       echo "===================="
       echo "Finished setup.py install"
@@ -2100,7 +2628,44 @@ print('  torch.cuda.is_available() =', torch.cuda.is_available())
       # libtorch_hip.so / libtorch_python.so etc. pick libomp up
       # transitively, so patching libtorch_cpu alone is sufficient.
       LIBTORCH_CPU="${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torch/lib/libtorch_cpu.so"
-      if [ -f "${LIBTORCH_CPU}" ] && command -v patchelf >/dev/null 2>&1; then
+      # ── Hollow-install hard fail ──────────────────────────────────
+      # If libtorch_cpu.so is missing from the install tree at this
+      # point, the install is "hollow": setup.py reported success but
+      # torch never landed in ${PYTORCH_PATH}. This happens on PT 2.9+
+      # when the site-packages copy step (gated above on PT 2.9-2.12)
+      # is skipped or fails silently, AND the upstream pip-redirect
+      # left the wheel only in the venv. C1 falsely passes because
+      # the venv's sys.path is still active. Without this gate, the
+      # build proceeds, writes a modulefile, and ships ~2 GB of
+      # satellites (vision/audio/triton/...) wrapped around an empty
+      # torch -- and anyone who `module load`s the result gets
+      # everything except torch itself.
+      # First observed in slurm 9422 PT 2.11.0 on rocm-7.2.3, 2026-05-14:
+      # `Successfully built torch` + C1 PASS + this WARNING in the log,
+      # then `du -sh pytorch/` was 4.0 KB. Was a WARNING-not-ERROR
+      # before; promoted to hard fail on 2026-05-14.
+      if [ ! -f "${LIBTORCH_CPU}" ]; then
+         echo "######################################################################" >&2
+         echo "ERROR: HOLLOW INSTALL DETECTED"                                          >&2
+         echo "ERROR:   ${LIBTORCH_CPU}"                                                >&2
+         echo "ERROR: does not exist after setup.py install reported success."          >&2
+         echo "ERROR:"                                                                  >&2
+         echo "ERROR: This is the PT 2.9+ pip-redirect symptom"                         >&2
+         echo "ERROR: (https://github.com/pytorch/pytorch/issues/152276):"              >&2
+         echo "ERROR:   setup.py is silently redirected to pip install . , which"       >&2
+         echo "ERROR:   drops the torch wheel into the build venv's site-packages"      >&2
+         echo "ERROR:   instead of ${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/."  >&2
+         echo "ERROR:"                                                                  >&2
+         echo "ERROR: Fix: check that the PT-version case block above the"              >&2
+         echo "ERROR:      'Finished setup.py install' banner includes"                 >&2
+         echo "ERROR:      \"${PYTORCH_SHORT_VERSION}\" in its match list."             >&2
+         echo "ERROR:      That block is what copies lib/python*/site-packages/* into"  >&2
+         echo "ERROR:      \${PYTORCH_PATH_SITE_PACKAGES}. Without it, the install"     >&2
+         echo "ERROR:      is hollow and C1 falsely passes via the venv's sys.path."    >&2
+         echo "######################################################################" >&2
+         exit 1
+      fi
+      if command -v patchelf >/dev/null 2>&1; then
          CURRENT_RUNPATH=$(patchelf --print-rpath "${LIBTORCH_CPU}" 2>/dev/null || true)
          if [[ ":${CURRENT_RUNPATH}:" != *":${ROCM_PATH}/llvm/lib:"* ]]; then
             NEW_RUNPATH="${CURRENT_RUNPATH:+${CURRENT_RUNPATH}:}${ROCM_PATH}/llvm/lib"
@@ -2130,9 +2695,17 @@ print('  torch.cuda.is_available() =', torch.cuda.is_available())
             echo "[pytorch C2 RUNPATH patch] libtorch_cpu.so already has ${ROCM_PATH}/llvm/lib in RUNPATH (no-op)"
          fi
       else
-         echo "WARNING: skipping C2 RUNPATH patch: ${LIBTORCH_CPU} missing or patchelf not in PATH" >&2
-         echo "WARNING: this build will fail Pytorch_Profile_Rocprof-compute_ROCm regression"      >&2
-         echo "WARNING: unless something else (e.g. amdclang module) puts llvm/lib on RUNPATH."    >&2
+         # patchelf missing on the build host is the ONLY case where
+         # we stay at WARNING here -- libtorch_cpu.so exists (the
+         # hollow-install gate above ruled that out), we just cannot
+         # rewrite its RUNPATH. Pytorch_Profile_Rocprof-compute_ROCm
+         # will fail at test time on stripped LD_LIBRARY_PATH, but
+         # everything else works.
+         echo "WARNING: skipping C2 RUNPATH patch: patchelf not in PATH"                              >&2
+         echo "WARNING: this build will fail Pytorch_Profile_Rocprof-compute_ROCm regression"        >&2
+         echo "WARNING: unless something else (e.g. amdclang module) puts llvm/lib on RUNPATH."      >&2
+         echo "WARNING: install patchelf >= 0.10 on the build host and re-run with --replace 1"      >&2
+         echo "WARNING: to fix. (libtorch_cpu.so exists; not a hollow install.)"                      >&2
       fi
 
       # Installing Torchvision
@@ -2361,9 +2934,12 @@ PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
 ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
 # the - option suppresses tabs
-cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
-	whatis("PyTorch version ${PYTORCH_VERSION} with ROCm Support")
+cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua
+	whatis("PyTorch version ${PYTORCH_VERSION} with ROCm Support${PYTORCH_INSTALL_SUFFIX:+ (variant: ${PYTORCH_INSTALL_SUFFIX#-})}")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
+	whatis("AOTriton: ${AOTRITON_VERSION}")
+	whatis("Triton (post-build wheel): ${TRITON_VERSION}")
+	whatis("FlashAttention: ${FLASHATTENTION_VERSION}")
 
 	prereq("${ROCM_MODULE_NAME}")
 	-- openmpi is required because libtorch_cpu links libmpi.so when
@@ -2450,11 +3026,14 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${PYTORCH_VERSION}.lua
 	setenv("PYTORCH_ROCM_ARCH","${AMDGPU_GFXMODEL}")
 EOF
 # An alternate module with tunable gemms
-cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}_tunableop_enabled.lua
-	whatis("PyTorch version ${PYTORCH_VERSION} with ROCm Support and Tunable GEMMS")
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua
+	whatis("PyTorch version ${PYTORCH_VERSION} with ROCm Support and Tunable GEMMS${PYTORCH_INSTALL_SUFFIX:+ (variant: ${PYTORCH_INSTALL_SUFFIX#-})}")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
+	whatis("AOTriton: ${AOTRITON_VERSION}")
+	whatis("Triton (post-build wheel): ${TRITON_VERSION}")
+	whatis("FlashAttention: ${FLASHATTENTION_VERSION}")
 
-	load pytorch
+	load("pytorch")
 	setenv("PYTORCH_TUNABLEOP_ENABLED","1")
 EOF
 #	cmd1="mkdir -p $$HOME/miopen_tmpdir; export TMPDIR=$$HOME/miopen_tmpdir"
