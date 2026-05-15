@@ -24,9 +24,10 @@ For each canonical package family it reports:
       for ftorch a missing `pytorch` Lmod module on the rocmplus tree;
       for jax on Ubuntu 22.04 + ROCm 7+, Python 3.11+ is required (`jax_setup.sh`
       policy gate — see `jax.SKIPPED` / `jaxlib.SKIPPED`).
-  B   BUNDLED in the ROCm SDK itself (a <pkg>.BUNDLED marker exists);
-      typical case is hipfort, which 6.3+ ships natively. No separate
-      install needed; users get the package via the rocm/<v> module.
+  B   BUNDLED in the ROCm SDK itself (a <pkg>.BUNDLED marker exists).
+      No separate install needed; users get the package via the rocm/<v>
+      module. (Historically hipfort was the canonical example, bundled
+      from ROCm 6.3+; it's no longer tracked as a separate row here.)
   -   absent / missing: no install dir AND no marker. Distinct from N.
       Could mean (a) the package was never attempted on this SDK
       (operator-skipped via PACKAGES_LIST or QUICK_INSTALLS), (b) the
@@ -138,7 +139,6 @@ PKG_LIST = [
     ("pnetcdf",    r"^pnetcdf(-v.*)?$",                   r"^pnetcdf-v(.+)$"),
     ("netcdf",     r"^netcdf(?:|-c-v.*|-fortran-v.*)$",   r"^netcdf-c-v(.+)$"),
     ("hipifly",    r"^hipifly$",                          None),
-    ("hipfort",    r"^hipfort(-v.*)?$",                   r"^hipfort-v(.+)$"),
     ("hip-python", r"^hip-python$",                       None),
     ("ftorch",     r"^ftorch$",                           None),
     ("kokkos",     r"^kokkos(-v.*)?$",                    r"^kokkos-v(.+)$"),
@@ -149,6 +149,7 @@ PKG_LIST = [
     ("tau",        r"^tau$",                              None),
     ("pdt",        r"^pdt$",                              None),
     ("likwid",     r"^likwid(-v.*)?$",                    r"^likwid-v(.+)$"),
+    ("mdb",        r"^mdb(-v.*)?$",                       r"^mdb-v(.+)$"),
     ("hpctoolkit", r"^hpctoolkit(-v.*)?$",                r"^hpctoolkit-v(.+)$"),
     ("hpcviewer",  r"^hpcviewer(-v.*)?$",                 r"^hpcviewer-v(.+)$"),
     ("mpi4py",     r"^mpi4py(-v.*)?$",                    r"^mpi4py-v(.+)$"),
@@ -717,7 +718,6 @@ def render_reasons(reasons, text=False):
 # wiring. Tuples are tried in order: first dir that actually exists wins
 # for the cell.
 PKG_TO_MODULE_CAT = {
-    "hipfort":  ("hipfort_from_source", "hipfort"),
     "netcdf":   ("netcdf-c", "netcdf-fortran"),
     "ftorch":   ("ftorch", "ftorch_amdflang"),
 }

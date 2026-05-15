@@ -514,26 +514,44 @@ else
       # can be inconsistent with what PnetCDF / netcdf-c pick up via
       # `which mpicc`).
       #
-      # Derive the actual rocm modulefile token to (re-)load. For RC
-      # trees (rocm-therock-23.2.0, rocm-afar-22.2.0, ...) the
-      # modulefile name does NOT match `${ROCM_MODULE}/${ROCM_VERSION}`
-      # because ROCM_VERSION is the SDK numeric (e.g. 7.13.0 for
-      # therock-23.2.0). Trying `module load rocm/7.13.0` fails with
-      # "no such file" even though the SDK is already loaded. Prefer
-      # the basename of the upstream-loaded ROCM_PATH (Lmod treats
-      # reload of an already-loaded module as a no-op); only fall back
-      # to the legacy `${ROCM_MODULE}/${ROCM_VERSION}` form for direct
-      # standalone invocation where ROCM_PATH may not be set yet.
-      # Pattern ported from mpi4py_setup.sh:310-316 (slurm 8225,
-      # 2026-05-05: original form resolved to "rocm/7.13.0" for
-      # therock-23.2.0 and tripped preflight rc=42, taking down
-      # netcdf-c + netcdf-fortran + pnetcdf in one shot).
-      if [[ -n "${ROCM_PATH:-}" ]]; then
-         _rp_bn="${ROCM_PATH##*/}"
-         ROCM_MODULE_NAME="${ROCM_MODULE}/${_rp_bn#rocm-}"
-         unset _rp_bn
-      else
-         ROCM_MODULE_NAME="${ROCM_MODULE}/${ROCM_VERSION}"
+      # Pattern history: original form resolved to `rocm/7.13.0` for
+      # therock-23.2.0 and tripped preflight rc=42 (slurm 8225,
+      # 2026-05-05), taking down netcdf-c + netcdf-fortran + pnetcdf in
+      # one shot. Pattern ported from mpi4py_setup.sh:310-316 then
+      # upgraded to the LOADEDMODULES-first shape below (2026-05-15)
+      # when the therock-afar dual-segment scheme exposed a residual
+      # mismatch in the ROCM_PATH-basename heuristic.
+      #
+      # Derive the rocm modulefile token to (re-)load. Three sources, in
+      # decreasing order of authority:
+      #   1. LMOD's LOADEDMODULES: the literal modulefile name currently
+      #      loaded (e.g. rocm/therock-afar-23.2.1). Only source that
+      #      handles the therock-afar dual scheme where install dir is
+      #      rocm-therock-afar-<NUMERIC> but the module is keyed on the
+      #      release tag (rocm/therock-afar-<RELEASE>).
+      #   2. ROCM_PATH basename: install-dir basename minus the `rocm-`
+      #      prefix. Correct for regular releases + afar (install-dir
+      #      basename == module name) but wrong for therock-afar.
+      #   3. ${ROCM_MODULE}/${ROCM_VERSION}: standalone-invocation fallback when
+      #      neither LOADEDMODULES nor ROCM_PATH is populated.
+      ROCM_MODULE_NAME=""
+      if [[ -n "${LOADEDMODULES:-}" ]]; then
+         _OLD_IFS="${IFS}"; IFS=":"
+         for _m in ${LOADEDMODULES}; do
+            case "${_m}" in
+               ${ROCM_MODULE:-rocm}/*) ROCM_MODULE_NAME="${_m}"; break ;;
+            esac
+         done
+         IFS="${_OLD_IFS}"; unset _OLD_IFS _m
+      fi
+      if [[ -z "${ROCM_MODULE_NAME}" ]]; then
+         if [[ -n "${ROCM_PATH:-}" ]]; then
+            _rp_bn="${ROCM_PATH##*/}"
+            ROCM_MODULE_NAME="${ROCM_MODULE}/${_rp_bn#rocm-}"
+            unset _rp_bn
+         else
+            ROCM_MODULE_NAME="${ROCM_MODULE}/${ROCM_VERSION}"
+         fi
       fi
       REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${MPI_MODULE}" "${HDF5_MODULE}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?

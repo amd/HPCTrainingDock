@@ -1261,11 +1261,31 @@ swap_sdk_lib_symlink() {
 #
 # Two independent idempotency checks, one per inserted block:
 #
-#   * LD_LIBRARY_PATH block: keyed off `rocm-patches-${ROCM_VERSION}`.
-#     Any reference to that string in the modulefile means somebody
-#     (this script on a previous run, or a human admin) has already
-#     wired the overlay. We do NOT add a second entry under any
-#     circumstances. On admin-applied hand edits with a different
+#   * LD_LIBRARY_PATH block: keyed off a `prepend_path("LD_LIBRARY_PATH",
+#     ".../rocm-patches-${ROCM_VERSION}/lib")` LINE-SHAPE match, not the
+#     bare `rocm-patches-${ROCM_VERSION}` substring.  Anchoring the
+#     idempotency check to the full prepend_path("LD_LIBRARY_PATH", ...)
+#     shape avoids a false-positive when the rocprof-compute bundle has
+#     ALREADY appended its own `prepend_path("PATH",
+#     ".../rocm-patches-${ROCM_VERSION}/rocprof-compute/bin")` line in
+#     the same run (which is the normal order on 7.2.x where
+#     PATCH_BUNDLES dispatch runs rocprof-compute *after*
+#     rocprof-sys-1.3.0).  An earlier shape (`grep -F` on the bare
+#     marker) silently skipped the overlay insertion on every 7.2.x
+#     build that also produced a rocprof-compute overlay, because the
+#     PATH line emitted by rocprof-compute's install.sh contains the
+#     same `rocm-patches-${ROCM_VERSION}` substring.  Confirmed bug
+#     site: slurm-9724 line 31400 (rocm-7.2.0 build on 2026-05-15).
+#     The functional impact was MASKED at runtime by
+#     swap_sdk_lib_symlink() (the SDK's own
+#     ${ROCM_PATH}/lib/librocprof-sys.so.X.Y.Z is replaced with a
+#     symlink to the overlay's patched .so, so the patched library
+#     loads via the SDK's own LD_LIBRARY_PATH entry); the visible
+#     symptom was a missing prepend_path("LD_LIBRARY_PATH", ...) line
+#     and its explanatory comment block in the generated modulefile.
+#     Any LD_LIBRARY_PATH overlay reference in the modulefile (this
+#     script on a previous run, or a human admin) means we do NOT add
+#     a second entry. On admin-applied hand edits with a different
 #     absolute path (e.g. /shared/apps/.../opt/rocm-patches-X.Y.Z/lib
 #     vs. our /opt/rocm-patches-X.Y.Z/lib default), we warn but keep
 #     the existing entry as the source of truth.
@@ -1289,11 +1309,20 @@ patch_module_file() {
    local marker="rocm-patches-${ROCM_VERSION}"
 
    # ─── Block 1: LD_LIBRARY_PATH overlay ───────────────────────────
-   if grep -Fq "${marker}" "${MODULE_FILE}"; then
+   # Match the full prepend_path("LD_LIBRARY_PATH", ".../rocm-patches-
+   # <ver>/lib") line shape, NOT the bare `rocm-patches-${ROCM_VERSION}`
+   # substring. The bare-substring form (used pre-2026-05-15) false-
+   # matched the rocprof-compute bundle's prepend_path("PATH",
+   # ".../rocm-patches-<ver>/rocprof-compute/bin") line on 7.2.x
+   # builds, silently skipping this insertion. See the header comment
+   # block on this function for the full story.
+   local overlay_grep_re='prepend_path\(\s*"LD_LIBRARY_PATH"\s*,\s*"[^"]*'"${marker}"'/lib"\s*\)'
+   if grep -qE "${overlay_grep_re}" "${MODULE_FILE}"; then
       # Try to extract the existing overlay path so we can warn on
-      # mismatch with this run's INSTALL_PREFIX/lib.
+      # mismatch with this run's INSTALL_PREFIX/lib. Same regex as
+      # the outer check, but only the quoted PATH argument is captured.
       local existing
-      existing="$(grep -oE '"[^"]*'"${marker}"'[^"]*/lib"' "${MODULE_FILE}" \
+      existing="$(grep -oE '"[^"]*'"${marker}"'/lib"' "${MODULE_FILE}" \
                    | head -1 | tr -d '"')"
       if [ -n "${existing}" ] && [ "${existing}" != "${overlay}" ]; then
          echo "[rocm_patches] module file already has an overlay entry, but it"

@@ -438,6 +438,66 @@ resolve_pytorch_stack_versions() {
    # is exactly what PT_MAJOR_MINOR holds, so the fix is one assignment.
    PYTORCH_SHORT_VERSION="${PT_MAJOR_MINOR}"
    MANIFEST_CELL_KEY="${PT_MAJOR_MINOR}|${ROCM_MAJOR_MINOR}"
+
+   # ── Compatibility gate: PT 2.6/2.7/2.8 are unsupported on ROCm 7.x ──
+   # Upstream PyTorch tested 2.6/2.7/2.8 only against ROCm 6.x. On ROCm
+   # 7.x this matrix has at least three independent breakages, all of
+   # which we have observed on this cluster:
+   #   (1) c10::warpSize / __AMDGCN_WAVEFRONT_SIZE constexpr regressions
+   #       in c10/macros/Macros.h and third_party/composable_kernel
+   #       headers (ROCm 7.x compiler tightened constexpr evaluation;
+   #       formerly Failures D/E/F).
+   #   (2) AOTriton 0.11.2b adaptor API mismatch with PT 2.7/2.8's
+   #       aten/.../mha_all_aot.hip ("This adaptor code is only tested
+   #       with AOTriton 0.9.x"). We cannot dodge this by going back to
+   #       AOTriton 0.9.x because its bundled Triton 3.2.0 emits HSA
+   #       code-object metadata that the system /usr/bin/ld.lld
+   #       rejects ("ld.lld: error: unknown abi version") -- a host-side
+   #       toolchain bug present on every ROCm we have. Formerly
+   #       Failures G/H.
+   #   (3) third_party/composable_kernel macro redefinitions vs. the
+   #       newer in-system rocm-7.x CK headers (CK_USE_OCP_FP8,
+   #       __assert_ocp_support, __assert_fnuz_support; observed on
+   #       9728 rocm-7.1.1 + PT 2.7.1).
+   # Each axis can in principle be patched, but the patches need to grow
+   # with every new ROCm 7.x point release and we are chasing upstream
+   # interface drift that PyTorch never intended to support. The honest
+   # matrix entry is "unsupported": users on ROCm 7.x should use PT 2.9+
+   # (the canonical pairing); users wanting PT 2.6/2.7/2.8 should stay
+   # on ROCm 6.x.
+   #
+   # Gate is intentionally placed AFTER PT_MAJOR_MINOR / ROCM_MAJOR_MINOR
+   # resolution and BEFORE any heavy work (manifest cell parse, source
+   # clone, configure, compile). Exit rc=0 is treated as a clean skip by
+   # main_setup.sh's run_and_log_versioned wrapper, equivalent to "this
+   # package was disabled for this ROCm" -- not a build failure.
+   case "${PT_MAJOR_MINOR}" in
+      2.6|2.7|2.8)
+         local _rocm_major_only="${ROCM_MAJOR_MINOR%%.*}"
+         if [[ "${_rocm_major_only}" -ge 7 ]]; then
+            echo "######################################################"
+            echo "SKIPPED: PyTorch ${PYTORCH_VERSION} on ROCm ${ROCM_VERSION}"
+            echo "         is not a supported combination."
+            echo ""
+            echo "         Upstream PyTorch ${PT_MAJOR_MINOR} was tested only"
+            echo "         against ROCm 6.x. On ROCm 7.x this combination"
+            echo "         hits multiple independent build failures:"
+            echo "         warpSize/CK constexpr regressions, AOTriton"
+            echo "         adaptor API mismatch (no working AOTriton"
+            echo "         version exists -- 0.9.x source-build hits the"
+            echo "         system ld.lld ABI bug, 0.11.2b's API differs"
+            echo "         from what mha_all_aot.hip expects), and"
+            echo "         third_party CK macro redefinitions vs the"
+            echo "         in-system rocm-7.x CK headers."
+            echo ""
+            echo "         Use PyTorch 2.9+ on ROCm 7.x, or PyTorch"
+            echo "         ${PT_MAJOR_MINOR} on ROCm 6.x."
+            echo "######################################################"
+            exit 0
+         fi
+         ;;
+   esac
+
    local cell_value="${PYTORCH_STACK_MANIFEST[${MANIFEST_CELL_KEY}]:-}"
    if [[ -n "${cell_value}" ]]; then
       MANIFEST_CELL_HIT=1
@@ -1277,16 +1337,36 @@ _pytorch_on_exit() {
 }
 trap _pytorch_on_exit EXIT
 
-# Derive ROCM_MODULE_NAME from the actual ROCM_PATH basename so RC
-# trees (rocm-therock-*, rocm-afar-*) match their loaded module
-# name instead of the SDK numeric. Falls back to the rocm/<version>
-# form for direct standalone invocation where ROCM_PATH is unset.
-if [[ -n "${ROCM_PATH:-}" ]]; then
-   _rp_bn="${ROCM_PATH##*/}"
-   ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
-   unset _rp_bn
-else
-   ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+# Derive the rocm modulefile token to (re-)load. Three sources, in
+# decreasing order of authority:
+#   1. LMOD's LOADEDMODULES: the literal modulefile name currently
+#      loaded (e.g. rocm/therock-afar-23.2.1). Only source that
+#      handles the therock-afar dual scheme where install dir is
+#      rocm-therock-afar-<NUMERIC> but the module is keyed on the
+#      release tag (rocm/therock-afar-<RELEASE>).
+#   2. ROCM_PATH basename: install-dir basename minus the `rocm-`
+#      prefix. Correct for regular releases + afar (install-dir
+#      basename == module name) but wrong for therock-afar.
+#   3. rocm/${ROCM_VERSION}: standalone-invocation fallback when
+#      neither LOADEDMODULES nor ROCM_PATH is populated.
+ROCM_MODULE_NAME=""
+if [[ -n "${LOADEDMODULES:-}" ]]; then
+   _OLD_IFS="${IFS}"; IFS=":"
+   for _m in ${LOADEDMODULES}; do
+      case "${_m}" in
+         rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+      esac
+   done
+   IFS="${_OLD_IFS}"; unset _OLD_IFS _m
+fi
+if [[ -z "${ROCM_MODULE_NAME}" ]]; then
+   if [[ -n "${ROCM_PATH:-}" ]]; then
+      _rp_bn="${ROCM_PATH##*/}"
+      ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
+      unset _rp_bn
+   else
+      ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+   fi
 fi
 
 # Provenance: capture this leaf script's git state for the modulefile

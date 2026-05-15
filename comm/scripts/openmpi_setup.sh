@@ -384,22 +384,45 @@ done
 # identical to the prior literal `rocm/${ROCM_VERSION}` it replaces.
 # For RC trees the loaded modulefile is rocm/therock-23.2.0 (or
 # rocm/afar-...) while ROCM_VERSION is the SDK numeric (e.g. 7.13.0)
-# -- using `rocm/${ROCM_VERSION}` would not resolve. We prefer the
-# basename of the ROCM_PATH that was loaded upstream (Lmod treats a
-# reload of the same modulefile as a no-op) and fall back to
-# rocm/${ROCM_VERSION} for direct standalone invocation where
-# ROCM_PATH may be unset. Mirrors the mpi4py_setup.sh fix shipped in
-# the previous trial (slurm-8099 audit). The single derivation is
-# used at four sites below: the preflight, the post-build module
-# unload, and both the Cache-branch and Build-branch heredoc-
-# templated openmpi modulefile prereq() lines (which would otherwise
-# bake `prereq("rocm/7.13.0")` into a persistent on-disk artifact).
-if [[ -n "${ROCM_PATH:-}" ]]; then
-   _rp_bn="${ROCM_PATH##*/}"
-   ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
-   unset _rp_bn
-else
-   ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+# -- using `rocm/${ROCM_VERSION}` would not resolve.
+#
+# Derivation strategy (most-to-least authoritative):
+#   1. LMOD's LOADEDMODULES env var: lists the literal modulefile names
+#      currently loaded (e.g. `rocm/therock-afar-23.2.1`). This is the
+#      most authoritative source and is the only one that handles the
+#      install-dir-vs-module-name divergence in the therock-afar dual
+#      scheme (install dir is rocm-therock-afar-<NUMERIC> but the
+#      modulefile basename is the release-tag-keyed therock-afar-
+#      <RELEASE>.lua).
+#   2. ROCM_PATH basename: works for regular + afar (install dir basename
+#      ==  module name minus 'rocm-' prefix) but produces the wrong
+#      token for therock-afar.
+#   3. rocm/${ROCM_VERSION}: standalone-invocation fallback when neither
+#      LOADEDMODULES nor ROCM_PATH are populated yet.
+#
+# Mirrors the same block in mpi4py_setup.sh. The single derivation is
+# used at four sites below: the preflight, the post-build module unload,
+# and both the Cache-branch and Build-branch heredoc-templated openmpi
+# modulefile prereq() lines (which would otherwise bake
+# `prereq("rocm/7.13.0")` into a persistent on-disk artifact).
+ROCM_MODULE_NAME=""
+if [[ -n "${LOADEDMODULES:-}" ]]; then
+   _OLD_IFS="${IFS}"; IFS=":"
+   for _m in ${LOADEDMODULES}; do
+      case "${_m}" in
+         rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+      esac
+   done
+   IFS="${_OLD_IFS}"; unset _OLD_IFS _m
+fi
+if [[ -z "${ROCM_MODULE_NAME}" ]]; then
+   if [[ -n "${ROCM_PATH:-}" ]]; then
+      _rp_bn="${ROCM_PATH##*/}"
+      ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
+      unset _rp_bn
+   else
+      ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+   fi
 fi
 
 # Preflight + load required modules. preflight_modules exits the script

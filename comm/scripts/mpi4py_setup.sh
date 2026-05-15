@@ -303,16 +303,33 @@ else
       # the ROCM_VERSION here is the SDK numeric (e.g. 7.13.0 for
       # therock-23.2.0). Trying `module load rocm/7.13.0` would fail
       # with "no such file" even though the SDK is already loaded.
-      # Prefer the basename of the upstream-loaded ROCM_PATH (Lmod
-      # treats reload of an already-loaded module as a no-op); only
-      # fall back to the legacy `rocm/${ROCM_VERSION}` form for direct
-      # standalone invocation where ROCM_PATH may not be set yet.
-      if [[ -n "${ROCM_PATH:-}" ]]; then
-         _rp_bn="${ROCM_PATH##*/}"
-         ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
-         unset _rp_bn
-      else
-         ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+      #
+      # Strategy: LMOD's LOADEDMODULES is the most authoritative source --
+      # it lists the literal modulefile name (e.g. rocm/therock-afar-23.2.1).
+      # We pull the first 'rocm/*' entry from there. Falling back to the
+      # ROCM_PATH basename works when the install-dir and module names are
+      # the same shape (regular releases, afar) but DOES NOT WORK for
+      # therock-afar where install dir is rocm-therock-afar-<NUMERIC>
+      # while the module is rocm/therock-afar-<RELEASE_TAG>. Last resort
+      # for standalone invocation: rocm/${ROCM_VERSION}.
+      ROCM_MODULE_NAME=""
+      if [[ -n "${LOADEDMODULES:-}" ]]; then
+         _OLD_IFS="${IFS}"; IFS=":"
+         for _m in ${LOADEDMODULES}; do
+            case "${_m}" in
+               rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+            esac
+         done
+         IFS="${_OLD_IFS}"; unset _OLD_IFS _m
+      fi
+      if [[ -z "${ROCM_MODULE_NAME}" ]]; then
+         if [[ -n "${ROCM_PATH:-}" ]]; then
+            _rp_bn="${ROCM_PATH##*/}"
+            ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
+            unset _rp_bn
+         else
+            ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+         fi
       fi
       REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${MPI_MODULE}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?

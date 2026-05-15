@@ -298,22 +298,38 @@ read -r -a VERSIONS_ARR <<< "${ROCM_VERSIONS_NORM}"
 N=${#VERSIONS_ARR[@]}
 (( N == 0 )) && { echo "ERROR: no ROCm versions parsed from '${ROCM_VERSIONS_RAW}'" >&2; exit 1; }
 
-# Pre-flight: every version must have a system rocm modulefile so the
-# compute-node sbatch can `module load rocm/<v>`. We check the canonical
-# 22.04 module tree on the login node (NFS-mounted on sh5 too). When the
-# cluster moves to 24.04, switch SYS_ROCM_MODDIR below.
+# Pre-flight: every version must have a rocm modulefile in EITHER the
+# live system tree OR the operator-chosen ${TOP_MODULE_PATH}/base/rocm
+# tree (typically a --site-resolved /nfsapps/<distro>/modules path).
+# The compute-node sbatch prepends ${TOP_MODULE_PATH}/base to MODULEPATH
+# before `module load rocm/<v>`, so a modulefile in either tree is
+# resolvable. We check the union here so the operator gets a fast,
+# login-side rejection for tokens that don't exist anywhere yet (instead
+# of a slow per-job failure inside the sbatch).
 SYS_ROCM_MODDIR="/shared/apps/modules/ubuntu/lmodfiles/base/rocm"
+SITE_ROCM_MODDIR="${TOP_MODULE_PATH}/base/rocm"
 MISSING=()
 for v in "${VERSIONS_ARR[@]}"; do
    # Lmod accepts modulefiles either with or without a .lua suffix.
-   if [[ ! -f "${SYS_ROCM_MODDIR}/${v}.lua" && ! -f "${SYS_ROCM_MODDIR}/${v}" ]]; then
+   _found=0
+   for _dir in "${SITE_ROCM_MODDIR}" "${SYS_ROCM_MODDIR}"; do
+      if [[ -f "${_dir}/${v}.lua" || -f "${_dir}/${v}" ]]; then
+         _found=1
+         break
+      fi
+   done
+   if [[ "${_found}" != 1 ]]; then
       MISSING+=("${v}")
    fi
 done
+unset _found _dir
 if (( ${#MISSING[@]} > 0 )); then
-   echo "ERROR: the following rocm versions have no module in ${SYS_ROCM_MODDIR}:" >&2
+   echo "ERROR: the following rocm versions have no module in either" >&2
+   echo "       ${SITE_ROCM_MODDIR} (site tree)" >&2
+   echo "       ${SYS_ROCM_MODDIR} (live system tree):" >&2
    for v in "${MISSING[@]}"; do echo "    rocm/${v}" >&2; done
-   echo "Install the rocm SDK + module on the system tree (or update SYS_ROCM_MODDIR)." >&2
+   echo "Install the rocm SDK + module on one of those trees (run_rocm_build_sweep.sh)" >&2
+   echo "or update SYS_ROCM_MODDIR / pass --site / --top-module-path to point at the right tree." >&2
    exit 1
 fi
 

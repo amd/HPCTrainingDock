@@ -167,7 +167,25 @@ for v in "${VERSIONS[@]}"; do
    # the Phase 0 logic in run_rocm_therock_install.sh so the sweep and
    # the helper agree on what counts as "already installed".
    _skip_match=""
-   if [[ "${v}" == therock-* ]]; then
+   if [[ "${v}" == therock-afar-* ]]; then
+      # therock-afar-<REL> installs to rocm-therock-afar-<ROCM_NUMERIC>
+      # where ROCM_NUMERIC lives inside the tarball (.info/version) and
+      # is unknown at this point. Conservative: glob for ANY
+      # rocm-therock-afar-* dir AND the matching modulefile; if both
+      # exist we consider the token already installed. The helper's own
+      # Phase 0 re-validates inside the install function.
+      _afar_rel="${v#therock-afar-}"
+      _mf="${TOP_MODULE_PATH}/base/rocm/therock-afar-${_afar_rel}.lua"
+      if [[ -f "${_mf}" ]]; then
+         for _cand in "${TOP_INSTALL_PATH}"/rocm-therock-afar-*; do
+            if [[ -d "${_cand}" ]]; then
+               _skip_match="${_cand}"
+               break
+            fi
+         done
+      fi
+      unset _afar_rel _mf _cand
+   elif [[ "${v}" == therock-* ]]; then
       _trel="${v#therock-}"
       for _cand in "${TOP_INSTALL_PATH}/rocm-therock-${_trel}" \
                    "${TOP_INSTALL_PATH}/rocm-therock-${_trel}.0"; do
@@ -188,12 +206,56 @@ for v in "${VERSIONS[@]}"; do
    fi
    unset _skip_match
 
+   # ── TheRock-AFAR branch: radeon flang/ extract-only ───────────────
+   # therock-afar-<REL> tokens (e.g. therock-afar-23.2.1) live on the
+   # AFAR site (https://repo.radeon.com/rocm/misc/flang/) under the
+   # filename shape therock-afar-<REL>-<FAMILY>-<NUMERIC>-<SHA>.tar.bz2.
+   # The helper run_rocm_therock_afar_install.sh:
+   #   * derives <FAMILY> from the first gfx model in AMDGPU_GFXMODEL
+   #     (e.g. gfx942 -> gfx94X) via a built-in mapping table;
+   #   * scrapes the listing to discover the matching tarball;
+   #   * extracts into rocm-therock-afar-<NUMERIC> (NUMERIC =
+   #     .info/version);
+   #   * emits the modulefile at base/rocm/therock-afar-<REL>.lua with
+   #     MODULEPATH prepends for rocm-therock-afar-<NUMERIC> and
+   #     rocmplus-therock-afar-<NUMERIC>.
+   # This branch MUST come BEFORE the legacy `therock-*` branch below,
+   # since `therock-afar-X.Y.Z` also matches the `therock-*` glob.
+   if [[ "${v}" == therock-afar-* ]]; then
+      THEROCK_AFAR_REL="${v#therock-afar-}"
+      {
+         echo ""
+         echo "=================================================================="
+         echo " [$(date)] BEGIN rocm-${v}  [TheRock-AFAR extract-only, gfxmodel=${AMDGPU_GFXMODEL}]"
+         echo "=================================================================="
+      } | tee -a "${SUMMARY}"
+
+      if bare_system/run_rocm_therock_afar_install.sh \
+            --therock-afar-release "${THEROCK_AFAR_REL}" \
+            --amdgpu-gfxmodel      "${AMDGPU_GFXMODEL}" \
+            --distro "${DISTRO}" --distro-version "${DISTRO_VERSION}" \
+            --top-install-path "${TOP_INSTALL_PATH}" \
+            --top-module-path  "${TOP_MODULE_PATH}" \
+            --replace-existing "${REPLACE_EXISTING}"
+      then
+         echo "[$(date)] OK   rocm-${v}" | tee -a "${SUMMARY}"
+         OK+=("${v}")
+      else
+         rc=$?
+         echo "[$(date)] FAIL rocm-${v} (rc=${rc})" | tee -a "${SUMMARY}"
+         FAIL+=("${v}")
+      fi
+      continue
+   fi
+
    # ── TheRock branch: download + extract, no docker/make/patches ───
    # TheRock releases are pre-built distro-agnostic ROCm SDK tarballs
-   # at https://repo.amd.com/rocm/tarball/. The helper handles URL
-   # auto-discovery (X.Y -> X.Y.0 extension + listing fallback for
-   # alpha/RC tarballs), extracts directly into the install dir
-   # (no wrapper segment to drop), reads .info/version to derive the
+   # at https://repo.amd.com/rocm/tarball/ (legacy URL_BASE) OR
+   # https://rocm.nightlies.amd.com/tarball-multi-arch/ (current upstream
+   # channel; see RELEASES.md on github.com/ROCm/TheRock). The helper
+   # handles URL auto-discovery (X.Y -> X.Y.0 extension + listing
+   # fallback for alpha/RC tarballs), extracts directly into the install
+   # dir (no wrapper segment to drop), reads .info/version to derive the
    # final install-dir basename (rocm-therock-<numeric>), and writes
    # a GPUSDK-shaped modulefile under base/rocm/therock-<token>.lua.
    if [[ "${v}" == therock-* ]]; then

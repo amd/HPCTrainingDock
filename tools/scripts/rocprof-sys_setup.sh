@@ -325,16 +325,36 @@ if [ "${INSTALL_ROCPROF_SYS_FROM_SOURCE}" = "1" ] ; then
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
 
-   # Derive ROCM_MODULE_NAME from the actual ROCM_PATH basename so RC
-   # trees (rocm-therock-*, rocm-afar-*) match their loaded module
-   # name instead of the SDK numeric. Falls back to the rocm/<version>
-   # form for direct standalone invocation where ROCM_PATH is unset.
-   if [[ -n "${ROCM_PATH:-}" ]]; then
-      _rp_bn="${ROCM_PATH##*/}"
-      ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
-      unset _rp_bn
-   else
-      ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+   # Derive the rocm modulefile token to (re-)load. Three sources, in
+   # decreasing order of authority:
+   #   1. LMOD's LOADEDMODULES: the literal modulefile name currently
+   #      loaded (e.g. rocm/therock-afar-23.2.1). Only source that
+   #      handles the therock-afar dual scheme where install dir is
+   #      rocm-therock-afar-<NUMERIC> but the module is keyed on the
+   #      release tag (rocm/therock-afar-<RELEASE>).
+   #   2. ROCM_PATH basename: install-dir basename minus the `rocm-`
+   #      prefix. Correct for regular releases + afar (install-dir
+   #      basename == module name) but wrong for therock-afar.
+   #   3. rocm/${ROCM_VERSION}: standalone-invocation fallback when
+   #      neither LOADEDMODULES nor ROCM_PATH is populated.
+   ROCM_MODULE_NAME=""
+   if [[ -n "${LOADEDMODULES:-}" ]]; then
+      _OLD_IFS="${IFS}"; IFS=":"
+      for _m in ${LOADEDMODULES}; do
+         case "${_m}" in
+            rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+         esac
+      done
+      IFS="${_OLD_IFS}"; unset _OLD_IFS _m
+   fi
+   if [[ -z "${ROCM_MODULE_NAME}" ]]; then
+      if [[ -n "${ROCM_PATH:-}" ]]; then
+         _rp_bn="${ROCM_PATH##*/}"
+         ROCM_MODULE_NAME="rocm/${_rp_bn#rocm-}"
+         unset _rp_bn
+      else
+         ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
+      fi
    fi
 
    if [ -f "${CACHE_FILES}/${TOOL_NAME}.tgz" ]; then

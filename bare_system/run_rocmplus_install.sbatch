@@ -200,29 +200,80 @@ fi
 # on missing files and leaves the rest loaded).
 module --force purge 2>/dev/null || module purge 2>/dev/null || true
 
-# Load the *system* rocm module (22.04-native tree). Do NOT add
-# /nfsapps/modules/base to MODULEPATH here; see header comment.
+# When the operator passed --site / --top-module-path to point at a
+# segregated tree (e.g. /nfsapps/ubuntu-22.04/modules), prepend that
+# tree's base/ to MODULEPATH so `module load rocm/<v>` resolves there
+# first. Falls through to the system tree (added by /etc/profile.d/
+# lmod.sh above) when the site tree has no matching modulefile.
+#
+# This replaces the older "do NOT add /nfsapps/modules/base" rule,
+# which was correct for the legacy distro-mixed /nfsapps tree but
+# overbroad now that --site allows distro-segregated subtrees. The
+# 22.04-vs-24.04 GLIBC safety check (below, after `module load`) still
+# fires; it's now scoped to "ROCM_PATH lives under /nfsapps but NOT
+# under ${TOP_INSTALL_PATH}" rather than blanket-rejecting /nfsapps/*.
+if [[ -n "${TOP_MODULE_PATH:-}" && -d "${TOP_MODULE_PATH}/base" ]]; then
+   case ":${MODULEPATH:-}:" in
+      *":${TOP_MODULE_PATH}/base:"*) ;;   # already on MODULEPATH
+      *) export MODULEPATH="${TOP_MODULE_PATH}/base${MODULEPATH:+:${MODULEPATH}}" ;;
+   esac
+   echo "Augmented MODULEPATH with site tree: ${TOP_MODULE_PATH}/base"
+fi
+echo "Effective MODULEPATH: ${MODULEPATH}"
+
+# Load the rocm module. Lmod resolves it from the first MODULEPATH
+# entry that contains the matching modulefile.
 module load "rocm/${ROCM_VERSION}"
 echo "Loaded module rocm/${ROCM_VERSION}; ROCM_PATH=${ROCM_PATH:-<unset>}"
 module list 2>&1 | sed 's/^/  /'
 
-# Sanity check: the resolved ROCM_PATH must exist and must NOT be a
-# /nfsapps SDK (those are 24.04-built; running them on 22.04 hits
-# GLIBC_2.38 / GLIBCXX_3.4.32 errors that masquerade as "HIP not found"
-# during dependent package builds).
+# Sanity check: the resolved ROCM_PATH must exist. Historically we
+# also blanket-rejected ROCM_PATH=/nfsapps/* because the legacy
+# /nfsapps tree was 24.04-built and produced GLIBC_2.38 / GLIBCXX_3.4.32
+# errors when used on the 22.04 compute nodes (those errors typically
+# masquerade as "HIP not found" inside dependent package builds).
+#
+# That blanket block is now scoped: if the operator explicitly pointed
+# this sweep at a segregated /nfsapps subtree via --site /
+# --top-install-path (and ROCM_PATH falls under it), the SDK was built
+# for that subtree's distro by the matching run_rocm_build_sweep call,
+# so trust the operator. Only reject /nfsapps paths that are OUTSIDE
+# the chosen TOP_INSTALL_PATH (i.e. the legacy distro-mixed tree).
 if [[ -z "${ROCM_PATH:-}" || ! -d "${ROCM_PATH}" ]]; then
    echo "ERROR: ROCM_PATH is unset or missing after module load: '${ROCM_PATH:-}'" >&2
    exit 1
 fi
 case "${ROCM_PATH}" in
    /nfsapps/*)
-      echo "ERROR: rocm/${ROCM_VERSION} resolved to ${ROCM_PATH}, which is the" >&2
-      echo "       24.04-built SDK on /nfsapps. The current nodes are Ubuntu 22.04;" >&2
-      echo "       use the system rocm modules under /shared/apps/modules/ubuntu/lmodfiles/base." >&2
-      exit 1
+      # Allow it only when the operator's TOP_INSTALL_PATH is also
+      # under /nfsapps AND ROCM_PATH is a prefix-match for it. Anything
+      # else is the legacy /nfsapps tree leaking through.
+      _allow_nfsapps=0
+      if [[ -n "${TOP_INSTALL_PATH:-}" ]]; then
+         case "${TOP_INSTALL_PATH}" in
+            /nfsapps/*)
+               case "${ROCM_PATH}" in
+                  ${TOP_INSTALL_PATH}/*) _allow_nfsapps=1 ;;
+               esac
+               ;;
+         esac
+      fi
+      if [[ "${_allow_nfsapps}" != 1 ]]; then
+         echo "ERROR: rocm/${ROCM_VERSION} resolved to ${ROCM_PATH}, which is the" >&2
+         echo "       legacy distro-mixed /nfsapps tree. The current nodes are Ubuntu" >&2
+         echo "       22.04; that tree was 24.04-built and produces GLIBC errors at" >&2
+         echo "       runtime. Either:" >&2
+         echo "       (a) load a system rocm module under" >&2
+         echo "           /shared/apps/modules/ubuntu/lmodfiles/base, or" >&2
+         echo "       (b) pass --site /nfsapps/<distro>/... so this sweep targets a" >&2
+         echo "           distro-segregated subtree (TOP_INSTALL_PATH='${TOP_INSTALL_PATH:-<unset>}')." >&2
+         exit 1
+      fi
+      echo "Accepting /nfsapps ROCM_PATH: under operator-chosen TOP_INSTALL_PATH=${TOP_INSTALL_PATH}"
+      unset _allow_nfsapps
       ;;
 esac
-echo "ROCm SDK in use: ${ROCM_PATH} (22.04-native)"
+echo "ROCm SDK in use: ${ROCM_PATH}"
 
 # ── 3b. Derive ROCM_NUMERIC + ROCM_RC_PREFIX from ROCM_PATH ──────────
 # ROCM_NUMERIC: SDK version from .info/version (e.g. 7.2.1 for a
@@ -240,7 +291,21 @@ fi
 ROCM_NUMERIC=$(cut -f1 -d- "${ROCM_PATH}/.info/version")
 ROCM_RC_PREFIX=""
 _bn="${ROCM_PATH##*/}"; _sx="${_bn#rocm-}"
-if [[ ! "${_sx}" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+# Strip the trailing -<X.Y.Z> or -<X.Y> from the install-dir suffix to get
+# the family prefix. The naive ${_sx%%-*} (first-dash cut) would collapse
+# multi-segment family prefixes -- 'therock-afar' would become 'therock',
+# which then collides in the rocmplus-${PREFIX}-${NUMERIC} install-dir
+# namespace with a future legacy therock-* install of the same numeric.
+# Examples:
+#   rocm-therock-afar-7.13.0 -> _sx=therock-afar-7.13.0 -> prefix='therock-afar'
+#   rocm-therock-7.13.0      -> _sx=therock-7.13.0      -> prefix='therock'
+#   rocm-afar-22.2.0         -> _sx=afar-22.2.0         -> prefix='afar'
+#   rocm-7.2.1               -> _sx=7.2.1               -> prefix=''  (regular)
+if [[ "${_sx}" =~ ^(.+)-[0-9]+(\.[0-9]+){1,2}$ ]]; then
+   ROCM_RC_PREFIX="${BASH_REMATCH[1]}"
+elif [[ ! "${_sx}" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+   # Tree name doesn't end in a numeric segment (unusual). Fall back to
+   # the legacy first-dash-cut so this still degrades to something sensible.
    ROCM_RC_PREFIX="${_sx%%-*}"
 fi
 unset _bn _sx

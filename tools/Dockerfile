@@ -24,6 +24,7 @@ ARG INSTALL_ROCPROF_SYS_FROM_SOURCE
 ARG INSTALL_ROCPROF_COMPUTE_FROM_SOURCE
 ARG BUILD_ROCPROFILER_SDK
 ARG BUILD_AQLPROFILE
+ARG BUILD_MDB
 
 LABEL maintainer="bob.robey@amd.com"
 
@@ -74,6 +75,10 @@ RUN  /tmp/tools/tau_setup.sh --rocm-version ${ROCM_VERSION} --build-tau ${BUILD_
 COPY tools/scripts/scorep_setup.sh /tmp/tools/scorep_setup.sh
 RUN  /tmp/tools/scorep_setup.sh --rocm-version ${ROCM_VERSION} --build-scorep ${BUILD_SCOREP} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
      rm -f /tmp/tools/scorep_setup.sh
+
+COPY tools/scripts/mdb_setup.sh /tmp/tools/mdb_setup.sh
+RUN  /tmp/tools/mdb_setup.sh --rocm-version ${ROCM_VERSION} --build-mdb ${BUILD_MDB} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+     rm -f /tmp/tools/mdb_setup.sh
 
 #
 # Install Grafana
