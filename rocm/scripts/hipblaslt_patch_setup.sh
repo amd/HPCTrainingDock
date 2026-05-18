@@ -249,27 +249,32 @@ DAT_PREFIX = "TensileLibrary_HH_HH_HA_Bias_SAV_UA_Type_HH_HPA_Contraction_l_"
 #
 # Forward direction (`Alik_Bljk_Cijk_Dijk_gfx942.dat`, transA=T, transB=N):
 # the upstream rocm/7.x gfx942 heuristic has lost equality rows for a
-# WHOLE FAMILY of small-num_classes fp16 forward GEMMs with K=2048, not
-# just the (100, 256, 2048) point originally measured in
-# single_process.sh. The wide-mode regression test
-# (~gcapodag/.../tests/hipblaslt_regression_check.sh) discovered this
-# gap empirically: across bs in {64, 128, 256, 512} x
-# num_classes in {10, 100, 1000}, every cell except (100, 256, 2048)
-# returns returnAlgoCount=0 on the unpatched library. All 12 cells are
-# served well by the same MT16x16x256 kernel (predicates on the chosen
-# solution are permissive: M >= 1, N >= 1, K >= 32, fp16 bias, all
-# CDNA3 features that our nn.Linear test uses).
+# WHOLE FAMILY of small-N fp16 forward GEMMs, not just the original
+# (100, 256, 2048) point. The regression test discovers gaps across:
+#   batches  bs  in {32, 64, 128, 256, 512, 1024}
+#   classes  nc  in {10, 100, 256, 1000, 2048}
+#   hiddens  hd  in {512, 1024, 2048, 4096}
+# 5 x 6 x 4 = 120 forward shapes. We patch all of them with a single
+# kernel (per-version index in SOLUTION_INDEX below); the chosen
+# kernel's predicates are permissive (M >= 1, N >= 1, K >= 32 = 512 in
+# our minimum, fp16 inputs, bias on, gfx942) so every cell in the
+# 120-shape grid is correctness-compatible. Macro tile MT16x16x256
+# launches enough workgroups to fill the SPX 228-CU partition across
+# the whole range. Upstream PR / ticket reference: this is what the
+# 6.4.1 -> 7.1.0 retune dropped.
 #
 # Backward directions (`Ailk_Bljk_..._CU228`, `Ailk_Bjlk_..._CU228`):
-# the original 2 shapes from the SPX investigation. Upstream backward
-# heuristic was healthy on this cluster's measurements but the rows
-# are kept defensively (idempotent + cheap; protects against future
-# upstream regressions of cells we know matter to ResNet finetuning).
+# the upstream backward heuristic was still healthy on this cluster's
+# measurements (the regression test reports only forward misses), so
+# we keep only the 2 originally-investigated shapes defensively
+# (idempotent + cheap; protects against future upstream regressions
+# of cells we know matter to ResNet finetuning).
 SPX_SHAPES = (
-    # forward: (M=num_classes, N=batch_size, B=1, K=hidden=2048)
-    [("Alik_Bljk_Cijk_Dijk_gfx942.dat",        nc,  bs, 1, 2048)
-     for nc in (10, 100, 1000)
-     for bs in (64, 128, 256, 512)]
+    # forward: (M=num_classes, N=batch_size, B=1, K=hidden)
+    [("Alik_Bljk_Cijk_Dijk_gfx942.dat",        nc,  bs, 1, hd)
+     for nc in (10, 100, 256, 1000, 2048)
+     for bs in (32, 64, 128, 256, 512, 1024)
+     for hd in (512, 1024, 2048, 4096)]
     +
     # backward grad + backward weight (original SPX investigation).
     [("Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat", 2048, 256, 1,  100),
