@@ -2,6 +2,16 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-05-18
+
+- ROCm versions:
+    + 7.1.0.lua.bak-pre-hipblaslt-autoload
+    + 7.1.1.lua.bak-pre-hipblaslt-autoload
+    + 7.2.0.lua.bak-pre-hipblaslt-autoload
+    + 7.2.2.lua.bak-pre-hipblaslt-autoload
+    + 7.2.3.lua.bak-pre-hipblaslt-autoload
+
+[Full snapshot](archive/AAC6_system_status_2026-05-18.md)
 ## 2026-05-14
 
 - ROCm versions:
