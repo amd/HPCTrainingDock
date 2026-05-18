@@ -243,64 +243,112 @@ import sys
 
 import msgpack
 
-DAT_PREFIX = "TensileLibrary_HH_HH_HA_Bias_SAV_UA_Type_HH_HPA_Contraction_l_"
+# Two .dat-prefix families are patched:
+#
+#   "HH" -> fp16 in / fp16 out / fp32 accumulate (the HPA path; this is
+#           what nn.Linear(...).half() lands on). The original
+#           regression. The intermediate `distance=<none>` library row
+#           short-circuits with returnAlgoCount=0 when the Equality
+#           table misses our shape family, so this MUST be patched to
+#           avoid the 6 s `getAllSolutions` compile stall.
+#
+#   "SS" -> fp32 in / fp32 out / fp32 compute (no HPA). nn.Linear with
+#           default dtype lands here. The bug here is SOFTER: the
+#           .dat carries Equality + GridBased only (no intermediate
+#           row), so a missing Equality row degrades into a slow but
+#           valid GridBased pick. The regression test PASSES for fp32
+#           without this overlay -- but cells run 100-300 ms (vs
+#           1-30 ms for fp16) because GridBased lands on a kernel
+#           that's tile-mismatched for our small (M, N). Patching
+#           seats a small-tile, high-GSU kernel that fills the SPX
+#           partition properly.
+DAT_PREFIXES = {
+    "HH": "TensileLibrary_HH_HH_HA_Bias_SAV_UA_Type_HH_HPA_Contraction_l_",
+    "SS": "TensileLibrary_SS_SS_HA_Bias_SAV_UA_Type_SS_Contraction_l_",
+}
 
-# (basename-suffix, M, N, B, K): SPX heuristic-table rows to patch.
+# (dtype_tag, basename-suffix, M, N, B, K): SPX heuristic-table rows
+# to patch.
 #
 # Forward direction (`Alik_Bljk_Cijk_Dijk_gfx942.dat`, transA=T, transB=N):
 # the upstream rocm/7.x gfx942 heuristic has lost equality rows for a
-# WHOLE FAMILY of small-N fp16 forward GEMMs, not just the original
+# WHOLE FAMILY of small-N forward GEMMs, not just the original
 # (100, 256, 2048) point. The regression test discovers gaps across:
 #   batches  bs  in {32, 64, 128, 256, 512, 1024}
 #   classes  nc  in {10, 100, 256, 1000, 2048}
 #   hiddens  hd  in {512, 1024, 2048, 4096}
-# 5 x 6 x 4 = 120 forward shapes. We patch all of them with a single
-# kernel (per-version index in SOLUTION_INDEX below); the chosen
-# kernel's predicates are permissive (M >= 1, N >= 1, K >= 32 = 512 in
-# our minimum, fp16 inputs, bias on, gfx942) so every cell in the
-# 120-shape grid is correctness-compatible. Macro tile MT16x16x256
-# launches enough workgroups to fill the SPX 228-CU partition across
-# the whole range. Upstream PR / ticket reference: this is what the
-# 6.4.1 -> 7.1.0 retune dropped.
+# 5 x 6 x 4 = 120 forward shapes per dtype. We patch all of them in
+# BOTH fp16 and fp32, with a single kernel per dtype per version
+# (indices in SOLUTION_INDEX below). The chosen kernels' predicates
+# are permissive (M >= 1, N >= 1, K >= 32 = 512 in our minimum,
+# fp16/fp32 inputs as appropriate, bias on, gfx942, WGMXCC=1 = SPX)
+# so every cell in the 120-shape grid is correctness-compatible.
+#   fp16: MT16x16x256, MI16x16x32 -- the original choice; fills the
+#         228-CU SPX partition across the whole range.
+#   fp32: MT32x96 GSU=7, MI16x16x4 -- the smallest-MT-area kernel in
+#         the fp32 catalogue with GSU>1, which is what gives enough
+#         workgroups to cover small (M=10, N=32) cells reasonably.
+#         For the canonical (100, 256, 2048) point it launches
+#         ~84 workgroups (~37% of 228 CUs), vs ~14% for MT32x32 GSU=1.
 #
 # Backward directions (`Ailk_Bljk_..._CU228`, `Ailk_Bjlk_..._CU228`):
 # the upstream backward heuristic was still healthy on this cluster's
 # measurements (the regression test reports only forward misses), so
 # we keep only the 2 originally-investigated shapes defensively
 # (idempotent + cheap; protects against future upstream regressions
-# of cells we know matter to ResNet finetuning).
+# of cells we know matter to ResNet finetuning). fp16 only -- fp32
+# backward was never observed to miss.
 SPX_SHAPES = (
-    # forward: (M=num_classes, N=batch_size, B=1, K=hidden)
-    [("Alik_Bljk_Cijk_Dijk_gfx942.dat",        nc,  bs, 1, hd)
+    # fp16 forward 120 shapes
+    [("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat",        nc,  bs, 1, hd)
      for nc in (10, 100, 256, 1000, 2048)
      for bs in (32, 64, 128, 256, 512, 1024)
      for hd in (512, 1024, 2048, 4096)]
     +
-    # backward grad + backward weight (original SPX investigation).
-    [("Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat", 2048, 256, 1,  100),
-     ("Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat", 2048, 100, 1,  256)]
+    # fp32 forward 120 shapes
+    [("SS", "Alik_Bljk_Cijk_Dijk_gfx942.dat",        nc,  bs, 1, hd)
+     for nc in (10, 100, 256, 1000, 2048)
+     for bs in (32, 64, 128, 256, 512, 1024)
+     for hd in (512, 1024, 2048, 4096)]
+    +
+    # fp16 backward grad + backward weight (original SPX investigation).
+    [("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat", 2048, 256, 1,  100),
+     ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat", 2048, 100, 1,  256)]
 )
+# CPX is fp16-only: the WGMXCC=4 catalogue defect is in the HH_HH
+# gfx942 38cu kernels. The SS_SS 38cu kernels already ship with
+# WGMXCC=1 (verified for all 5 versions), so no rewrite is needed
+# on the fp32 side of CPX.
 CPX_DATS = [
-    "Alik_Bljk_Cijk_Dijk_CU38_gfx942.dat",
-    "Ailk_Bljk_Cijk_Dijk_CU38_gfx942.dat",
-    "Ailk_Bjlk_Cijk_Dijk_CU38_gfx942.dat",
+    ("HH", "Alik_Bljk_Cijk_Dijk_CU38_gfx942.dat"),
+    ("HH", "Ailk_Bljk_Cijk_Dijk_CU38_gfx942.dat"),
+    ("HH", "Ailk_Bjlk_Cijk_Dijk_CU38_gfx942.dat"),
 ]
+# SOLUTION_INDEX[v][(dtype_tag, suffix)] -> kernel solution index in
+# that version's .dat catalogue. Indices vary between versions
+# (catalogue ordering changes); the kernel NAME / tile signature is
+# the version-stable identifier we hand-verified.
 SOLUTION_INDEX = {
-    "7.1.0": {"Alik_Bljk_Cijk_Dijk_gfx942.dat":       299906,
-              "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat": 291111,
-              "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat": 287925},
-    "7.1.1": {"Alik_Bljk_Cijk_Dijk_gfx942.dat":       299906,
-              "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat": 291111,
-              "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat": 287925},
-    "7.2.0": {"Alik_Bljk_Cijk_Dijk_gfx942.dat":       347698,
-              "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat": 338868,
-              "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat": 335682},
-    "7.2.2": {"Alik_Bljk_Cijk_Dijk_gfx942.dat":       348921,
-              "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat": 340091,
-              "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat": 336905},
-    "7.2.3": {"Alik_Bljk_Cijk_Dijk_gfx942.dat":       348921,
-              "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat": 340091,
-              "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat": 336905},
+    "7.1.0": {("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       299906,
+              ("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"): 291111,
+              ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 287925,
+              ("SS", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       374163},
+    "7.1.1": {("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       299906,
+              ("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"): 291111,
+              ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 287925,
+              ("SS", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       374226},
+    "7.2.0": {("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       347698,
+              ("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"): 338868,
+              ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 335682,
+              ("SS", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       415402},
+    "7.2.2": {("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       348921,
+              ("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"): 340091,
+              ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 336905,
+              ("SS", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       416625},
+    "7.2.3": {("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       348921,
+              ("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"): 340091,
+              ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 336905,
+              ("SS", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       416625},
 }
 CPX_SENTINEL = "__cpx_patch_v1__"
 
@@ -409,17 +457,23 @@ def main():
     sdir = pathlib.Path(args.src_libdir)
     ddir = pathlib.Path(args.dst_libdir)
     idx_map = SOLUTION_INDEX[args.rocm_version]
-    # Group shapes by .dat filename: each file is read+written once,
-    # with all matching rows applied. Preserves declaration order
-    # within each file (and thus determinism of the encoded bytes).
+    # Group shapes by (dtype_tag, suffix): each file is read+written
+    # once, with all matching rows applied. Preserves declaration
+    # order within each file (and thus determinism of the encoded
+    # bytes). NB: the same suffix CAN appear under two different
+    # dtype tags ("HH" and "SS" both have `Alik_Bljk_Cijk_Dijk_gfx942.dat`)
+    # -- those are TWO physically distinct files, hence keying on
+    # the tuple.
     by_file = {}
-    for suffix, M, N, B, K in SPX_SHAPES:
-        by_file.setdefault(suffix, []).append((M, N, B, K))
-    for suffix, shapes in by_file.items():
-        patch_spx(sdir / (DAT_PREFIX + suffix), ddir / (DAT_PREFIX + suffix),
-                  shapes, idx_map[suffix])
-    for suffix in CPX_DATS:
-        patch_cpx(sdir / (DAT_PREFIX + suffix), ddir / (DAT_PREFIX + suffix))
+    for tag, suffix, M, N, B, K in SPX_SHAPES:
+        by_file.setdefault((tag, suffix), []).append((M, N, B, K))
+    for (tag, suffix), shapes in by_file.items():
+        prefix = DAT_PREFIXES[tag]
+        patch_spx(sdir / (prefix + suffix), ddir / (prefix + suffix),
+                  shapes, idx_map[(tag, suffix)])
+    for tag, suffix in CPX_DATS:
+        prefix = DAT_PREFIXES[tag]
+        patch_cpx(sdir / (prefix + suffix), ddir / (prefix + suffix))
 
 
 if __name__ == "__main__":
@@ -429,24 +483,30 @@ PYEOF
 # ── install into DST_LIBDIR ─────────────────────────────────────────
 ${SUDO} mkdir -p "${DST_LIBDIR}"
 
-DAT_PREFIX="TensileLibrary_HH_HH_HA_Bias_SAV_UA_Type_HH_HPA_Contraction_l_"
-PATCHED_SUFFIXES=(
-   "Alik_Bljk_Cijk_Dijk_gfx942.dat"
-   "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"
-   "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"
-   "Alik_Bljk_Cijk_Dijk_CU38_gfx942.dat"
-   "Ailk_Bljk_Cijk_Dijk_CU38_gfx942.dat"
-   "Ailk_Bjlk_Cijk_Dijk_CU38_gfx942.dat"
+# PATCHED_FILES lists FULL filenames (prefix + suffix), not just
+# suffixes, because the patcher now writes TWO prefixes:
+#   HH = fp16 (TensileLibrary_HH_HH_HA_Bias_SAV_UA_Type_HH_HPA_Contraction_l_)
+#   SS = fp32 (TensileLibrary_SS_SS_HA_Bias_SAV_UA_Type_SS_Contraction_l_)
+HH_PREFIX="TensileLibrary_HH_HH_HA_Bias_SAV_UA_Type_HH_HPA_Contraction_l_"
+SS_PREFIX="TensileLibrary_SS_SS_HA_Bias_SAV_UA_Type_SS_Contraction_l_"
+PATCHED_FILES=(
+   "${HH_PREFIX}Alik_Bljk_Cijk_Dijk_gfx942.dat"           # SPX fwd fp16
+   "${HH_PREFIX}Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"     # SPX bwd_grad fp16
+   "${HH_PREFIX}Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"     # SPX bwd_wei  fp16
+   "${HH_PREFIX}Alik_Bljk_Cijk_Dijk_CU38_gfx942.dat"      # CPX fwd      fp16 (WGMXCC rewrite)
+   "${HH_PREFIX}Ailk_Bljk_Cijk_Dijk_CU38_gfx942.dat"      # CPX bwd_grad fp16 (WGMXCC rewrite)
+   "${HH_PREFIX}Ailk_Bjlk_Cijk_Dijk_CU38_gfx942.dat"      # CPX bwd_wei  fp16 (WGMXCC rewrite)
+   "${SS_PREFIX}Alik_Bljk_Cijk_Dijk_gfx942.dat"           # SPX fwd fp32 (new 2026-05-18)
 )
-for suffix in "${PATCHED_SUFFIXES[@]}"; do
-   ${SUDO} cp -p "${WORKDIR}/${DAT_PREFIX}${suffix}" "${DST_LIBDIR}/${DAT_PREFIX}${suffix}"
-   ${SUDO} chmod 0644 "${DST_LIBDIR}/${DAT_PREFIX}${suffix}"
+for fname in "${PATCHED_FILES[@]}"; do
+   ${SUDO} cp -p "${WORKDIR}/${fname}" "${DST_LIBDIR}/${fname}"
+   ${SUDO} chmod 0644 "${DST_LIBDIR}/${fname}"
 done
 
 # Symlink farm: everything in the SDK library dir we didn't patch.
 PATCHED_SET=""
-for suffix in "${PATCHED_SUFFIXES[@]}"; do
-   PATCHED_SET+=" ${DAT_PREFIX}${suffix}"
+for fname in "${PATCHED_FILES[@]}"; do
+   PATCHED_SET+=" ${fname}"
 done
 sl_count=0
 for f in "${SRC_LIBDIR}"/*; do
