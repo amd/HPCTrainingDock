@@ -353,6 +353,41 @@ fi
 # AMDGPU_INSTALL_VERSION
 version-set
 
+# ROCm 7.13.0 Tech Preview (and any later preview release in this branch)
+# uses a fundamentally different package distribution from the legacy
+# 5.x-7.2 stream:
+#   * apt source lives at repo.amd.com/rocm/packages/<distro> (NOT
+#     repo.radeon.com/rocm/apt/<X.Y.Z>); the legacy host has no 7.13 tree.
+#   * GPG key at repo.amd.com/rocm/packages/gpg/rocm.gpg, installed to
+#     /etc/apt/keyrings/amdrocm.gpg (separate keyring filename from the
+#     legacy /etc/apt/keyrings/rocm.gpg so the two can coexist).
+#   * amdgpu-install installer is series 31.30 (e.g.
+#     amdgpu-install_31.30.313000-1_all.deb) with first-class
+#     --rocmrelease=<X.Y>  + --gfxversion=<gfx-family>  flags. Package
+#     names are gfx-tagged (e.g. amdrocm7.13-gfx94x for gfx942/MI300).
+#   * Packages install into /opt/rocm/core-<X.Y>/ (NOT /opt/rocm-<X.Y.Z>/).
+#     We add compatibility symlinks below so the rest of this script and
+#     all downstream rocm/, extras/, comm/, tools/ scripts that hard-code
+#     /opt/rocm-${ROCM_VERSION} continue to work unmodified.
+#   * Delta-release (--base-rocm-version) flow does not apply: AMD does
+#     not currently ship deltas in this stream; we force it off.
+#   * The legacy INCLUDE_TOOLS apt-install of omnitrace/rocprofiler-systems/
+#     rocprof-compute does not apply: those packages do not exist under
+#     the legacy names in the new repo. We force INCLUDE_TOOLS=0 here;
+#     the rocm_patches.sh rocprof-compute overlay supplies the tool.
+#
+# Reference: https://rocm.docs.amd.com/en/7.13.0-preview/install/rocm.html
+IS_ROCM_PREVIEW=0
+ROCM_MAJORMINOR=""
+if [ "$(printf '%s\n' "7.13" "${ROCM_VERSION}" | sort -V | head -n1)" = "7.13" ]; then
+   IS_ROCM_PREVIEW=1
+   ROCM_MAJORMINOR=$(echo "${ROCM_VERSION}" | awk -F. '{print $1"."$2}')
+   if [ -n "${BASE_ROCM_VERSION}" ]; then
+      echo "[rocm_setup] NOTE: --base-rocm-version=${BASE_ROCM_VERSION} is not applicable to ROCm 7.13+ preview; clearing it"
+      BASE_ROCM_VERSION=""
+   fi
+fi
+
 # If the caller did not specify --base-rocm-version, consult the registry.
 # This makes the conf file the single source of truth: a sweep that calls
 # rocm_setup.sh directly (without going through run_rocm_build_sweep.sh) still
@@ -420,14 +455,236 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
       if [ "${USER}" != "sysadmin" ]; then
          ${SUDO} rm ${CACHE_FILES}/rocm-${ROCM_VERSION}.tgz
       fi
-      ROCM_ALTERNATIVES_BIN_LIST="amd-smi clinfo hipcc hipcc.bin hipcc_cmake_linker_helper hipcc.pl hipconfig hipconfig.bin hipconfig.pl hipconvertinplace-perl.sh hipconvertinplace.sh hipdemangleatp hipexamine-perl.sh hipexamine.sh hipify-clang hipify-perl roccoremerge rocgdb rocm_agent_enumerator rocminfo rocm-smi roc-obj roc-obj-extract roc-obj-ls rocprof rocprofv2 rocsys"
-      for file in $ROCM_ALTERNATIVES_BIN_LIST
-      do
-         ${SUDO} update-alternatives --install /usr/bin/$file $file /opt/rocm-${ROCM_VERSION}/bin/$file 100
-      done
-      ${SUDO} update-alternatives --install /opt/rocm rocm /opt/rocm-${ROCM_VERSION} 100
+      # update-alternatives registration disabled (2026-05-19).
+      #
+      # The ROCM_ALTERNATIVES_BIN_LIST below was curated for ROCm 5.x-7.2
+      # and unconditionally registers /usr/bin -> /opt/rocm-${ROCM_VERSION}/bin
+      # for every entry. ROCm 7.13's package layout drops the .bin/.pl
+      # hipcc/hipconfig variants, retires the roc-obj* legacy obj utilities,
+      # and replaces rocprof/rocprofv2/rocsys with the rocprofiler-sdk
+      # entrypoints -- producing 14 non-fatal `update-alternatives: error:
+      # alternative path ... doesn't exist` lines in slurm-10068-rocm-sweep.out.
+      # The user-facing tools we actually expose go through the modulefile
+      # PATH prepend (base/bin), so the /usr/bin alternatives links were
+      # never load-bearing in this build path. Comment out to silence the
+      # noise and avoid registering links that may become stale across
+      # version swaps.
+      #
+      # ROCM_ALTERNATIVES_BIN_LIST="amd-smi clinfo hipcc hipcc.bin hipcc_cmake_linker_helper hipcc.pl hipconfig hipconfig.bin hipconfig.pl hipconvertinplace-perl.sh hipconvertinplace.sh hipdemangleatp hipexamine-perl.sh hipexamine.sh hipify-clang hipify-perl roccoremerge rocgdb rocm_agent_enumerator rocminfo rocm-smi roc-obj roc-obj-extract roc-obj-ls rocprof rocprofv2 rocsys"
+      # for file in $ROCM_ALTERNATIVES_BIN_LIST
+      # do
+      #    ${SUDO} update-alternatives --install /usr/bin/$file $file /opt/rocm-${ROCM_VERSION}/bin/$file 100
+      # done
+      # ${SUDO} update-alternatives --install /opt/rocm rocm /opt/rocm-${ROCM_VERSION} 100
+      :  # explicit no-op so the surrounding `if`-branch is non-empty
 
    else
+
+      if [[ "${IS_ROCM_PREVIEW}" == "1" ]]; then
+         # ------------------------------------------------------------------
+         # ROCm 7.13+ TECH PREVIEW INSTALL PATH
+         # ------------------------------------------------------------------
+         # Sourced from https://rocm.docs.amd.com/en/7.13.0-preview/install/rocm.html
+         # (fam=instinct, os=ubuntu, i=pkgman). Distinct from the legacy
+         # 5.x-7.2 install flow because:
+         #   * Different repository host       (repo.amd.com vs repo.radeon.com)
+         #   * Different keyring filename      (amdrocm.gpg vs rocm.gpg)
+         #   * Different installer series      (31.30   vs   X.Y matching ROCm)
+         #   * Required --rocmrelease=X.Y      (short form, e.g. 7.13, NOT 7.13.0)
+         #   * Required --gfxversion=<family>  (e.g. gfx94x for gfx942/MI300A)
+         #   * Different install root          (/opt/rocm/core-X.Y/ vs /opt/rocm-X.Y.Z/)
+         #
+         # We layer compatibility symlinks at the end so the rest of this
+         # script (modulefile generation, amdclang autodetection, etc.) and
+         # all downstream package scripts continue to use /opt/rocm-${ROCM_VERSION}
+         # paths unmodified.
+         echo ""
+         echo "============================================================"
+         echo " ROCm 7.13+ TECH PREVIEW install path"
+         echo " ROCM_VERSION=${ROCM_VERSION}, ROCM_MAJORMINOR=${ROCM_MAJORMINOR}"
+         echo "============================================================"
+         echo ""
+
+         if [ "${DISTRO}" == "ubuntu" ]; then
+            ${PKG_SUDO} apt-get update
+
+            # Defeat the interactive tzdata "Geographic area:" prompt that
+            # amdgpu-install (via inner sudo apt-get) would otherwise hit
+            # when tzdata is pulled in as a transitive dep. Same root cause
+            # as in the legacy branch below; do it once here.
+            echo "Etc/UTC" | ${SUDO} tee /etc/timezone > /dev/null
+            ${SUDO} ln -fs /usr/share/zoneinfo/Etc/UTC /etc/localtime
+            ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y tzdata
+            ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive dpkg-reconfigure --frontend=noninteractive tzdata
+
+            # Prereqs (libatomic1 + libquadmath0 are called out by the
+            # 7.13 docs; libdrm-dev + logrotate match the legacy branch).
+            ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y \
+               libdrm-dev logrotate wget gnupg ca-certificates libatomic1 libquadmath0
+
+            # Map DISTRO_VERSION -> repo.amd.com path tag + amdgpu-install
+            # Ubuntu codename. These are the two pieces of distro-specific
+            # URL info we need.
+            case "${DISTRO_VERSION}" in
+               22.04*) ROCM_AMD_DIST_TAG="ubuntu2204"; UB_CODENAME="jammy"    ;;
+               24.04*) ROCM_AMD_DIST_TAG="ubuntu2404"; UB_CODENAME="noble"    ;;
+               26.04*) ROCM_AMD_DIST_TAG="ubuntu2604"; UB_CODENAME="resolute" ;;
+               *) send-error "ROCm ${ROCM_VERSION} preview: unsupported Ubuntu ${DISTRO_VERSION}; supported: 22.04 / 24.04 / 26.04" ;;
+            esac
+
+            # Install the new repo.amd.com GPG key into a distinct keyring
+            # file (amdrocm.gpg) so it coexists with the legacy rocm.gpg
+            # keyring (used by 5.x-7.2 repos at repo.radeon.com).
+            ${SUDO} mkdir --parents --mode=0755 /etc/apt/keyrings
+            wget -q -O - https://repo.amd.com/rocm/packages/gpg/rocm.gpg \
+               | gpg --dearmor \
+               | ${SUDO} tee /etc/apt/keyrings/amdrocm.gpg > /dev/null
+
+            # Register the single-arch (instinct/radeon/ryzen) apt source
+            # at repo.amd.com. The fam=all multi-arch repo carries ARM64
+            # too, which we don't need for x86_64 HPC builds.
+            echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/packages/${ROCM_AMD_DIST_TAG} stable main" \
+               | ${SUDO} tee /etc/apt/sources.list.d/amdrocm-preview.list > /dev/null
+            ${PKG_SUDO} apt-get update
+
+            # AMDGPU_GFXMODEL is a semicolon-separated list like "gfx942"
+            # or "gfx942;gfx90a". The 7.13 amdrocm packages are tagged
+            # with the gfx FAMILY, not the specific gfx target:
+            #   gfx94x  (covers gfx940/gfx941/gfx942/gfx94X => MI300A/X)
+            #   gfx95x  (covers gfx950 family)
+            #   gfx101x (covers gfx1010/gfx1011/gfx1012/...)
+            #   gfx103x (covers gfx1030/gfx1031/...)
+            #   gfx110x (covers gfx1100/gfx1101/gfx1102/gfx1103)
+            #   gfx120x (covers gfx1200/gfx1201)
+            # Some gfx names have their own package and are NOT collapsed
+            # into a family: gfx908, gfx90a, gfx950, gfx1150, gfx1151,
+            # gfx1152. Use the first ;-separated target as the install gfx;
+            # operators wanting multi-target should run separate builds.
+            _first_gfx="${AMDGPU_GFXMODEL%%;*}"
+            case "${_first_gfx}" in
+               gfx908|gfx90a|gfx950|gfx1150|gfx1151|gfx1152)
+                  ROCM_PREVIEW_GFX="${_first_gfx}" ;;
+               gfx94[0-9])  ROCM_PREVIEW_GFX="gfx94x"  ;;
+               gfx95[0-9])  ROCM_PREVIEW_GFX="gfx95x"  ;;
+               gfx101[0-9]) ROCM_PREVIEW_GFX="gfx101x" ;;
+               gfx103[0-9]) ROCM_PREVIEW_GFX="gfx103x" ;;
+               gfx110[0-9]) ROCM_PREVIEW_GFX="gfx110x" ;;
+               gfx120[0-9]) ROCM_PREVIEW_GFX="gfx120x" ;;
+               "")          send-error "ROCm ${ROCM_VERSION} preview: AMDGPU_GFXMODEL is empty; cannot pick gfx-family package suffix" ;;
+               *)           ROCM_PREVIEW_GFX="${_first_gfx}" ;;
+            esac
+            unset _first_gfx
+
+            # KNOWN AMD BUG: amdgpu-install 31.30.313000 (only installer
+            # version published under repo.radeon.com/amdgpu-install/31.30/
+            # at 2026-05-19) constructs malformed apt package names for
+            # the 7.13 preview tree -- it appends the full X.Y.Z release
+            # tag after the gfx family ("amdrocm-gfx94x7.13.0",
+            # "amdrocm-base7.13.0", and worse it contains a TYPO:
+            # "amdrocm-devoper-tools7.13.0"). The actual repo.amd.com
+            # packages are named with X.Y *between* the family root and
+            # the optional gfx suffix: "amdrocm7.13-gfx94x",
+            # "amdrocm-base7.13", "amdrocm-developer-tools7.13", etc.
+            # Result: every apt-get the installer issues 404s on every
+            # package and the build fails. Observed in
+            # slurm-10042-rocm-sweep.out (2026-05-19).
+            #
+            # Fix: bypass amdgpu-install entirely. Install the canonical
+            # SDK meta-package amdrocm-core-sdk${X.Y}-${gfx-family}
+            # directly via apt. Its Depends: chain transitively pulls
+            # amdrocm-core-dev (which pulls amdrocm-core => base + llvm
+            # + runtime + every -dev variant of the libs + opencl-dev),
+            # amdrocm-developer-tools (profiler + smi base), amdrocm-rdc,
+            # and amdrocm-opencl -- equivalent coverage to
+            # --usecase=rocm,rocmdev,rocmdevtools,hiplibsdk,openclsdk,mlsdk
+            # in the legacy amdgpu-install. Verified shape against
+            # https://repo.amd.com/rocm/packages/ubuntu2404/dists/stable/main/binary-amd64/Packages.gz
+            # (Depends graph rooted at amdrocm-core-sdk7.13-gfx94x).
+            ROCM_PREVIEW_META="amdrocm-core-sdk${ROCM_MAJORMINOR}-${ROCM_PREVIEW_GFX}"
+            echo "[rocm_setup] preview: apt-get install ${ROCM_PREVIEW_META} (bypassing broken amdgpu-install 31.30)"
+            ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y \
+               "${ROCM_PREVIEW_META}"
+
+            # Layout reconciliation. The amdrocm-core-sdk* deb tree
+            # installs into /opt/rocm/core-${ROCM_MAJORMINOR}/ (preview
+            # layout) but every downstream script in this repo
+            # (modulefile writer below, deploy_package.sh's `find -type
+            # d` packager, the host extract phase in run_rocm_build.sh,
+            # etc.) expects the legacy /opt/rocm-${ROCM_VERSION}/ layout
+            # to be a REAL directory. `find -maxdepth 1 -type d` does
+            # not match symlinks, so a symlink at /opt/rocm-${ROCM_VERSION}
+            # would be invisible to deploy_package.sh and
+            # rocm-${ROCM_VERSION}.tgz would come out empty.
+            #
+            # Fix: make /opt/rocm-${ROCM_VERSION} the canonical real
+            # directory (mv the freshly-installed tree there), and put a
+            # compatibility symlink back at the preview drop site so any
+            # 7.13 tool that hardcodes the new path still resolves. Both
+            # endpoints live on the same /opt filesystem, so the mv is a
+            # near-instant rename (no data copy).
+            #
+            # The drop-site basename is not documented stably -- the deb
+            # tree may use /opt/rocm/core-${X.Y.Z} (matching the
+            # apt-package version field 7.13.0-2) or /opt/rocm/core-${X.Y}
+            # (truncated to major.minor, matching the package-name suffix
+            # amdrocm-...7.13). Auto-detect both. We also accept a
+            # `/opt/rocm-${ROCM_VERSION}` real dir in case a future
+            # release skips the /opt/rocm/core-* indirection.
+            NEW_ROCM_ROOT=""
+            for _cand in \
+               "/opt/rocm/core-${ROCM_VERSION}" \
+               "/opt/rocm/core-${ROCM_MAJORMINOR}" \
+               "/opt/rocm-${ROCM_VERSION}" ; do
+               if [ -d "${_cand}" ] && [ ! -L "${_cand}" ]; then
+                  NEW_ROCM_ROOT="${_cand}"
+                  break
+               fi
+            done
+            unset _cand
+            if [ -z "${NEW_ROCM_ROOT}" ]; then
+               echo "[rocm_setup] preview: post-install dir scan for diagnostics:"
+               ls -la /opt /opt/rocm 2>&1 || true
+               send-error "ROCm ${ROCM_VERSION} preview install failed: no real directory at /opt/rocm/core-{${ROCM_VERSION},${ROCM_MAJORMINOR}} or /opt/rocm-${ROCM_VERSION} after ${ROCM_PREVIEW_META} apt install"
+            fi
+            echo "[rocm_setup] preview: detected install drop at ${NEW_ROCM_ROOT}"
+
+            if [ "${NEW_ROCM_ROOT}" != "${INSTALL_PATH}" ]; then
+               if [ -e "${INSTALL_PATH}" ] && [ ! -L "${INSTALL_PATH}" ]; then
+                  # Stale /opt/rocm-${ROCM_VERSION} from a previous (broken)
+                  # run -- replace it. -L guard avoids removing the symlink
+                  # in the re-run-same-build case.
+                  ${SUDO} rm -rf "${INSTALL_PATH}"
+               elif [ -L "${INSTALL_PATH}" ]; then
+                  ${SUDO} rm -f "${INSTALL_PATH}"
+               fi
+               ${SUDO} mv "${NEW_ROCM_ROOT}" "${INSTALL_PATH}"
+               ${SUDO} ln -sfn "${INSTALL_PATH}" "${NEW_ROCM_ROOT}"
+            fi
+            # Convenience llvm/ symlink (legacy layout) inside the real
+            # tree -- 7.13 ships clang under lib/llvm/ so legacy callers
+            # of <root>/llvm/bin/amdclang would otherwise 404. -e guards
+            # against re-creating it on a fresh-cache rerun.
+            if [ ! -e "${INSTALL_PATH}/llvm" ] && [ -d "${INSTALL_PATH}/lib/llvm" ]; then
+               ${SUDO} ln -sf lib/llvm "${INSTALL_PATH}/llvm"
+            fi
+            echo "[rocm_setup] preview: canonical real tree at ${INSTALL_PATH}; compat symlink ${NEW_ROCM_ROOT} -> ${INSTALL_PATH}"
+
+            # The legacy INCLUDE_TOOLS apt path tries to install
+            # `rocprofiler-systems` / `rocprofiler-compute` deb packages
+            # that do not exist under those names in the new repo.amd.com
+            # stream. rocm_patches.sh's rocprof-compute overlay is what
+            # provides the user-facing tool for 7.x anyway -- the inline
+            # apt step here was always a no-op for >=7.1. Force off.
+            INCLUDE_TOOLS=0
+
+         elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
+            send-error "ROCm ${ROCM_VERSION} preview install on RHEL-compatible distros is not yet implemented in this script. See https://rocm.docs.amd.com/en/${ROCM_VERSION}.0-preview/install/rocm.html (i=pkgman, os=rhel) for the manual steps and add a branch here if needed."
+         fi
+
+      else
+         # ------------------------------------------------------------------
+         # LEGACY ROCm 5.x-7.2 INSTALL PATH (unchanged)
+         # ------------------------------------------------------------------
 
 # if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
 # if ROCM_VERSION is less than or equal to 6.1.2, the awk command result will be blank
@@ -611,8 +868,17 @@ EOF
 #      fi
 
       rm -rf amdgpu-install_${AMDGPU_INSTALL_VERSION}_all.deb
+      fi   # end IS_ROCM_PREVIEW preview-vs-legacy wrap
    fi
-   amdgpu-install -q -y --usecase=rocm,hip,hiplibsdk --no-dkms --rocmrelease=${ROCM_VERSION}
+   if [[ "${IS_ROCM_PREVIEW}" != "1" ]]; then
+      # Legacy belt-and-suspenders extra amdgpu-install (unchanged): a
+      # second pass with the explicit rocm/hip/hiplibsdk usecases catches
+      # any package that didn't make it into the first invocation's
+      # usecase set. Skipped for ROCm 7.13+ preview because the new
+      # amdgpu-install's --rocmrelease=X.Y.Z form would mis-resolve
+      # (the new amdrocm packages are tagged X.Y, not X.Y.Z).
+      amdgpu-install -q -y --usecase=rocm,hip,hiplibsdk --no-dkms --rocmrelease=${ROCM_VERSION}
+   fi
 
    # Delta-release merge: when --base-rocm-version was supplied, the base was
    # installed at /opt/rocm-${BASE_ROCM_VERSION} above and the delta packages

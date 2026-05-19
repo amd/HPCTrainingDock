@@ -1,16 +1,25 @@
 #!/bin/bash
 
+# ── In-flight-edit safety: self-snapshot to per-job tmpdir ────────────
+# Defence: on entry, copy ourselves to /tmp/admin/${SLURM_JOB_ID}/ and
+# re-exec from the snapshot.
+if [[ -z "${_PYTORCH_SETUP_SH_FROM_SNAPSHOT:-}" ]] && \
+   [[ -n "${SLURM_JOB_ID:-}" ]] && \
+   [[ -f "${BASH_SOURCE[0]}" ]]; then
+   _PT_SNAP_DIR="/tmp/admin/${SLURM_JOB_ID}"
+   _PT_SNAP="${_PT_SNAP_DIR}/pytorch_setup.sh.snap"
+   mkdir -p "${_PT_SNAP_DIR}" 2>/dev/null || true
+   if cp -p "${BASH_SOURCE[0]}" "${_PT_SNAP}" 2>/dev/null; then
+      export _PYTORCH_SETUP_SH_FROM_SNAPSHOT=1
+      echo "pytorch_setup.sh: in-flight-edit safety: re-exec from ${_PT_SNAP}"
+      exec bash "${_PT_SNAP}" "$@"
+   fi
+fi
+
 # ── Preflight: declare and load required Lmod modules ─────────────────
-# Inlined (mirrors extras/scripts/magma_setup.sh:7-37) so this script is
-# self-contained and can be copied/run standalone. preflight_modules
-# loads each module in order; on the first failure it prints the Lmod
+# preflight_modules loads each module in order; on the first failure it prints the Lmod
 # diagnostic and returns MISSING_PREREQ_RC=42, which the parent
 # main_setup.sh re-classifies as SKIPPED rather than FAILED.
-# Added 2026-05-02 after slurm 8032 confirmed that bare `module load`
-# calls were the last remaining silent-failure surface in this script
-# (the rocm + magma loads at the build entry point would print to
-# stderr and continue if the module was missing, leaving MAGMA_HOME
-# unset and the build hitting cuda.h ~65 min later).
 MISSING_PREREQ_RC=42
 if ! type module >/dev/null 2>&1; then
    [ -r /etc/profile.d/lmod.sh ]            && . /etc/profile.d/lmod.sh
@@ -37,7 +46,7 @@ preflight_modules() {
    echo "preflight: all required modules loaded."
 }
 
-ROCM_VERSION=6.2.0
+ROCM_VERSION=7.2.0
 # Skip rocminfo autodetect if --amdgpu-gfxmodel was supplied. Under
 # `set -eo pipefail`, an unguarded rocminfo can kill the script when
 # the SDK is built against a newer glibc than the host (ROCm 7.2.3
@@ -121,7 +130,7 @@ declare -A PYTORCH_COMPANION_VERSIONS=(
    [2.9]="0.24.1:2.9.1"
    [2.10]="0.25.0:2.10.0"
    [2.11]="0.26.0:2.11.0"
-   [2.12]="0.27.0:2.12.0"
+   [2.12]="0.27.0:2.11.0"
 )
 
 # ── PyTorch stack manifest: (PT major.minor, ROCm major.minor) → all pins ──
@@ -210,17 +219,39 @@ declare -A PYTORCH_STACK_MANIFEST=(
    # breaking the newer 3.4.0 metadata), split that minor's cell off
    # from this block with its own pinned aotriton/triton pair and a
    # comment explaining the divergence.
-   ["2.7|6.2"]="aotriton=0.11.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
-   ["2.7|6.3"]="aotriton=0.11.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
-   ["2.7|6.4"]="aotriton=0.11.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
-   ["2.7|7.0"]="aotriton=0.11.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
-   ["2.7|7.1"]="aotriton=0.11.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
-   ["2.7|7.2"]="aotriton=0.11.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
-   ["2.8|6.3"]="aotriton=0.11.2b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
-   ["2.8|6.4"]="aotriton=0.11.2b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
-   ["2.8|7.0"]="aotriton=0.11.2b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
-   ["2.8|7.1"]="aotriton=0.11.2b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
-   ["2.8|7.2"]="aotriton=0.11.2b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.4.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   # ─ PT 2.7/2.8 cells: aotriton reverted to canonical (0.9.2b/0.10b) ─
+   # 2026-05-16: cells reverted from aotriton=0.11.2b back to canonical
+   # PT/AOTriton pairings (PT 2.7 -> 0.9.2b, PT 2.8 -> 0.10b). The
+   # 0.11.2b shim was originally chosen to dodge the host /usr/bin/ld.lld
+   # ABI bug that rejects HSA code-object metadata emitted by Triton
+   # 3.2.0 (bundled inside AOTriton 0.9.x/0.10b). However, AOTriton
+   # 0.11.2b's adaptor API is incompatible with PT 2.7/2.8's
+   # aten/.../mha_all_aot.hip:
+   #   - PT 2.7: hard #error "This adaptor code is only tested with
+   #             AOTriton 0.9.x" (mha_all_aot.hip:68).
+   #   - PT 2.8: implicit conversion failure aotriton::TensorView<2>
+   #             -> LazyTensor<2> (mha_all_aot.hip:696, :937).
+   # Both failures observed on EVERY ROCm version in the matrix
+   # (rocm-6.2..7.2), most recently in 9747 (rocm-6.4.3) on 2026-05-16.
+   # The PT 2.7/2.8 cells are now skipped unconditionally by the
+   # compatibility gate at the top of resolve_pytorch_stack_versions
+   # (search "is not a supported combination"), so these manifest
+   # values are effectively documentation-only; they record the
+   # AOTriton release that PyTorch 2.7/2.8 were actually tested with
+   # upstream, in case a future change re-enables source-build of
+   # AOTriton 0.9.x/0.10b (e.g. via prebuilt-tarball install path) and
+   # the gate is widened/removed.
+   ["2.7|6.2"]="aotriton=0.9.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.7|6.3"]="aotriton=0.9.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.7|6.4"]="aotriton=0.9.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.7|7.0"]="aotriton=0.9.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.7|7.1"]="aotriton=0.9.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.7|7.2"]="aotriton=0.9.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.8|6.3"]="aotriton=0.10b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.8|6.4"]="aotriton=0.10b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.8|7.0"]="aotriton=0.10b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.8|7.1"]="aotriton=0.10b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   ["2.8|7.2"]="aotriton=0.10b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
    ["2.9|7.0"]="aotriton=0.11.2b;torchvision=0.24.1;torchaudio=2.9.1;triton=3.4.0;flashattention=2.8.3;pillow=12.1.1;sageattention=1.0.6;deepspeed=latest"
    ["2.9|7.1"]="aotriton=0.11.2b;torchvision=0.24.1;torchaudio=2.9.1;triton=3.4.0;flashattention=2.8.3;pillow=12.1.1;sageattention=1.0.6;deepspeed=latest"
    ["2.9|7.2"]="aotriton=0.11.2b;torchvision=0.24.1;torchaudio=2.9.1;triton=3.4.0;flashattention=2.8.3;pillow=12.1.1;sageattention=1.0.6;deepspeed=latest"
@@ -439,64 +470,38 @@ resolve_pytorch_stack_versions() {
    PYTORCH_SHORT_VERSION="${PT_MAJOR_MINOR}"
    MANIFEST_CELL_KEY="${PT_MAJOR_MINOR}|${ROCM_MAJOR_MINOR}"
 
-   # ── Compatibility gate: PT 2.6/2.7/2.8 are unsupported on ROCm 7.x ──
-   # Upstream PyTorch tested 2.6/2.7/2.8 only against ROCm 6.x. On ROCm
-   # 7.x this matrix has at least three independent breakages, all of
-   # which we have observed on this cluster:
-   #   (1) c10::warpSize / __AMDGCN_WAVEFRONT_SIZE constexpr regressions
-   #       in c10/macros/Macros.h and third_party/composable_kernel
-   #       headers (ROCm 7.x compiler tightened constexpr evaluation;
-   #       formerly Failures D/E/F).
-   #   (2) AOTriton 0.11.2b adaptor API mismatch with PT 2.7/2.8's
-   #       aten/.../mha_all_aot.hip ("This adaptor code is only tested
-   #       with AOTriton 0.9.x"). We cannot dodge this by going back to
-   #       AOTriton 0.9.x because its bundled Triton 3.2.0 emits HSA
-   #       code-object metadata that the system /usr/bin/ld.lld
-   #       rejects ("ld.lld: error: unknown abi version") -- a host-side
-   #       toolchain bug present on every ROCm we have. Formerly
-   #       Failures G/H.
-   #   (3) third_party/composable_kernel macro redefinitions vs. the
-   #       newer in-system rocm-7.x CK headers (CK_USE_OCP_FP8,
-   #       __assert_ocp_support, __assert_fnuz_support; observed on
-   #       9728 rocm-7.1.1 + PT 2.7.1).
-   # Each axis can in principle be patched, but the patches need to grow
-   # with every new ROCm 7.x point release and we are chasing upstream
-   # interface drift that PyTorch never intended to support. The honest
-   # matrix entry is "unsupported": users on ROCm 7.x should use PT 2.9+
-   # (the canonical pairing); users wanting PT 2.6/2.7/2.8 should stay
-   # on ROCm 6.x.
+   #   - AOTriton 0.9.2b bundles Triton 3.2.0, which emits HSA
+   #     code-object metadata with an "abi version" field that
+   #     Ubuntu jammy's stock /usr/bin/ld.lld (LLVM 14) rejects:
+   #         ld.lld: error: unknown abi version:
+   #     The same .hsaco loads cleanly through ROCm-bundled
+   #     ld.lld 19+ (in every rocm-X.Y.Z/llvm/bin we ship).
    #
-   # Gate is intentionally placed AFTER PT_MAJOR_MINOR / ROCM_MAJOR_MINOR
-   # resolution and BEFORE any heavy work (manifest cell parse, source
-   # clone, configure, compile). Exit rc=0 is treated as a clean skip by
-   # main_setup.sh's run_and_log_versioned wrapper, equivalent to "this
-   # package was disabled for this ROCm" -- not a build failure.
-   case "${PT_MAJOR_MINOR}" in
-      2.6|2.7|2.8)
-         local _rocm_major_only="${ROCM_MAJOR_MINOR%%.*}"
-         if [[ "${_rocm_major_only}" -ge 7 ]]; then
-            echo "######################################################"
-            echo "SKIPPED: PyTorch ${PYTORCH_VERSION} on ROCm ${ROCM_VERSION}"
-            echo "         is not a supported combination."
-            echo ""
-            echo "         Upstream PyTorch ${PT_MAJOR_MINOR} was tested only"
-            echo "         against ROCm 6.x. On ROCm 7.x this combination"
-            echo "         hits multiple independent build failures:"
-            echo "         warpSize/CK constexpr regressions, AOTriton"
-            echo "         adaptor API mismatch (no working AOTriton"
-            echo "         version exists -- 0.9.x source-build hits the"
-            echo "         system ld.lld ABI bug, 0.11.2b's API differs"
-            echo "         from what mha_all_aot.hip expects), and"
-            echo "         third_party CK macro redefinitions vs the"
-            echo "         in-system rocm-7.x CK headers."
-            echo ""
-            echo "         Use PyTorch 2.9+ on ROCm 7.x, or PyTorch"
-            echo "         ${PT_MAJOR_MINOR} on ROCm 6.x."
-            echo "######################################################"
-            exit 0
-         fi
-         ;;
-   esac
+   #   - Triton 3.2.0's path_to_rocm_lld() (cited verbatim in
+   #     this commit's audit notes; see
+   #     third_party/triton bda2acff, file
+   #     third_party/amd/backend/compiler.py:172) walks an
+   #     ordered list: $TRITON_HIP_LLD_PATH first, then
+   #     <wheel>/triton/backends/amd/llvm/bin/ld.lld, then
+   #     /opt/rocm/llvm/bin/ld.lld (hardcoded), then
+   #     /usr/bin/ld.lld, then raise. We do not deploy /opt/rocm
+   #     (warewulf imaging made that symlink different per node;
+   #     operator removed it ~2026-04-22). Without the env
+   #     override, Triton falls all the way to the system LLD 14
+   #     and dies.
+   #
+   # Fix landed in the AOTriton build region of this script
+   # (search "TRITON_HIP_LLD_PATH"): we now export
+   #     TRITON_HIP_LLD_PATH="${ROCM_PATH}/llvm/bin/ld.lld"
+   # before the AOTriton clone/cmake/ninja steps and validate
+   # the file exists. That pins kernel codegen to the
+   # ROCm-bundled LLD 19, which accepts Triton 3.2.0's
+   # HSA metadata. With this in place the canonical pairing
+   # holds end-to-end:
+   #   PT 2.7.x -> AOTriton 0.9.2b -> mha_all_aot.hip compiles
+   #               cleanly (no #error trip)
+   #   PT 2.8.x -> AOTriton 0.10b  -> same logic; same fix
+   #
 
    local cell_value="${PYTORCH_STACK_MANIFEST[${MANIFEST_CELL_KEY}]:-}"
    if [[ -n "${cell_value}" ]]; then
@@ -1578,6 +1583,52 @@ else
 
       export PYTHONPATH=$PYTORCH_PATH:$PYTHONPATH
 
+      # ── setuptools<81 pin (Bug 2 fix, wheel-install branch) ──
+      # Twin of the pin block in the source-build branch (see comment
+      # there for the full rationale: setuptools 81/82 removed
+      # `pkg_resources` and any setup.py whose first executable line
+      # is `from pkg_resources import ...` now crashes immediately).
+      #
+      # The wheel-install branch (this one) generally does NOT bump
+      # setuptools above the venv-creation default (typically 59.6.0
+      # on Ubuntu 22.04), because no PT source build runs `pip install
+      # -r requirements.txt` here to drag in a 82.x update. So in the
+      # common case this pin is a no-op even for PT >= 2.10 wheel
+      # installs. We still apply it defensively because:
+      #   (a) some future addition (e.g. another pip install above)
+      #       could quietly upgrade the venv to setuptools 82+; and
+      #   (b) flashattention's setup.py is the only source build in
+      #       this branch, so a single pin here protects the whole
+      #       wheel-branch chain through the rest of the function.
+      #
+      # Gated on PT >= 2.10 to stay byte-stable for the
+      # already-passing PT 2.7-2.9 wheel-branch builds (their venvs
+      # resolve setuptools organically and we have no reason to
+      # change that).
+      PT_PIN_MAJOR=$(echo "${PYTORCH_VERSION}" | cut -d. -f1)
+      PT_PIN_MINOR=$(echo "${PYTORCH_VERSION}" | cut -d. -f2)
+      if [ "${PT_PIN_MAJOR}" -gt 2 ] || \
+         { [ "${PT_PIN_MAJOR}" -eq 2 ] && [ "${PT_PIN_MINOR}" -ge 10 ]; }; then
+         echo "[setuptools<81 pin/wheel-branch] PT ${PYTORCH_VERSION} >= 2.10 -- pinning build-venv setuptools before flashattention setup.py"
+         echo "[setuptools<81 pin/wheel-branch]   before: setuptools=$(python3 -c 'import setuptools; print(setuptools.__version__)' 2>&1)"
+         pip3 install --upgrade --force-reinstall --no-deps 'setuptools<81' || {
+            echo "ERROR: failed to pin setuptools<81 in the wheel-branch PT-build venv."        >&2
+            echo "ERROR: flashattention setup.py may crash on 'from pkg_resources import ...'." >&2
+            echo "ERROR: investigate pip3 / network / venv writability before retrying."        >&2
+            exit 1
+         }
+         echo "[setuptools<81 pin/wheel-branch]   after:  setuptools=$(python3 -c 'import setuptools; print(setuptools.__version__)' 2>&1) (must be < 81)"
+         if ! python3 -c 'from pkg_resources import DistributionNotFound, get_distribution, parse_version' 2>/dev/null; then
+            echo "ERROR: post-pin probe failed: 'from pkg_resources import ...' still does not import."        >&2
+            echo "ERROR: the pinned setuptools either did not install or another setuptools is shadowing it." >&2
+            python3 -c 'import sys; [print("  sys.path:", p) for p in sys.path]'                               >&2
+            exit 1
+         fi
+         echo "[setuptools<81 pin/wheel-branch]   probe:  pkg_resources import OK"
+      else
+         echo "[setuptools<81 pin/wheel-branch] PT ${PYTORCH_VERSION} < 2.10 -- no pin needed (legacy setuptools path)."
+      fi
+
       # Installing Flash Attention
 
       pip3 install --target=${FLASHATTENTION_PATH} packaging
@@ -1946,6 +1997,67 @@ else
       export GPU_TARGETS=${AMDGPU_GFXMODEL}
       export AMDGPU_TARGETS=${AMDGPU_GFXMODEL}
 
+      # ── TRITON_HIP_LLD_PATH (critical; do NOT remove) ─────────────────
+      # The AOTriton build below invokes a vendored Triton (3.2.0 for
+      # AOTriton 0.9.2b, 3.2.0 for 0.10b, 3.4.0 for 0.11.x). Triton's
+      # AMD backend (third_party/amd/backend/compiler.py: path_to_rocm_lld)
+      # picks ld.lld by walking, in order:
+      #   1. $TRITON_HIP_LLD_PATH
+      #   2. <wheel>/triton/backends/amd/llvm/bin/ld.lld   (wheel-only)
+      #   3. /opt/rocm/llvm/bin/ld.lld                      (hardcoded)
+      #   4. /usr/bin/ld.lld
+      #   5. raise.
+      # On this cluster /opt/rocm does not exist (warewulf imaging put
+      # a different symlink target on every compute node; operator
+      # removed it ~2026-04-22). Compute nodes installed lld:amd64
+      # 1:14.0-55 on 2026-04-26 20:49, which made /usr/bin/ld.lld
+      # appear (LLVM 14). LLD 14 rejects the HSA code-object metadata
+      # that Triton 3.2.0 emits ("ld.lld: error: unknown abi
+      # version:"), nuking the AOTriton kernel codegen across every
+      # gfx target. The ROCm-bundled lld at ${ROCM_PATH}/llvm/bin/ld.lld
+      # is AMD LLD 19.0.0+ on every rocm we deploy and accepts that
+      # metadata cleanly.
+      #
+      # We point Triton at the ROCm-bundled lld via the env var and
+      # validate the path before letting the AOTriton clone proceed.
+      # If the file is missing the build aborts here with a clear
+      # diagnostic, instead of failing 90+ min later inside ninja
+      # codegen with the cryptic "unknown abi version" message.
+      #
+      # Self-corrects if the operator passes a custom --aotriton-version
+      # with a different bundled Triton ABI; the env var still wins
+      # (it is checked first by path_to_rocm_lld).
+      if [ -z "${ROCM_PATH:-}" ]; then
+         echo "ERROR: ROCM_PATH is empty; cannot set TRITON_HIP_LLD_PATH."
+         echo "ERROR: rocm/${ROCM_VERSION} module must be loaded before"
+         echo "ERROR: the AOTriton build (see preflight_modules above)."
+         exit 1
+      fi
+      export TRITON_HIP_LLD_PATH="${ROCM_PATH}/llvm/bin/ld.lld"
+      if [ ! -f "${TRITON_HIP_LLD_PATH}" ]; then
+         echo "######################################################"
+         echo "ERROR: TRITON_HIP_LLD_PATH=${TRITON_HIP_LLD_PATH}"
+         echo "ERROR: does not exist. This is the ROCm-bundled lld"
+         echo "ERROR: that AOTriton's vendored Triton needs to accept"
+         echo "ERROR: the HSA code-object 'abi version' field it emits."
+         echo "ERROR:"
+         echo "ERROR: Without it, Triton falls through to /usr/bin/ld.lld"
+         echo "ERROR: (LLVM 14 on Ubuntu jammy) which rejects the metadata"
+         echo "ERROR: with 'ld.lld: error: unknown abi version:' and the"
+         echo "ERROR: build dies ~90 min into pytorch wheel link."
+         echo "ERROR:"
+         echo "ERROR: Reinstall the rocm/${ROCM_VERSION} SDK so that"
+         echo "ERROR: ${ROCM_PATH}/llvm/bin/ld.lld is present, or set"
+         echo "ERROR: TRITON_HIP_LLD_PATH manually before re-invoking."
+         echo "######################################################"
+         exit 1
+      fi
+      # Print version for the log so the audit trail is unambiguous.
+      _lld_v=$("${TRITON_HIP_LLD_PATH}" --version 2>&1 | head -1 || echo "<probe failed>")
+      echo "pytorch: TRITON_HIP_LLD_PATH=${TRITON_HIP_LLD_PATH}"
+      echo "pytorch: TRITON_HIP_LLD_PATH version: ${_lld_v}"
+      unset _lld_v
+
       # Clean up stale source tree from prior interrupted runs.
       # No zstd build needed: aotriton 0.8+ replaced its zstd
       # compression path with liblzma (already installed via apt at
@@ -2060,8 +2172,145 @@ else
       if [ ${AOTRITON_NINJA_RC} -ne 0 ]; then
          echo ""
          echo "ERROR: aotriton ninja install failed (rc=${AOTRITON_NINJA_RC})"
+         echo "ERROR:"
+         echo "ERROR: The most common failure here is the Triton kernel"
+         echo "ERROR: codegen step rejecting HSA code-object metadata:"
+         echo "ERROR:    'ld.lld: error: unknown abi version: '"
+         echo "ERROR: which means Triton fell through to /usr/bin/ld.lld"
+         echo "ERROR: (LLVM 14 on Ubuntu jammy) and rejected the metadata."
+         echo "ERROR: Check that TRITON_HIP_LLD_PATH (set near the top of"
+         echo "ERROR: this build region) actually pointed at the"
+         echo "ERROR: ROCm-bundled lld 19+ and that the file existed."
          exit 1
       fi
+
+      # ── Post-install sanity probe (critical short-circuit) ────────────
+      # User directive 2026-05-16: short-circuit the build if AOTriton
+      # did not actually produce the artifacts pytorch will need ~90 min
+      # from now. Without this probe a silent codegen failure (e.g. all
+      # .hsaco emit successfully but the final libaotriton_v2.so link
+      # gets skipped, or vice versa) is only discovered late in the
+      # pytorch wheel link as "missing libaotriton_v2.so, no rule" --
+      # exactly the failure mode the configure-rc guard above protects
+      # against, but staged later in the pipeline.
+      #
+      # Each check fails-fast with the operator-actionable signal:
+      #   1. libaotriton_v2.so present and non-empty at the install path.
+      #   2. At least one kernel object (.hsaco OR .aks2) present under
+      #      the install tree (catches "ninja install completed rc=0 but
+      #      kernel codegen produced zero objects" -- a known mode when
+      #      Triton's target-arch filter mis-classifies our GFX list).
+      #      Both extensions are accepted because AOTriton's packaging
+      #      changed across the releases we currently build:
+      #        - 0.9.2b  : .aks2 only (kernel-set v2 envelopes wrapping
+      #                    the gfx ELF; no loose .hsaco are emitted).
+      #                    Empirical: 9802-9814 each installed thousands
+      #                    of .aks2 under aotriton/lib/aotriton.images/
+      #                    amd-gfx942/flash/...___MI300X.aks2 with zero
+      #                    .hsaco -- the original probe (.hsaco-only)
+      #                    false-positived all 13 jobs (~28 node-h lost,
+      #                    audit_2026_05_17.md).
+      #        - 0.10b   : .aks2 + some loose .hsaco.
+      #        - 0.11.x  : .aks2 + .hsaco (both populated).
+      #      The genuine "linked .so, emitted no kernels" failure mode
+      #      this guard catches zeroes BOTH counts simultaneously, so
+      #      OR-ing them does not weaken the probe.
+      #   3. The installed .so is linked against libamdhip64 from
+      #      ${ROCM_PATH}, not /opt/rocm or any other rocm tree (catches
+      #      the "wrong rocm major" contamination documented in the
+      #      AOTRITON_HIP_OVERRIDES block above).
+      _aot_lib_glob=("${AOTRITON_PATH}"/lib/libaotriton_v2.so*)
+      _aot_lib="${_aot_lib_glob[0]:-}"
+      if [ ! -s "${_aot_lib}" ]; then
+         echo ""
+         echo "######################################################"
+         echo "ERROR: AOTriton post-install probe (1/3) FAILED:"
+         echo "ERROR:   ${AOTRITON_PATH}/lib/libaotriton_v2.so* not found"
+         echo "ERROR:   (or zero-byte)."
+         echo "ERROR: ninja install returned rc=0 but did not deposit the"
+         echo "ERROR: main shared library. Refusing to start pytorch wheel"
+         echo "ERROR: build -- it would only fail at link time."
+         echo "ERROR:"
+         echo "ERROR: Listing of ${AOTRITON_PATH}:"
+         ls -la "${AOTRITON_PATH}" "${AOTRITON_PATH}/lib" 2>&1 | sed 's/^/ERROR:   /'
+         echo "######################################################"
+         exit 1
+      fi
+      _aot_hsaco_count=$(find "${AOTRITON_PATH}" -name '*.hsaco' 2>/dev/null | wc -l)
+      _aot_aks2_count=$(find "${AOTRITON_PATH}" -name '*.aks2' 2>/dev/null | wc -l)
+      _aot_kernel_count=$(( ${_aot_hsaco_count:-0} + ${_aot_aks2_count:-0} ))
+      if [ "${_aot_kernel_count}" -lt 1 ]; then
+         echo ""
+         echo "######################################################"
+         echo "ERROR: AOTriton post-install probe (2/3) FAILED:"
+         echo "ERROR:   no kernel objects (.hsaco or .aks2) under"
+         echo "ERROR:   ${AOTRITON_PATH}"
+         echo "ERROR: AOTriton produced libaotriton_v2.so but emitted"
+         echo "ERROR: zero kernel objects -- triton codegen ran but"
+         echo "ERROR: filtered out every (target,kernel) cell. Either"
+         echo "ERROR: TARGET_GPUS=${TARGET_GPUS} is unsupported by this"
+         echo "ERROR: AOTriton version, or the kernel codegen silently"
+         echo "ERROR: skipped emission. Refusing to start pytorch wheel"
+         echo "ERROR: build."
+         echo "######################################################"
+         exit 1
+      fi
+      _aot_needed=$(readelf -d "${_aot_lib}" 2>/dev/null \
+         | awk '/NEEDED.*libamdhip64/{ for(i=1;i<=NF;i++) if($i ~ /libamdhip64/) print $i }' \
+         | tr -d '[]' | head -1)
+      if [ -n "${_aot_needed}" ]; then
+         # Resolve where this DT_NEEDED actually points by tracing
+         # against the current LD_LIBRARY_PATH + ${ROCM_PATH}/lib. If
+         # the resolved path is NOT inside ${ROCM_PATH}, the wrong
+         # rocm major slipped in -- exactly the bug the
+         # AOTRITON_HIP_OVERRIDES block above is meant to prevent.
+         # (We don't fail on a mere SONAME mismatch -- some rocm
+         # majors bump SONAME minor without an API break -- so we
+         # actually trace the resolution.)
+         _aot_hip_resolved=$(LD_LIBRARY_PATH="${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}" \
+            ldd "${_aot_lib}" 2>/dev/null | awk -v want="${_aot_needed}" \
+            '$1 == want { print $3; exit }')
+         case "${_aot_hip_resolved}" in
+            "${ROCM_PATH}"/*)
+               echo "pytorch: AOTriton probe (3/3) OK: ${_aot_needed} -> ${_aot_hip_resolved}"
+               ;;
+            "")
+               echo ""
+               echo "######################################################"
+               echo "ERROR: AOTriton post-install probe (3/3) FAILED:"
+               echo "ERROR:   libaotriton_v2.so DT_NEEDED ${_aot_needed} but"
+               echo "ERROR:   ldd cannot resolve it from ${ROCM_PATH}/lib."
+               echo "ERROR: Without that resolution 'import torch' will fail"
+               echo "ERROR: at the C1 validation step with"
+               echo "ERROR:   ImportError: ${_aot_needed}: cannot open shared object file."
+               echo "ERROR: Refusing to start pytorch wheel build."
+               echo "######################################################"
+               exit 1
+               ;;
+            *)
+               echo ""
+               echo "######################################################"
+               echo "ERROR: AOTriton post-install probe (3/3) FAILED:"
+               echo "ERROR:   libaotriton_v2.so DT_NEEDED ${_aot_needed}"
+               echo "ERROR:   resolves to ${_aot_hip_resolved}"
+               echo "ERROR:   which is OUTSIDE ${ROCM_PATH}."
+               echo "ERROR: A different rocm major leaked into the AOTriton"
+               echo "ERROR: link (typically via the /opt/rocm fallback path"
+               echo "ERROR: in aotriton's CMakeLists.txt). 'import torch'"
+               echo "ERROR: against this AOTriton will load the wrong"
+               echo "ERROR: libamdhip64 and crash. Refusing to start"
+               echo "ERROR: pytorch wheel build."
+               echo "######################################################"
+               exit 1
+               ;;
+         esac
+      else
+         echo "pytorch: AOTriton probe (3/3) skipped: ${_aot_lib} has no DT_NEEDED libamdhip64 (unusual but not fatal)"
+      fi
+      echo "pytorch: AOTriton post-install probes OK"
+      echo "pytorch:   libaotriton_v2.so : ${_aot_lib} ($(stat -c%s "${_aot_lib}") bytes)"
+      echo "pytorch:   kernel objects    : ${_aot_kernel_count} (.hsaco=${_aot_hsaco_count} .aks2=${_aot_aks2_count})"
+      unset _aot_lib _aot_lib_glob _aot_hsaco_count _aot_aks2_count _aot_kernel_count _aot_needed _aot_hip_resolved
 
       cd ../..
       rm -rf aotriton
@@ -2090,6 +2339,196 @@ else
       export USE_CUDA=0
       export MAX_JOBS=40
       export USE_MPI=1
+
+      # ── Disable libtorch C++ test binaries ────────────────────────────
+      # PyTorch's source build defaults BUILD_TEST=ON, which compiles
+      # ~150 upstream-CI C++ test binaries (Dict_test, Dimname_test,
+      # test_api, test_jit, test_lazy, test_cpp_c10d/Process*Gloo*Test,
+      # Process*NCCLTest, etc.) into pytorch_build/build/bin/. NONE of
+      # those binaries ship in the wheel and NONE of them get installed
+      # by `setup.py install --prefix=...` -- they exist only so
+      # upstream's CI can run them in their own containers.
+      #
+      # We disable them for two reasons:
+      #
+      # (1) Build-time + disk savings: skipping ~150 link steps and
+      #     their associated ATen/c10/torch_hip object dependencies
+      #     shaves 10-20 min off every PT source build (more on small
+      #     nodes), with zero impact on the deployed install.
+      #
+      # (2) Hard build break on Ubuntu 22.04 + gcc-11 toolchain with
+      #     PT 2.12.0 on ROCm 7.2.3. The test binaries link against
+      #     libtorch_hip.so via `-Wl,--no-as-needed` using /usr/bin/c++
+      #     (system gcc-11.4). PT 2.12 emits bfloat16 conversion calls
+      #     to the compiler-rt builtin __truncsfbf2 inside HIP TUs that
+      #     end up in libtorch_hip.so as an undefined reference (the
+      #     .so's own link did NOT pull in clang_rt.builtins). Probes
+      #     on a build-class node:
+      #         gcc:                     11.4.0
+      #         libgcc.a __truncsfbf2:   NOT FOUND
+      #         clang_rt.builtins.a:     T __truncsfbf2     (ROCm 7.2.3)
+      #     With BUILD_TEST=ON, every Dict_test/Dimname_test/test_api/
+      #     ... link step fires:
+      #         /usr/bin/ld: …/libtorch_hip.so: undefined reference
+      #                      to `__truncsfbf2'
+      #         collect2: error: ld returned 1 exit status
+      #         ninja: build stopped: subcommand failed.
+      #         ERROR: pytorch wheel build failed (rc=1).
+      #     The libtorch_hip.so itself links fine -- the unresolved
+      #     symbol only matters at downstream consumer-link time, and
+      #     in a BUILD_TEST=OFF build there are no downstream C++
+      #     consumers inside the build tree.
+      #     First seen in slurm 9968 (rocm-7.2.3 + PT 2.12.0, 2026-05-18
+      #     ~20:03 fail). See log line 68374:
+      #       FAILED: [code=1] bin/Dict_test
+      #       /usr/bin/ld: …libtorch_hip.so: undefined reference to
+      #                    `__truncsfbf2'
+      #     log: logs_05_18_2026/rocm-7.2.3_9968/log_pytorch_v2.12.0_05_18_2026.txt
+      #
+      # PT 2.10 / 2.11 may or may not also trip on this depending on
+      # whether their bf16 codegen path emits __truncsfbf2 in the same
+      # spot; BUILD_TEST=0 is the correct config for all release-style
+      # builds regardless, since we never use those test binaries.
+      #
+      # PyTorch honours BUILD_TEST via tools/setup_helpers: setup.py
+      # reads `check_env_flag("BUILD_TEST", default="ON")`, so a
+      # plain export here flows through pip / pyproject build.
+      export BUILD_TEST=0
+
+      # ── Inject ROCm clang's compiler-rt builtins into all link steps ──
+      # PT 2.12+ HIP TUs emit references to bfloat16 conversion builtins
+      # (__truncsfbf2, __extendbfsf2, __truncdfbf2, ...) that come from
+      # the LLVM compiler-rt runtime. These references propagate into
+      # libtorch_hip.so. With:
+      #   (a) BUILD_TEST=0 above, the build no longer dies at the
+      #       Dict_test/Dimname_test C++ unit-test link step (9968).
+      #   (b) But libtorch_hip.so itself is still linked by the system
+      #       /usr/bin/c++ (Ubuntu 22.04 gcc-11.4), and gcc-11.4's
+      #       libgcc.a / libgcc_s.so.1 do NOT carry __truncsfbf2 (added
+      #       in libgcc only at GCC 13). Linkers happily produce a .so
+      #       with unresolved refs (no `--no-undefined`), so the link
+      #       step prints `[N/M] Linking CXX shared library
+      #       lib/libtorch_hip.so` and exits 0.
+      #   (c) The failure surfaces at runtime when dlopen(libtorch_hip)
+      #       checks symbols. Surfaced by slurm 9980 (PT 2.12.0 +
+      #       rocm-7.2.3, 2026-05-18 22:25), C1 validation step:
+      #          ImportError: …/libtorch_hip.so: undefined symbol:
+      #                      __truncsfbf2
+      #       log: logs_05_18_2026/rocm-7.2.3_9980/log_pytorch_v2.12.0_05_18_2026.txt
+      #
+      # The static archive libclang_rt.builtins-x86_64.a inside ROCm's
+      # bundled clang (clang/19 on ROCm 6.4, clang/20 on ROCm 7.0/7.1,
+      # clang/22 on ROCm 7.2+) defines __truncsfbf2 (and friends).
+      # Probe on 2026-05-18:
+      #   ROCm 6.4.3 → clang/19/.../libclang_rt.builtins-x86_64.a: T __truncsfbf2
+      #   ROCm 7.0.2 → clang/20/.../libclang_rt.builtins-x86_64.a: T __truncsfbf2
+      #   ROCm 7.1.1 → clang/20/.../libclang_rt.builtins-x86_64.a: T __truncsfbf2
+      #   ROCm 7.2.0 → clang/22/.../libclang_rt.builtins-x86_64.a: T __truncsfbf2
+      #   ROCm 7.2.2 → clang/22/.../libclang_rt.builtins-x86_64.a: T __truncsfbf2
+      #   ROCm 7.2.3 → clang/22/.../libclang_rt.builtins-x86_64.a: T __truncsfbf2
+      # Only the .a is shipped (no .so), so we link it at build time
+      # rather than relying on LD_LIBRARY_PATH at import time.
+      #
+      # Why LDFLAGS (with --whole-archive) and not
+      # CMAKE_SHARED_LINKER_FLAGS / TORCH_HIP_LINK_FLAGS:
+      # PyTorch's setup.py + cmake glue passes LDFLAGS through to
+      # CMAKE_EXE/SHARED/MODULE_LINKER_FLAGS_INIT (cmake's standard
+      # env-var-to-flag bridge). Those LINKER_FLAGS variables are
+      # placed by cmake near the FRONT of the final link command
+      # (before the .o object files), e.g. confirmed in slurm 9996
+      # log line 83733 for torch/_C.cpython-310-x86_64-linux-gnu.so:
+      #   gcc -shared … -Wl,-rpath,…/llvm/lib \
+      #     /shared/.../libclang_rt.builtins-x86_64.a \
+      #     build/temp.../torch/csrc/stub.o \
+      #     -L… -ltorch_python -o …
+      # That ordering breaks plain static-archive scan semantics:
+      # when ld processes the .a, NOTHING is undefined yet (no .o has
+      # been scanned), so ld pulls 0 symbols from the .a; then the
+      # .o file references __truncsfbf2 -- too late, .a has already
+      # been finalized. Net effect of plain LDFLAGS injection: the
+      # .so is built EXACTLY as if the .a weren't there at all and
+      # dlopen still fails with `undefined symbol: __truncsfbf2`
+      # (slurm 9996, 2026-05-19 00:49 fail). This silent "the flag
+      # is there but useless" mode is why the cmake configure dump
+      # at log line 46707 shows the .a in `Shared LD flags` and
+      # yet the runtime import still trips.
+      #
+      # Force the bf16 builtins in via --whole-archive: this tells
+      # ld to bring in EVERY symbol from the named archive regardless
+      # of scan order, so position-in-command-line stops mattering.
+      # libclang_rt.builtins-x86_64.a is small (a few hundred KB) and
+      # only carries low-level runtime helper routines; pulling all
+      # of it into every torch .so is a tiny size cost in exchange
+      # for a deterministic resolution of __truncsfbf2 and friends.
+      # `--push-state` / `--pop-state` (binutils ≥ 2.30, present on
+      # Ubuntu 22.04 and RHEL 9) localises the --whole-archive scope
+      # so it does NOT affect any subsequent libraries the linker
+      # picks up via -l flags. References:
+      #   ld(1) man page: "--push-state, --pop-state"
+      #   GCC bug 90453 (rationale for --push-state on static libs)
+      #
+      # ── Gating: PT 2.12+ only ─────────────────────────────────────────
+      # PT 2.10 and PT 2.11 do not emit unresolved __truncsfbf2 in
+      # libtorch_hip.so (verified by all-green builds 9967/9989/9990/9991
+      # without any LDFLAGS injection, see audit 2026-05-19). Injecting
+      # the builtins archive for those versions is at best inert and at
+      # worst breaks the build (see "fmaxl/logbl" regression below), so
+      # we only enable it for PT 2.12+ where it actually matters.
+      #
+      # ── -lm safety net (anti-regression) ──────────────────────────────
+      # 2026-05-19 regression: with --whole-archive, CMake's basic C
+      # compiler sanity check (CMakeTestCCompiler.cmake -> /usr/bin/cc
+      # linking testCCompiler.c with NO -lm) pulls in __divxc3 (complex
+      # long double division) from the archive, which references fmaxl
+      # and logbl from libm. Those go unresolved and CMake aborts:
+      #     /usr/bin/ld: …libclang_rt.builtins-x86_64.a(divxc3.c.o):
+      #       in function `__divxc3':
+      #     divxc3.c:(.text+0x47): undefined reference to `fmaxl'
+      #     divxc3.c:(.text+0x4f): undefined reference to `logbl'
+      #     collect2: error: ld returned 1 exit status
+      # Surfaced by slurm 9992 (PT 2.11.0+rocm-7.1.0) and 9993 (PT 2.11.0
+      # +rocm-7.0.2), both failing at log line 45530.
+      #     log: logs_05_19_2026/rocm-7.1.0_9992/log_pytorch_v2.11.0_05_19_2026.txt
+      #
+      # CMake propagates env LDFLAGS into try-compile via
+      # CMAKE_EXE_LINKER_FLAGS_INIT, so EVERY try-compile inherits the
+      # archive. We append `-Wl,--as-needed -lm -Wl,--no-as-needed` at
+      # the end of LDFLAGS so:
+      #   - libm satisfies fmaxl/logbl pulled in by --whole-archive of
+      #     the builtins archive (resolves the cmTC failure above);
+      #   - --as-needed prevents adding a spurious DT_NEEDED on libm
+      #     in .so files that don't actually use libm symbols (keeps
+      #     ldd output of torch's .so files clean);
+      #   - --no-as-needed restores the linker default state so later
+      #     LDFLAGS contributions from PyTorch's own cmake glue keep
+      #     their original semantics. Empirically verified on all 8
+      #     ROCm versions (rocm-7.0.0 → 7.2.3) on 2026-05-19.
+      _CLANG_RT_GLOB="${ROCM_PATH}/llvm/lib/clang/*/lib/linux/libclang_rt.builtins-x86_64.a"
+      _CLANG_RT_BUILTINS=$(ls -1 ${_CLANG_RT_GLOB} 2>/dev/null | head -1)
+      _PT_MAJOR=$(echo "${PT_MAJOR_MINOR:-0.0}" | cut -d. -f1)
+      _PT_MINOR=$(echo "${PT_MAJOR_MINOR:-0.0}" | cut -d. -f2)
+      _PT_NEEDS_BF16_INJECTION=0
+      if [ "${_PT_MAJOR:-0}" -gt 2 ] 2>/dev/null; then
+         _PT_NEEDS_BF16_INJECTION=1
+      elif [ "${_PT_MAJOR:-0}" -eq 2 ] 2>/dev/null && [ "${_PT_MINOR:-0}" -ge 12 ] 2>/dev/null; then
+         _PT_NEEDS_BF16_INJECTION=1
+      fi
+      if [ "${_PT_NEEDS_BF16_INJECTION}" -eq 1 ]; then
+         if [ -f "${_CLANG_RT_BUILTINS}" ]; then
+            export LDFLAGS="${LDFLAGS:-} -Wl,--push-state,--whole-archive ${_CLANG_RT_BUILTINS} -Wl,--pop-state -Wl,--as-needed -lm -Wl,--no-as-needed"
+            echo "[bf16-builtins] PT ${PT_MAJOR_MINOR} >= 2.12 -- injecting compiler-rt builtins archive (--whole-archive) + -lm safety net into LDFLAGS:"
+            echo "                ${_CLANG_RT_BUILTINS}"
+         else
+            echo "WARNING: clang_rt.builtins-x86_64.a not found under" >&2
+            echo "         ${_CLANG_RT_GLOB}" >&2
+            echo "         PT 2.12+ may fail at 'import torch' with" >&2
+            echo "         ImportError: undefined symbol __truncsfbf2" >&2
+         fi
+      else
+         echo "[bf16-builtins] PT ${PT_MAJOR_MINOR} < 2.12 -- skipping compiler-rt builtins LDFLAGS injection"
+         echo "                (PT 2.10/2.11 do not emit unresolved __truncsfbf2; injection breaks CMake sanity check via fmaxl/logbl, see 9992/9993)"
+      fi
+      unset _CLANG_RT_GLOB _CLANG_RT_BUILTINS _PT_MAJOR _PT_MINOR _PT_NEEDS_BF16_INJECTION
 
       # ── Compiler selection: rely on system GCC (NOT amdclang) ─────────
       # We deliberately do NOT load the amdclang module for the build,
@@ -2897,6 +3336,67 @@ print('  torch.cuda.is_available() =', torch.cuda.is_available())
       # If torchvision later gains a build-required submodule, swap this
       # block back to git clone --recursive (and update the egg-detection
       # block below to handle the +sha suffix again).
+      #
+      # ── setuptools<81 pin (Bug 2 fix, applies to torchvision+torchaudio) ──
+      # setuptools 81 (released 2026-05) marked the `pkg_resources`
+      # package as removed-from-the-public-API; setuptools 82.0.1 dropped
+      # it from the wheel entirely (no more
+      # site-packages/pkg_resources/). torchvision and torchaudio's
+      # setup.py both call
+      #    from pkg_resources import DistributionNotFound, get_distribution, parse_version
+      # on the first executable line of setup.py (line 14 in
+      # vision-0.25.0 / audio-2.10.0). On the build venv that PT >= 2.10
+      # produces, the auto-upgraded setuptools is now 82.0.1, so
+      # setup.py crashes with `ModuleNotFoundError: No module named
+      # 'pkg_resources'` *before* a single source file compiles, and
+      # because the legacy invocation does not check rc the build
+      # script historically silently swallowed the failure (see rc-gate
+      # Bug 2b further down).
+      #
+      # Fix: downgrade setuptools in the active build venv to a version
+      # that still ships pkg_resources. setuptools 80.10.2 is the last
+      # release with the API intact and is the version chosen by the
+      # tier-1/tier-2 isolation tests on rocm-7.2.3 + PT 2.10.0
+      # (2026-05-18, .scratch_pin_test/tier{1,2}.log).
+      #
+      # Gating: only applied for PT major.minor >= 2.10. Older PT
+      # builds (2.7/2.8/2.9) were already passing because the build
+      # venv resolved to setuptools < 81 organically (PT's own
+      # requirements.txt-driven `python -m pip install -r ...` step
+      # produced a 65.x..80.x setuptools in those venvs). Keeping the
+      # gate is what makes this patch byte-stable for the
+      # already-passing PT 2.7-2.9 build matrix.
+      #
+      # The pin is applied here (just before torchvision) rather than
+      # before each setup.py call because the same build venv stays
+      # active through the torchaudio install that follows, so one
+      # pin covers both. If a future refactor splits these into
+      # separate venvs, move/duplicate the pin alongside the new venv
+      # activation.
+      PT_PIN_MAJOR=$(echo "${PYTORCH_VERSION}" | cut -d. -f1)
+      PT_PIN_MINOR=$(echo "${PYTORCH_VERSION}" | cut -d. -f2)
+      if [ "${PT_PIN_MAJOR}" -gt 2 ] || \
+         { [ "${PT_PIN_MAJOR}" -eq 2 ] && [ "${PT_PIN_MINOR}" -ge 10 ]; }; then
+         echo "[setuptools<81 pin] PT ${PYTORCH_VERSION} >= 2.10 -- pinning build-venv setuptools to restore pkg_resources for torchvision/torchaudio setup.py"
+         echo "[setuptools<81 pin]   before: setuptools=$(python3 -c 'import setuptools; print(setuptools.__version__)' 2>&1)"
+         pip3 install --upgrade --force-reinstall --no-deps 'setuptools<81' || {
+            echo "ERROR: failed to pin setuptools<81 in the PT-build venv."                      >&2
+            echo "ERROR: torchvision setup.py will crash on 'from pkg_resources import ...'."   >&2
+            echo "ERROR: investigate pip3 / network / venv writability before retrying."         >&2
+            exit 1
+         }
+         echo "[setuptools<81 pin]   after:  setuptools=$(python3 -c 'import setuptools; print(setuptools.__version__)' 2>&1) (must be < 81)"
+         if ! python3 -c 'from pkg_resources import DistributionNotFound, get_distribution, parse_version' 2>/dev/null; then
+            echo "ERROR: post-pin probe failed: 'from pkg_resources import ...' still does not import." >&2
+            echo "ERROR: the pinned setuptools either did not install or another setuptools is shadowing it on PYTHONPATH." >&2
+            python3 -c 'import sys; [print("  sys.path:", p) for p in sys.path]'                >&2
+            exit 1
+         fi
+         echo "[setuptools<81 pin]   probe:  pkg_resources import OK"
+      else
+         echo "[setuptools<81 pin] PT ${PYTORCH_VERSION} < 2.10 -- no pin needed (legacy setuptools path)."
+      fi
+
       TORCHVISION_TGZ="vision-${TORCHVISION_VERSION}.tar.gz"
       TORCHVISION_URL="https://github.com/pytorch/vision/archive/refs/tags/v${TORCHVISION_VERSION}.tar.gz"
       echo "Downloading torchvision v${TORCHVISION_VERSION} from ${TORCHVISION_URL}"
@@ -2910,6 +3410,24 @@ print('  torch.cuda.is_available() =', torch.cuda.is_available())
       cd "vision-${TORCHVISION_VERSION}"
       export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages:$PYTHONPATH
       python3 setup.py install --prefix=${TORCHVISION_PATH}
+      TORCHVISION_INSTALL_RC=$?
+      # rc gate (Bug 2b): historically this script ignored setup.py's
+      # exit status, so an early crash (e.g. setuptools-82.0.1
+      # `pkg_resources` ModuleNotFoundError in job 9875) produced an
+      # empty/partial ${TORCHVISION_PATH} tree but the build kept
+      # going, emitted a modulefile pointing at the missing tree, and
+      # failed only later at `import torchvision` time. Fail fast here
+      # so the operator sees the real first-failure log line.
+      if [ "${TORCHVISION_INSTALL_RC}" != "0" ]; then
+         echo "ERROR: torchvision setup.py install failed (rc=${TORCHVISION_INSTALL_RC})"      >&2
+         echo "ERROR:   src tree: $(pwd)"                                                       >&2
+         echo "ERROR:   prefix:   ${TORCHVISION_PATH}"                                          >&2
+         echo "ERROR:   PT:       ${PYTORCH_VERSION}    torchvision: ${TORCHVISION_VERSION}"    >&2
+         echo "ERROR:   inspect the log above for the first traceback (commonly: "             >&2
+         echo "ERROR:   'from pkg_resources import ...' -> setuptools<81 pin missing/broken,"  >&2
+         echo "ERROR:   or a torch ABI mismatch if a hipcc/cmake configure step failed)."      >&2
+         exit 1
+      fi
       cd ..
       # Detect the actual installed torchvision egg directory and capture
       # its basename for both the post-build PYTHONPATH and the
@@ -2965,6 +3483,24 @@ print('  torch.cuda.is_available() =', torch.cuda.is_available())
       cd "audio-${TORCHAUDIO_VERSION}"
       export PYTHONPATH=${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages:$PYTHONPATH
       python3 setup.py install --prefix=${TORCHAUDIO_PATH}
+      TORCHAUDIO_INSTALL_RC=$?
+      # rc gate (Bug 2b, twin of the torchvision rc gate above). Same
+      # rationale: the setuptools<81 pin block earlier in this branch
+      # covers the pkg_resources crash for both, but a different
+      # failure mode here (e.g. failed sox/lame/ffmpeg header probe,
+      # cmake error, etc.) would otherwise silently land in
+      # ${TORCHAUDIO_PATH}'s eggless tree and only surface at
+      # `import torchaudio` time.
+      if [ "${TORCHAUDIO_INSTALL_RC}" != "0" ]; then
+         echo "ERROR: torchaudio setup.py install failed (rc=${TORCHAUDIO_INSTALL_RC})"        >&2
+         echo "ERROR:   src tree: $(pwd)"                                                       >&2
+         echo "ERROR:   prefix:   ${TORCHAUDIO_PATH}"                                           >&2
+         echo "ERROR:   PT:       ${PYTORCH_VERSION}    torchaudio:  ${TORCHAUDIO_VERSION}"     >&2
+         echo "ERROR:   inspect the log above for the first traceback (commonly: "             >&2
+         echo "ERROR:   'from pkg_resources import ...' -> setuptools<81 pin missing/broken,"  >&2
+         echo "ERROR:   or missing sox/lame/ffmpeg dev headers reported by setup.py probe)."   >&2
+         exit 1
+      fi
       # Detect the actual installed torchaudio egg directory; same
       # pattern as torchvision above, see comment block there.
       TORCHAUDIO_EGG=$(ls -d "${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torchaudio-${TORCHAUDIO_VERSION}"*.egg 2>/dev/null | head -1)
@@ -3102,6 +3638,112 @@ fi
 PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
 ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
+# Companion package (torchvision / torchaudio / pillow) PYTHONPATH
+# emission for the modulefile: VERSION-AWARE.
+#
+# Bug fix (audit 2026-05-17): for PT >= 2.10 the wheel-based
+# torchvision/torchaudio install (pip3 install --target=...) and the
+# modern-setuptools source build (`setup.py install` with
+# setuptools >= ~60) both lay out the package FLAT under
+#   ${PKG}/lib/python3.X/site-packages/torchvision/      (+ .egg-info/)
+#   ${PKG}/lib/python3.X/site-packages/torchaudio/       (+ .egg-info/)
+# *not* as a `torchvision-X-py3.X-linux-x86_64.egg/` directory.
+#
+# The legacy heredoc unconditionally referenced a `.egg` path that
+# does not exist for those layouts -> the modulefile prepended a
+# bogus PYTHONPATH entry and `import torchvision` / `import torchaudio`
+# failed at module load time. PT 2.10.0 on rocmplus-{6.4.3,7.1.0,
+# 7.1.1,7.2.0,7.2.2} all reproduced this. PT <= 2.9 source builds
+# still produced real .egg dirs on the build hosts at the time and
+# were unaffected.
+#
+# Strategy:
+#   * PT >= 2.10  -> prepend the parent `site-packages/` directory
+#                    (which works for both flat and .egg layouts
+#                    because Python's importer treats either
+#                    `torchvision/__init__.py` or
+#                    `torchvision-*.egg/` as a child entry).
+#                    Also emit explicit .egg-path lines, but ONLY
+#                    when a real .egg exists on disk (defensive
+#                    belt-and-suspenders in case a future setuptools
+#                    pin restores egg emission).
+#   * PT <  2.10  -> emit the legacy 3 lines BYTE-IDENTICAL to the
+#                    pre-fix script, so re-runs against existing
+#                    2.7 / 2.8 / 2.9 cells regenerate the same
+#                    modulefile content.
+#
+# The bare `${TORCHAUDIO_PATH}` / `${TORCHVISION_PATH}` prepends
+# below (kept in the heredoc unchanged) cover the wheel-branch
+# layout where pip3 --target=DIR drops packages at DIR/ root.
+IS_PT_2_10_PLUS=0
+if [ "$(printf '%s\n' "${PYTORCH_VERSION}" "2.10.0" | sort -V | head -n1)" = "2.10.0" ]; then
+   IS_PT_2_10_PLUS=1
+fi
+_nl=$'\n'
+if [ "${IS_PT_2_10_PLUS}" = "1" ]; then
+   MODULE_COMPANION_PREPENDS="prepend_path(\"PYTHONPATH\",\"${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages\")"
+   MODULE_COMPANION_PREPENDS+="${_nl}prepend_path(\"PYTHONPATH\",\"${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages\")"
+   if [ -n "${TORCHAUDIO_EGG_NAME:-}" ] && [ -e "${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/${TORCHAUDIO_EGG_NAME}" ]; then
+      MODULE_COMPANION_PREPENDS+="${_nl}prepend_path(\"PYTHONPATH\",\"${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/${TORCHAUDIO_EGG_NAME}\")"
+   fi
+   if [ -n "${TORCHVISION_EGG_NAME:-}" ] && [ -e "${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/${TORCHVISION_EGG_NAME}" ]; then
+      MODULE_COMPANION_PREPENDS+="${_nl}prepend_path(\"PYTHONPATH\",\"${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/${TORCHVISION_EGG_NAME}\")"
+   fi
+   _pillow_egg_path="${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/pillow-${PILLOW_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg"
+   if [ -e "${_pillow_egg_path}" ]; then
+      MODULE_COMPANION_PREPENDS+="${_nl}prepend_path(\"PYTHONPATH\",\"${_pillow_egg_path}\")"
+   fi
+   unset _pillow_egg_path
+else
+   MODULE_COMPANION_PREPENDS="prepend_path(\"PYTHONPATH\",\"${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/${TORCHAUDIO_EGG_NAME:-torchaudio-${TORCHAUDIO_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg}\")"
+   MODULE_COMPANION_PREPENDS+="${_nl}prepend_path(\"PYTHONPATH\",\"${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/${TORCHVISION_EGG_NAME:-torchvision-${TORCHVISION_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg}\")"
+   MODULE_COMPANION_PREPENDS+="${_nl}prepend_path(\"PYTHONPATH\",\"${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/pillow-${PILLOW_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg\")"
+fi
+
+# ── flashattention modulefile-prepend (egg-vs-flat split, PT >= 2.10) ──
+# Twin of the MODULE_COMPANION_PREPENDS gating above, applied to
+# flashattention because flash_attn is the ONLY package built via
+# `setup.py install --prefix=...` (rather than `pip install --target=...`)
+# whose modulefile emission still hardcodes the egg-name path.
+#
+# Bug history: with PT 2.9.x, setuptools shipped by the build venv
+# laid flash_attn out under
+#   ${FLASHATTENTION_PATH}/lib/python3.X/site-packages/flash_attn-${VER}-py3.X-linux-x86_64.egg/
+# (a real .egg directory), so the legacy emit (line "prepend egg path"
+# below) worked. With PT 2.10+, the Bug-2 setuptools<81 pin (which is
+# still >= the modern-flat threshold of ~setuptools 65) makes
+# `setup.py install` produce a FLAT layout:
+#   ${FLASHATTENTION_PATH}/lib/python3.X/site-packages/flash_attn/
+#   ${FLASHATTENTION_PATH}/lib/python3.X/site-packages/flash_attn-${VER}-py3.X.egg-info/   (metadata, not .egg)
+#   ${FLASHATTENTION_PATH}/lib/python3.X/site-packages/flash_attn_2_cuda...so
+# The legacy egg-named prepend then DANGLES (the .egg/ directory does
+# not exist) and `import flash_attn` raises ModuleNotFoundError
+# because the parent site-packages was never on PYTHONPATH.
+# (HPCTrainingExamples ctest Pytorch_FlashAttention_Check_Import
+# reproduced this on rocmplus-7.2.3 + pytorch/2.10.0 on 2026-05-18.)
+#
+# Fix: for PT >= 2.10, emit the parent site-packages directory and
+# keep the .egg path only as a conditional fallback (matches the
+# torchvision/torchaudio pattern above). For PT < 2.10, leave the
+# legacy two-line emit byte-stable so the 2.7-2.9 modulefiles regenerate
+# identically.
+if [ "${IS_PT_2_10_PLUS}" = "1" ]; then
+   MODULE_FA_PREPENDS="prepend_path(\"PYTHONPATH\",\"${FLASHATTENTION_PATH}\")"
+   MODULE_FA_PREPENDS+="${_nl}prepend_path(\"PYTHONPATH\",\"${FLASHATTENTION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages\")"
+   _fa_egg_path="${FLASHATTENTION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/flash_attn-${FLASHATTENTION_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg"
+   if [ -e "${_fa_egg_path}" ]; then
+      MODULE_FA_PREPENDS+="${_nl}prepend_path(\"PYTHONPATH\",\"${_fa_egg_path}\")"
+   fi
+   unset _fa_egg_path
+else
+   MODULE_FA_PREPENDS="prepend_path(\"PYTHONPATH\",\"${FLASHATTENTION_PATH}\")"
+   MODULE_FA_PREPENDS+="${_nl}prepend_path(\"PYTHONPATH\",\"${FLASHATTENTION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/flash_attn-${FLASHATTENTION_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg\")"
+fi
+
+unset _nl
+echo "[modulefile-emit] IS_PT_2_10_PLUS=${IS_PT_2_10_PLUS}; companion prepends:"
+printf '  %s\n' "${MODULE_COMPANION_PREPENDS}" | sed 's/^/    /'
+
 # the - option suppresses tabs
 cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua
 	whatis("PyTorch version ${PYTORCH_VERSION} with ROCm Support${PYTORCH_INSTALL_SUFFIX:+ (variant: ${PYTORCH_INSTALL_SUFFIX#-})}")
@@ -3120,13 +3762,10 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INST
 	-- ImportError: libmagma.so: cannot open shared object file.
 	load("magma")
 	conflict("miniconda3")
-	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}")
-	prepend_path("PYTHONPATH","${FLASHATTENTION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/flash_attn-${FLASHATTENTION_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
+	${MODULE_FA_PREPENDS}
 	prepend_path("PYTHONPATH","${SAGEATTENTION_PATH}")
 	prepend_path("PYTHONPATH","${TRANSFORMERS_PATH}")
-	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/${TORCHAUDIO_EGG_NAME:-torchaudio-${TORCHAUDIO_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg}")
-	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/${TORCHVISION_EGG_NAME:-torchvision-${TORCHVISION_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg}")
-	prepend_path("PYTHONPATH","${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/pillow-${PILLOW_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg")
+	${MODULE_COMPANION_PREPENDS}
 	prepend_path("PYTHONPATH","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages")
 	prepend_path("PYTHONPATH","${PYTORCH_PATH}")
 	prepend_path("PYTHONPATH","${TORCHAUDIO_PATH}")

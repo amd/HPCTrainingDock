@@ -18,7 +18,14 @@ There are THREE buckets, emitted in this order:
 
 For each canonical package family it reports:
 
-  Y   installed (a directory matching the package's regex exists)
+  Y   installed (a single directory matching the package's regex exists)
+  <n> installed in multiple distinct directories on the SAME rocmplus
+      tree, e.g. `pytorch-v2.7.1/` next to `pytorch-v2.9.1/` -> cell
+      shows '2'. Replaces 'Y' whenever the install count is >= 2 so
+      the brief table surfaces multi-install columns at a glance;
+      `--versions` mode shows the actual version strings instead
+      (split across continuation rows in --text output, slash-joined
+      in markdown).
   N = NOT POSSIBLE to build on this SDK or a hard prereq is missing
       (`<pkg>.SKIPPED`): incomplete AFAR SDK (see other packages), or
       for ftorch a missing `pytorch` Lmod module on the rocmplus tree;
@@ -74,18 +81,28 @@ The marker file lives as a sibling of the install dir (i.e. directly
 under rocmplus-${VERSION}/), is named ${pkg}.SKIPPED or ${pkg}.BUNDLED,
 and contains a short human-readable explanation.
 
-With `--versions`, every cell that would have been `Y` is replaced by
-the installed version string parsed out of the install dir basename
-(e.g. `magma-v2.10.0` -> `2.10.0`, `openmpi-5.0.10-ucc-...` -> `5.0.10`).
-The `N` / `B` / `-` glyphs and the `amdclang` / `count Y` rows are
-unaffected. A handful of packages that install to a versionless dir
-(hipifly, tau, pdt, hip-python, ftorch, tensorflow) keep `Y` even
-under `--versions`. When two versions of the same package coexist in
-one rocmplus tree (e.g. `pytorch-v2.7.1/` next to `pytorch-v2.9.1/`),
-the cell becomes a slash-joined list in semver-ascending order:
-`2.7.1 / 2.9.1`. Markdown rendering with `--versions` auto-defaults to
-`--per-table 5` if the operator did not pass one explicitly, since
-version cells are wider than glyph cells.
+With `--versions`, every cell that would have been `Y` (or a multi-
+install count like `2`) is replaced by the installed version string
+parsed out of the install dir basename (e.g. `magma-v2.10.0` ->
+`2.10.0`, `openmpi-5.0.10-ucc-...` -> `5.0.10`). The `N` / `B` / `-`
+glyphs and the `amdclang` / `count Y` rows are unaffected. A handful
+of packages that install to a versionless dir (hipifly, tau, pdt,
+hip-python, ftorch, tensorflow) keep `Y` even under `--versions`.
+
+When two versions of the same package coexist in one rocmplus tree
+(e.g. `pytorch-v2.7.1/` next to `pytorch-v2.9.1/`), the rendering
+depends on the output mode:
+
+  - --text (both --versions and --install-provenance): the row spills
+    onto a continuation line right below the package row. The package
+    label is repeated, the multi-install column shows the next entry
+    (e.g. `2.9.1`), and every other column on that continuation line
+    is blank. Columns with a single install render unchanged.
+  - markdown (default): the cell stays a single table cell and joins
+    the entries with ` / ` in semver-ascending order, e.g.
+    `2.7.1 / 2.9.1`. Markdown rendering with `--versions` auto-
+    defaults to `--per-table 5` if the operator did not pass one
+    explicitly, since version cells are wider than glyph cells.
 
 Usage:
   python3 bare_system/inventory_packages.py
@@ -205,6 +222,22 @@ def version_sort_key(v):
         try: key.append((0, int(p)))
         except ValueError: key.append((1, p))
     return (bucket, key)
+
+
+def rc_version_sort_key(v):
+    """Sort RC trees (therock-*, afar-*) by their numeric body only,
+    ignoring the family prefix, so columns in the RC table read
+    lowest-to-highest left-to-right regardless of family:
+      afar-7.1.0 < afar-7.2.0 < therock-7.12.0 < therock-7.13.0.
+    """
+    if v.startswith("therock-"): body = v[len("therock-"):]
+    elif v.startswith("afar-"):  body = v[len("afar-"):]
+    else:                        body = v
+    key = []
+    for p in re.split(r"\.", body):
+        try: key.append((0, int(p)))
+        except ValueError: key.append((1, p))
+    return key
 
 
 def list_pkgs(root, version):
@@ -397,31 +430,42 @@ def _sdk_suffix_for_rocmplus(roots, version):
 
 
 def presence(roots, version, pkg, regex):
-    """Return one of 'Y', 'N', 'B', '-' for the (version, pkg) cell.
+    """Return one of 'Y', '<count>', 'N', 'B', '-' for the (version, pkg) cell.
 
-    Order: install dir wins (Y), then SKIPPED marker (N = Not possible
-    to build), then BUNDLED marker (B), then absent (-). If both an
-    install dir AND a marker are present (transition state during a
-    re-run), Y wins because the install is what actually loads.
+    Order: install dir wins (Y / count), then SKIPPED marker (N = Not
+    possible to build), then BUNDLED marker (B), then absent (-). If
+    both an install dir AND a marker are present (transition state
+    during a re-run), the install wins because that is what actually
+    loads.
+
+    When MORE THAN ONE matching install dir is present for the same
+    (version, pkg) -- e.g. `pytorch-v2.7.1/` next to `pytorch-v2.9.1/`
+    in the same rocmplus tree -- the cell returns the distinct-install
+    count as a decimal string (e.g. '2', '3') so the brief presence
+    table surfaces multi-install columns at a glance without widening
+    to version strings. A single install still returns 'Y' for byte-
+    compatibility with prior brief output.
 
     The on-disk marker file is named <pkg>.SKIPPED (kept for filename
     consistency with the setup-script writers); the displayed glyph is
     'N' to make it visually distinct from '-' (truly absent / unknown).
     """
     rgx = re.compile(regex)
-    has_install = False
+    matched = set()
     has_notbuildable = False
     has_bundled = False
     for r in roots:
         entries = list_pkgs(r, version)
-        if any(rgx.match(b) for b in entries):
-            has_install = True
+        for b in entries:
+            if rgx.match(b):
+                matched.add(b)
         # markers are flat files at the rocmplus root
         if (pkg + ".SKIPPED") in entries:
             has_notbuildable = True
         if (pkg + ".BUNDLED") in entries:
             has_bundled = True
-    if has_install: return "Y"
+    if matched:
+        return "Y" if len(matched) == 1 else str(len(matched))
     if has_notbuildable: return "N"
     if has_bundled: return "B"
     return "-"
@@ -444,20 +488,22 @@ def _pkg_version_sort_key(s):
 
 
 def presence_with_version(roots, version, pkg, presence_regex, version_regex):
-    """Like presence(), but on a Y hit returns the installed version string.
+    """Like presence(), but on a Y hit returns the installed version string(s).
 
-    Returns:
-      - 'X.Y.Z'                 -- single matching install, version_regex captured
-      - 'X.Y.Z / X.Y.W'         -- two or more matching installs (e.g. pytorch-v2.7.1
-                                   AND pytorch-v2.9.1 coexisting); slash-joined in
-                                   semver-ascending order via _pkg_version_sort_key
-      - 'Y'                     -- install present but version_regex is None
-                                   (versionless dirs: hipifly, tau, pdt, hip-python,
-                                   ftorch, tensorflow) OR version_regex didn't
-                                   capture against any matching basename
-      - 'N' / 'B' / '-'         -- same semantics as presence(): SKIPPED marker /
-                                   BUNDLED marker / absent. Cells unaffected by
-                                   --versions mode.
+    Always returns a non-empty `list[str]`; renderers decide whether to
+    slash-join (markdown) or render one entry per line (text):
+
+      - ['X.Y.Z']                 -- single matching install, version_regex captured
+      - ['X.Y.Z', 'X.Y.W']        -- two or more matching installs (e.g.
+                                     pytorch-v2.7.1 AND pytorch-v2.9.1 coexisting);
+                                     semver-ascending order via _pkg_version_sort_key
+      - ['Y']                     -- install present but version_regex is None
+                                     (versionless dirs: hipifly, tau, pdt, hip-python,
+                                     ftorch, tensorflow) OR version_regex didn't
+                                     capture against any matching basename
+      - ['N'] / ['B'] / ['-']     -- same semantics as presence(): SKIPPED marker /
+                                     BUNDLED marker / absent. Cells unaffected by
+                                     --versions mode.
     """
     pres_rgx = re.compile(presence_regex)
     ver_rgx = re.compile(version_regex) if version_regex else None
@@ -475,7 +521,7 @@ def presence_with_version(roots, version, pkg, presence_regex, version_regex):
             has_bundled = True
     if matched_basenames:
         if ver_rgx is None:
-            return "Y"
+            return ["Y"]
         captured = []
         for b in matched_basenames:
             m = ver_rgx.match(b)
@@ -485,20 +531,39 @@ def presence_with_version(roots, version, pkg, presence_regex, version_regex):
             # Install dir matched the presence regex but no version was
             # extractable -- treat like the versionless case so the cell
             # still says "installed".
-            return "Y"
+            return ["Y"]
         # Deduplicate while preserving sort order.
-        unique_sorted = sorted(set(captured), key=_pkg_version_sort_key)
-        return " / ".join(unique_sorted)
-    if has_notbuildable: return "N"
-    if has_bundled: return "B"
-    return "-"
+        return sorted(set(captured), key=_pkg_version_sort_key)
+    if has_notbuildable: return ["N"]
+    if has_bundled: return ["B"]
+    return ["-"]
 
 
 def _cell_is_installed(cell):
-    """True iff `cell` represents a successful install (Y or any version
-    string under --versions mode). Used by `count Y` to count both glyph
-    and version cells uniformly."""
+    """True iff `cell` represents a successful install.
+
+    Accepts either a scalar (brief-mode `presence()` result -- 'Y',
+    a numeric count string like '2', or one of '-'/'N'/'B'), or a
+    `list[str]` (versions-mode `presence_with_version()` result and
+    provenance scan_cache values, where any non-{'-','N','B'} first
+    entry counts as installed). Used by `count Y` to count both glyph
+    and version cells uniformly.
+    """
+    if isinstance(cell, list):
+        if not cell:
+            return False
+        return cell[0] not in {"-", "N", "B"}
     return cell not in {"-", "N", "B"}
+
+
+def _join_cell(cell):
+    """Slash-join a list cell for renderers that emit one line per cell
+    (markdown tables, brief text rendering). Scalar cells pass through
+    unchanged so brief-mode call sites can keep using the same code path.
+    """
+    if isinstance(cell, list):
+        return " / ".join(cell)
+    return cell
 
 
 def collect_marker_reasons(roots, versions):
@@ -570,7 +635,12 @@ def _render_one_md_table(title, versions, roots, versions_mode=False):
                  for v in versions]
         rows.append((pkg, cells))
     for pkg, cells in rows:
-        print("| " + " | ".join([pkg] + cells) + " |")
+        # Cells from _cell_for() under versions_mode are lists (one entry
+        # per matched install); markdown collapses them back to a single
+        # cell with the historical ' / ' join so the table stays one row
+        # per package. Brief-mode scalar cells pass through unchanged.
+        joined = [_join_cell(c) for c in cells]
+        print("| " + " | ".join([pkg] + joined) + " |")
     # AMD clang / LLVM version row -- metadata, not a package presence cell.
     # Placed below the package rows and above 'count Y' so it sits with
     # the other column-summary content.
@@ -620,15 +690,23 @@ def render_text_table(title, versions, roots, versions_mode=False):
     cleanly at the terminal edge instead of being squashed.
 
     Under versions_mode=True the per-column width grows to fit the
-    widest cell in that column (version strings can run 6-16 chars,
-    e.g. '13.6.0' single, '13.6.0 / 14.0.0' multi), so the table stays
-    aligned without truncation.
+    widest cell in that column (single version string, never a slash
+    join). Multi-install cells -- e.g. pytorch-v2.7.1 and pytorch-v2.9.1
+    in the same rocmplus tree -- spill onto a continuation row right
+    below the package row: the package label is repeated, the multi-
+    install column shows the next install, and every other column is
+    blank on that line. The number of continuation rows for a package
+    row is `max(len(cell_list)) - 1` over its columns; rows with no
+    multi-install columns emit exactly one line as before.
     """
     pkg_col = max(len("package"), max(len(p) for p, _, _ in PKG_LIST),
                   len("count Y"), len("amdclang"), len("rocm_patches"))
 
     # Pre-compute every cell so we can both size columns AND emit rows
-    # without walking the filesystem twice.
+    # without walking the filesystem twice.  In versions_mode, cells are
+    # `list[str]` (one entry per matched install); in brief mode they
+    # are scalar strings from presence().  We normalize to lists below
+    # so column-width and row-emit logic is uniform.
     package_rows = []
     for pkg, pres_regex, ver_regex in PKG_LIST:
         cells = [_cell_for(roots, v, pkg, pres_regex, ver_regex, versions_mode)
@@ -640,18 +718,23 @@ def render_text_table(title, versions, roots, versions_mode=False):
                            if _cell_is_installed(cells[ci])))
                    for ci in range(len(versions))]
 
-    # Per-column width: max(header, all package cells, metadata cells,
-    # count cell). Unconditional lower bound of 6 (matches the
-    # pre-versions behavior) so brief-mode output stays byte-identical
-    # -- brief cells are 1 char and short headers like '7.0.0' (5
-    # chars) would otherwise shrink the column below 6 and change
-    # alignment vs prior runs. versions_mode can still grow columns
-    # above 6 freely to fit '13.6.0 / 14.0.0'-class strings.
+    def _as_list(c):
+        return c if isinstance(c, list) else [c]
+
+    # Per-column width: max(header, every install entry across all
+    # package cells, metadata cells, count cell).  Unconditional lower
+    # bound of 6 (matches the pre-versions behavior) so brief-mode
+    # output stays byte-identical -- brief cells are 1 char and short
+    # headers like '7.0.0' (5 chars) would otherwise shrink the column
+    # below 6 and change alignment vs prior runs.  versions_mode can
+    # still grow columns above 6 freely to fit the widest install
+    # string per column (e.g. '13.6.0', '2.10.0').
     col_widths = []
     for ci, v in enumerate(versions):
         w = max(len(v), 6)
         for _, cells in package_rows:
-            w = max(w, len(cells[ci]))
+            for entry in _as_list(cells[ci]):
+                w = max(w, len(entry))
         w = max(w, len(clang_cells[ci]), len(rp_cells[ci]),
                 len(count_cells[ci]))
         col_widths.append(w)
@@ -663,12 +746,23 @@ def render_text_table(title, versions, roots, versions_mode=False):
             parts.append(str(c).ljust(w))
         print(sep.join(parts).rstrip())
 
+    def emit_pkg_row(label, cells):
+        """Emit a package row, spilling multi-install cells across
+        continuation rows. The label is repeated on every continuation
+        row; columns whose install list is shorter than max_rows render
+        as blank on the continuation rows."""
+        as_lists = [_as_list(c) for c in cells]
+        max_rows = max(len(c) for c in as_lists) if as_lists else 1
+        for r in range(max_rows):
+            row_cells = [(cl[r] if r < len(cl) else "") for cl in as_lists]
+            emit_row(label, row_cells)
+
     print(f"=== {title} ===")
     emit_row("package", versions)
     # underline row matching the column widths
     emit_row("-" * pkg_col, ["-" * w for w in col_widths])
     for pkg, cells in package_rows:
-        emit_row(pkg, cells)
+        emit_pkg_row(pkg, cells)
     # Metadata rows (not Y/N package cells): clang ships with the SDK;
     # rocm_patches is the vendored overlay tree applied on top of the SDK.
     emit_row("amdclang", clang_cells)
@@ -894,7 +988,10 @@ _DIRTY_GLYPH = {"clean": "C", "dirty": "D", "unknown": "?"}
 
 def _format_provenance_cell(entries, pkg, repo=None,
                             with_dates=False, time_too=False):
-    """Render scan output for one cell. Empty list -> 'unknown'.
+    """Render scan output for one cell. Empty list -> ['unknown'].
+
+    Always returns a non-empty `list[str]`; renderers decide whether to
+    slash-join (markdown) or render one entry per line (text).
 
     Each (script, hash, dirty) entry renders as `<payload> <C|D|?>` where
     `<payload>` is `<hash6>` by default, or `YYYY-MM-DD` (resp.
@@ -903,11 +1000,11 @@ def _format_provenance_cell(entries, pkg, repo=None,
     shown only when the script's short name (after stripping a trailing
     `_setup.sh`) differs from the row's `pkg` (e.g. magma_setup.sh
     writes openblas's modulefile -> 'magma@<payload> C'). Multiple
-    distinct entries are slash-joined, mirroring the multi-version
-    cell format under --versions in the main matrix.
+    distinct entries become multiple list elements, mirroring the
+    multi-version cell format under --versions in the main matrix.
     """
     if not entries:
-        return "unknown"
+        return ["unknown"]
     parts = []
     for script, h, dirty in entries:
         s = script
@@ -924,7 +1021,7 @@ def _format_provenance_cell(entries, pkg, repo=None,
             parts.append(f"{payload} {d_short}")
         else:
             parts.append(f"{s}@{payload} {d_short}")
-    return " / ".join(parts)
+    return parts
 
 
 def collect_provenance(module_path, versions, repo=None,
@@ -1015,13 +1112,26 @@ def _scan_built_by_in_file(lua_path, script_filter=None):
 
 
 def _provenance_cell(module_path, version, pkg, scan_cache):
+    """Look up a (version, pkg) entry in scan_cache. Missing entries fall
+    back to ['-'] (list shape mirrors what `_format_provenance_cell`
+    returns), so callers can uniformly treat the result as `list[str]`.
+    """
     key = (version, pkg)
     if key in scan_cache:
         return scan_cache[key]
-    return "-"
+    return ["-"]
 
 
 def render_provenance_text(title, versions, module_path, scan_cache):
+    """Fixed-width plain-text rendering of the provenance matrix.
+
+    Cells in scan_cache are `list[str]` (one entry per matching
+    `Built by:` writer in the modulefile). Multi-install cells spill
+    onto continuation rows below the package row: the package label is
+    repeated, the multi-install column shows the next entry, and every
+    other column is blank on that line. Column widths fit the widest
+    install entry per column.
+    """
     print(f"=== {title} ===")
     pkg_col = max(len("package"), max(len(p) for p, _, _ in PKG_LIST),
                   len("rocm_patches"))
@@ -1032,12 +1142,18 @@ def render_provenance_text(title, versions, module_path, scan_cache):
         cell_rows.append((pkg, cells))
     rp_cells = [_provenance_cell(module_path, v, "rocm_patches", scan_cache)
                 for v in versions]
+
+    def _as_list(c):
+        return c if isinstance(c, list) else [c]
+
     col_widths = []
     for ci, v in enumerate(versions):
         w = max(len(v), 6)
         for _, cells in cell_rows:
-            w = max(w, len(cells[ci]))
-        w = max(w, len(rp_cells[ci]))
+            for entry in _as_list(cells[ci]):
+                w = max(w, len(entry))
+        for entry in _as_list(rp_cells[ci]):
+            w = max(w, len(entry))
         col_widths.append(w)
     sep = "  "
 
@@ -1047,11 +1163,18 @@ def render_provenance_text(title, versions, module_path, scan_cache):
             parts.append(str(c).ljust(w))
         print(sep.join(parts).rstrip())
 
+    def emit_pkg_row(label, cells):
+        as_lists = [_as_list(c) for c in cells]
+        max_rows = max(len(c) for c in as_lists) if as_lists else 1
+        for r in range(max_rows):
+            row_cells = [(cl[r] if r < len(cl) else "") for cl in as_lists]
+            emit(label, row_cells)
+
     emit("package", list(versions))
     emit("-" * pkg_col, ["-" * w for w in col_widths])
     for pkg, cells in cell_rows:
-        emit(pkg, cells)
-    emit("rocm_patches", rp_cells)
+        emit_pkg_row(pkg, cells)
+    emit_pkg_row("rocm_patches", rp_cells)
     print()
 
 
@@ -1060,14 +1183,18 @@ def _render_provenance_md_one(title, versions, module_path, scan_cache):
     header = ["package"] + list(versions)
     print("| " + " | ".join(header) + " |")
     print("|" + "|".join(["---"] * len(header)) + "|")
+    # scan_cache values are list[str] (one entry per matching Built-by
+    # writer); markdown collapses them back to a single cell with the
+    # historical ' / ' join so the table stays one row per package.
     for pkg, _pres, _ver in PKG_LIST:
-        cells = [_provenance_cell(module_path, v, pkg, scan_cache)
+        cells = [_join_cell(_provenance_cell(module_path, v, pkg, scan_cache))
                  for v in versions]
         print("| " + " | ".join([pkg] + cells) + " |")
     # rocm_patches metadata row: same cache as the PKG_LIST rows; the
     # cache is populated from base/rocm/<v>.lua's `Built by:
     # rocm_patches.sh@...` whatis line (see collect_provenance).
-    rp_cells = [_provenance_cell(module_path, v, "rocm_patches", scan_cache)
+    rp_cells = [_join_cell(_provenance_cell(module_path, v, "rocm_patches",
+                                            scan_cache))
                 for v in versions]
     print("| " + " | ".join(["**rocm_patches**"] + rp_cells) + " |")
     print()
@@ -1107,14 +1234,16 @@ def main():
              "If --versions is on and --per-table is left at 0, defaults "
              "to 5 since version cells are wider than glyph cells.")
     ap.add_argument("--versions", action="store_true",
-        help="replace 'Y' cells with the installed version string parsed "
-             "out of the install dir basename (e.g. magma -> '2.10.0', "
-             "openmpi -> '5.0.10'). Versionless dirs (hipifly, tau, pdt, "
-             "hip-python, ftorch, tensorflow) keep 'Y'. When two versions "
-             "of one package coexist in the same rocmplus tree, cells "
-             "render slash-joined in semver-ascending order, e.g. "
-             "'2.7.1 / 2.9.1'. 'N'/'B'/'-' glyphs and the amdclang / "
-             "count Y rows are unchanged.")
+        help="replace 'Y' (or a multi-install count like '2') cells with "
+             "the installed version string parsed out of the install dir "
+             "basename (e.g. magma -> '2.10.0', openmpi -> '5.0.10'). "
+             "Versionless dirs (hipifly, tau, pdt, hip-python, ftorch, "
+             "tensorflow) keep 'Y'. When two or more versions of one "
+             "package coexist in the same rocmplus tree, --text spills "
+             "the row onto continuation lines (label repeated, blanks "
+             "in other columns), while markdown joins them with ' / ' "
+             "in semver-ascending order ('2.7.1 / 2.9.1'). 'N'/'B'/'-' "
+             "glyphs and the amdclang / count Y rows are unchanged.")
     ap.add_argument("--install-provenance", action="store_true",
         help="emit ONLY the install-script provenance matrix (no Y/N/B/-, "
              "no amdclang, no count Y, no reasons). Cells contain "
@@ -1173,8 +1302,9 @@ def main():
 
     v6 = [v for v in all_versions if v.startswith("6.")]
     v7 = [v for v in all_versions if v.startswith("7.")]
-    vrc = [v for v in all_versions
-           if v.startswith("therock-") or v.startswith("afar-")]
+    vrc = sorted([v for v in all_versions
+                  if v.startswith("therock-") or v.startswith("afar-")],
+                 key=rc_version_sort_key)
 
     # ── --install-provenance: provenance-only output (exclusive) ────
     if args.install_provenance:
@@ -1277,11 +1407,16 @@ def main():
 
     versions_note_text = (
         "  Y cells replaced by version string under --versions (versionless "
-        "pkgs stay Y; multi-install slash-joined ascending)." if args.versions else "")
+        "pkgs stay Y; multi-install cells spill onto continuation lines "
+        "with the label repeated and other columns blank)." if args.versions
+        else "  Multi-install cells show the install count (e.g. '2') "
+        "instead of 'Y'.")
     versions_note_md = (
         " With `--versions`, **Y** cells are replaced by the installed version "
         "string (versionless pkgs stay **Y**; multi-install cells slash-joined "
-        "in semver order)." if args.versions else "")
+        "in semver order)." if args.versions
+        else " Multi-install cells show the install count (e.g. **`2`**) "
+        "instead of **Y**.")
 
     if args.text:
         print(f"Sources: {', '.join(args.roots)}")
@@ -1289,7 +1424,7 @@ def main():
         print("Legend: Y = installed,  "
               "N = NOT POSSIBLE to build on this SDK (see <pkg>.SKIPPED marker),  "
               "B = BUNDLED in the ROCm SDK (see <pkg>.BUNDLED marker),  "
-              "- = absent / missing (no install, no marker)" + versions_note_text)
+              "- = absent / missing (no install, no marker)." + versions_note_text)
         print()
         if v7:  render_text_table("ROCm 7.x.x", v7, args.roots,
                                   versions_mode=args.versions)
