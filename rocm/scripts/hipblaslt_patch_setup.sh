@@ -266,6 +266,17 @@ DAT_PREFIXES = {
     "HH": "TensileLibrary_HH_HH_HA_Bias_SAV_UA_Type_HH_HPA_Contraction_l_",
     "SS": "TensileLibrary_SS_SS_HA_Bias_SAV_UA_Type_SS_Contraction_l_",
 }
+# bf16 / fp64 intentionally not patched on gfx942 (see SLURM job 10089):
+#   bf16  -- forward Linear lands in Ailk_Bljk (tA=N tB=N), a different
+#            .dat than fp16/fp32, AND the BB_BB catalogue ships ZERO
+#            WGMXCC=1 (SPX-tuned) kernels. The only candidates are
+#            WGMXCC=8 (MI300X-tuned); routing to one of those is not
+#            obviously better than the upstream fallback on a 228-CU
+#            SPX device, so we defer until a wallclock A/B says so.
+#   fp64  -- no _HA_Bias_*_DD_*_Contraction_*_gfx942.dat exists in any
+#            rocm-7.x release; nn.Linear(fp64) reaches hipBLASLt zero
+#            times (algo_get_heuristic calls captured = 0), so there
+#            is no equality-table to overlay.
 
 # (dtype_tag, basename-suffix, M, N, B, K): SPX heuristic-table rows
 # to patch.
