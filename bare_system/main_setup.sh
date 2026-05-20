@@ -113,6 +113,13 @@ SITE_CLI=0
 : ${BUILD_ROCPROF_COMPUTE:="1"}
 : ${BUILD_HIPIFLY:="1"}
 : ${PACKAGES_INPUT:=""}      # comma- or space-separated whitelist; empty = all (subject to other flags)
+# PnetCDF version (build-time dep of netcdf, also a first-class
+# versioned rocmplus module after 2026-05-20). Empty = leaf default
+# (netcdf_setup.sh's PNETCDF_VERSION). When non-empty, forwarded to the
+# netcdf run_and_log line below as --pnetcdf-version. Sweep-CLI knob
+# is run_rocmplus_install_sweep.sh:--pnetcdf-version (threaded via the
+# sbatch as the PNETCDF_VERSION env var, picked up here).
+: ${PNETCDF_VERSION:=""}
 : ${PYTHON_VERSION:="12"} # python3 minor release
 : ${USE_MAKEFILE:="0"}
 : ${QUICK_INSTALLS:="0"}     # 1 = skip packages whose wall is >= 20 min (see QUICK_INSTALLS_PKGS below)
@@ -194,6 +201,7 @@ usage()
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
    echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, likwid, mdb, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, hpctoolkit, likwid, mdb, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Currently supported only for pytorch; keys are aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build."
    echo "  --rocm-rc-prefix [ FAMILY ]:  release-candidate family name (e.g. 'therock', 'afar'). Auto-detected from \${ROCM_PATH} basename for rocm-{therock,afar}-* trees. Empty for regular releases. When non-empty, install/module dirs become rocmplus-\${FAMILY}-\${ROCM_VERSION}/ instead of rocmplus-\${ROCM_VERSION}/. Default: auto-detected (empty for regular releases)."
+   echo "  --pnetcdf-version [ PNETCDF_VERSION ]:  PnetCDF version threaded through to extras/scripts/netcdf_setup.sh --pnetcdf-version. Empty (default) -> leaf script's internal default. Install lands at rocmplus-<v>/pnetcdf-v\$PNETCDF_VERSION/ with a pnetcdf/\$PNETCDF_VERSION modulefile."
    echo "  --help: prints this message"
    exit 1
 }
@@ -290,6 +298,11 @@ do
       "--packages")
           shift
           PACKAGES_INPUT=${1}
+          reset-last
+          ;;
+      "--pnetcdf-version")
+          shift
+          PNETCDF_VERSION=${1}
           reset-last
           ;;
       "--rocm-rc-prefix")
@@ -1771,7 +1784,8 @@ run_and_log_versioned hdf5 extras/scripts/hdf5_setup.sh ${COMMON_OPTIONS} --buil
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/hdf5)
 
 run_and_log_versioned netcdf extras/scripts/netcdf_setup.sh ${COMMON_OPTIONS} --build-netcdf ${BUILD_NETCDF} ${REPLACE_OPTS} \
-   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${ROCMPLUS} --netcdf-c-module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/netcdf-c --netcdf-f-module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/netcdf-fortran")
+   $([ -n "${PNETCDF_VERSION}" ] && echo "--pnetcdf-version ${PNETCDF_VERSION}") \
+   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${ROCMPLUS} --netcdf-c-module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/netcdf-c --netcdf-f-module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/netcdf-fortran --pnetcdf-module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/pnetcdf")
 
 run_and_log_versioned fftw extras/scripts/fftw_setup.sh ${COMMON_OPTIONS} --build-fftw ${BUILD_FFTW} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/fftw)

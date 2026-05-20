@@ -83,6 +83,11 @@ QUICK_INSTALLS="${QUICK_INSTALLS:-0}"
 REPLACE_EXISTING="${REPLACE_EXISTING:-0}"
 KEEP_FAILED_INSTALLS="${KEEP_FAILED_INSTALLS:-0}"
 PACKAGES_LIST="${PACKAGES_LIST:-}"
+# PnetCDF version pass-through (2026-05-20). Empty = leaf default;
+# non-empty -> forwarded to main_setup.sh --pnetcdf-version, which
+# threads it to extras/scripts/netcdf_setup.sh. Same shape as the
+# optional SITE / ROCM_PATH pass-throughs below.
+PNETCDF_VERSION="${PNETCDF_VERSION:-}"
 
 # Auto-detect python minor version from the compute node's distro when the
 # caller did not pin one. Ubuntu 22.04 ships /usr/bin/python3.10 by default;
@@ -124,6 +129,7 @@ echo " QUICK_INSTALLS:   ${QUICK_INSTALLS}"
 echo " REPLACE_EXISTING: ${REPLACE_EXISTING}"
 echo " KEEP_FAILED:      ${KEEP_FAILED_INSTALLS}"
 echo " PACKAGES_LIST:    ${PACKAGES_LIST:-<all>}"
+echo " PNETCDF_VERSION:  ${PNETCDF_VERSION:-<leaf default>}"
 echo "=================================================================="
 
 # ── 1. Ensure /nfsapps is writable on this compute node ──────────────
@@ -329,12 +335,15 @@ if [[ -n "${PACKAGES_LIST}" ]]; then
    PACKAGES_ARGS=( --packages "${PACKAGES_LIST}" )
 fi
 
-# --site / --rocm-path are optional pass-throughs (forwarded only when
-# the operator set them at sweep submission time). Omitted args let
-# main_setup.sh's auto-derivation rungs fire on the compute node.
+# --site / --rocm-path / --pnetcdf-version are optional pass-throughs
+# (forwarded only when the operator set them at sweep submission time).
+# Omitted args let main_setup.sh's auto-derivation rungs (or, for
+# --pnetcdf-version, the netcdf leaf's internal default) fire on the
+# compute node.
 SITE_ARGS=()
-[[ -n "${SITE}"      ]] && SITE_ARGS+=( --site      "${SITE}"      )
-[[ -n "${ROCM_PATH}" ]] && SITE_ARGS+=( --rocm-path "${ROCM_PATH}" )
+[[ -n "${SITE}"            ]] && SITE_ARGS+=( --site            "${SITE}"            )
+[[ -n "${ROCM_PATH}"       ]] && SITE_ARGS+=( --rocm-path       "${ROCM_PATH}"       )
+[[ -n "${PNETCDF_VERSION}" ]] && SITE_ARGS+=( --pnetcdf-version "${PNETCDF_VERSION}" )
 
 bare_system/main_setup.sh \
    --rocm-version         "${ROCM_NUMERIC}" \

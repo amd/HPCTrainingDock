@@ -49,6 +49,7 @@ preflight_modules() {
 # Variables controlling setup process
 NETCDF_C_MODULE_PATH=/etc/lmod/modules/ROCmPlus/netcdf-c
 NETCDF_F_MODULE_PATH=/etc/lmod/modules/ROCmPlus/netcdf-fortran
+PNETCDF_MODULE_PATH=/etc/lmod/modules/ROCmPlus/pnetcdf
 BUILD_NETCDF=0
 ROCM_VERSION=6.2.0
 ROCM_MODULE="rocm"
@@ -68,11 +69,29 @@ NETCDF_C_VERSION="4.9.3"
 NETCDF_F_VERSION=""
 NETCDF_F_VERSION_INPUT=""
 NETCDF_F_VERSION_FALLBACK="4.6.2"
+# PnetCDF version (build-time dep, also installed as its own first-class
+# rocmplus module after the 2026-05-20 versioning migration). Default is
+# the latest stable upstream release. Operator override via
+# --pnetcdf-version; main_setup.sh threads it through from the sweep CLI
+# (--pnetcdf-version on run_rocmplus_install_sweep.sh).
+PNETCDF_VERSION="1.14.1"
 # C->F compatibility map. Update when netcdf-fortran releases catch up.
 # netcdf-fortran tracks netcdf-c slowly, so most C bumps share an F.
 declare -A NETCDF_C_TO_F=(
    [4.9.3]="4.6.2"
    [4.10.0]="4.6.2"
+)
+# C->HDF5-module compatibility map. The preflight uses this to pick the
+# correct hdf5 modulefile when multiple coexist on the tree (e.g.
+# rocmplus-7.2.3 has both hdf5/1.14.6 and hdf5/2.1.1 after the
+# 2026-05-20 hdf5 2.x rollout). Empty string = bare `hdf5` module (let
+# Lmod default-resolution pick; preserved for legacy 4.9.3 builds where
+# 1.14.x was the only hdf5 available at original build time).
+# netcdf-c 4.10.0 added HDF5 2.x compat (PR #3237); it should NOT be
+# built against 1.14.x (configure aborts on missing 2.x APIs).
+declare -A NETCDF_C_TO_HDF5=(
+   [4.9.3]=""
+   [4.10.0]="2.1.1"
 )
 HDF5_MODULE="hdf5"
 # netcdf depends on hdf5, which itself depends on openmpi. Without
@@ -133,11 +152,13 @@ usage()
    echo "  --rocm-module [ ROCM_MODULE ] default $ROCM_MODULE"
    echo "  --netcdf-c-version [ NETCDF_C_VERSION ] default $NETCDF_C_VERSION"
    echo "  --netcdf-f-version [ NETCDF_F_VERSION ] auto-derived from NETCDF_C_VERSION via NETCDF_C_TO_F map; pass explicitly to override (fallback: $NETCDF_F_VERSION_FALLBACK)"
+   echo "  --pnetcdf-version  [ PNETCDF_VERSION ] default $PNETCDF_VERSION; install lands at <base>/pnetcdf-v\$PNETCDF_VERSION and emits a pnetcdf/\$PNETCDF_VERSION modulefile"
    echo "  --netcdf-c-module-path [ NETCDF_C_MODULE_PATH ] default $NETCDF_C_MODULE_PATH"
    echo "  --netcdf-f-module-path [ NETCDF_F_MODULE_PATH ] default $NETCDF_F_MODULE_PATH"
+   echo "  --pnetcdf-module-path  [ PNETCDF_MODULE_PATH ] default $PNETCDF_MODULE_PATH"
    echo "  --hdf5-module [ HDF5_MODULE ] default $HDF5_MODULE"
    echo "  --mpi-module [ MPI_MODULE ] default $MPI_MODULE"
-   echo "  --install-path [ NETCDF_INSTALL_BASE ] BASE dir; netcdf-c lands in <base>/netcdf-c-v\$NETCDF_C_VERSION, netcdf-fortran in <base>/netcdf-fortran-v\$NETCDF_F_VERSION, pnetcdf in <base>/pnetcdf; default $NETCDF_INSTALL_BASE"
+   echo "  --install-path [ NETCDF_INSTALL_BASE ] BASE dir; netcdf-c lands in <base>/netcdf-c-v\$NETCDF_C_VERSION, netcdf-fortran in <base>/netcdf-fortran-v\$NETCDF_F_VERSION, pnetcdf in <base>/pnetcdf-v\$PNETCDF_VERSION; default $NETCDF_INSTALL_BASE"
    echo "  --c-compiler [ C_COMPILER ] default ${C_COMPILER}"
    echo "  --cxx-compiler [ CXX_COMPILER ] default ${CXX_COMPILER}"
    echo "  --f-compiler [ F_COMPILER ] default ${F_COMPILER}"
@@ -190,6 +211,11 @@ do
           NETCDF_F_MODULE_PATH=${1}
           reset-last
           ;;
+      "--pnetcdf-module-path")
+          shift
+          PNETCDF_MODULE_PATH=${1}
+          reset-last
+          ;;
       "--install-path")
           shift
           NETCDF_INSTALL_BASE_INPUT=${1}
@@ -238,6 +264,11 @@ do
       "--netcdf-f-version")
           shift
           NETCDF_F_VERSION_INPUT=${1}
+          reset-last
+          ;;
+      "--pnetcdf-version")
+          shift
+          PNETCDF_VERSION=${1}
           reset-last
           ;;
       "--replace")
@@ -311,7 +342,11 @@ NETCDF_INSTALL_BASE=${NETCDF_INSTALL_BASE%/netcdf}
 
 NETCDF_C_PATH=${NETCDF_INSTALL_BASE}/netcdf-c-v${NETCDF_C_VERSION}
 NETCDF_F_PATH=${NETCDF_INSTALL_BASE}/netcdf-fortran-v${NETCDF_F_VERSION}
-PNETCDF_PATH=${NETCDF_INSTALL_BASE}/pnetcdf
+# PnetCDF install path is now versioned (2026-05-20). Prior installs at
+# the unversioned <base>/pnetcdf path on the live tree were migrated to
+# <base>/pnetcdf-v1.14.0 with a backward-compat symlink so existing
+# netcdf-c modulefiles that bake the unversioned path still resolve.
+PNETCDF_PATH=${NETCDF_INSTALL_BASE}/pnetcdf-v${PNETCDF_VERSION}
 
 # ── BUILD_NETCDF=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
 NOOP_RC=43
@@ -369,6 +404,19 @@ if [ -d "${NETCDF_C_PATH}" ] && [ -d "${NETCDF_F_PATH}" ] && [ -d "${PNETCDF_PAT
    exit ${NOOP_RC}
 fi
 
+# Per-component pre-existence flags. Used by:
+#   (a) the build branches below to skip components already on disk
+#       (enables single-component builds when --pnetcdf-version is
+#       bumped while netcdf-c / netcdf-fortran are already installed),
+#   (b) the EXIT trap so fail-cleanup only nukes dirs we created in
+#       this run (don't wipe a working sibling component on failure).
+_pre_existed_netcdf_c=0
+_pre_existed_netcdf_f=0
+_pre_existed_pnetcdf=0
+[ -d "${NETCDF_C_PATH}" ] && _pre_existed_netcdf_c=1
+[ -d "${NETCDF_F_PATH}" ] && _pre_existed_netcdf_f=1
+[ -d "${PNETCDF_PATH}"  ] && _pre_existed_pnetcdf=1
+
 # ── EXIT trap: fail-cleanup of all three components ──────────────────
 # On non-zero exit, remove any partial install + modulefile this script
 # may have written for ANY of the three components, since we don't know
@@ -378,12 +426,32 @@ fi
 _netcdf_on_exit() {
    local rc=$?
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
-      echo "[netcdf fail-cleanup] rc=${rc}: removing partial netcdf-c/netcdf-fortran/pnetcdf installs + modulefiles"
-      ${SUDO:-sudo} rm -rf "${NETCDF_C_PATH}" "${NETCDF_F_PATH}" "${PNETCDF_PATH}"
-      ${SUDO:-sudo} rm -f  "${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua" \
-                           "${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua"
+      echo "[netcdf fail-cleanup] rc=${rc}: removing partial installs + modulefiles for components this run created"
+      # Only nuke components that did NOT pre-exist at script entry.
+      # Otherwise a single-component build (e.g. only pnetcdf-v1.14.1 on
+      # top of an existing netcdf-c-v4.10.0) would wipe the working
+      # sibling component on PnetCDF build failure.
+      if [ "${_pre_existed_netcdf_c:-0}" != "1" ]; then
+         ${SUDO:-sudo} rm -rf "${NETCDF_C_PATH}"
+         ${SUDO:-sudo} rm -f  "${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua"
+      fi
+      if [ "${_pre_existed_netcdf_f:-0}" != "1" ]; then
+         ${SUDO:-sudo} rm -rf "${NETCDF_F_PATH}"
+         ${SUDO:-sudo} rm -f  "${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua"
+      fi
+      if [ "${_pre_existed_pnetcdf:-0}" != "1" ]; then
+         ${SUDO:-sudo} rm -rf "${PNETCDF_PATH}"
+         ${SUDO:-sudo} rm -f  "${PNETCDF_MODULE_PATH}/${PNETCDF_VERSION}.lua"
+      fi
    elif [ ${rc} -ne 0 ]; then
       echo "[netcdf fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
+   fi
+   # Always wipe the /tmp build dir (regardless of rc / KEEP_FAILED).
+   # This used to be a separate `trap ... EXIT` further down which
+   # silently overwrote this trap; folded in here so the build-dir
+   # cleanup AND the per-component fail-cleanup both fire reliably.
+   if [ -n "${NETCDF_BUILD_DIR:-}" ] && [ -d "${NETCDF_BUILD_DIR}" ]; then
+      rm -rf "${NETCDF_BUILD_DIR}"
    fi
    return ${rc}
 }
@@ -553,7 +621,20 @@ else
             ROCM_MODULE_NAME="${ROCM_MODULE}/${ROCM_VERSION}"
          fi
       fi
-      REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${MPI_MODULE}" "${HDF5_MODULE}" )
+      # Pin hdf5 by mapped version when NETCDF_C_TO_HDF5 has an entry
+      # for this netcdf-c version. Avoids relying on Lmod's
+      # default-resolution when multiple hdf5 modulefiles coexist on a
+      # tree (e.g. rocmplus-7.2.3 has both hdf5/1.14.6 and hdf5/2.1.1
+      # after the 2026-05-20 hdf5 2.x rollout). Bare `hdf5` is kept as
+      # the legacy fallback for netcdf-c versions not in the map.
+      HDF5_MODULE_NAME="${HDF5_MODULE}"
+      if [ -n "${NETCDF_C_TO_HDF5[${NETCDF_C_VERSION}]:-}" ]; then
+         HDF5_MODULE_NAME="${HDF5_MODULE}/${NETCDF_C_TO_HDF5[${NETCDF_C_VERSION}]}"
+         echo "netcdf: pinning ${HDF5_MODULE_NAME} for netcdf-c ${NETCDF_C_VERSION} (from NETCDF_C_TO_HDF5 map)"
+      else
+         echo "netcdf: no NETCDF_C_TO_HDF5 entry for ${NETCDF_C_VERSION}; loading bare '${HDF5_MODULE}' (Lmod default)"
+      fi
+      REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${MPI_MODULE}" "${HDF5_MODULE_NAME}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
       if [[ `which h5dump | wc -l` -eq 0 ]]; then
          echo "h5dump was not found in PATH after loading the hdf5 module"
@@ -593,7 +674,11 @@ else
       # S6.C / openmpi S7.B / kokkos /tmp-build patterns. EXIT trap
       # guarantees cleanup even on `set -e` aborts.
       NETCDF_BUILD_DIR=$(mktemp -d -t netcdf-build.XXXXXX)
-      trap '[ -n "${NETCDF_BUILD_DIR:-}" ] && rm -rf "${NETCDF_BUILD_DIR}"' EXIT
+      # Don't `trap ... EXIT` here -- that would overwrite the
+      # _netcdf_on_exit fail-cleanup trap installed above (line ~451),
+      # leaving partial install dirs / modulefiles behind on failure.
+      # _netcdf_on_exit knows about NETCDF_BUILD_DIR via the global var
+      # and rms it itself at the end of the trap function.
       cd "${NETCDF_BUILD_DIR}"
 
       if [ "${HDF5_ENABLE_PARALLEL}" = "ON" ]; then
@@ -605,10 +690,81 @@ else
          if [ -n "${HDF5_MPI_MODULE:-}" ]; then
             module load "${HDF5_MPI_MODULE}"
          fi
-         # install pnetcdf
-         git clone --branch checkpoint.1.14.0 https://github.com/Parallel-NetCDF/PnetCDF.git
-         cd PnetCDF
-         autoreconf -i
+      fi
+      # Per-component idempotence guard: skip the PnetCDF build branch
+      # when the versioned install dir already exists. The HDF5_ENABLE_PARALLEL
+      # decision above still sets ENABLE_PNETCDF=ON so the netcdf-c
+      # build below + modulefile heredoc still wire in the existing
+      # pnetcdf install.
+      if [ "${ENABLE_PNETCDF}" = "ON" ] && [ "${_pre_existed_pnetcdf}" = "1" ]; then
+         echo ""
+         echo "[netcdf per-component] pnetcdf-v${PNETCDF_VERSION} already installed at ${PNETCDF_PATH}; skipping PnetCDF build."
+         echo ""
+      fi
+      if [ "${ENABLE_PNETCDF}" = "ON" ] && [ "${_pre_existed_pnetcdf}" != "1" ]; then
+         # install pnetcdf — use the official release tarball
+         # (pnetcdf-${VER}.tar.gz) rather than git clone + autoreconf.
+         # The tarball ships a pre-generated `configure` script so
+         # we don't need a recent libtool on the build node. Audit
+         # basis: slurm 10200 (2026-05-20) job failed because PnetCDF
+         # 1.14.1's configure.ac bumped LT_PREREQ to 2.5.4, but
+         # Ubuntu 22.04 ships libtool 2.4.6:
+         #   configure.ac:459: error: Libtool version 2.5.4 or higher is required
+         # Switching to the upstream tarball sidesteps the autoreconf
+         # path entirely. The git-clone fallback below covers the rare
+         # case of a network blip against parallel-netcdf.github.io.
+         PNETCDF_TARBALL="pnetcdf-${PNETCDF_VERSION}.tar.gz"
+         PNETCDF_URL="https://parallel-netcdf.github.io/Release/${PNETCDF_TARBALL}"
+         PNETCDF_SRCDIR=""
+         echo "PnetCDF: downloading release tarball ${PNETCDF_URL}"
+         if wget -q "${PNETCDF_URL}" -O "${PNETCDF_TARBALL}"; then
+            # Extract first, then locate the top-level dir on disk.
+            # Earlier draft used `tar -tzf | head -n1` to probe the
+            # name before extraction, but `head` closes the pipe
+            # after reading one line and tar dies with SIGPIPE (rc=141
+            # under set -e) -- slurm 10201 (2026-05-20) failed at
+            # exactly this line. Extraction-first sidesteps SIGPIPE
+            # entirely. Modern releases (>=1.11) extract to
+            # pnetcdf-${VER}/; pre-1.11 to parallel-netcdf-${VER}/.
+            tar -xzf "${PNETCDF_TARBALL}"
+            rm -f "${PNETCDF_TARBALL}"
+            for _cand in "pnetcdf-${PNETCDF_VERSION}" "parallel-netcdf-${PNETCDF_VERSION}"; do
+               if [ -d "${_cand}" ]; then
+                  PNETCDF_SRCDIR="${_cand}"
+                  break
+               fi
+            done
+            unset _cand
+            if [ -z "${PNETCDF_SRCDIR}" ]; then
+               echo "ERROR: extracted ${PNETCDF_TARBALL} but neither pnetcdf-${PNETCDF_VERSION}/ nor parallel-netcdf-${PNETCDF_VERSION}/ exist." >&2
+               echo "       Top-level entries in CWD ($(pwd)):" >&2
+               ls -1 >&2
+               exit 1
+            fi
+            echo "PnetCDF: extracted tarball into ${PNETCDF_SRCDIR}/"
+         else
+            echo "WARNING: tarball download failed; falling back to git clone (requires libtool >= 2.5.4 for autoreconf)"
+            PNETCDF_TAG=""
+            for _cand in "checkpoint.${PNETCDF_VERSION}" "${PNETCDF_VERSION}" "pnetcdf-${PNETCDF_VERSION}"; do
+               if git ls-remote --exit-code --tags https://github.com/Parallel-NetCDF/PnetCDF.git \
+                     "refs/tags/${_cand}" >/dev/null 2>&1; then
+                  PNETCDF_TAG="${_cand}"
+                  break
+               fi
+            done
+            unset _cand
+            if [ -z "${PNETCDF_TAG}" ]; then
+               echo "ERROR: no git tag matching PnetCDF ${PNETCDF_VERSION} (tried 'checkpoint.${PNETCDF_VERSION}', '${PNETCDF_VERSION}', 'pnetcdf-${PNETCDF_VERSION}')." >&2
+               exit 1
+            fi
+            echo "PnetCDF: using git tag '${PNETCDF_TAG}'"
+            git clone --depth=1 --branch "${PNETCDF_TAG}" https://github.com/Parallel-NetCDF/PnetCDF.git PnetCDF
+            PNETCDF_SRCDIR="PnetCDF"
+            cd "${PNETCDF_SRCDIR}"
+            autoreconf -i
+            cd ..
+         fi
+         cd "${PNETCDF_SRCDIR}"
 
          # ---------------------------------------------------------------------
          # PnetCDF Fortran-runtime fix (audit_2026_05_01.md Issue 4):
@@ -704,82 +860,122 @@ else
          cd ..
       fi
 
-      echo ""
-      echo "================================="
-      echo " Installing NETCDF-C"
-      echo "================================="
-      echo ""
-
-      git clone --branch v${NETCDF_C_VERSION} https://github.com/Unidata/netcdf-c.git
-      cd netcdf-c
-      # H5FDhttp.c plugin-handle guard. The original patch wrapped the
-      # `if (H5FD_HTTP_g)` test with `H5Iis_valid(...) > 0` to avoid
-      # touching a stale id on the HDF5 1.14 plugin path (netcdf-c
-      # 4.9.x). netcdf-c 4.10.0 refactored libhdf5/H5FDhttp.c for HDF5
-      # 2.0.0 compat (PR #3237: H5FD_class_t versioning, H5FD_http_term
-      # finalizer), and the original `if (H5FD_HTTP_g)` pattern no longer
-      # appears in unaltered form. Apply only when the exact pre-patch
-      # line is still present so this is a no-op on 4.10.0+ (rather than
-      # silently mangling some other call site).
-      if [ -f libhdf5/H5FDhttp.c ] && grep -q 'if (H5FD_HTTP_g)' libhdf5/H5FDhttp.c; then
-         sed -i 's/if\ (H5FD_HTTP_g)/if\ (H5FD_HTTP_g\ \&\&\ (H5Iis_valid(H5FD_HTTP_g)\ >\ 0))/g' libhdf5/H5FDhttp.c
-         echo "netcdf-c: applied H5FDhttp.c plugin-handle guard patch"
+      if [ "${_pre_existed_netcdf_c}" = "1" ]; then
+         echo ""
+         echo "[netcdf per-component] netcdf-c-v${NETCDF_C_VERSION} already installed at ${NETCDF_C_PATH}; skipping netcdf-c build."
+         echo ""
       else
-         echo "netcdf-c: H5FDhttp.c plugin-handle guard not applicable (file refactored or pattern absent at netcdf-c v${NETCDF_C_VERSION})"
+         echo ""
+         echo "================================="
+         echo " Installing NETCDF-C"
+         echo "================================="
+         echo ""
+
+         git clone --branch v${NETCDF_C_VERSION} https://github.com/Unidata/netcdf-c.git
+         cd netcdf-c
+         # H5FDhttp.c plugin-handle guard. The original patch wrapped the
+         # `if (H5FD_HTTP_g)` test with `H5Iis_valid(...) > 0` to avoid
+         # touching a stale id on the HDF5 1.14 plugin path (netcdf-c
+         # 4.9.x). netcdf-c 4.10.0 refactored libhdf5/H5FDhttp.c for HDF5
+         # 2.0.0 compat (PR #3237: H5FD_class_t versioning, H5FD_http_term
+         # finalizer), and the original `if (H5FD_HTTP_g)` pattern no longer
+         # appears in unaltered form. Apply only when the exact pre-patch
+         # line is still present so this is a no-op on 4.10.0+ (rather than
+         # silently mangling some other call site).
+         if [ -f libhdf5/H5FDhttp.c ] && grep -q 'if (H5FD_HTTP_g)' libhdf5/H5FDhttp.c; then
+            sed -i 's/if\ (H5FD_HTTP_g)/if\ (H5FD_HTTP_g\ \&\&\ (H5Iis_valid(H5FD_HTTP_g)\ >\ 0))/g' libhdf5/H5FDhttp.c
+            echo "netcdf-c: applied H5FDhttp.c plugin-handle guard patch"
+         else
+            echo "netcdf-c: H5FDhttp.c plugin-handle guard not applicable (file refactored or pattern absent at netcdf-c v${NETCDF_C_VERSION})"
+         fi
+         mkdir build && cd build
+
+         cmake -DCMAKE_INSTALL_PREFIX=${NETCDF_C_PATH} \
+   	       -DNETCDF_ENABLE_HDF5=ON -DNETCDF_ENABLE_DAP=ON \
+   	       -DNETCDF_BUILD_UTILITIES=ON -DNETCDF_ENABLE_CDF5=ON \
+   	       -DNETCDF_ENABLE_TESTS=OFF -DNETCDF_ENABLE_PARALLEL_TESTS=OFF \
+   	       -DZLIB_INCLUDE_DIR=${HDF5_ROOT}/zlib/include \
+   	       -DCMAKE_C_FLAGS="-I ${HDF5_ROOT}/include/" \
+   	       -DCMAKE_C_COMPILER=${C_COMPILER} \
+   	       -DNETCDF_ENABLE_PNETCDF=${ENABLE_PNETCDF} \
+   	       -DPNETCDF_LIBRARY=${PNETCDF_PATH}/lib/libpnetcdf.so \
+   	       -DPNETCDF_INCLUDE_DIR=${PNETCDF_PATH}/include \
+   	       -DNETCDF_ENABLE_FILTER_SZIP=OFF -DNETCDF_ENABLE_NCZARR=OFF ..
+
+         cmake --build . -j ${MAKE_JOBS}
+         make install
+
+         cd ../..
+         rm -rf netcdf-c
       fi
-      mkdir build && cd build
 
-      cmake -DCMAKE_INSTALL_PREFIX=${NETCDF_C_PATH} \
-	    -DNETCDF_ENABLE_HDF5=ON -DNETCDF_ENABLE_DAP=ON \
-	    -DNETCDF_BUILD_UTILITIES=ON -DNETCDF_ENABLE_CDF5=ON \
-	    -DNETCDF_ENABLE_TESTS=OFF -DNETCDF_ENABLE_PARALLEL_TESTS=OFF \
-	    -DZLIB_INCLUDE_DIR=${HDF5_ROOT}/zlib/include \
-	    -DCMAKE_C_FLAGS="-I ${HDF5_ROOT}/include/" \
-	    -DCMAKE_C_COMPILER=${C_COMPILER} \
-	    -DNETCDF_ENABLE_PNETCDF=${ENABLE_PNETCDF} \
-	    -DPNETCDF_LIBRARY=${PNETCDF_PATH}/lib/libpnetcdf.so \
-	    -DPNETCDF_INCLUDE_DIR=${PNETCDF_PATH}/include \
-	    -DNETCDF_ENABLE_FILTER_SZIP=OFF -DNETCDF_ENABLE_NCZARR=OFF ..
-
-      cmake --build . -j ${MAKE_JOBS}
-      make install
-
-      cd ../..
-
-      # put netcdf-c install path in PATH for netcdf-fortran install
+      # put netcdf-c install path in PATH for netcdf-fortran install.
+      # Done unconditionally so a single-component pnetcdf rebuild on
+      # top of an existing netcdf-c still has the right PATH for the
+      # downstream netcdf-fortran build branch (when that one fires).
       export PATH=${NETCDF_C_PATH}:$PATH
       export HDF5_PLUGIN_PATH=${NETCDF_C_PATH}/hdf5/lib/plugin/
 
-      git clone --branch v${NETCDF_F_VERSION} https://github.com/Unidata/netcdf-fortran.git
-      cd netcdf-fortran
+      if [ "${_pre_existed_netcdf_f}" = "1" ]; then
+         echo ""
+         echo "[netcdf per-component] netcdf-fortran-v${NETCDF_F_VERSION} already installed at ${NETCDF_F_PATH}; skipping netcdf-fortran build."
+         echo ""
+      else
+         echo ""
+         echo "======================================="
+         echo " Installing NETCDF-FORTRAN"
+         echo "======================================="
+         echo ""
 
-      # netcdf-fortran is looking for nc_def_var_szip even if SZIP is OFF
-      LINE=`sed -n '/if (NOT HAVE_DEF_VAR_SZIP)/=' CMakeLists.txt | grep -n ""`
-      LINE=`echo ${LINE} | cut -c 3-`
-      sed -i ''"${LINE}"'i set(HAVE_DEF_VAR_SZIP TRUE)' CMakeLists.txt
+         git clone --branch v${NETCDF_F_VERSION} https://github.com/Unidata/netcdf-fortran.git
+         cd netcdf-fortran
 
-      mkdir build && cd build
-      cmake -DCMAKE_INSTALL_PREFIX=${NETCDF_F_PATH} \
-	    -DENABLE_TESTS=OFF -DBUILD_EXAMPLES=OFF \
-	    -DCMAKE_Fortran_COMPILER=$F_COMPILER ..
+         # netcdf-fortran is looking for nc_def_var_szip even if SZIP is OFF
+         LINE=`sed -n '/if (NOT HAVE_DEF_VAR_SZIP)/=' CMakeLists.txt | grep -n ""`
+         LINE=`echo ${LINE} | cut -c 3-`
+         sed -i ''"${LINE}"'i set(HAVE_DEF_VAR_SZIP TRUE)' CMakeLists.txt
 
-      cmake --build . -j ${MAKE_JOBS}
-      make install
+         mkdir build && cd build
+         cmake -DCMAKE_INSTALL_PREFIX=${NETCDF_F_PATH} \
+   	       -DENABLE_TESTS=OFF -DBUILD_EXAMPLES=OFF \
+   	       -DCMAKE_Fortran_COMPILER=$F_COMPILER ..
 
-      cd ../..
-      rm -rf netcdf-c
-      rm -rf netcdf-fortran
-      ${SUDO} rm -rf PnetCDF
+         cmake --build . -j ${MAKE_JOBS}
+         make install
 
+         cd ../..
+         rm -rf netcdf-fortran
+      fi
+
+      # Clean up the PnetCDF source dir (tarball-extracted name varies
+      # by release: pnetcdf-${VER} for >=1.11, parallel-netcdf-${VER}
+      # for older, or PnetCDF/ for the git-clone fallback). ${PNETCDF_SRCDIR}
+      # is set above when the PnetCDF branch fired this run; empty when
+      # PnetCDF was pre-existed (skipped) or ENABLE_PNETCDF=OFF.
+      [ -n "${PNETCDF_SRCDIR:-}" ] && [ -d "${PNETCDF_SRCDIR}" ] && ${SUDO} rm -rf "${PNETCDF_SRCDIR}"
+
+      # chown / chmod only the components we actually built in this run.
+      # Pre-existing installs are already root-owned; skipping them
+      # avoids spurious touches that could disrupt other ongoing reads.
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
-         for D in ${NETCDF_C_PATH} ${NETCDF_F_PATH} ${PNETCDF_PATH}; do
+         _built_dirs=()
+         [ "${_pre_existed_netcdf_c}" != "1" ] && _built_dirs+=( "${NETCDF_C_PATH}" )
+         [ "${_pre_existed_netcdf_f}" != "1" ] && _built_dirs+=( "${NETCDF_F_PATH}" )
+         [ "${_pre_existed_pnetcdf}"  != "1" ] && [ "${ENABLE_PNETCDF}" = "ON" ] && _built_dirs+=( "${PNETCDF_PATH}" )
+         for D in "${_built_dirs[@]}"; do
             ${SUDO} find ${D} -type f -execdir chown root:root "{}" +
             ${SUDO} find ${D} -type d -execdir chown root:root "{}" +
          done
+         unset _built_dirs
       fi
 
       if [[ "${USER}" != "root" ]]; then
-         ${SUDO} chmod go-w ${NETCDF_C_PATH} ${NETCDF_F_PATH} ${PNETCDF_PATH}
+         _chmod_dirs=()
+         [ "${_pre_existed_netcdf_c}" != "1" ] && _chmod_dirs+=( "${NETCDF_C_PATH}" )
+         [ "${_pre_existed_netcdf_f}" != "1" ] && _chmod_dirs+=( "${NETCDF_F_PATH}" )
+         [ "${_pre_existed_pnetcdf}"  != "1" ] && [ "${ENABLE_PNETCDF}" = "ON" ] && _chmod_dirs+=( "${PNETCDF_PATH}" )
+         [ ${#_chmod_dirs[@]} -gt 0 ] && ${SUDO} chmod go-w "${_chmod_dirs[@]}"
+         unset _chmod_dirs
       fi
 
    fi
@@ -788,25 +984,38 @@ else
    # the expected libraries. Catches the silent-failure case where
    # PnetCDF / netcdf-c failed mid-build (audit P1 in 7865) but the
    # script still went on to publish broken modulefiles.
-   for lib in \
-      "${NETCDF_C_PATH}/lib/libnetcdf.so" \
-      "${NETCDF_F_PATH}/lib/libnetcdff.so"; do
-      if ! { [ -f "${lib}" ] || [ -f "${lib}.0" ] || [ -L "${lib}" ]; }; then
-         echo "ERROR: expected netcdf library not found: ${lib}" >&2
-         echo "       Refusing to write netcdf-c / netcdf-fortran modulefiles." >&2
+   #
+   # Scope the check to components this run actually built; a single-
+   # component pnetcdf rebuild on top of an existing netcdf-c-v4.9.3
+   # shouldn't re-verify netcdf-c libs (they're owned by a prior run
+   # that already passed this gate).
+   if [ "${_pre_existed_netcdf_c}" != "1" ]; then
+      _lib="${NETCDF_C_PATH}/lib/libnetcdf.so"
+      if ! { [ -f "${_lib}" ] || [ -f "${_lib}.0" ] || [ -L "${_lib}" ]; }; then
+         echo "ERROR: expected netcdf-c library not found: ${_lib}" >&2
+         echo "       Refusing to write netcdf-c modulefile." >&2
          exit 1
       fi
-   done
-   if [ "${ENABLE_PNETCDF}" = "ON" ] && [ ! -f "${PNETCDF_PATH}/lib/libpnetcdf.so" ] \
-        && [ ! -f "${PNETCDF_PATH}/lib/libpnetcdf.a" ]; then
-      echo "ERROR: PnetCDF was requested (HDF5_ENABLE_PARALLEL=ON) but" >&2
-      echo "       ${PNETCDF_PATH}/lib/libpnetcdf.{so,a} is missing." >&2
-      echo "       Refusing to write netcdf-c / netcdf-fortran modulefiles." >&2
-      exit 1
    fi
+   if [ "${_pre_existed_netcdf_f}" != "1" ]; then
+      _lib="${NETCDF_F_PATH}/lib/libnetcdff.so"
+      if ! { [ -f "${_lib}" ] || [ -f "${_lib}.0" ] || [ -L "${_lib}" ]; }; then
+         echo "ERROR: expected netcdf-fortran library not found: ${_lib}" >&2
+         echo "       Refusing to write netcdf-fortran modulefile." >&2
+         exit 1
+      fi
+   fi
+   if [ "${ENABLE_PNETCDF}" = "ON" ] && [ "${_pre_existed_pnetcdf}" != "1" ]; then
+      if [ ! -f "${PNETCDF_PATH}/lib/libpnetcdf.so" ] \
+         && [ ! -f "${PNETCDF_PATH}/lib/libpnetcdf.a" ]; then
+         echo "ERROR: PnetCDF was requested (HDF5_ENABLE_PARALLEL=ON) but" >&2
+         echo "       ${PNETCDF_PATH}/lib/libpnetcdf.{so,a} is missing." >&2
+         echo "       Refusing to write netcdf-c / netcdf-fortran / pnetcdf modulefiles." >&2
+         exit 1
+      fi
+   fi
+   unset _lib
 
-   # Create a module file for netcdf-c
-   #
    # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit).
    # The previous "if [ -d ] / if [ ! -w ] / else / SUDO=sudo / else
    # / SUDO=sudo / echo / fi" block was a known-broken probe: in 8063
@@ -818,36 +1027,6 @@ else
    # PKG_SUDO computation used at install-time elsewhere in this
    # script (line 435): one source of truth, no probes that lie.
    PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
-   ${PKG_SUDO_MOD} mkdir -p ${NETCDF_C_MODULE_PATH}
-
-   # Pin the hdf5 modulefile version that this netcdf-c was built
-   # against. Without the pin, the netcdf-c modulefile emits a bare
-   # `load("hdf5")` which Lmod resolves to whichever hdf5 version is
-   # "default" at load time -- a problem once multiple hdf5 versions
-   # coexist on the same rocmplus-<v> tree (e.g. 1.14.6 alongside
-   # 2.1.1 on rocmplus-7.2.3). Loading netcdf-c 4.10.0 (built against
-   # HDF5 2.1.1) under a default-resolved hdf5/1.14.6 would give an
-   # ABI mismatch.
-   #
-   # HDF5_ROOT is set by hdf5_setup.sh's modulefile to
-   #   ${HDF5_PATH}/HDF_Group/HDF5/${HDF5_VERSION}
-   # (see extras/scripts/hdf5_setup.sh, modulefile heredoc), so the
-   # trailing path component is the version we just built against.
-   # Defensive fallback to bare `load("hdf5")` if the layout changes.
-   HDF5_BUILT_AGAINST=""
-   if [ -n "${HDF5_ROOT:-}" ] && [[ "${HDF5_ROOT}" == */HDF_Group/HDF5/* ]]; then
-      HDF5_BUILT_AGAINST="${HDF5_ROOT##*/HDF_Group/HDF5/}"
-      # Strip any trailing slash component (defensive; HDF5_ROOT should
-      # be the leaf dir itself, not a parent).
-      HDF5_BUILT_AGAINST="${HDF5_BUILT_AGAINST%%/*}"
-   fi
-   if [ -n "${HDF5_BUILT_AGAINST}" ]; then
-      NETCDF_C_HDF5_LOAD="load(\"${HDF5_MODULE}/${HDF5_BUILT_AGAINST}\")"
-      echo "netcdf-c modulefile: pinning hdf5 dependency to ${HDF5_MODULE}/${HDF5_BUILT_AGAINST}"
-   else
-      NETCDF_C_HDF5_LOAD="load(\"${HDF5_MODULE}\")"
-      echo "WARNING: could not extract HDF5 version from HDF5_ROOT='${HDF5_ROOT:-<unset>}'; falling back to unpinned load(\"${HDF5_MODULE}\")" >&2
-   fi
 
    # Provenance: capture this leaf script's git state for the modulefile
    # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
@@ -872,51 +1051,136 @@ else
    fi
    unset _leaf_dir
 
-   # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua
-	whatis("Netcdf-c Library")
+   # ── pnetcdf modulefile (new, 2026-05-20) ─────────────────────────
+   # Emit a first-class pnetcdf/${PNETCDF_VERSION} modulefile when this
+   # run actually built PnetCDF. The netcdf-c modulefile heredoc below
+   # then loads this module by version pin instead of baking in absolute
+   # paths inline -- so pnetcdf becomes a versioned dependency that
+   # netcdf-c, netcdf-fortran, and any direct consumer can `module load
+   # pnetcdf/<ver>` to get.
+   if [ "${ENABLE_PNETCDF}" = "ON" ] && [ "${_pre_existed_pnetcdf}" != "1" ]; then
+      ${PKG_SUDO_MOD} mkdir -p ${PNETCDF_MODULE_PATH}
+      # The - option suppresses tabs
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${PNETCDF_MODULE_PATH}/${PNETCDF_VERSION}.lua
+	whatis("Parallel-NetCDF Library")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
-        ${NETCDF_C_HDF5_LOAD}
-        local base = "${NETCDF_C_PATH}"
-        local base_pnetcdf = "${PNETCDF_PATH}"
-        prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-        prepend_path("LD_LIBRARY_PATH", pathJoin(base_pnetcdf, "lib"))
-        prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
-        prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
-        prepend_path("PATH", pathJoin(base, "bin"))
-        prepend_path("PATH", base)
-        prepend_path("PATH", pathJoin(base_pnetcdf, "bin"))
-	setenv("NETCDF_C_ROOT", base)
-	setenv("PNETCDF_ROOT", base_pnetcdf)
-EOF
-
-   # Create a module file for netcdf-fortran
-   # See netcdf-c block above for the rationale on PKG_SUDO_MOD; the
-   # netcdf-fortran modulefile dir is a sibling of netcdf-c's and
-   # has the exact same lying-probe failure mode. Reusing the same
-   # PKG_SUDO_MOD value computed for netcdf-c (computed once per
-   # process, no race window).
-   ${PKG_SUDO_MOD} mkdir -p ${NETCDF_F_MODULE_PATH}
-
-   # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua
-	whatis("Netcdf-fortran Library")
-	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
-
-	load("netcdf-c")
-	local base = "${NETCDF_F_PATH}"
-	local base_pnetcdf = "${PNETCDF_PATH}"
+	local base = "${PNETCDF_PATH}"
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-	prepend_path("LD_LIBRARY_PATH", pathJoin(base_pnetcdf, "lib"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("PATH", base)
-	prepend_path("PATH", pathJoin(base_pnetcdf, "bin"))
-	setenv("NETCDF_F_ROOT", base)
-	setenv("PNETCDF_ROOT", base_pnetcdf)
+	setenv("PNETCDF_ROOT", base)
+	setenv("PNETCDF_PATH", base)
 EOF
+   fi
+
+   # ── netcdf-c modulefile ──────────────────────────────────────────
+   # Only (re)write when this run actually built netcdf-c. Otherwise
+   # an existing pre-built install's modulefile would be silently
+   # overwritten with potentially-different load() pins -- bad for
+   # users who depend on the existing module's exact link chain.
+   if [ "${_pre_existed_netcdf_c}" != "1" ]; then
+      ${PKG_SUDO_MOD} mkdir -p ${NETCDF_C_MODULE_PATH}
+
+      # Pin the hdf5 modulefile version that this netcdf-c was built
+      # against. Without the pin, the netcdf-c modulefile emits a bare
+      # `load("hdf5")` which Lmod resolves to whichever hdf5 version is
+      # "default" at load time -- a problem once multiple hdf5 versions
+      # coexist on the same rocmplus-<v> tree (e.g. 1.14.6 alongside
+      # 2.1.1 on rocmplus-7.2.3). Loading netcdf-c 4.10.0 (built against
+      # HDF5 2.1.1) under a default-resolved hdf5/1.14.6 would give an
+      # ABI mismatch.
+      #
+      # HDF5_ROOT is set by hdf5_setup.sh's modulefile to
+      #   ${HDF5_PATH}/HDF_Group/HDF5/${HDF5_VERSION}
+      # (see extras/scripts/hdf5_setup.sh, modulefile heredoc), so the
+      # trailing path component is the version we just built against.
+      # Defensive fallback to bare `load("hdf5")` if the layout changes.
+      HDF5_BUILT_AGAINST=""
+      if [ -n "${HDF5_ROOT:-}" ] && [[ "${HDF5_ROOT}" == */HDF_Group/HDF5/* ]]; then
+         HDF5_BUILT_AGAINST="${HDF5_ROOT##*/HDF_Group/HDF5/}"
+         # Strip any trailing slash component (defensive; HDF5_ROOT should
+         # be the leaf dir itself, not a parent).
+         HDF5_BUILT_AGAINST="${HDF5_BUILT_AGAINST%%/*}"
+      fi
+      if [ -n "${HDF5_BUILT_AGAINST}" ]; then
+         NETCDF_C_HDF5_LOAD="load(\"${HDF5_MODULE}/${HDF5_BUILT_AGAINST}\")"
+         echo "netcdf-c modulefile: pinning hdf5 dependency to ${HDF5_MODULE}/${HDF5_BUILT_AGAINST}"
+      else
+         NETCDF_C_HDF5_LOAD="load(\"${HDF5_MODULE}\")"
+         echo "WARNING: could not extract HDF5 version from HDF5_ROOT='${HDF5_ROOT:-<unset>}'; falling back to unpinned load(\"${HDF5_MODULE}\")" >&2
+      fi
+
+      # PnetCDF load line: when this run links netcdf-c against a
+      # PnetCDF build, pin the version via load("pnetcdf/${PNETCDF_VERSION}")
+      # so the netcdf-c modulefile pulls in the matching pnetcdf module
+      # automatically. The pnetcdf module (emitted above) handles its
+      # own PATH/LD_LIBRARY_PATH/etc. -- no need to duplicate them here.
+      # ENABLE_PNETCDF=OFF builds (no parallel HDF5) leave this line
+      # empty so the netcdf-c modulefile doesn't try to load a pnetcdf
+      # module that doesn't exist.
+      NETCDF_C_PNETCDF_LOAD=""
+      if [ "${ENABLE_PNETCDF}" = "ON" ]; then
+         NETCDF_C_PNETCDF_LOAD="load(\"pnetcdf/${PNETCDF_VERSION}\")"
+         echo "netcdf-c modulefile: pinning pnetcdf dependency to pnetcdf/${PNETCDF_VERSION}"
+      fi
+
+      # The - option suppresses tabs
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua
+	whatis("Netcdf-c Library")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
+
+	${NETCDF_C_HDF5_LOAD}
+	${NETCDF_C_PNETCDF_LOAD}
+	local base = "${NETCDF_C_PATH}"
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("PATH", pathJoin(base, "bin"))
+	prepend_path("PATH", base)
+	setenv("NETCDF_C_ROOT", base)
+EOF
+   fi
+
+   # ── netcdf-fortran modulefile ────────────────────────────────────
+   # Same per-component gating as netcdf-c: only (re)write when this
+   # run actually built netcdf-fortran. See netcdf-c block above for
+   # the PKG_SUDO_MOD rationale.
+   if [ "${_pre_existed_netcdf_f}" != "1" ]; then
+      ${PKG_SUDO_MOD} mkdir -p ${NETCDF_F_MODULE_PATH}
+
+      # Pin the netcdf-c modulefile version this netcdf-fortran was
+      # built against. Without the pin, the netcdf-fortran modulefile
+      # emits a bare `load("netcdf-c")` which Lmod resolves to
+      # whichever netcdf-c is "default" at load time. Once multiple
+      # netcdf-c versions coexist on the tree (e.g. rocmplus-7.2.3
+      # has both 4.9.3 and 4.10.0 after the 2026-05-20 rollout), the
+      # bare load drifts to the higher version -- which has a
+      # DIFFERENT hdf5 SONAME chain (4.9.3 -> libhdf5.so.310,
+      # 4.10.0 -> libhdf5.so.320). The netcdf-fortran .so was linked
+      # against ONE of those chains at build time; loading the wrong
+      # netcdf-c silently breaks ld.so resolution for any consumer.
+      # See audit at /home/admin/.cursor/plans/*.plan.md (Part B of
+      # the 2026-05-20 netcdf hdf5 test regression fix) for the
+      # ldd traces showing exactly this hazard hitting
+      # netcdf-fortran/4.6.2 on the live tree.
+      # The - option suppresses tabs
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua
+	whatis("Netcdf-fortran Library")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
+
+	load("netcdf-c/${NETCDF_C_VERSION}")
+	local base = "${NETCDF_F_PATH}"
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("PATH", pathJoin(base, "bin"))
+	prepend_path("PATH", base)
+	setenv("NETCDF_F_ROOT", base)
+EOF
+   fi
 
 fi
 

@@ -83,6 +83,13 @@ fi
 : ${REPLACE_EXISTING:="0"}
 : ${KEEP_FAILED_INSTALLS:="0"}  # 1 = preserve partial install dirs / modulefiles for post-mortem
 : ${PACKAGES_LIST:=""}     # whitelist passed through to main_setup.sh --packages
+# PnetCDF version (2026-05-20). Empty -> netcdf_setup.sh's internal
+# default. Non-empty -> threaded to main_setup.sh --pnetcdf-version,
+# which forwards to the netcdf leaf. The leaf versions the install
+# path (pnetcdf-v${PNETCDF_VERSION}/) and emits a first-class
+# pnetcdf/${PNETCDF_VERSION} modulefile, so multiple PnetCDF versions
+# coexist per rocmplus-<v> tree.
+: ${PNETCDF_VERSION:=""}
 # MAX_PARALLEL: cap on simultaneously-RUNNING jobs across the chain.
 #   1 (default) = strict serial: each job depends on the previous one.
 #   N > 1       = sliding window: first N jobs all start concurrently (subject
@@ -172,6 +179,10 @@ Usage: $0 [opts]
                                  (which would resolve from PYTORCH_STACK_MANIFEST). See
                                  extras/scripts/pytorch_setup.sh PYTORCH_STACK_MANIFEST for the auto-derived
                                  (PT,ROCm)->stack-pin defaults; off-table combos warn and fall back leniently.
+   --pnetcdf-version V           PnetCDF version threaded through main_setup.sh -> netcdf_setup.sh
+                                 (default: leaf default 1.14.1). The leaf versions the install dir
+                                 (pnetcdf-v\${V}/) and emits a first-class pnetcdf/\${V} modulefile,
+                                 so multiple PnetCDF versions coexist per rocmplus-<v> tree.
    --max-parallel N              cap on simultaneously-RUNNING jobs (default ${MAX_PARALLEL}).
                                  1 = strict serial chain (each job depends on the previous; today's
                                  default behavior). N>1 = sliding window: first N jobs run in parallel
@@ -217,6 +228,7 @@ while [[ $# -gt 0 ]]; do
       --replace-existing)  shift; REPLACE_EXISTING=${1} ;;
       --keep-failed-installs) shift; KEEP_FAILED_INSTALLS=${1} ;;
       --packages)          shift; PACKAGES_LIST=${1} ;;
+      --pnetcdf-version)   shift; PNETCDF_VERSION=${1} ;;
       --max-parallel)      shift; MAX_PARALLEL=${1} ;;
       --start-after)       shift; START_AFTER=${1} ;;
       --start-after-any)   shift; START_AFTER_ANY=${1} ;;
@@ -355,6 +367,7 @@ cat <<EOF
  REPLACE_EXISTING:  ${REPLACE_EXISTING}
  KEEP_FAILED:       ${KEEP_FAILED_INSTALLS}
  PACKAGES:          ${PACKAGES_LIST:-<all>}
+ PNETCDF_VERSION:   ${PNETCDF_VERSION:-<leaf default>}
  MAX_PARALLEL:      ${MAX_PARALLEL}   $( (( MAX_PARALLEL == 1 )) && echo "(strict serial chain)" || echo "(sliding window: up to ${MAX_PARALLEL} jobs RUNNING simultaneously)")
  sbatch file:       ${SBATCH_FILE}
  Dry run:           ${DRY_RUN}
@@ -409,10 +422,13 @@ for v in "${VERSIONS_ARR[@]}"; do
    EXPORT_VARS+=",TOP_INSTALL_PATH=${TOP_INSTALL_PATH}"
    EXPORT_VARS+=",TOP_MODULE_PATH=${TOP_MODULE_PATH}"
    EXPORT_VARS+=",ROCM_INSTALLPATH=${ROCM_INSTALLPATH}"
-   # SITE and ROCM_PATH only added when set, so the sbatch sees their
-   # absence as "not specified" (lets main_setup.sh's auto-derive fire).
-   [[ -n "${SITE}"      ]] && EXPORT_VARS+=",SITE=${SITE}"
-   [[ -n "${ROCM_PATH}" ]] && EXPORT_VARS+=",ROCM_PATH=${ROCM_PATH}"
+   # SITE / ROCM_PATH / PNETCDF_VERSION only added when set, so the
+   # sbatch sees their absence as "not specified" (lets main_setup.sh's
+   # auto-derive fire for SITE/ROCM_PATH, and netcdf_setup.sh's leaf
+   # default fire for PNETCDF_VERSION).
+   [[ -n "${SITE}"            ]] && EXPORT_VARS+=",SITE=${SITE}"
+   [[ -n "${ROCM_PATH}"       ]] && EXPORT_VARS+=",ROCM_PATH=${ROCM_PATH}"
+   [[ -n "${PNETCDF_VERSION}" ]] && EXPORT_VARS+=",PNETCDF_VERSION=${PNETCDF_VERSION}"
    EXPORT_VARS+=",PYTHON_VERSION=${PYTHON_VERSION}"
    EXPORT_VARS+=",QUICK_INSTALLS=${QUICK_INSTALLS}"
    EXPORT_VARS+=",REPLACE_EXISTING=${REPLACE_EXISTING}"

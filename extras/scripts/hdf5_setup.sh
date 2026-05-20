@@ -450,22 +450,40 @@ else
       cd ..
       mkdir build && cd build
 
-      # HDF5 2.0+ renamed the CMake parallel-build variable from
-      # HDF5_ENABLE_PARALLEL to HDF5_PROVIDES_PARALLEL (see HDF5
-      # 2.0.0 release notes: https://support.hdfgroup.org/releases/
-      # hdf5/v2_0/v2_0_0/downloads/). Without this rename, the 2.x
-      # build silently produces a SERIAL libhdf5 even when mpicc is
-      # on PATH and ENABLE_PARALLEL=ON, breaking PnetCDF/netcdf-c
-      # downstream.  Use sort -V to detect HDF5_VERSION >= 2.0.0;
-      # any other comparison form would be tripped by the
-      # 1.14.6 -> 2.0.0 transition (lexicographic '1.14' > '2.0').
+      # HDF5 2.x: per HDF5 issue #6019, the rename story we had
+      # before was WRONG. HDF5_ENABLE_PARALLEL is STILL the
+      # build-time KNOB in 2.x (same as 1.x). HDF5_PROVIDES_PARALLEL
+      # is a read-only STATE variable that the HDF5 build SETS for
+      # downstream consumers to query -- it does NOT enable parallel
+      # when passed in as a -D flag. The 2.x docs (INSTALL_CMake.md)
+      # still say `HDF5_ENABLE_PARALLEL` is the option.
+      #
+      # The 2026-05-20 sweep (slurm 10200) silently produced a
+      # SERIAL hdf5/2.1.1 because we passed
+      # -DHDF5_PROVIDES_PARALLEL:BOOL=ON (the state var, ignored),
+      # and the resulting H5pubconf.h has /* #undef H5_HAVE_PARALLEL */
+      # -- meaning H5Pset_dxpl_mpio / H5Pset_fapl_mpio /
+      # H5Pset_coll_metadata_write / H5Pset_all_coll_metadata_ops
+      # are not declared, downstream parallel-IO consumers fail to
+      # compile, and h5perf_serial gets installed instead of h5pcc.
+      # See verification under /shared/apps/ubuntu/opt/rocmplus-7.2.3/
+      # hdf5-v2.1.1/HDF_Group/HDF5/2.1.1/include/H5pubconf.h.
+      #
+      # Fix: always pass -DHDF5_ENABLE_PARALLEL:BOOL=ON for both 1.x
+      # and 2.x. Also pass HDF5_PROVIDES_PARALLEL defensively for
+      # 2.x, in case a future minor release actually does honor it
+      # as a build knob (cheap, harmless overlap).
       HDF5_PARALLEL_VAR="HDF5_ENABLE_PARALLEL"
       HDF5_IS_2X=0
+      HDF5_PARALLEL_EXTRA_ARGS=()
       if [ "$(printf '%s\n%s\n' "2.0.0" "${HDF5_VERSION}" | sort -V | head -n1)" = "2.0.0" ]; then
-         HDF5_PARALLEL_VAR="HDF5_PROVIDES_PARALLEL"
          HDF5_IS_2X=1
+         # Belt-and-suspenders: also set the state var explicitly
+         # so any downstream find_package(HDF5) probe that looks at
+         # HDF5_PROVIDES_PARALLEL gets the right answer.
+         HDF5_PARALLEL_EXTRA_ARGS+=( "-DHDF5_PROVIDES_PARALLEL:BOOL=${ENABLE_PARALLEL}" )
       fi
-      echo "HDF5: parallel CMake var = ${HDF5_PARALLEL_VAR} (HDF5_VERSION=${HDF5_VERSION})"
+      echo "HDF5: parallel CMake var = ${HDF5_PARALLEL_VAR} (HDF5_VERSION=${HDF5_VERSION}, HDF5_IS_2X=${HDF5_IS_2X})"
 
       # ZLIB enable: HDF5 2.x no longer honors ZLIB_ROOT (CMake
       # "Manually-specified variables were not used" warning, audited
@@ -530,6 +548,7 @@ else
 				-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON \
 				-DBUILD_TESTING:BOOL=OFF \
 				-D${HDF5_PARALLEL_VAR}:BOOL=${ENABLE_PARALLEL} \
+				"${HDF5_PARALLEL_EXTRA_ARGS[@]}" \
 				-DHDF5_BUILD_FORTRAN:BOOL=ON ..
 
 
