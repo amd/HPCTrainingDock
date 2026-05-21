@@ -564,6 +564,7 @@ else
 
 	prereq("${ROCM_MODULE_NAME}")
 	prepend_path("PYTHONPATH","$TF_PATH")
+	prepend_path("PATH","${TF_PATH}/bin")
         setenv("TF_CPP_MIN_LOG_LEVEL","2")
 EOF
 
