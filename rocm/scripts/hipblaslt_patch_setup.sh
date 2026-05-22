@@ -43,6 +43,9 @@
 #   * 7.1.0, 7.1.1  -- family A
 #   * 7.2.0         -- family B
 #   * 7.2.2, 7.2.3  -- family C
+#   * 7.13.0        -- family D (per-arch lib subdir gfx942/; CPX
+#                     WGMXCC=4 defect already fixed upstream so the
+#                     CPX rewrite step is a sentinel-only no-op there)
 #
 
 set -euo pipefail
@@ -129,7 +132,7 @@ done
 
 # ── version gate ────────────────────────────────────────────────────
 case "${ROCM_VERSION}" in
-   7.1.0|7.1.1|7.2.0|7.2.2|7.2.3) ;;
+   7.1.0|7.1.1|7.2.0|7.2.2|7.2.3|7.13.0) ;;
    *)
       echo "[hipblaslt_patch] no fix vendored for rocm/${ROCM_VERSION}; exiting NOOP (rc=${NOOP_RC})"
       exit ${NOOP_RC}
@@ -148,8 +151,20 @@ DST_LIBDIR="${INSTALL_PREFIX}/hipblaslt/library"
 DST_DOCDIR="${INSTALL_PREFIX}/hipblaslt"
 MODULE_FILE="${MODULE_PATH}/rocmplus-${ROCM_VERSION}/hipblaslt/patched.lua"
 
+# Layout probe: rocm/7.13.0+ stages the gfx942 .dat files under a
+# per-arch subdir (lib/hipblaslt/library/gfx942/...), while 7.1.x and
+# 7.2.x ship them flat in lib/hipblaslt/library/. We mirror whichever
+# layout the SDK uses so HIPBLASLT_TENSILE_LIBPATH=${DST_LIBDIR}
+# resolves the same way after the overlay is selected.
+ARCH_SUBDIR=""
+if [ -d "${SRC_LIBDIR}/gfx942" ] && compgen -G "${SRC_LIBDIR}/gfx942/*.dat" >/dev/null; then
+   ARCH_SUBDIR="gfx942"
+fi
+EFFECTIVE_SRC_LIBDIR="${SRC_LIBDIR}${ARCH_SUBDIR:+/${ARCH_SUBDIR}}"
+EFFECTIVE_DST_LIBDIR="${DST_LIBDIR}${ARCH_SUBDIR:+/${ARCH_SUBDIR}}"
+
 # Sentinel: CPX-patched .dat embeds an in-band msgpack marker.
-SENTINEL_DAT="${DST_LIBDIR}/TensileLibrary_HH_HH_HA_Bias_SAV_UA_Type_HH_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_CU38_gfx942.dat"
+SENTINEL_DAT="${EFFECTIVE_DST_LIBDIR}/TensileLibrary_HH_HH_HA_Bias_SAV_UA_Type_HH_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_CU38_gfx942.dat"
 
 echo ""
 echo "=================================="
@@ -197,7 +212,7 @@ trap '[ -n "${WORKDIR:-}" ] && rm -rf "${WORKDIR}"' EXIT
 
 echo "[hipblaslt_patch] running inline patcher (SPX heuristic + CPX WGMXCC) ..."
 python3 - --rocm-version "${ROCM_VERSION}" \
-          --src-libdir "${SRC_LIBDIR}" \
+          --src-libdir "${EFFECTIVE_SRC_LIBDIR}" \
           --dst-libdir "${WORKDIR}" <<'PYEOF'
 """Inline patcher for hipBLASLt .dat libraries (SPX heuristic + CPX WGMXCC).
 
@@ -269,6 +284,15 @@ SOLUTION_INDEX = {
     "7.2.3": {("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       348921,
               ("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"): 340091,
               ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 336905},
+    # rocm/7.13.0: catalogue was substantially regenerated -- the
+    # 7.2.x indices don't survive. Mapped by tile signature:
+    # MT16x16x256/MI16x16x1/WGMXCC1/GSU1 for fwd, MT128x{32,16}x32
+    # for the two backward variants. CPX side is a sentinel-only
+    # no-op here because every CU38 solution already ships with
+    # workGroupMappingXCC=1 upstream.
+    "7.13.0":{("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       236740,
+              ("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"): 225772,
+              ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 222586},
 }
 CPX_SENTINEL = "__cpx_patch_v1__"
 
@@ -392,7 +416,7 @@ if __name__ == "__main__":
 PYEOF
 
 # ── install into DST_LIBDIR ─────────────────────────────────────────
-${SUDO} mkdir -p "${DST_LIBDIR}"
+${SUDO} mkdir -p "${EFFECTIVE_DST_LIBDIR}"
 
 HH_PREFIX="TensileLibrary_HH_HH_HA_Bias_SAV_UA_Type_HH_HPA_Contraction_l_"
 PATCHED_FILES=(
@@ -404,11 +428,19 @@ PATCHED_FILES=(
    "${HH_PREFIX}Ailk_Bjlk_Cijk_Dijk_CU38_gfx942.dat"      # CPX bwd_wei  fp16 (WGMXCC rewrite)
 )
 for fname in "${PATCHED_FILES[@]}"; do
-   ${SUDO} cp -p "${WORKDIR}/${fname}" "${DST_LIBDIR}/${fname}"
-   ${SUDO} chmod 0644 "${DST_LIBDIR}/${fname}"
+   ${SUDO} cp -p "${WORKDIR}/${fname}" "${EFFECTIVE_DST_LIBDIR}/${fname}"
+   ${SUDO} chmod 0644 "${EFFECTIVE_DST_LIBDIR}/${fname}"
 done
 
 # Symlink farm: everything in the SDK library dir we didn't patch.
+# For flat layout (7.1.x / 7.2.x): single pass over ${SRC_LIBDIR}.
+# For nested layout (7.13.0+):     pass 1 mirrors top-level files
+#                                  (extop_*.co, hipblasltTransform.hsaco,
+#                                  hipblasltExtOpLibrary.dat, ...) without
+#                                  filtering since they aren't patch
+#                                  targets; pass 2 walks the gfx942/ subdir
+#                                  and applies the patched-file filter
+#                                  there.
 PATCHED_SET=""
 for fname in "${PATCHED_FILES[@]}"; do
    PATCHED_SET+=" ${fname}"
@@ -416,12 +448,28 @@ done
 sl_count=0
 for f in "${SRC_LIBDIR}"/*; do
    base="$(basename "${f}")"
-   case " ${PATCHED_SET} " in
-      *" ${base} "*) continue ;;
-   esac
+   if [ -d "${f}" ]; then
+      continue
+   fi
+   if [ -z "${ARCH_SUBDIR}" ]; then
+      case " ${PATCHED_SET} " in
+         *" ${base} "*) continue ;;
+      esac
+   fi
    ${SUDO} ln -sfn "${f}" "${DST_LIBDIR}/${base}"
    sl_count=$((sl_count + 1))
 done
+if [ -n "${ARCH_SUBDIR}" ]; then
+   ${SUDO} mkdir -p "${DST_LIBDIR}/${ARCH_SUBDIR}"
+   for f in "${SRC_LIBDIR}/${ARCH_SUBDIR}"/*; do
+      base="$(basename "${f}")"
+      case " ${PATCHED_SET} " in
+         *" ${base} "*) continue ;;
+      esac
+      ${SUDO} ln -sfn "${f}" "${DST_LIBDIR}/${ARCH_SUBDIR}/${base}"
+      sl_count=$((sl_count + 1))
+   done
+fi
 
 # ── install README and modulefile ───────────────────────────────────
 ${SUDO} mkdir -p "${DST_DOCDIR}"
@@ -461,7 +509,7 @@ cat <<-EOF | ${SUDO} tee "${MODULE_FILE}" >/dev/null
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("Version: patched (rocm-${ROCM_VERSION} base)")
 	whatis("Category: AMD")
-	whatis("Description: Restores rocm/6.4.1-class perf on MI300A SPX and CPX for skinny fp16 GEMMs")
+	whatis("Description: Restores perf on MI300A SPX and CPX for skinny fp16 GEMMs")
 
 	-- No prereq("rocm/${ROCM_VERSION}"): structural via MODULEPATH-scoping
 	-- under rocmplus-${ROCM_VERSION}/. A real prereq() also breaks the
