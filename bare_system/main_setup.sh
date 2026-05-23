@@ -122,7 +122,7 @@ SITE_CLI=0
 : ${PNETCDF_VERSION:=""}
 : ${PYTHON_VERSION:="12"} # python3 minor release
 : ${USE_MAKEFILE:="0"}
-: ${QUICK_INSTALLS:="0"}     # 1 = skip packages whose wall is >= 20 min (see QUICK_INSTALLS_PKGS below)
+: ${QUICK_INSTALLS:="0"}     # 1 = skip packages whose wall is >= 20 min (long-pole gate) PLUS the explicit always-skip set likwid + mdb (see QUICK_INSTALLS_PKGS below)
 : ${REPLACE_EXISTING:="0"}   # 1 = remove prior rocmplus-<v> install + module dirs first
 : ${KEEP_FAILED_INSTALLS:="0"}  # 1 = keep partial install dirs/modulefiles when a package fails (for post-mortem)
 
@@ -196,7 +196,7 @@ usage()
    echo "  --install-rocprof-compute-from-source [0 or 1]:  default is $INSTALL_ROCPROF_COMPUTE_FROM_SOURCE (false)"
    echo "  --install-rocprof-sys-from-source [0 or 1]:  default is $INSTALL_ROCPROF_SYS_FROM_SOURCE (false)"
    echo "  --use-makefile [0 or 1]:  default is 0 (false)"
-   echo "  --quick-installs [0 or 1]:  skip packages whose wall >= 20 min (measured from job 8065 sweep): pytorch (91m), tensorflow (70m), jax (34m, when policy gate allows). Also skips ftorch (transitive: needs pytorch) and julia (dormant: no install wired). Threshold raised from 15 -> 20 min after job 8065 audit moved petsc (17m) and scorep (17m) under the cutoff. Default $QUICK_INSTALLS"
+   echo "  --quick-installs [0 or 1]:  skip packages whose wall >= 20 min (measured from job 8065 sweep): pytorch (91m), tensorflow (70m), jax (34m, when policy gate allows). Also skips ftorch (transitive: needs pytorch), julia (dormant: no install wired), and likwid + mdb (explicit always-skip in quick mode regardless of wall, e.g. so per-tool iteration does not retrigger their builds and their occasional flakiness does not block the long-pole iteration loop). Threshold raised from 15 -> 20 min after job 8065 audit moved petsc (17m) and scorep (17m) under the cutoff. Default $QUICK_INSTALLS"
    echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf the versioned subdir under \${TOP_INSTALL_PATH} (the version itself lives in the leaf script). Default $REPLACE_EXISTING"
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
    echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, likwid, mdb, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, hpctoolkit, likwid, mdb, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Currently supported only for pytorch; keys are aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build."
@@ -591,6 +591,14 @@ declare -A DESELECTED_BY=()
 # next time it surfaces, jax-on-rocm-6 (was 34m in job 7975) on the right
 # sides of the line.
 #
+# Plus an explicit always-skip set (packages added to QUICK_INSTALLS_PKGS
+# regardless of wall time): likwid + mdb. Both are sub-minute builds in
+# practice (see the wall-time table below for the most recent sample),
+# so they are NOT here for the wall-time reason -- they are an operator
+# opt-out for the quick-installs iteration loop. Operators who do want
+# them in a quick run can pass --packages "... likwid mdb ..."
+# explicitly: --packages always wins over --quick-installs.
+#
 # Wall-time data sources, newest first (delta is mtime of the per-package
 # log file vs. the previous one, in a full --quick-installs 0 run):
 #
@@ -615,6 +623,12 @@ declare -A DESELECTED_BY=()
 #   mpi4py        1:41         1:41         1:37        BUILD (< 20 min)
 #   kokkos        1:31         0:30        n/a          BUILD (< 20 min)
 #   hip-python    1:17         1:20        n/a          BUILD (< 20 min)
+#   likwid       <1m          <1m          n/a          SKIP  (operator opt-out, not wall:
+#                                                              explicit always-skip in
+#                                                              QUICK_INSTALLS_PKGS)
+#   mdb          <1m          <1m          n/a          SKIP  (operator opt-out, not wall:
+#                                                              explicit always-skip in
+#                                                              QUICK_INSTALLS_PKGS)
 #   ftorch        0:49        <1m         <1m          SKIP  (transitive: preflight
 #                                                              requires pytorch which
 #                                                              is itself SKIP-ed)
@@ -635,7 +649,7 @@ declare -A DESELECTED_BY=()
 # package by exporting BUILD_<name>=1 between this point and sub-script
 # invocation; we don't expose per-package CLI flags here on purpose.
 QUICK_INSTALLS_PKGS=( BUILD_PYTORCH BUILD_TENSORFLOW BUILD_JAX BUILD_FTORCH \
-                     BUILD_JULIA )
+                     BUILD_JULIA BUILD_LIKWID BUILD_MDB )
 QUICK_INSTALLS_THRESHOLD_MIN=20
 if [[ "${QUICK_INSTALLS}" == "1" ]]; then
    echo ""
@@ -662,6 +676,8 @@ if [[ "${QUICK_INSTALLS}" == "1" ]]; then
                            # one-line marker for both, not the verbose
                            # 3-line "skipped" banner for ftorch_amdflang.
                            DESELECTED_BY[ftorch_amdflang]="quick-installs" ;;
+         BUILD_LIKWID)     DESELECTED_BY[likwid]="quick-installs" ;;
+         BUILD_MDB)        DESELECTED_BY[mdb]="quick-installs" ;;
          BUILD_JULIA)      ;;  # dormant: no run_and_log call exists
       esac
    done
@@ -1818,24 +1834,91 @@ run_and_log_versioned tensorflow extras/scripts/tensorflow_setup.sh ${COMMON_OPT
 run_and_log_versioned pytorch extras/scripts/pytorch_setup.sh ${COMMON_OPTIONS} --build-pytorch ${BUILD_PYTORCH} --python-version ${PYTHON_VERSION} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/pytorch)
 
-# FTorch: dispatch to one or both toolchains per FTORCH_FC_COMPILER.
-# Each variant goes to a different install dir / Lmod module
-# (ftorch vs ftorch_amdflang -- the leaf script appends _amdflang to
-# both paths internally), so they coexist. Each gets its own
-# run_and_log entry so the per-package summary lists them separately
-# and a failure in one doesn't shadow the other.
-case "${FTORCH_FC_COMPILER}" in
-   gfortran|both)
-      run_and_log_versioned ftorch extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} --build-ftorch ${BUILD_FTORCH} --fc-compiler gfortran ${REPLACE_OPTS} \
-         $(path_args ftorch rocmplus-${ROCMPLUS_SUFFIX}/ftorch)
-      ;;
-esac
-case "${FTORCH_FC_COMPILER}" in
-   amdflang|both)
-      run_and_log_versioned ftorch_amdflang extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} --build-ftorch ${BUILD_FTORCH} --fc-compiler amdflang ${REPLACE_OPTS} \
-         $(path_args ftorch rocmplus-${ROCMPLUS_SUFFIX}/ftorch)
-      ;;
-esac
+# FTorch: dispatched along TWO orthogonal axes:
+#
+#   1. Fortran toolchain (FTORCH_FC_COMPILER): gfortran | amdflang | both.
+#      Each toolchain goes to a different install dir / Lmod module
+#      (ftorch-v* vs ftorch_amdflang-v* -- the leaf script appends
+#      _amdflang to the basename internally) so they coexist.
+#
+#   2. Bound PyTorch version (PKG_VERSIONS_REQ[pytorch]): one ftorch
+#      build per pytorch version. FTorch's .so + .mod artifacts embed
+#      libtorch's C++ ABI, so a single ftorch install can only serve
+#      ONE pytorch version. When the operator asks for multi-pytorch
+#      (e.g. --packages "pytorch=2.7.1 pytorch=2.9.1"), each pytorch
+#      version gets its own ftorch install at
+#         ${ROCMPLUS}/ftorch-v${PYTV}/             (gfortran)
+#         ${ROCMPLUS}/ftorch_amdflang-v${PYTV}/    (amdflang)
+#      with modulefile ${MODULE_PATH}/${PYTV}.lua so consumers say
+#      `module load ftorch/${PYTV}` instead of the legacy
+#      `module load ftorch/dev`.
+#
+# When no --packages tokens for pytorch are present, the loop runs
+# once with NO --pytorch-version flag; the leaf script's auto-derive
+# resolves the bound pytorch version from the loaded pytorch module
+# (see ftorch_setup.sh's PYTORCH_VERSION resolution block). This
+# preserves byte-identical behavior for the common single-pytorch
+# operator workflow.
+#
+# Why an inline loop here (rather than run_and_log_versioned ftorch):
+# run_and_log_versioned iterates over PKG_VERSIONS_REQ[<pkg_name>],
+# which for `ftorch` would be FTorch's OWN upstream version axis
+# (--ftorch-version <ref>, the git checkout). The "version the
+# install dir by pytorch version" axis is keyed on a DIFFERENT
+# package's version (pytorch's), so we drive that axis here.
+#
+# The FTorch upstream axis is collapsed: if --packages contains a
+# `ftorch=<REF>` token, we pick the first entry from
+# PKG_VERSIONS_REQ[ftorch] and pass --ftorch-version <REF> uniformly
+# across every pytorch iteration. Multiple ftorch upstream tokens
+# (e.g. `ftorch=0.7 ftorch=main`) are not supported as separate
+# concurrent installs in this orchestrator -- the install dir is
+# version-keyed by pytorch only, so two FTorch refs against the
+# same pytorch would collide. If you need that, switch the dir
+# naming scheme to ftorch-vpyt<PYTV>-vft<FTV>/ and re-introduce
+# a nested loop here.
+_ftorch_upstream_ref=""
+if [[ -n "${PKG_VERSIONS_REQ[ftorch]:-}" ]]; then
+   # Take the first non-empty entry. mapfile -t preserves the empty
+   # entry that the parser uses for "bare ftorch token, repo HEAD";
+   # we want to skip past those to the first concrete ref.
+   while IFS= read -r _line; do
+      if [[ -n "${_line}" ]]; then
+         _ftorch_upstream_ref="${_line}"
+         break
+      fi
+   done <<< "${PKG_VERSIONS_REQ[ftorch]}"
+   unset _line
+   # Count concrete entries; warn if there's more than one (we only
+   # use the first per the design note above).
+   _ftorch_ref_count=0
+   while IFS= read -r _line; do
+      [[ -n "${_line}" ]] && _ftorch_ref_count=$((_ftorch_ref_count + 1))
+   done <<< "${PKG_VERSIONS_REQ[ftorch]}"
+   unset _line
+   if (( _ftorch_ref_count > 1 )); then
+      echo "WARNING: --packages contains ${_ftorch_ref_count} ftorch=<REF> tokens; only the first ('${_ftorch_upstream_ref}') will be used."
+      echo "         The ftorch install dir is version-keyed by pytorch (not by FTorch upstream ref), so multiple FTorch refs against the same pytorch would collide."
+      echo "         To build multiple FTorch refs against the same pytorch, run separate sweeps with different --packages selections."
+   fi
+   unset _ftorch_ref_count
+fi
+_ftorch_upstream_args=()
+[[ -n "${_ftorch_upstream_ref}" ]] && _ftorch_upstream_args=( --ftorch-version "${_ftorch_upstream_ref}" )
+
+_ftorch_pyt_versions=()
+if [[ -z "${PKG_VERSIONS_REQ[pytorch]+SET}" ]]; then
+   # No --packages whitelist (or it didn't include pytorch): single
+   # iteration, no version flag, leaf auto-derive picks up whichever
+   # pytorch module is the Lmod default at build time.
+   _ftorch_pyt_versions=("")
+else
+   # mapfile -t preserves the empty-entry semantics that the parser
+   # uses for "bare pytorch token, leaf default". An empty entry here
+   # drives the same auto-derive path as the no-PKG_VERSIONS_REQ case.
+   mapfile -t _ftorch_pyt_versions <<< "${PKG_VERSIONS_REQ[pytorch]}"
+fi
+
 case "${FTORCH_FC_COMPILER}" in
    gfortran|amdflang|both) ;;
    *)
@@ -1843,6 +1926,62 @@ case "${FTORCH_FC_COMPILER}" in
       exit 1
       ;;
 esac
+
+for _pyt_ver in "${_ftorch_pyt_versions[@]}"; do
+   if [[ -z "${_pyt_ver}" ]]; then
+      _pyt_args=()
+      _label_suffix=""
+   else
+      # Pin BOTH:
+      #   --pytorch-version: tells the leaf script what to encode in
+      #     the install dir / modulefile name (and what to put in the
+      #     whatis() lines).
+      #   --pytorch-module:  tells the leaf's preflight which exact
+      #     pytorch modulefile to load (so cmake links against the
+      #     matching libtorch). The bare `pytorch` default would let
+      #     Lmod pick its current default, which silently mismatches
+      #     in a multi-pytorch tree.
+      _pyt_args=( --pytorch-version "${_pyt_ver}" --pytorch-module "pytorch/${_pyt_ver}" )
+      # Per-iteration label so the per-package log file +
+      # SUCCESS/FAILED/DESELECTED summary surface this iteration
+      # distinctly. Mirrors run_and_log_versioned's "_v<VER>" label
+      # convention (we use _v<VER> here too -- it's the install-dir
+      # version by definition, just keyed on pytorch).
+      _label_suffix="_v${_pyt_ver}"
+   fi
+
+   case "${FTORCH_FC_COMPILER}" in
+      gfortran|both)
+         _label="ftorch${_label_suffix}"
+         # Mirror DESELECTED_BY so a deselected ftorch (BUILD_FTORCH=0
+         # via --quick-installs or --packages-whitelist-excluded)
+         # produces the concise one-line marker for this versioned
+         # iteration instead of the verbose 3-line "SKIP" banner.
+         if [[ -n "${DESELECTED_BY[ftorch]:-}" ]]; then
+            DESELECTED_BY[${_label}]="${DESELECTED_BY[ftorch]}"
+         fi
+         run_and_log "${_label}" extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} \
+            --build-ftorch ${BUILD_FTORCH} --fc-compiler gfortran ${REPLACE_OPTS} \
+            "${_pyt_args[@]}" \
+            "${_ftorch_upstream_args[@]}" \
+            $(path_args ftorch rocmplus-${ROCMPLUS_SUFFIX}/ftorch)
+         ;;
+   esac
+   case "${FTORCH_FC_COMPILER}" in
+      amdflang|both)
+         _label="ftorch_amdflang${_label_suffix}"
+         if [[ -n "${DESELECTED_BY[ftorch_amdflang]:-}" ]]; then
+            DESELECTED_BY[${_label}]="${DESELECTED_BY[ftorch_amdflang]}"
+         fi
+         run_and_log "${_label}" extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} \
+            --build-ftorch ${BUILD_FTORCH} --fc-compiler amdflang ${REPLACE_OPTS} \
+            "${_pyt_args[@]}" \
+            "${_ftorch_upstream_args[@]}" \
+            $(path_args ftorch rocmplus-${ROCMPLUS_SUFFIX}/ftorch)
+         ;;
+   esac
+done
+unset _ftorch_pyt_versions _pyt_ver _pyt_args _label _label_suffix _ftorch_upstream_ref _ftorch_upstream_args
 
 #If ROCm should be installed in a different location
 #if [ "${ROCM_INSTALLPATH}" != "/opt/" ]; then

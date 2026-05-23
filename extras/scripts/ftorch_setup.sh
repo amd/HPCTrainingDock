@@ -39,20 +39,38 @@ preflight_modules() {
 # Best-effort sibling marker for bare_system/inventory_packages.py ('N' cell
 # when FTorch cannot run because required modules are missing — mirrors
 # pytorch_setup.sh's pytorch.SKIPPED pattern).
+#
+# Marker filename has to be derived from the basename of FTORCH_PATH (and
+# NOT the literal "ftorch.SKIPPED") so it stays distinct across:
+#   * gfortran vs amdflang installs   (ftorch-v* vs ftorch_amdflang-v*)
+#   * different bound pytorch versions (-v<VER> tail differs)
+# Otherwise a single ftorch.SKIPPED marker would shadow every other
+# (toolchain, pytorch-version) cell in inventory_packages.py for the
+# same rocmplus tree, mis-flagging working installs as 'N'. The marker
+# strips the trailing -v<VER> from FTORCH_PATH's basename so the file is
+# named e.g. ftorch.SKIPPED / ftorch_amdflang.SKIPPED -- inventory looks
+# up ${pkg}.SKIPPED keyed on the cell's pkg name (ftorch /
+# ftorch_amdflang per PKG_TO_MODULE_CAT), not the version-tagged dir
+# basename, so this aligns with the consumer's lookup shape.
 _ftorch_write_missing_prereq_marker() {
-   local _skip_dir _mods
+   local _skip_dir _mods _ftorch_basename _marker_name
    _skip_dir="$(dirname "${FTORCH_PATH}")"
+   _ftorch_basename="$(basename "${FTORCH_PATH}")"
+   # Strip the -v<VER> tail to recover the pkg name (ftorch / ftorch_amdflang).
+   _marker_name="${_ftorch_basename%-v*}.SKIPPED"
    _mods=$(printf '%s ' "$@")
    ${SUDO} mkdir -p "${_skip_dir}" 2>/dev/null || true
    if [ ! -d "${_skip_dir}" ]; then
       echo "ftorch: could not create skip-marker dir ${_skip_dir}" >&2
       return 0
    fi
-   ${SUDO} tee "${_skip_dir}/ftorch.SKIPPED" >/dev/null 2>/dev/null <<MARKER_EOF || true
-SKIPPED package: ftorch
+   ${SUDO} tee "${_skip_dir}/${_marker_name}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+SKIPPED package: ${_ftorch_basename%-v*}
 ROCm SDK:        ${ROCM_PATH:-unknown}
 ROCm token:      ${ROCM_VERSION:-unknown}
-Fortran toolchain: ${FC_COMPILER} (install prefix ${FTORCH_PATH})
+Fortran toolchain:    ${FC_COMPILER} (install prefix ${FTORCH_PATH})
+Bound PyTorch:        ${PYTORCH_VERSION:-unresolved}
+Bound PyTorch module: ${PYTORCH_MODULE}
 Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
 Setup script:    ftorch_setup.sh (preflight_modules)
 Reason:          Required Lmod module(s) could not be loaded (needed: ${_mods}). Typical case: no ${PYTORCH_MODULE} module for this rocmplus tree. Install PyTorch for this SDK or include pytorch in --packages. See the log for the Lmod error.
@@ -76,6 +94,27 @@ FTORCH_PATH=/opt/rocmplus-${ROCM_VERSION}/ftorch
 FTORCH_PATH_INPUT=""
 PYTORCH_MODULE=pytorch
 FTORCH_VERSION=""    # empty -> default branch (main); else passed to git checkout after clone
+# PYTORCH_VERSION: the pytorch SDK release this ftorch is bound to. FTorch's
+# .so + .mod artifacts embed libtorch's C++ ABI, so the install is only
+# valid for the one pytorch version it was built against -- different
+# pytorch versions ship different libtorch SONAMEs / headers and cannot
+# share a single ftorch install. We therefore version the ftorch install
+# dir + modulefile by PYTORCH_VERSION (NOT by FTorch's own upstream version
+# tag, which is captured separately via --ftorch-version above and recorded
+# in the modulefile whatis() line).
+#
+# Resolution order (highest priority first):
+#   1. --pytorch-version <VER>  (explicit; main_setup.sh passes this when
+#      iterating over multiple pytorch installs).
+#   2. ${PYTORCH_MODULE} parsed as "pytorch/<VER>"  (e.g. when the operator
+#      passed --pytorch-module pytorch/2.9.1 directly).
+#   3. After preflight has loaded the pytorch module, scan LOADEDMODULES
+#      for the resolved "pytorch/<VER>" token (handles --pytorch-module
+#      pytorch with no explicit version: Lmod's default-version rule
+#      picks one and we read the resolved value back out).
+# All three paths populate the same PYTORCH_VERSION variable; the install
+# dir / modulefile name / whatis() string then come from one source of truth.
+PYTORCH_VERSION=""
 # --fc-compiler {gfortran|amdflang}: choose Fortran compiler for the FTorch
 # build. Default is gfortran (matches Ubuntu 22.04 system default). Selecting
 # `amdflang` loads the rocm-tied `amdclang` modulefile (which sets
@@ -114,9 +153,10 @@ usage()
    echo "  --build-ftorch [ BUILD_FTORCH ] default $BUILD_FTORCH "
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --pytorch-module [ PYTORCH_MODULE ] default $PYTORCH_MODULE"
+   echo "  --pytorch-version [ PYTORCH_VERSION ] pytorch SDK release this ftorch will be bound to. The ftorch install dir + modulefile are versioned by THIS value (ftorch-v\${PYTORCH_VERSION}/ and \${MODULE_PATH}/\${PYTORCH_VERSION}.lua) so multiple pytorch versions can each have their own ftorch. Empty (default) -> auto-derive after the pytorch module is loaded (preflight stage); pass explicitly when --pytorch-module is bare 'pytorch' but you need to pin the install dir to a specific version up front."
    echo "  --install-path [ FTORCH_PATH ] default $FTORCH_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
-   echo "  --ftorch-version [ FTORCH_VERSION ] git tag/branch/commit to check out after clone (default: repo HEAD)"
+   echo "  --ftorch-version [ FTORCH_VERSION ] FTorch upstream git tag/branch/commit to check out after clone (default: repo HEAD). Independent of --pytorch-version: this controls the source ref FTorch is BUILT FROM, --pytorch-version controls the libtorch ABI it is BUILT AGAINST. Recorded in the modulefile whatis() but NOT in the install path."
    echo "  --fc-compiler [ gfortran|amdflang ] Fortran compiler for the build, default $FC_COMPILER. amdflang appends _amdflang to install + modulefile paths and loads the rocm-tied amdclang module."
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --replace [ 0|1 ] remove prior install + modulefile before building, default $REPLACE"
@@ -174,6 +214,11 @@ do
           PYTORCH_MODULE=${1}
 	  reset-last
           ;;
+      "--pytorch-version")
+          shift
+          PYTORCH_VERSION=${1}
+          reset-last
+          ;;
       "--ftorch-version")
           shift
           FTORCH_VERSION=${1}
@@ -215,13 +260,13 @@ fi
 # ── --fc-compiler validation + path/modulefile suffix ───────────────
 # Mirrors petsc_setup.sh's --use-amdflang 1 suffix pattern: when the
 # operator picks the amdflang toolchain we install to a sibling location
-# (FTORCH_PATH_amdflang) and write a sibling modulefile (dev_amdflang.lua
-# under MODULE_PATH_amdflang) so the gfortran and amdflang installs
-# coexist. .mod files are not portable across Fortran compilers, so a
-# single install cannot serve both toolchains. The modulefile suffix
-# (_amdflang on MODULE_PATH itself) keeps the Lmod hierarchy clean: a
-# user picks the toolchain at `module load ftorch` time by selecting
-# either the dev or dev_amdflang version under whichever MODULE_PATH
+# (..._amdflang) and write a sibling modulefile under MODULE_PATH_amdflang
+# so the gfortran and amdflang installs coexist. .mod files are not
+# portable across Fortran compilers, so a single install cannot serve
+# both toolchains. The _amdflang suffix on MODULE_PATH itself keeps the
+# Lmod hierarchy clean: a user picks the toolchain at `module load ftorch`
+# time by selecting either the ftorch/<pytorch-ver> or
+# ftorch_amdflang/<pytorch-ver> module under whichever MODULE_PATH
 # the site exposes.
 case "${FC_COMPILER}" in
    gfortran|amdflang) ;;
@@ -229,38 +274,120 @@ case "${FC_COMPILER}" in
       send-error "Unsupported --fc-compiler value: '${FC_COMPILER}' (expected: gfortran|amdflang)"
       ;;
 esac
-# Modulefile inside the per-toolchain MODULE_PATH always stays dev.lua
-# so the Lmod hierarchy is symmetrical:
-#   ftorch/dev          (gfortran build)
-#   ftorch_amdflang/dev (amdflang build)
-# i.e. the *directory* (= Lmod module name) carries the toolchain tag,
-# not the file name. This matches petsc's _amdflang suffix convention.
-MODULEFILE_NAME=dev.lua
 if [ "${FC_COMPILER}" = "amdflang" ]; then
    FTORCH_PATH=${FTORCH_PATH}_amdflang
    MODULE_PATH=${MODULE_PATH}_amdflang
 fi
 
-# ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
-# Modulefile name is dev.lua in both cases; the install dir +
-# enclosing module dir carry the _amdflang suffix when --fc-compiler
-# amdflang was passed (see suffix block above).
 # ── BUILD_FTORCH=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
+# Done BEFORE PYTORCH_VERSION resolution so the no-op path can return
+# cleanly even if no pytorch module is loadable -- the orchestrator's
+# DESELECTED branch only needs the exit code (NOOP_RC=43), not a
+# resolved install path.
 NOOP_RC=43
 if [ "${BUILD_FTORCH}" = "0" ]; then
    echo "[ftorch BUILD_FTORCH=0] operator opt-out; skipping (no source build, no cache restore)."
    exit ${NOOP_RC}
 fi
 
+# ── PYTORCH_VERSION resolution (see header comment block on PYTORCH_VERSION) ─
+# We need the bound pytorch version BEFORE the --replace cleanup and
+# existence guard below, because both consult the final FTORCH_PATH /
+# MODULEFILE_NAME, and both of those are versioned by PYTORCH_VERSION.
+# Three resolution paths, in priority order; the first that yields a
+# non-empty value wins:
+#
+#   1. --pytorch-version <VER>: explicit, highest authority. main_setup.sh
+#      always passes this when iterating over multiple pytorch installs
+#      (PKG_VERSIONS_REQ[pytorch]).
+#   2. --pytorch-module pytorch/<VER>: parse the version out of the
+#      module token directly. main_setup.sh ALSO passes this so that
+#      the leaf's preflight `module load` pins the same version Lmod
+#      will expose to the build's cmake.
+#   3. Lmod probe: query `module -t avail ${PYTORCH_MODULE}` and read
+#      back the default version. Used only for standalone invocation
+#      where neither flag was passed (e.g. an operator running
+#      ftorch_setup.sh by hand against an existing rocmplus tree).
+#      Best-effort; failures fall through to the explicit error below.
+if [[ -z "${PYTORCH_VERSION}" ]]; then
+   case "${PYTORCH_MODULE}" in
+      pytorch/*) PYTORCH_VERSION="${PYTORCH_MODULE#pytorch/}" ;;
+   esac
+fi
+if [[ -z "${PYTORCH_VERSION}" ]]; then
+   if ! type module >/dev/null 2>&1; then
+      [ -r /etc/profile.d/lmod.sh ]         && . /etc/profile.d/lmod.sh
+      [ -r /usr/share/lmod/lmod/init/bash ] && . /usr/share/lmod/lmod/init/bash
+   fi
+   if type module >/dev/null 2>&1; then
+      # `module -t avail` prints one modulefile per line in machine-
+      # parseable form; the default version is suffixed with `(D)`.
+      _ML_AVAIL=$(module -t avail "${PYTORCH_MODULE}" 2>&1 || true)
+      # First pass: a `(D)` line wins outright.
+      while IFS= read -r _line; do
+         case "${_line}" in
+            "${PYTORCH_MODULE}/"*"(D)"*)
+               _ver="${_line#${PYTORCH_MODULE}/}"
+               PYTORCH_VERSION="${_ver%%[[:space:]]*}"
+               break
+               ;;
+         esac
+      done <<< "${_ML_AVAIL}"
+      # Fallback: only one version available -> take it. Keeps the
+      # standalone path working even when Lmod did not mark a default
+      # (single-version trees).
+      if [[ -z "${PYTORCH_VERSION}" ]]; then
+         _candidates=()
+         while IFS= read -r _line; do
+            case "${_line}" in
+               "${PYTORCH_MODULE}/"*)
+                  _ver="${_line#${PYTORCH_MODULE}/}"
+                  _ver="${_ver%%[[:space:]]*}"
+                  [[ -n "${_ver}" ]] && _candidates+=("${_ver}")
+                  ;;
+            esac
+         done <<< "${_ML_AVAIL}"
+         if [[ "${#_candidates[@]}" -eq 1 ]]; then
+            PYTORCH_VERSION="${_candidates[0]}"
+         fi
+         unset _candidates
+      fi
+      unset _ML_AVAIL _line _ver
+   fi
+fi
+if [[ -z "${PYTORCH_VERSION}" ]]; then
+   send-error "Could not resolve PYTORCH_VERSION. Pass --pytorch-version <VER>, or --pytorch-module pytorch/<VER>, or ensure '${PYTORCH_MODULE}' resolves to a single Lmod modulefile (or has a (D) default-marked version) so the install dir + modulefile name can be versioned by it."
+fi
+
+# ── Final FTORCH_PATH + modulefile name (now version-keyed) ─────────
+# Install layout (mirrors pytorch_setup.sh: pytorch-v<VER>/ + <VER>.lua):
+#   gfortran:  ${ROCMPLUS}/ftorch-v${PYTORCH_VERSION}/
+#              ${MODULE_PATH}/${PYTORCH_VERSION}.lua          -> ftorch/${VER}
+#   amdflang:  ${ROCMPLUS}/ftorch_amdflang-v${PYTORCH_VERSION}/
+#              ${MODULE_PATH}/${PYTORCH_VERSION}.lua          -> ftorch_amdflang/${VER}
+# Note: the install dir gets BOTH the toolchain suffix (_amdflang on
+# the basename, applied above) AND the pytorch-version suffix
+# (-v<VER>, applied here). The basename order matters -- pytorch's
+# version goes LAST so the dir matches `ftorch*-v*` for the inventory
+# regex (ftorch / ftorch_amdflang -> -v<pytorch-ver> tail), parallel
+# to pytorch-v<pytorch-ver>.
+FTORCH_PATH="${FTORCH_PATH}-v${PYTORCH_VERSION}"
+MODULEFILE_NAME="${PYTORCH_VERSION}.lua"
+
 if [ "${REPLACE}" = "1" ]; then
    echo "[ftorch --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${FTORCH_PATH}"
    echo "  modulefile:  ${MODULE_PATH}/${MODULEFILE_NAME}"
+   echo "  bound pytorch version: ${PYTORCH_VERSION}"
    ${SUDO} rm -rf "${FTORCH_PATH}"
    ${SUDO} rm -f  "${MODULE_PATH}/${MODULEFILE_NAME}"
-   _ft_mark="$(dirname "${FTORCH_PATH}")/ftorch.SKIPPED"
+   # Marker filename matches the basename-stripping done in
+   # _ftorch_write_missing_prereq_marker (ftorch / ftorch_amdflang
+   # without the -v<VER> tail) so the cleanup is symmetric.
+   _ft_basename="$(basename "${FTORCH_PATH}")"
+   _ft_mark="$(dirname "${FTORCH_PATH}")/${_ft_basename%-v*}.SKIPPED"
    ${SUDO} rm -f "${_ft_mark}"
-   unset _ft_mark
+   unset _ft_mark _ft_basename
 fi
 
 # ── Existence guard: skip if already installed (see hypre_setup.sh) ──
@@ -293,12 +420,16 @@ trap _ftorch_on_exit EXIT
 echo ""
 echo "==================================="
 echo "Starting FTorch Install with"
-echo "ROCM_VERSION: $ROCM_VERSION"
+echo "ROCM_VERSION:    $ROCM_VERSION"
 echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL"
-echo "BUILD_FTORCH: $BUILD_FTORCH"
-echo "FC_COMPILER: $FC_COMPILER"
-echo "FTORCH_PATH: $FTORCH_PATH"
-echo "MODULE_PATH: $MODULE_PATH"
+echo "BUILD_FTORCH:    $BUILD_FTORCH"
+echo "FC_COMPILER:     $FC_COMPILER"
+echo "PYTORCH_VERSION: $PYTORCH_VERSION  (bound libtorch ABI; FTorch install + modulefile are versioned by this)"
+echo "PYTORCH_MODULE:  $PYTORCH_MODULE"
+echo "FTORCH_VERSION:  ${FTORCH_VERSION:-<repo HEAD>}  (FTorch upstream git ref)"
+echo "FTORCH_PATH:     $FTORCH_PATH"
+echo "MODULE_PATH:     $MODULE_PATH"
+echo "MODULEFILE_NAME: $MODULEFILE_NAME"
 echo "==================================="
 echo ""
 
@@ -388,11 +519,20 @@ else
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   # Cached tarballs in /CacheFiles only exist for the gfortran build
-   # (the historical default); they bake gfortran .mod files which can't
-   # be consumed by amdflang. Skip the cache restore path for the
-   # amdflang variant so it always builds from source.
-   if [ "${FC_COMPILER}" != "amdflang" ] && [ -f "${CACHE_FILES}/ftorch.tgz" ]; then
+   # Cache restore is intentionally DISABLED in the versioned-install
+   # regime: the historical /CacheFiles/.../ftorch.tgz tarballs were
+   # captured against an unknown pytorch version (the legacy
+   # ${ROCMPLUS}/ftorch/ single-install layout did not record one),
+   # so they cannot be safely extracted into a versioned install dir
+   # ftorch-v${PYTORCH_VERSION}/ -- we'd be claiming the bound pytorch
+   # version is X.Y.Z when in fact the .so + .mod files inside were
+   # built against some older pytorch release. Always build from
+   # source so the (FTORCH_PATH, PYTORCH_VERSION) pairing is correct
+   # by construction. The cache path is left here so an explicit
+   # --rebuild-cache mode could be wired in later (would require
+   # capturing pytorch version into the tarball name and validating
+   # on extract; deferred until there's a wall-time motivation).
+   if false && [ "${FC_COMPILER}" != "amdflang" ] && [ -f "${CACHE_FILES}/ftorch.tgz" ]; then
       echo ""
       echo "============================"
       echo " Installing Cached FTorch"
@@ -540,9 +680,11 @@ else
    # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
    # see netcdf_setup.sh for the lying-probe failure mode this replaces).
    #
-   # Modulefile name is always dev.lua; the enclosing MODULE_PATH carries
-   # the _amdflang suffix when --fc-compiler amdflang was passed (so the
-   # Lmod module name becomes ftorch_amdflang vs ftorch). When the
+   # Modulefile name is ${PYTORCH_VERSION}.lua (bound libtorch ABI keyed
+   # by the pytorch version this ftorch was built against). The
+   # enclosing MODULE_PATH carries the _amdflang suffix when
+   # --fc-compiler amdflang was passed, so the Lmod module name
+   # becomes ftorch_amdflang/${VER} vs ftorch/${VER}. When the
    # amdflang build, also emit a prereq("amdclang") so consumers can't
    # load the amdflang ftorch into a gcc/gfortran environment (the .mod
    # files would not match -- see header for full rationale).
@@ -554,15 +696,34 @@ else
       FC_PREREQ_LINE='prereq("amdclang")'
    fi
 
+   # Compute the version-pinned pytorch module name to LOAD from the
+   # ftorch modulefile. Without this, the heredoc below would write
+   # `load("pytorch")` (bare), which Lmod resolves to whichever pytorch
+   # version is currently the default -- typically the highest. That
+   # silently mismatches the libtorch ABI baked into ftorch's .so + .mod
+   # whenever multiple pytorch installs coexist (the whole reason this
+   # script is now versioned). Always pin the load target to the same
+   # pytorch version we resolved + linked against above.
+   #   PYTORCH_MODULE has form "pytorch" (bare)         -> pin to pytorch/${VER}
+   #   PYTORCH_MODULE has form "pytorch/X.Y.Z"          -> use as-is (already pinned)
+   #   PYTORCH_MODULE has form "<other>"                -> pin <other>/${VER}
+   case "${PYTORCH_MODULE}" in
+      */*) PYTORCH_MODULE_PINNED="${PYTORCH_MODULE}" ;;
+      *)   PYTORCH_MODULE_PINNED="${PYTORCH_MODULE}/${PYTORCH_VERSION}" ;;
+   esac
+
    # The - option suppresses tabs
    cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${MODULEFILE_NAME}
 	whatis("FTorch: a library for directly calling PyTorch ML models from Fortran")
+	whatis("Bound PyTorch:    ${PYTORCH_VERSION} (libtorch ABI is pinned; see Lmod load() below)")
+	whatis("Bound PyTorch module: ${PYTORCH_MODULE_PINNED}")
 	whatis("Fortran toolchain: ${FC_COMPILER}")
+	whatis("FTorch upstream ref: ${FTORCH_VERSION:-<repo HEAD>}")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
 	prereq("${ROCM_MODULE_NAME}")
 	${FC_PREREQ_LINE}
-	load("${PYTORCH_MODULE}")
+	load("${PYTORCH_MODULE_PINNED}")
 	prepend_path("LD_LIBRARY_PATH", pathJoin("${FTORCH_PATH}", "lib"))
 	setenv("FTORCH_HOME","${FTORCH_PATH}")
 	setenv("FTorch_DIR","${FTORCH_PATH}")

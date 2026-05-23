@@ -157,7 +157,12 @@ Usage: $0 [opts]
                                      (useful for distro-segregated test trees that don't fit the named presets)
                                  Any explicit --top-* / --rocm-* flag overrides the corresponding preset value (so e.g. \`--site nfsapps --rocm-install-path /opt\` is valid).
    --python-version N            python3 minor release (default: distro-native -- 10 on Ubuntu 22.04, 12 on 24.04)
-   --quick-installs 0|1          skip long-pole packages (default ${QUICK_INSTALLS})
+   --quick-installs 0|1          skip long-pole packages -- pytorch / tensorflow / jax / ftorch / julia
+                                 (wall >= 20 min) PLUS the explicit always-skip set likwid + mdb
+                                 (operator opt-out: not wall-driven; see QUICK_INSTALLS_PKGS in
+                                 bare_system/main_setup.sh). Pass --packages "... likwid mdb ..."
+                                 to override (--packages always wins over --quick-installs).
+                                 (default ${QUICK_INSTALLS})
    --replace-existing 0|1        replace existing rocmplus-<v> packages per-pkg (default ${REPLACE_EXISTING})
    --keep-failed-installs 0|1    on per-package failure, keep partial install dirs / modulefiles for post-mortem (default ${KEEP_FAILED_INSTALLS}; default 0 wipes them so retries start clean)
    --packages "name1 name2 ..."  whitelist (passed verbatim to main_setup.sh --packages); empty = all.

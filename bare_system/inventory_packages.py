@@ -87,7 +87,12 @@ parsed out of the install dir basename (e.g. `magma-v2.10.0` ->
 `2.10.0`, `openmpi-5.0.10-ucc-...` -> `5.0.10`). The `N` / `B` / `-`
 glyphs and the `amdclang` / `count Y` rows are unaffected. A handful
 of packages that install to a versionless dir (hipifly, tau, pdt,
-hip-python, ftorch, tensorflow) keep `Y` even under `--versions`.
+hip-python, tensorflow) keep `Y` even under `--versions`. ftorch
+installs were versionless historically (single `${ROCMPLUS}/ftorch/`
+dir bound to the highest pytorch's libtorch ABI by chance) but are
+now versioned by the bound pytorch release: `ftorch-v<PYTORCH_VER>/`,
+mirroring `pytorch-v<PYTORCH_VER>/`. The ftorch cell shows the bound
+pytorch version under `--versions`.
 
 When two versions of the same package coexist in one rocmplus tree
 (e.g. `pytorch-v2.7.1/` next to `pytorch-v2.9.1/`), the rendering
@@ -157,7 +162,16 @@ PKG_LIST = [
     ("netcdf",     r"^netcdf(?:|-c-v.*|-fortran-v.*)$",   r"^netcdf-c-v(.+)$"),
     ("hipifly",    r"^hipifly$",                          None),
     ("hip-python", r"^hip-python$",                       None),
-    ("ftorch",     r"^ftorch$",                           None),
+    # ftorch install dirs are versioned by the BOUND pytorch version
+    # (NOT by FTorch's own upstream ref): each pytorch version gets its
+    # own ftorch-v<PYTV>/ and ftorch_amdflang-v<PYTV>/ install. The
+    # version_capture regex extracts <PYTV> for --versions mode so the
+    # cell shows e.g. "2.7.1 / 2.9.1" when both are present (rather than
+    # just "Y" / "2"). Mirrors pytorch's PKG_LIST entry below. The
+    # legacy ${ROCMPLUS}/ftorch (no -v suffix) layout has been retired
+    # by the leaf script; the alternation `(?:|-v.*)` keeps the brief
+    # presence check tolerant if a stale legacy dir is still on disk.
+    ("ftorch",     r"^ftorch(?:|-v.*)$",                  r"^ftorch-v(.+)$"),
     ("kokkos",     r"^kokkos(-v.*)?$",                    r"^kokkos-v(.+)$"),
     ("magma",      r"^magma(-v.*)?$",                     r"^magma-v(.+)$"),
     ("hypre",      r"^hypre(-v.*)?$",                     r"^hypre-v(.+)$"),
@@ -1237,8 +1251,10 @@ def main():
         help="replace 'Y' (or a multi-install count like '2') cells with "
              "the installed version string parsed out of the install dir "
              "basename (e.g. magma -> '2.10.0', openmpi -> '5.0.10'). "
-             "Versionless dirs (hipifly, tau, pdt, hip-python, ftorch, "
-             "tensorflow) keep 'Y'. When two or more versions of one "
+             "Versionless dirs (hipifly, tau, pdt, hip-python, "
+             "tensorflow) keep 'Y'. ftorch is versioned by the bound "
+             "pytorch release (ftorch-v<PYTV>) so its cell shows the "
+             "bound pytorch version too. When two or more versions of one "
              "package coexist in the same rocmplus tree, --text spills "
              "the row onto continuation lines (label repeated, blanks "
              "in other columns), while markdown joins them with ' / ' "
