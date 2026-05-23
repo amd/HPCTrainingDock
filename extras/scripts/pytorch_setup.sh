@@ -3181,17 +3181,67 @@ else
       export PYTHONPATH=${PYTHONPATH}:${INSTALL_PATH}/pypackages
       echo ""
       echo "[pytorch C1 validation] PYTHONPATH=${PYTHONPATH}"
-      echo "[pytorch C1 validation] running 'import torch' check"
-      if ! python3 -c "
+      # Wrap the check in `timeout` so a stuck HIP-runtime init can't
+      # hang the entire sweep. Healthy `import torch` + `torch.cuda.is_available()`
+      # takes seconds; we give it 10 minutes (huge head-room for cold
+      # caches / slow filesystems) before SIGTERM and a further 30s
+      # before SIGKILL. `--foreground` keeps the child in the same
+      # process group so SIGINT from a user-facing scancel still flows
+      # through. The 124 exit code from timeout is dispatched separately
+      # from "non-zero from python" so the operator sees a different
+      # error trail (the const_data_ptr / ABI guidance below is wrong
+      # for a hang; the hang is almost always GPU/driver-side).
+      #
+      # Provenance for this guard: slurm 10141 (rocm-7.13.0 / TheRock
+      # 23.2 RC, 2026-05-19): python3 -c 'import torch; ...
+      # torch.cuda.is_available()' burned 100% CPU for 13.5h in
+      # userspace after `import torch` finished mapping every libtorch
+      # SO + libamdhip64.so.7.13 + libaotriton_v2.so.0.11.2. Spun in
+      # HSA/HIP device-discovery init; no syscall, no progress, no
+      # diagnostic output. Without this timeout the whole sweep stalled
+      # until manual scancel.
+      echo "[pytorch C1 validation] running 'import torch' check (timeout 600s)"
+      timeout --foreground --kill-after=30 600 python3 -c "
 import torch
 print('  torch.__version__   =', torch.__version__)
 print('  torch.version.hip   =', getattr(torch.version, 'hip', None))
 print('  torch.version.cuda  =', torch.version.cuda)
 print('  torch.cuda.is_available() =', torch.cuda.is_available())
-"; then
+"
+      _c1_rc=$?
+      if [[ ${_c1_rc} -eq 124 || ${_c1_rc} -eq 137 ]]; then
          echo "" >&2
          echo "######################################################################" >&2
-         echo "[pytorch C1 validation] FAILED -- 'import torch' did not succeed." >&2
+         echo "[pytorch C1 validation] TIMED OUT (exit ${_c1_rc}) -- 'import torch +" >&2
+         echo "                        torch.cuda.is_available()' did not return in 600s." >&2
+         echo "" >&2
+         echo "This is the failure mode first seen in slurm 10141 (rocm-7.13.0," >&2
+         echo "TheRock 23.2 RC, 2026-05-19): the python process pegs one CPU at" >&2
+         echo "100%% in userspace AFTER libtorch + libtorch_hip + libaotriton +" >&2
+         echo "libamdhip64 are all mapped, so the hang is past dlopen -- almost" >&2
+         echo "certainly inside HSA/HIP device-discovery init triggered by" >&2
+         echo "torch.cuda.is_available(). NOT the const_data_ptr / ABI failure" >&2
+         echo "covered by the non-timeout branch below (that one fails fast at" >&2
+         echo "'import torch', not after)." >&2
+         echo "" >&2
+         echo "Diagnostic next steps:" >&2
+         echo "  1. Re-run the same one-liner under AMD_LOG_LEVEL=3 HSA_ENABLE_DEBUG=1" >&2
+         echo "     wrapped in 'timeout 60 ...' so the runtime spew lands in the log:" >&2
+         echo "       AMD_LOG_LEVEL=3 HSA_ENABLE_DEBUG=1 timeout 60 python3 -c \\" >&2
+         echo "          \"import torch; print(torch.cuda.is_available())\"" >&2
+         echo "  2. If kernel.yama.ptrace_scope allows it, attach gdb to capture" >&2
+         echo "     the userspace stack: 'gdb -p \$PID -batch -ex \"thread apply" >&2
+         echo "     all bt 30\" -ex detach'." >&2
+         echo "  3. Sanity-check the GPU is visible to the slurm step (rocm-smi)" >&2
+         echo "     and that ROCm matches the SDK pytorch was built against -- a" >&2
+         echo "     driver/runtime version skew on TheRock RC trees is the most" >&2
+         echo "     plausible trigger." >&2
+         echo "######################################################################" >&2
+         exit 1
+      elif [[ ${_c1_rc} -ne 0 ]]; then
+         echo "" >&2
+         echo "######################################################################" >&2
+         echo "[pytorch C1 validation] FAILED (exit ${_c1_rc}) -- 'import torch' did not succeed." >&2
          echo "" >&2
          echo "This is the failure mode that silently passed in slurm 8049 / 8061 /" >&2
          echo "8063 / 8065 because the validation was gated by DEBUG=0. The libtorch" >&2
@@ -3454,6 +3504,72 @@ print('  torch.cuda.is_available() =', torch.cuda.is_available())
       if [ -n "${PILLOW_EGG}" ]; then
          PILLOW_VERSION=$(basename "${PILLOW_EGG}" | sed 's/^pillow-\(.*\)-py3\..*/\1/')
       fi
+
+      # ── Pillow shim for PT >= 2.10 (torchvision 0.25 / 0.26 / 0.27) ──
+      # torchvision 0.25+ ships under modern setuptools/pyproject and
+      # `python3 setup.py install --prefix=...` for those tags drops
+      # only `torchvision/` + `torchvision-X-py3.X.egg-info/` under
+      # ${TORCHVISION_PATH}/lib/python3.X/site-packages/. NO sibling
+      # `pillow-X-py3.X-linux-x86_64.egg/` and NO `PIL/` dir.
+      # Verified empty-vision-tree on rocm-7.2.3 for PT 2.10.0 / 2.11.0
+      # / 2.12.0:
+      #   $ ls .../pytorch-v2.11.0/vision/lib/python3.10/site-packages/
+      #     torchvision/  torchvision-0.26.0-py3.10.egg-info/
+      #
+      # Failure mode at runtime: transformers' image_utils.py runs
+      #   PILImageResampling = PIL.Image.Resampling
+      # which Python resolves against whichever PIL is first on
+      # sys.path. With no Pillow under TORCHVISION_PATH, the importer
+      # falls through to the system Pillow at
+      # /usr/lib/python3/dist-packages/PIL on Ubuntu 22.04 -- version
+      # 9.0.1, which predates `Resampling` (added in Pillow 9.1.0).
+      # Symptom: AttributeError -> ModuleNotFoundError on
+      # `from transformers import ResNetForImageClassification`.
+      # Audit: nightly cdash regression run 2026-05-22 showed
+      # pytorch_noprofile.sh + the four pytorch_profiling_*.sh tests
+      # all crashing with this trace under PT 2.11.0/rocm-7.2.3, while
+      # PT 2.9.1 passed because torchvision 0.24.1 still produced a
+      # sibling pillow-12.2.0.egg/ in the same site-packages dir.
+      #
+      # Defence (PT 2.10+ only -- legacy 2.7/2.8/2.9 path is unaffected
+      # because their torchvision tags still bundle pillow as an egg):
+      # if neither a pillow .egg nor a PIL/ directory exists in
+      # ${TORCHVISION_PATH}/.../site-packages/, drop a wheel install
+      # there via `pip3 install --no-deps --target=...`. The
+      # IS_PT_2_10_PLUS=1 modulefile branch (search "IS_PT_2_10_PLUS"
+      # below) already prepends the bare site-packages dir on
+      # PYTHONPATH for module-load consumers, so the wheel-deposited
+      # PIL/ surfaces ahead of the system one without any additional
+      # modulefile change.
+      _vision_sp="${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages"
+      _pt_ge_210=0
+      if [ "$(printf '%s\n' "${PYTORCH_VERSION}" "2.10.0" | sort -V | head -n1)" = "2.10.0" ]; then
+         _pt_ge_210=1
+      fi
+      if [ "${_pt_ge_210}" = "1" ] \
+         && [ -z "${PILLOW_EGG:-}" ] \
+         && [ ! -d "${_vision_sp}/PIL" ]; then
+         echo "[pillow shim] no Pillow under ${_vision_sp}/ after torchvision setup.py install"
+         echo "[pillow shim] (PT ${PYTORCH_VERSION} / torchvision ${TORCHVISION_VERSION} no longer bundles pillow as a transitive .egg dep)"
+         echo "[pillow shim] installing pillow==${PILLOW_VERSION} via pip3 --target so transformers' PIL.Image.Resampling resolves"
+         pip3 install --no-deps --target="${_vision_sp}" "pillow==${PILLOW_VERSION}"
+         _pip_pillow_rc=$?
+         if [ "${_pip_pillow_rc}" -ne 0 ]; then
+            echo "ERROR: pillow shim: pip3 install pillow==${PILLOW_VERSION} into ${_vision_sp} failed (rc=${_pip_pillow_rc})" >&2
+            echo "ERROR: torchvision is installed but transformers/image_utils will fail at module-load time with"             >&2
+            echo "ERROR:   AttributeError: module 'PIL.Image' has no attribute 'Resampling'"                                   >&2
+            echo "ERROR: because the system Pillow on Ubuntu 22.04 is 9.0.1 (predates Resampling, added in 9.1.0)."           >&2
+            echo "ERROR: Fix: ensure the build node can reach PyPI (proxy?), or pre-stage a pillow wheel and"                  >&2
+            echo "ERROR:   pass it via pip3 -f <local-dir>."                                                                   >&2
+            exit 1
+         fi
+         unset _pip_pillow_rc
+         echo "[pillow shim] OK; ${_vision_sp}/PIL/ now exists ($(ls -1 "${_vision_sp}/PIL" 2>/dev/null | wc -l) entries)"
+      else
+         echo "[pillow shim] skipped (PT ${PYTORCH_VERSION}, _pt_ge_210=${_pt_ge_210}, PILLOW_EGG=${PILLOW_EGG:-<none>}, PIL/=$([ -d "${_vision_sp}/PIL" ] && echo yes || echo no))"
+      fi
+      unset _vision_sp _pt_ge_210
+
       export PYTHONPATH=${TORCHVISION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/pillow-${PILLOW_VERSION}-py3.${PYTHON_VERSION}-linux-x86_64.egg:$PYTHONPATH
       if [[ "${DEBUG}" != 0 ]]; then
          echo "Testing import torchvision"

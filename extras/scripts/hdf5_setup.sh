@@ -431,6 +431,35 @@ else
 	 C_COMPILER=`which mpicc`
 	 CXX_COMPILER=`which mpicxx`
 	 F_COMPILER=`which mpifort`
+
+	 # OpenMPI's mpifort/mpicxx have the Fortran/C++ compiler name
+	 # baked in at OpenMPI configure-time. On the rocmplus-6.x trees
+	 # the openmpi/5.0.10 install was configured against amdflang,
+	 # but ROCm 6.3.x SDKs only ship amdflang under ${ROCM_PATH}/llvm/bin/,
+	 # which is NOT on PATH after `module load rocm/6.3.x` (the module
+	 # prepends ${ROCM_PATH}/bin only). ROCm 6.4.x DOES ship amdflang
+	 # under ${ROCM_PATH}/bin/, so it works there.
+	 #
+	 # Result on 6.3.x: mpifort -> "Open MPI wrapper compiler was
+	 # unable to find the specified compiler amdflang in your PATH"
+	 # and the HDF5 cmake Fortran-ABI probe fails (sweep 10220-10224,
+	 # 2026-05-20). Fix: when amdflang is missing from PATH but the
+	 # rocm SDK ships one under llvm/bin, extend PATH so mpifort
+	 # finds the SDK's own amdflang. This is the SAME compiler the
+	 # openmpi/mpifort wrapper was originally configured against, so
+	 # the mpi.mod is in the correct Flang module format and no
+	 # OMPI_FC override is needed (which would have introduced a
+	 # different incompatibility -- gfortran can't read amdflang-
+	 # classic's V34 .mod files; verified slurm 10237, 2026-05-20).
+	 #
+	 # No-op on ROCm 7.x (amdflang already on PATH) and on 6.4.x
+	 # (same).
+	 if ! command -v amdflang >/dev/null 2>&1 \
+	      && [ -n "${ROCM_PATH:-}" ] \
+	      && [ -x "${ROCM_PATH}/llvm/bin/amdflang" ]; then
+	    export PATH="${ROCM_PATH}/llvm/bin:${PATH}"
+	    echo "HDF5: amdflang not on PATH; prepending ${ROCM_PATH}/llvm/bin (mpifort wrapper depends on it)"
+	 fi
       fi
 
       # override flags with user defined values if present

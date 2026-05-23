@@ -658,6 +658,27 @@ else
          F_COMPILER=${F_COMPILER_INPUT}
       fi
 
+      # OpenMPI wrapper-compiler fallback for ROCm 6.3.x trees.
+      # openmpi/5.0.10 on rocmplus-6.x was configured against amdflang.
+      # ROCm 6.3.x SDKs only ship amdflang under ${ROCM_PATH}/llvm/bin/,
+      # which is NOT on PATH after `module load rocm/6.3.x` (the
+      # module prepends ${ROCM_PATH}/bin only). Result: mpifort fails
+      # with "Open MPI wrapper compiler was unable to find the
+      # specified compiler amdflang in your PATH", which breaks BOTH
+      # the pnetcdf ./configure (MPIF90=mpifort) AND the
+      # netcdf-fortran cmake Fortran-ABI probe (slurm 10220-10224,
+      # 2026-05-20 sweep). Same root cause and same fix as
+      # hdf5_setup.sh -- see the long comment there for the full
+      # history including why OMPI_FC=gfortran does NOT work
+      # (amdflang-classic's V34 .mod format is unreadable by gfortran).
+      # No-op on ROCm 7.x and 6.4.x (amdflang already on PATH).
+      if ! command -v amdflang >/dev/null 2>&1 \
+           && [ -n "${ROCM_PATH:-}" ] \
+           && [ -x "${ROCM_PATH}/llvm/bin/amdflang" ]; then
+         export PATH="${ROCM_PATH}/llvm/bin:${PATH}"
+         echo "netcdf: amdflang not on PATH; prepending ${ROCM_PATH}/llvm/bin (mpifort wrapper depends on it)"
+      fi
+
       # Use all available cores for the netcdf builds. Without -j, each of
       # pnetcdf, netcdf-c, netcdf-fortran ran serially on one core (~10min
       # combined on sh5); with -j$(nproc) it drops to a couple of minutes.
@@ -843,17 +864,66 @@ else
          # there in CMake form.
          # ---------------------------------------------------------------------
          PNETCDF_FORTRAN_PIC_FLAGS=( FFLAGS="-fPIC" FCFLAGS="-fPIC" )
+
+         # ---------------------------------------------------------------------
+         # amdflang-classic SHARED-runtime rpath embedding (ROCm 6.x / 7.0.x).
+         #
+         # PnetCDF's configure inspects `mpifort -v` and discovers amdflang's
+         # default link line:
+         #   -L${ROCM_PATH}/lib/llvm/lib -lflang -lflangrti -lompstub -lpgmath
+         # so libpnetcdf.so links successfully and gets NEEDED entries for
+         # libflang.so / libompstub.so / libflangrti.so / libpgmath.so. BUT
+         # PnetCDF does NOT embed -rpath for those locations -- libpnetcdf.so's
+         # RUNPATH only mentions openmpi/ucc/ucx/xpmem, not the rocm flang
+         # runtime dir.
+         # Consequence: when netcdf-c later links ncdump/nccopy/ncgen
+         # against -lnetcdf -lpnetcdf with LDFLAGS=-Wl,--no-undefined (set
+         # by netcdf-c-4.10.0's default cmake config), ld walks libpnetcdf
+         # for transitive symbol resolution, can't find libflang.so /
+         # libompstub.so on its search path, and aborts with:
+         #   warning: libflang.so, needed by libpnetcdf.so, not found
+         #            (try using -rpath or -rpath-link)
+         #   undefined reference to `f90_ptr_alloc04a_i8' etc.
+         # Verified failing log:
+         #   logs_05_20_2026/rocm-6.4.3_10241/log_netcdf_v4.10.0_05_20_2026.txt
+         # vs. legacy passing log (-Wl,--no-undefined was apparently absent
+         # on netcdf-c-4.9.3's stricter mode chain):
+         #   logs_05_08_2026/rocm-6.4.3_8678/log_netcdf_05_08_2026.txt
+         #
+         # Fix: when amdflang-classic's libflang.so is in
+         # ${ROCM_PATH}/lib/llvm/lib, embed that path as an RPATH in
+         # libpnetcdf.so via LDFLAGS="-Wl,-rpath,...". The RPATH lets ld
+         # auto-resolve transitive deps when downstream consumers link
+         # against libpnetcdf at link time AND lets the dynamic loader
+         # find them at runtime without users having to load extra
+         # modules.
+         # Companion fix to extras/scripts/hdf5_setup.sh + netcdf_setup.sh
+         # PATH-extension (also 2026-05-20) which makes amdflang itself
+         # findable by mpifort on ROCm 6.3.x.
+         # No-op on ROCm 7.x (no libflang.so under lib/llvm/lib -- the
+         # amdflang-new toolchain ships static libflang_rt.runtime.a only,
+         # and PNETCDF_FORTRAN_LIBS handles that case via the
+         # LIBS=... path above).
+         # ---------------------------------------------------------------------
+         PNETCDF_AMDFLANG_RPATH_FLAGS=()
+         if [ -n "${ROCM_PATH:-}" ] && [ -f "${ROCM_PATH}/lib/llvm/lib/libflang.so" ]; then
+            PNETCDF_AMDFLANG_RPATH_FLAGS=( LDFLAGS="-Wl,-rpath,${ROCM_PATH}/lib/llvm/lib -L${ROCM_PATH}/lib/llvm/lib" )
+            echo "PnetCDF: embedding rpath for amdflang-classic runtime at ${ROCM_PATH}/lib/llvm/lib"
+         fi
+
          if [ -n "${PNETCDF_FORTRAN_LIBS}" ]; then
             echo "PnetCDF: linking amdflang Fortran runtime: ${PNETCDF_FORTRAN_LIBS}"
             ./configure --prefix=${PNETCDF_PATH} MPICC=`which mpicc` MPIF90=`which mpifort` \
                         "${PNETCDF_FORTRAN_PIC_FLAGS[@]}" \
+                        "${PNETCDF_AMDFLANG_RPATH_FLAGS[@]}" \
                         LIBS="${PNETCDF_FORTRAN_LIBS}"
          else
             echo "WARNING: could not locate amdflang Fortran runtime under ROCM_PATH=${ROCM_PATH:-<unset>};"
             echo "         libpnetcdf.so may have unresolved Fortran::runtime::* / _FortranA* symbols"
             echo "         and the subsequent netcdf-c utility link will fail."
             ./configure --prefix=${PNETCDF_PATH} MPICC=`which mpicc` MPIF90=`which mpifort` \
-                        "${PNETCDF_FORTRAN_PIC_FLAGS[@]}"
+                        "${PNETCDF_FORTRAN_PIC_FLAGS[@]}" \
+                        "${PNETCDF_AMDFLANG_RPATH_FLAGS[@]}"
          fi
          make -j ${MAKE_JOBS}
          make install
