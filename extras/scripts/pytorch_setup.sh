@@ -3930,9 +3930,26 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INST
 	--   Surfaced by Pytorch_Profile_Rocprof-compute_ROCm test on
 	--   rocm-7.2.1 in cdash nightly 2026-05-05.
 	prepend_path("LD_LIBRARY_PATH","${ROCM_PATH}/llvm/lib")
-	local user = os.getenv("USER")
-	setenv("MIOPEN_USER_DB_PATH", "/tmp/" .. user .. "/my-miopen-cache")
-	setenv("MIOPEN_CUSTOM_CACHE_DIR", "/tmp/" .. user .. "/my-miopen-cache")
+	-- MIOpen user/kernel cache on node-local /tmp. A single shared path
+	-- per user races when concurrent Slurm jobs on the same node write
+	-- the same SQLite/ufdb files (rename errors, abort). Interactive
+	-- sessions reuse a persistent cache; Slurm jobs get a per-job dir
+	-- so all ranks in one job share but jobs do not collide. Do not
+	-- clobber MIOPEN_* if the user already set them.
+	local user = os.getenv("USER") or "unknown"
+	local job_id = os.getenv("SLURM_JOB_ID")
+	local miopen_cache = "/tmp/" .. user .. "/miopen-cache"
+	if job_id then
+	  miopen_cache = miopen_cache .. "/jobs/" .. job_id
+	else
+	  miopen_cache = miopen_cache .. "/interactive"
+	end
+	if os.getenv("MIOPEN_USER_DB_PATH") == nil then
+	  setenv("MIOPEN_USER_DB_PATH", miopen_cache)
+	end
+	if os.getenv("MIOPEN_CUSTOM_CACHE_DIR") == nil then
+	  setenv("MIOPEN_CUSTOM_CACHE_DIR", miopen_cache)
+	end
 	setenv("Torch_DIR","${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages")
 	-- Re-export the gfx arch list pytorch was built for. Without this,
 	-- ANY downstream cmake project that does find_package(Torch) (which
