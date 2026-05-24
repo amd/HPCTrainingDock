@@ -59,7 +59,7 @@ CXX_COMPILER=g++
 CXX_COMPILER_INPUT=""
 F_COMPILER=gfortran
 F_COMPILER_INPUT=""
-NETCDF_C_VERSION="4.9.3"
+NETCDF_C_VERSION="4.10.0"
 # NETCDF_F_VERSION is auto-derived from NETCDF_C_VERSION via the
 # NETCDF_C_TO_F map below unless the operator passes
 # --netcdf-f-version explicitly (which writes NETCDF_F_VERSION_INPUT).

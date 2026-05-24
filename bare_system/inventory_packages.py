@@ -28,9 +28,12 @@ For each canonical package family it reports:
       in markdown).
   N = NOT POSSIBLE to build on this SDK or a hard prereq is missing
       (`<pkg>.SKIPPED`): incomplete AFAR SDK (see other packages), or
-      for ftorch a missing `pytorch` Lmod module on the rocmplus tree;
-      for jax on Ubuntu 22.04 + ROCm 7+, Python 3.11+ is required (`jax_setup.sh`
-      policy gate — see `jax.SKIPPED` / `jaxlib.SKIPPED`).
+      for ftorch a missing `pytorch` Lmod module on the rocmplus tree.
+      (Historically jax on Ubuntu 22.04 + ROCm 7+ was N-marked because
+      the default JAX 8.0 dropped Python 3.10; the policy gate in
+      `jax_setup.sh` now auto-downshifts to JAX 6.0 — the transition
+      release that ships cp310 wheels with the jax_rocm7_* plugin — so
+      that combo builds normally rather than producing a SKIPPED marker.)
   B   BUNDLED in the ROCm SDK itself (a <pkg>.BUNDLED marker exists).
       No separate install needed; users get the package via the rocm/<v>
       module. (Historically hipfort was the canonical example, bundled

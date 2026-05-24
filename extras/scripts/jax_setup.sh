@@ -90,6 +90,7 @@ compat_info()
    echo " List of compatible versions according to https://github.com/ROCm/jax/releases: "
    echo " JAX version 8.0 --> ROCm version 7.0.0 or higher and Python higher than 3.10 "
    echo " JAX version 7.1 --> ROCm version 7.0.0 or higher and Python higher than 3.10 "
+   echo " JAX version 6.0 --> ROCm version 7.0.0 or higher and Python 3.10 supported (transition release) "
    echo " JAX version 5.0 --> ROCm versions 6.0.3, 6.2.4 and 6.3.1 "
    echo " JAX version 4.35 --> ROCm versions 6.0.3, 6.1.3 and 6.2.4 "
    echo " JAX version 4.34 --> ROCm versions 6.0.3, 6.1.3 and 6.2.3 "
@@ -202,49 +203,48 @@ JAX_POLICY_SKIP=0
 # echoed by compat_info() further down):
 #   JAX 8.0  -- ROCm >= 7.0,  Python > 3.10 (i.e. 3.11+)
 #   JAX 7.1  -- ROCm >= 7.0,  Python > 3.10
+#   JAX 6.0  -- ROCm >= 7.0,  Python 3.10 wheels ship (cp310, jax_rocm7_*
+#                              plugin) -- the transition release that
+#                              bridges the ROCm 7 ABI to Python 3.10.
 #   JAX 5.0  -- ROCm 6.0.3 / 6.2.4 / 6.3.1, Python 3.10 supported
 #   (older JAX lines drop further into the 6.x series.)
 #
 # Two facts force the policy here:
 #   1. Ubuntu 22.04 ships Python 3.10 as system python; this driver
 #      auto-detects PYTHON_VERSION=3.10 (bare_system/main_setup.sh).
-#      No JAX line that supports ROCm 7.x supports Python 3.10 -- so
-#      JAX is unbuildable in that combination. (Job 8063: 9 s bail at
-#      the "Python 3.10 is not supported from JAX 7.1" check.)
-#   2. JAX 5.0 is the newest line that still supports Python 3.10
-#      and it requires ROCm 6.x; using it on ROCm 7.x throws compat
-#      errors immediately.
+#      JAX 7.1 / 8.0 drop Python 3.10 support, so the default 8.0
+#      cannot be used on 22.04. (Job 8063: 9 s bail at the "Python
+#      3.10 is not supported from JAX 7.1" check.) JAX 6.0 IS still
+#      buildable on ROCm 7.x + Python 3.10 -- it ships cp310 wheels
+#      and the jax_rocm7_* plugin -- so we downshift to it instead
+#      of skipping entirely (as the prior policy did).
+#   2. JAX 6.0 requires ROCm 7.x; on ROCm 6.x JAX 5.0 is still the
+#      newest line that supports Python 3.10.
 #
 # Resulting policy (applied AFTER arg parsing so user CLI overrides
 # can defeat it deliberately):
-#   * ROCm major >= 7  AND  Ubuntu 22.04  ->  force BUILD_JAX=0
-#       (the existing BUILD_JAX=0 short-circuit a few lines down then
-#        records this as SKIPPED(no-op) in main_setup.sh's per-package
-#        summary; no source clone, no Bazel run, no fail-cleanup).
+#   * ROCm major >= 7  AND  Ubuntu 22.04  AND  user did NOT pass
+#     --jax-version  ->  default JAX_VERSION to 6.0 (the transition
+#       release that supports both ROCm 7 ABI and Python 3.10).
 #   * ROCm major == 6  AND  user did NOT pass --jax-version  ->
-#       default JAX_VERSION to 5.0 (the only line that still supports
-#       Python 3.10 on the 6.x series).
+#       default JAX_VERSION to 5.0 (the newest line that supports
+#       both ROCm 6.x and Python 3.10).
 #
 # Operator escape hatches:
-#   * To force-attempt JAX on ROCm 7+ / Ubuntu 22.04 anyway, pass
-#     --build-jax 1 AFTER setting BUILD_JAX=1 in main_setup.sh AND
-#     edit/remove this gate (it is a hard skip, not a warn-and-try).
-#     The historical evidence (8063) is that the build will fail
-#     within seconds; this gate just makes the failure cheap and
-#     legible instead of an opaque rc=1.
+#   * To force-attempt JAX 7.1/8.0 on Ubuntu 22.04 anyway, pass
+#     --jax-version 8.0 (or 7.1). JAX_VERSION_USER_SET will keep
+#     that override intact; the inner Python-3.10 gate inside the
+#     7.1/8.0 build branch will then fail fast via compat_info()
+#     so the failure is cheap and legible instead of opaque.
 #   * To use a non-5.0 JAX line on ROCm 6.x, pass --jax-version X.Y
 #     and JAX_VERSION_USER_SET will keep that override intact.
 ROCM_MAJOR=${ROCM_VERSION%%.*}
-if [ "${ROCM_MAJOR}" -ge 7 ] 2>/dev/null && [ "${DISTRO_VERSION}" = "22.04" ]; then
+if [ "${ROCM_MAJOR}" -ge 7 ] 2>/dev/null && [ "${DISTRO_VERSION}" = "22.04" ] && [ "${JAX_VERSION_USER_SET}" = "0" ]; then
    echo "[jax policy] ROCm ${ROCM_VERSION} on Ubuntu ${DISTRO_VERSION} (Python 3.10):"
-   echo "             no JAX line supports both ROCm 7+ and Python 3.10."
-   echo "             JAX 8.0 / 7.1 require Python > 3.10; JAX 5.0 requires ROCm 6.x."
-   echo "             Forcing BUILD_JAX=0 to skip cleanly."
-   echo "             (Override: bump system Python to 3.11+ or drop ROCm to 6.x.)"
-   if [ "${BUILD_JAX}" = "1" ]; then
-      JAX_POLICY_SKIP=1
-   fi
-   BUILD_JAX=0
+   echo "             defaulting JAX_VERSION to 6.0 (the transition release that"
+   echo "             supports both ROCm 7 ABI and Python 3.10 via cp310 wheels)."
+   echo "             Override with --jax-version X.Y if you want a different line."
+   JAX_VERSION=6.0
 elif [ "${ROCM_MAJOR}" = "6" ] && [ "${JAX_VERSION_USER_SET}" = "0" ]; then
    echo "[jax policy] ROCm ${ROCM_VERSION} (6.x): defaulting JAX_VERSION to 5.0"
    echo "             (the newest line that supports both ROCm 6.x and Python 3.10)."
@@ -823,8 +823,20 @@ else
          ${SUDO} chmod go-w ${JAX_PATH}
       fi
 
+      # Capture ROCM_PATH BEFORE the unload so the modulefile heredoc
+      # below resolves it correctly. Without this the heredoc's
+      # ${ROCM_PATH} expanded to empty, producing the LD_PRELOAD line
+      # `prepend_path("LD_PRELOAD","/lib/llvm/lib/libunwind.so.1")`
+      # which then hit `cannot be preloaded ... ignored` at every
+      # module-load and silently disabled the libunwind workaround
+      # that commit b173acf added to keep jax compute kernels from
+      # segfaulting on ROCm 7.x. (Cached-install branch above does not
+      # unload, so ROCM_PATH is still valid there; we set ROCM_PATH_FOR_MODULE
+      # in both branches for symmetry via the fallback below.)
+      ROCM_PATH_FOR_MODULE="${ROCM_PATH}"
       module unload ${ROCM_MODULE_NAME}
    fi
+   : "${ROCM_PATH_FOR_MODULE:=${ROCM_PATH}}"
 
    # Create a module file for jax
    #
@@ -864,7 +876,7 @@ else
 	prereq("${ROCM_MODULE_NAME}")
 	setenv("XLA_FLAGS","--xla_gpu_enable_triton_gemm=False --xla_gpu_autotune_level=3")
 	setenv("JAX_PLATFORMS","rocm,cpu")
-	prepend_path("LD_PRELOAD","${ROCM_PATH}/lib/llvm/lib/libunwind.so.1")
+	prepend_path("LD_PRELOAD","${ROCM_PATH_FOR_MODULE}/lib/llvm/lib/libunwind.so.1")
 	prepend_path("PYTHONPATH","${JAX_PATH}")
 	prepend_path("PYTHONPATH","${JAXLIB_PATH}")
 EOF
