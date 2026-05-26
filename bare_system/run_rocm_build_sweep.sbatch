@@ -151,40 +151,62 @@ SUMMARY="sweep_summary_$(date +%Y%m%d_%H%M%S)_job${SLURM_JOB_ID}.out"
 
 OK=(); SKIP=(); FAIL=()
 for v in "${VERSIONS[@]}"; do
-   # The skip-if-installed pre-check has THREE shapes here, one per
-   # token bucket -- the install-dir basename rule differs:
+   # The skip-if-installed pre-check has FOUR shapes here, one per
+   # token bucket -- the install-dir + modulefile basename rule differs:
    #   * numeric (v=7.2.1)       -> rocm-7.2.1            (token verbatim)
-   #   * AFAR    (v=afar-22.2.0) -> rocm-afar-22.2.0      (token verbatim;
-   #                                                       .info/version
-   #                                                       7.2.0 only feeds
-   #                                                       rocmplus-afar-7.2.0)
-   #   * TheRock (v=therock-7.13 OR therock-7.13.0)
+   #   * AFAR    (v=afar-22.2.0) -> rocm-afar-22.2.0      (release-keyed)
+   #                                + base/rocm/afar-22.2.0-<ROCM>.lua
+   #                                (unified flang-site naming, 2026-05-26)
+   #   * TheRock-AFAR (v=therock-afar-23.2.1)
+   #                             -> rocm-afar-23.2.1      (release-keyed,
+   #                                shares the same rocm-afar-* namespace
+   #                                as AFAR proper; compiler numbers
+   #                                don't overlap in practice -- AFAR
+   #                                uses 22.x.y, TheRock-AFAR uses
+   #                                23.x.y)
+   #                                + base/rocm/afar-23.2.1-<ROCM>.lua
+   #   * TheRock (v=therock-7.13 OR therock-7.13.0; non-flang channel)
    #                             -> rocm-therock-${.info/version}
    #                                e.g. rocm-therock-7.13.0 for both inputs.
    # We don't read .info/version here (we'd have to download the tarball
-   # to learn it), so the TheRock pre-check is a glob match against both
-   # the literal token and the X.Y -> X.Y.0 auto-extension. This mirrors
-   # the Phase 0 logic in run_rocm_therock_install.sh so the sweep and
-   # the helper agree on what counts as "already installed".
+   # to learn it), so the modulefile-side check for AFAR / TheRock-AFAR
+   # uses a glob (afar-<REL>-*.lua). The TheRock pre-check is a glob
+   # match against both the literal token and the X.Y -> X.Y.0 auto-
+   # extension. All three pre-checks mirror the Phase 0 logic in the
+   # respective install helpers so the sweep and the helpers agree on
+   # what counts as "already installed".
    _skip_match=""
    if [[ "${v}" == therock-afar-* ]]; then
-      # therock-afar-<REL> installs to rocm-therock-afar-<ROCM_NUMERIC>
-      # where ROCM_NUMERIC lives inside the tarball (.info/version) and
-      # is unknown at this point. Conservative: glob for ANY
-      # rocm-therock-afar-* dir AND the matching modulefile; if both
-      # exist we consider the token already installed. The helper's own
-      # Phase 0 re-validates inside the install function.
+      # therock-afar-<REL> installs to rocm-afar-<REL> + emits
+      # base/rocm/afar-<REL>-<ROCM_NUMERIC>.lua. The install dir
+      # basename is known directly (release-tag-keyed); the modulefile
+      # uses a glob since ROCM_NUMERIC lives inside the tarball.
       _afar_rel="${v#therock-afar-}"
-      _mf="${TOP_MODULE_PATH}/base/rocm/therock-afar-${_afar_rel}.lua"
-      if [[ -f "${_mf}" ]]; then
-         for _cand in "${TOP_INSTALL_PATH}"/rocm-therock-afar-*; do
-            if [[ -d "${_cand}" ]]; then
-               _skip_match="${_cand}"
-               break
-            fi
-         done
+      if [[ -d "${TOP_INSTALL_PATH}/rocm-afar-${_afar_rel}" ]]; then
+         shopt -s nullglob
+         _mf_glob=( "${TOP_MODULE_PATH}/base/rocm/afar-${_afar_rel}"-*.lua )
+         shopt -u nullglob
+         [[ ${#_mf_glob[@]} -gt 0 ]] \
+            && _skip_match="${TOP_INSTALL_PATH}/rocm-afar-${_afar_rel} + ${_mf_glob[0]}"
+         unset _mf_glob
       fi
-      unset _afar_rel _mf _cand
+      unset _afar_rel
+   elif [[ "${v}" == afar-* ]]; then
+      # AFAR proper: install dir rocm-afar-<REL> + modulefile
+      # base/rocm/afar-<REL>-<ROCM>.lua (unified naming). The legacy
+      # base/rocm/afar-<REL>.lua (no -<ROCM> suffix) is NOT treated as
+      # "installed" so a sweep against a pre-unified-naming tree
+      # naturally upgrades the modulefile to the new shape.
+      _afar_rel="${v#afar-}"
+      if [[ -d "${TOP_INSTALL_PATH}/rocm-afar-${_afar_rel}" ]]; then
+         shopt -s nullglob
+         _mf_glob=( "${TOP_MODULE_PATH}/base/rocm/afar-${_afar_rel}"-*.lua )
+         shopt -u nullglob
+         [[ ${#_mf_glob[@]} -gt 0 ]] \
+            && _skip_match="${TOP_INSTALL_PATH}/rocm-afar-${_afar_rel} + ${_mf_glob[0]}"
+         unset _mf_glob
+      fi
+      unset _afar_rel
    elif [[ "${v}" == therock-* ]]; then
       _trel="${v#therock-}"
       for _cand in "${TOP_INSTALL_PATH}/rocm-therock-${_trel}" \

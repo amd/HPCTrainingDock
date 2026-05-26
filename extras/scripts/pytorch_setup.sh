@@ -2680,6 +2680,59 @@ else
 
       cd pytorch-v${PYTORCH_VERSION}
 
+      # ── PT 2.11 + RCCL >= 2.28 nccl_device.h backport (PT 2.12 fix) ──
+      # PT 2.11 torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp
+      # includes <nccl_device.h> unconditionally whenever the bundled
+      # NCCL reports NCCL_VERSION_CODE >= 2.28.0:
+      #   #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+      #   #define NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+      #   #include <nccl_device.h>
+      #   #endif
+      # RCCL on rocm-7.13.0 reports NCCL_VERSION_CODE=22803 (rccl.h
+      # NCCL_MAJOR=2 NCCL_MINOR=28 NCCL_PATCH=3) but RCCL does NOT ship
+      # nccl_device.h -- the file exists only in upstream NVIDIA NCCL
+      # 2.28+. The same RCCL on rocm-7.2.3 reports 22707 so the gate is
+      # false there and the missing header is never referenced; that is
+      # why PT 2.11.0 builds clean on rocm-7.2.3 (slurm 10537) but fails
+      # on rocm-7.13.0 (slurm 10631, 2026-05-25) with two FAILED HIPCC
+      # steps building NCCLSymmetricMemory.cu and nccl_extension.cu:
+      #   fatal error: 'nccl_device.h' file not found
+      # Upstream PT 2.12 already carries the fix: the include is wrapped
+      # in `#if !defined(USE_ROCM)`. We backport the exact same shape to
+      # PT 2.11 so the symm-mem-device path is skipped under ROCm
+      # identically to PT 2.12's behaviour.
+      # Idempotent: skipped when the file is missing (older PT or an
+      # upstream refactor) or already carries the !defined(USE_ROCM)
+      # guard. Gated strictly to PT 2.11 because PT <= 2.10 lacks the
+      # file (the symm-mem-device feature did not exist) and PT >= 2.12
+      # carries the fix natively.
+      _NDC="torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp"
+      if [[ "${PYTORCH_SHORT_VERSION}" == "2.11" ]] \
+         && [[ -f "${_NDC}" ]] \
+         && grep -q '#include <nccl_device.h>' "${_NDC}" \
+         && ! grep -q '!defined(USE_ROCM)' "${_NDC}"; then
+         echo "Patching ${_NDC} to gate <nccl_device.h> on !USE_ROCM (backport of upstream PT 2.12 fix)"
+         python3 - "${_NDC}" <<'PY'
+import re, sys, pathlib
+p = pathlib.Path(sys.argv[1])
+s = p.read_text()
+pat = re.compile(
+   r'(#if NCCL_VERSION_CODE >= NCCL_VERSION\(2, 28, 0\)\n)'
+   r'(#define NCCL_HAS_SYMMEM_DEVICE_SUPPORT\n)'
+   r'(#include <nccl_device\.h>\n)'
+   r'(#endif)'
+)
+new, n = pat.subn(r'\1#if !defined(USE_ROCM)\n\2\3#endif\n\4', s, count=1)
+if n != 1:
+   sys.exit("ERROR: nccl_dev_cap.hpp pattern did not match exactly once (n=%d); bailing" % n)
+p.write_text(new)
+PY
+         echo "  -> patched (verify):"
+         grep -nE 'USE_ROCM|nccl_device\.h|NCCL_HAS_SYMMEM_DEVICE_SUPPORT' "${_NDC}" | sed 's/^/    /'
+      else
+         echo "Skipping ${_NDC} backport (not PT 2.11, file missing, or already patched)"
+      fi
+
       # ── MAGMA 2.10+ compatibility (backport of pytorch PR #180388) ───
       # PyTorch v2.9.1 (and earlier) encodes AT_MAGMA_VERSION as
       #   MAJOR*100 + MINOR*10 + MICRO

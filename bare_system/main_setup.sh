@@ -200,7 +200,8 @@ usage()
    echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf the versioned subdir under \${TOP_INSTALL_PATH} (the version itself lives in the leaf script). Default $REPLACE_EXISTING"
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
    echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, likwid, mdb, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, hpctoolkit, likwid, mdb, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Currently supported only for pytorch; keys are aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build."
-   echo "  --rocm-rc-prefix [ FAMILY ]:  release-candidate family name (e.g. 'therock', 'afar'). Auto-detected from \${ROCM_PATH} basename for rocm-{therock,afar}-* trees. Empty for regular releases. When non-empty, install/module dirs become rocmplus-\${FAMILY}-\${ROCM_VERSION}/ instead of rocmplus-\${ROCM_VERSION}/. Default: auto-detected (empty for regular releases)."
+   echo "  --rocm-rc-prefix [ FAMILY ]:  release-candidate family name (e.g. 'therock', 'afar'). Auto-detected from \${ROCM_PATH} basename for rocm-{therock,afar}-* trees. Empty for regular releases. When non-empty, install/module dirs become rocmplus-\${FAMILY}-\${ROCM_VERSION}/ instead of rocmplus-\${ROCM_VERSION}/ -- EXCEPT for FAMILY='afar', where the suffix is rocmplus-afar-\${ROCM_RC_COMPILER}-\${ROCM_VERSION}/ (compiler-AND-rocm-keyed; see --rocm-rc-compiler). Default: auto-detected (empty for regular releases)."
+   echo "  --rocm-rc-compiler [ COMPILER ]:  compiler/AFAR release number for AFAR trees (e.g. '22.2.0' for rocm-afar-22.2.0, '23.2.1' for rocm-afar-23.2.1 a.k.a. the TheRock-AFAR drop). Auto-detected from \${ROCM_PATH} basename when ROCM_RC_PREFIX='afar'. Empty for non-afar trees. When non-empty AND ROCM_RC_PREFIX='afar', the rocmplus suffix becomes afar-\${COMPILER}-\${ROCM_VERSION} so two AFAR drops with the same SDK numeric but different compiler releases get distinct rocmplus trees. Default: auto-detected."
    echo "  --pnetcdf-version [ PNETCDF_VERSION ]:  PnetCDF version threaded through to extras/scripts/netcdf_setup.sh --pnetcdf-version. Empty (default) -> leaf script's internal default. Install lands at rocmplus-<v>/pnetcdf-v\$PNETCDF_VERSION/ with a pnetcdf/\$PNETCDF_VERSION modulefile."
    echo "  --help: prints this message"
    exit 1
@@ -309,6 +310,12 @@ do
           shift
           ROCM_RC_PREFIX=${1}
           ROCM_RC_PREFIX_USER_SET=1
+          reset-last
+          ;;
+      "--rocm-rc-compiler")
+          shift
+          ROCM_RC_COMPILER=${1}
+          ROCM_RC_COMPILER_USER_SET=1
           reset-last
           ;;
       "--help")
@@ -502,28 +509,54 @@ fi
 ROCM_MODULE_VERSION=""
 : ${ROCM_RC_PREFIX:=""}
 : ${ROCM_RC_PREFIX_USER_SET:=0}
+: ${ROCM_RC_COMPILER:=""}
+: ${ROCM_RC_COMPILER_USER_SET:=0}
 
 if [ -n "${ROCM_PATH}" ] && [ -d "${ROCM_PATH}" ]; then
    if [ -f "${ROCM_PATH}/.info/version" ]; then
       ROCM_MODULE_VERSION=$(cut -f1 -d'-' "${ROCM_PATH}/.info/version")
       echo "Detected loaded ROCm module numeric version ${ROCM_MODULE_VERSION} (ROCM_PATH=${ROCM_PATH})"
    fi
-   if [ "${ROCM_RC_PREFIX_USER_SET}" != "1" ]; then
-      _rocm_basename="${ROCM_PATH##*/}"          # rocm-therock-afar-7.13.0 | rocm-therock-23.2.0 | rocm-7.2.1
-      _rocm_suffix="${_rocm_basename#rocm-}"      # therock-afar-7.13.0 | therock-23.2.0 | 7.2.1
-      # Strip trailing -<X.Y> or -<X.Y.Z> to recover the (possibly multi-
-      # segment) family prefix. Naive ${_rocm_suffix%%-*} would collapse
-      # 'therock-afar' to 'therock' and produce a colliding rocmplus tree.
-      if [[ "${_rocm_suffix}" =~ ^(.+)-[0-9]+(\.[0-9]+){1,2}$ ]]; then
-         ROCM_RC_PREFIX="${BASH_REMATCH[1]}"      # therock-afar | therock | afar
-         echo "Detected ROCm release-candidate prefix: '${ROCM_RC_PREFIX}' (numeric tail: '${_rocm_suffix#${ROCM_RC_PREFIX}-}')"
+   if [ "${ROCM_RC_PREFIX_USER_SET}" != "1" ] || \
+      ( [ "${ROCM_RC_PREFIX}" = "afar" ] && [ "${ROCM_RC_COMPILER_USER_SET}" != "1" ] ); then
+      _rocm_basename="${ROCM_PATH##*/}"          # rocm-afar-22.2.0 | rocm-therock-7.13.0 | rocm-7.2.1
+      _rocm_suffix="${_rocm_basename#rocm-}"      # afar-22.2.0 | therock-7.13.0 | 7.2.1
+      # Strip the trailing -<X.Y[.Z]> from the install-dir suffix to get
+      # both the family prefix AND the captured numeric tail. The
+      # interpretation of the tail depends on the prefix (post unified-AFAR
+      # naming, 2026-05-26):
+      #   * prefix='afar'        -> tail is the COMPILER/AFAR release number
+      #                             (e.g. '22.2.0' for rocm-afar-22.2.0; SDK
+      #                             numeric '7.2.0' lives in .info/version)
+      #   * prefix='therock'     -> tail IS the SDK numeric (e.g. '7.13.0'
+      #                             for rocm-therock-7.13.0; no separate
+      #                             compiler number to track)
+      #   * prefix='' (regular)  -> tail is the SDK numeric
+      # The naive ${_rocm_suffix%%-*} (first-dash cut) would also collapse
+      # any multi-segment family prefix (legacy 'therock-afar' would become
+      # 'therock'), so we use a regex with two capture groups instead.
+      if [[ "${_rocm_suffix}" =~ ^(.+)-([0-9]+(\.[0-9]+){1,2})$ ]]; then
+         if [ "${ROCM_RC_PREFIX_USER_SET}" != "1" ]; then
+            ROCM_RC_PREFIX="${BASH_REMATCH[1]}"
+            echo "Detected ROCm release-candidate prefix: '${ROCM_RC_PREFIX}' (numeric tail: '${BASH_REMATCH[2]}')"
+         fi
+         # Compiler number is meaningful ONLY for the afar family. For
+         # therock and other prefixes the tail IS the SDK numeric and we
+         # leave ROCM_RC_COMPILER empty so the ROCMPLUS_SUFFIX construction
+         # below falls into the legacy <prefix>-<numeric> branch.
+         if [ "${ROCM_RC_PREFIX}" = "afar" ] && [ "${ROCM_RC_COMPILER_USER_SET}" != "1" ]; then
+            ROCM_RC_COMPILER="${BASH_REMATCH[2]}"
+            echo "Detected ROCm afar compiler/release number: '${ROCM_RC_COMPILER}'"
+         fi
       elif [[ ! "${_rocm_suffix}" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
          # Tree name doesn't end in -<NUMERIC>. Fall back to first-segment
          # cut so we still produce something rather than silently leaving
          # ROCM_RC_PREFIX empty (which would land in the regular-release
          # rocmplus tree, the worst-case collision).
-         ROCM_RC_PREFIX="${_rocm_suffix%%-*}"
-         echo "Detected ROCm release-candidate prefix: '${ROCM_RC_PREFIX}' (RC tag suffix: '${_rocm_suffix#${ROCM_RC_PREFIX}-}'; install-dir name did not end in -<NUMERIC>)"
+         if [ "${ROCM_RC_PREFIX_USER_SET}" != "1" ]; then
+            ROCM_RC_PREFIX="${_rocm_suffix%%-*}"
+            echo "Detected ROCm release-candidate prefix: '${ROCM_RC_PREFIX}' (RC tag suffix: '${_rocm_suffix#${ROCM_RC_PREFIX}-}'; install-dir name did not end in -<NUMERIC>)"
+         fi
       fi
       unset _rocm_basename _rocm_suffix
    fi
@@ -1345,7 +1378,16 @@ trap final_summary EXIT
 # assignment so the existing dependent code stays unchanged). Needed
 # here so the info block can show the concrete destination paths the
 # operator is about to write to.
-_RPS_PREVIEW="${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCM_VERSION}"
+#
+# For afar trees (ROCM_RC_PREFIX='afar' AND ROCM_RC_COMPILER non-empty)
+# the suffix is afar-<compiler>-<rocm_numeric>; for everything else it
+# falls back to the legacy <prefix>-<numeric> shape (numeric alone for
+# regular releases).
+if [ "${ROCM_RC_PREFIX}" = "afar" ] && [ -n "${ROCM_RC_COMPILER}" ]; then
+   _RPS_PREVIEW="afar-${ROCM_RC_COMPILER}-${ROCM_VERSION}"
+else
+   _RPS_PREVIEW="${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCM_VERSION}"
+fi
 
 echo ""
 echo "=================================================================="
@@ -1353,6 +1395,7 @@ echo "  rocmplus install plan"
 echo "=================================================================="
 echo "  ROCm version      : ${ROCM_VERSION}"
 echo "  ROCM_RC_PREFIX    : '${ROCM_RC_PREFIX}'   (install/module suffix: rocmplus-${_RPS_PREVIEW})"
+echo "  ROCM_RC_COMPILER  : '${ROCM_RC_COMPILER}'   (afar trees only; embedded in rocmplus suffix above)"
 echo "  AMDGPU_GFXMODEL   : ${AMDGPU_GFXMODEL}"
 echo "  PYTHON_VERSION    : 3.${PYTHON_VERSION}"
 echo "  DISTRO            : ${DISTRO} ${DISTRO_VERSION}"
@@ -1403,15 +1446,27 @@ fi
 
 # ── Derived paths ────────────────────────────────────────────────────
 # ROCMPLUS_SUFFIX is the suffix used after `rocmplus-` for both install
-# dirs and module category dirs. For a regular release ROCM_RC_PREFIX
-# is empty and the ${VAR:+...} expansion contributes nothing, so the
-# suffix is just ${ROCM_VERSION} (byte-identical to prior behavior).
-# For a release-candidate (ROCM_RC_PREFIX='therock', say) it becomes
-# 'therock-${ROCM_VERSION}', e.g. 'therock-7.13.0'. This means therock
-# / afar installs cannot collide with a future official rocm release
-# of the same numeric version (no upstream release has a 'therock-' or
-# 'afar-' family prefix).
-ROCMPLUS_SUFFIX="${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCM_VERSION}"
+# dirs and module category dirs. Three shapes:
+#   * Regular release:   ROCM_RC_PREFIX='' + ROCM_RC_COMPILER=''
+#                        -> ROCMPLUS_SUFFIX=${ROCM_VERSION}
+#                        (byte-identical to prior behavior)
+#   * AFAR family:       ROCM_RC_PREFIX='afar' + ROCM_RC_COMPILER non-empty
+#                        -> ROCMPLUS_SUFFIX=afar-${COMPILER}-${ROCM_VERSION}
+#                        (compiler-AND-rocm-keyed; two AFAR drops with the
+#                        same SDK numeric but different compiler releases
+#                        can't collide on the rocmplus side)
+#   * Other RC trees:    ROCM_RC_PREFIX non-empty + ROCM_RC_COMPILER=''
+#                        (e.g. ROCM_RC_PREFIX='therock')
+#                        -> ROCMPLUS_SUFFIX=${PREFIX}-${ROCM_VERSION}
+# In all three cases the family-prefix in the suffix guarantees that a
+# release-candidate install can't collide with a future official rocm
+# release of the same numeric version (no upstream release has a
+# 'therock-' or 'afar-' family prefix).
+if [ "${ROCM_RC_PREFIX}" = "afar" ] && [ -n "${ROCM_RC_COMPILER}" ]; then
+   ROCMPLUS_SUFFIX="afar-${ROCM_RC_COMPILER}-${ROCM_VERSION}"
+else
+   ROCMPLUS_SUFFIX="${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCM_VERSION}"
+fi
 ROCMPLUS="${TOP_INSTALL_PATH}/rocmplus-${ROCMPLUS_SUFFIX}"
 
 # ── Bring the destination rocmplus-<v> modulefile dir to the front of ─

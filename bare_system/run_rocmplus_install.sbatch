@@ -14,16 +14,23 @@
 # rocmplus-${ROCM_VERSION} install + module category on /nfsapps.
 #
 # ROCM_VERSION accepts both regular numeric tokens (e.g. '7.2.1') and
-# release-candidate flavor tokens (e.g. 'therock-23.2.0', 'afar-22.2.0',
-# 'afar-7.0.5'); whatever token is passed is what `module load
-# rocm/<token>` consumes. Post-load we derive two distinct values from
-# ${ROCM_PATH}: ROCM_NUMERIC (the SDK version from .info/version, used
-# as --rocm-version downstream so version-comparison logic in
-# rocm_setup.sh and friends keeps working) and ROCM_RC_PREFIX (empty
-# for regular releases, 'therock'/'afar' for RC trees, used by
-# main_setup.sh to construct rocmplus-<prefix>-<numeric>/ install dirs
-# that don't collide with future official releases of the same numeric
-# version).
+# release-candidate flavor tokens (e.g. 'therock-7.13.0',
+# 'afar-22.2.0-7.2.0', 'afar-23.2.1-7.13.0'); whatever token is passed
+# is what `module load rocm/<token>` consumes. Post-load we derive
+# three distinct values from ${ROCM_PATH}:
+#   * ROCM_NUMERIC -- the SDK version from .info/version, used as
+#     --rocm-version downstream so version-comparison logic in
+#     rocm_setup.sh and friends keeps working.
+#   * ROCM_RC_PREFIX -- empty for regular releases, 'therock' / 'afar' /
+#     ... for RC trees.
+#   * ROCM_RC_COMPILER -- set ONLY for afar trees: the compiler/AFAR
+#     release number embedded in the install-dir basename (e.g. '22.2.0'
+#     for rocm-afar-22.2.0, '23.2.1' for rocm-afar-23.2.1). Used by
+#     main_setup.sh to construct rocmplus-afar-<compiler>-<rocm_numeric>/
+#     install dirs so two AFAR drops with the same SDK numeric but
+#     different compiler releases don't collide on the rocmplus side.
+#     Empty for non-afar trees (in which case the rocmplus suffix
+#     reduces to the legacy <prefix>-<numeric> shape).
 #
 # Why the system tree (not /nfsapps/modules/base/rocm)?  The /nfsapps SDKs
 # were built for Ubuntu 24.04 (GLIBC 2.38, libstdc++.so.6 GLIBCXX_3.4.32+)
@@ -296,29 +303,55 @@ if [[ ! -f "${ROCM_PATH}/.info/version" ]]; then
 fi
 ROCM_NUMERIC=$(cut -f1 -d- "${ROCM_PATH}/.info/version")
 ROCM_RC_PREFIX=""
+ROCM_RC_COMPILER=""
 _bn="${ROCM_PATH##*/}"; _sx="${_bn#rocm-}"
 # Strip the trailing -<X.Y.Z> or -<X.Y> from the install-dir suffix to get
-# the family prefix. The naive ${_sx%%-*} (first-dash cut) would collapse
+# the family prefix + (for afar trees only) the compiler/AFAR-release
+# number. The naive ${_sx%%-*} (first-dash cut) would collapse
 # multi-segment family prefixes -- 'therock-afar' would become 'therock',
 # which then collides in the rocmplus-${PREFIX}-${NUMERIC} install-dir
 # namespace with a future legacy therock-* install of the same numeric.
-# Examples:
-#   rocm-therock-afar-7.13.0 -> _sx=therock-afar-7.13.0 -> prefix='therock-afar'
-#   rocm-therock-7.13.0      -> _sx=therock-7.13.0      -> prefix='therock'
-#   rocm-afar-22.2.0         -> _sx=afar-22.2.0         -> prefix='afar'
-#   rocm-7.2.1               -> _sx=7.2.1               -> prefix=''  (regular)
-if [[ "${_sx}" =~ ^(.+)-[0-9]+(\.[0-9]+){1,2}$ ]]; then
+# Examples (post unified-AFAR naming, 2026-05-26):
+#   rocm-afar-22.2.0    -> _sx=afar-22.2.0    -> prefix='afar', compiler='22.2.0'
+#                          (AFAR proper from flang/)
+#   rocm-afar-23.2.1    -> _sx=afar-23.2.1    -> prefix='afar', compiler='23.2.1'
+#                          (TheRock-AFAR from flang/, was rocm-therock-afar-7.13.0)
+#   rocm-therock-7.13.0 -> _sx=therock-7.13.0 -> prefix='therock', compiler=''
+#                          (TheRock from repo.amd.com)
+#   rocm-7.2.1          -> _sx=7.2.1          -> prefix='', compiler=''
+#                          (regular release)
+# The compiler segment is captured only when prefix='afar' (single-segment
+# afar family); for other prefixes the captured tail IS the SDK numeric
+# (e.g. 'therock-7.13.0' -> tail='7.13.0' is the rocm version, NOT a
+# distinct compiler number) so we leave ROCM_RC_COMPILER empty -- the
+# rocmplus suffix in those cases reduces to the legacy
+# '${ROCM_RC_PREFIX}-${ROCM_NUMERIC}' shape.
+if [[ "${_sx}" =~ ^(.+)-([0-9]+(\.[0-9]+){1,2})$ ]]; then
    ROCM_RC_PREFIX="${BASH_REMATCH[1]}"
+   if [[ "${ROCM_RC_PREFIX}" == "afar" ]]; then
+      ROCM_RC_COMPILER="${BASH_REMATCH[2]}"
+   fi
 elif [[ ! "${_sx}" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
    # Tree name doesn't end in a numeric segment (unusual). Fall back to
    # the legacy first-dash-cut so this still degrades to something sensible.
    ROCM_RC_PREFIX="${_sx%%-*}"
 fi
 unset _bn _sx
+
+# Compose the rocmplus install/module suffix:
+#   * afar trees:    afar-<compiler>-<rocm_numeric>   (e.g. afar-22.2.0-7.2.0)
+#   * other RC:      <prefix>-<rocm_numeric>          (legacy shape)
+#   * regular:       <rocm_numeric>                   (legacy shape)
+if [[ "${ROCM_RC_PREFIX}" == "afar" && -n "${ROCM_RC_COMPILER}" ]]; then
+   ROCMPLUS_SUFFIX_PREVIEW="afar-${ROCM_RC_COMPILER}-${ROCM_NUMERIC}"
+else
+   ROCMPLUS_SUFFIX_PREVIEW="${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCM_NUMERIC}"
+fi
 echo "  ROCM_VERSION (token):    ${ROCM_VERSION}"
 echo "  ROCM_NUMERIC:            ${ROCM_NUMERIC}"
 echo "  ROCM_RC_PREFIX:          '${ROCM_RC_PREFIX}'"
-echo "  rocmplus install suffix: rocmplus-${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCM_NUMERIC}"
+echo "  ROCM_RC_COMPILER:        '${ROCM_RC_COMPILER}'"
+echo "  rocmplus install suffix: rocmplus-${ROCMPLUS_SUFFIX_PREVIEW}"
 
 # ── 4. Run main_setup.sh ─────────────────────────────────────────────
 # Stdin from /dev/null so the 30-second confirm prompt times out cleanly
@@ -348,6 +381,7 @@ SITE_ARGS=()
 bare_system/main_setup.sh \
    --rocm-version         "${ROCM_NUMERIC}" \
    --rocm-rc-prefix       "${ROCM_RC_PREFIX}" \
+   --rocm-rc-compiler     "${ROCM_RC_COMPILER}" \
    --rocm-install-path    "${ROCM_INSTALLPATH}" \
    --top-install-path     "${TOP_INSTALL_PATH}" \
    --top-module-path      "${TOP_MODULE_PATH}" \

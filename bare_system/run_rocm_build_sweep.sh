@@ -89,26 +89,46 @@ usage() {
    cat <<EOF
 Usage: $0 [opts]
    --rocm-versions "v1 v2 ..."   space- or comma-separated list (default: 7.1.0 7.0.2 7.0.1 7.0.0 6.4.3 6.4.2 6.4.1 6.4.0).
-                                 Accepts THREE token shapes mixed in any order:
+                                 Accepts FOUR token shapes mixed in any order:
                                    * regular numeric        e.g. 7.2.1, 6.4.3
                                        Drives the full docker-build + make-rocm-package pipeline
                                        via run_rocm_build.sh.
+                                       Install: rocm-<v>, Module: base/rocm/<v>.lua
                                    * AFAR drops             e.g. afar-22.1.0, afar-22.2.0
                                        Skip docker entirely and just wget + tar -xjpf the drop
                                        from https://repo.radeon.com/rocm/misc/flang/ via
                                        run_rocm_afar_install.sh; the AMD-internal build number
                                        that distinguishes reposts (e.g. 8873 for afar-22.2.0)
                                        is auto-discovered from the directory listing.
+                                       Install: rocm-afar-<N>, Module:
+                                       base/rocm/afar-<N>-<rocm>.lua (loaded as
+                                       rocm/afar-<N>-<rocm>). <rocm> is derived from
+                                       .info/version inside the extracted tree.
+                                   * TheRock-AFAR drops     e.g. therock-afar-23.1.0, therock-afar-23.2.1
+                                       Same flang/ site (https://repo.radeon.com/rocm/misc/flang/)
+                                       as AFAR proper but the file shape is
+                                       (therock-afar|therock)-<REL>-<FAMILY>-<NUMERIC>-<SHA>.tar.bz2
+                                       (the "afar" infix is optional in the upstream filename;
+                                       both shapes are matched). Driven by
+                                       run_rocm_therock_afar_install.sh.
+                                       UNIFIED naming with AFAR proper:
+                                       Install: rocm-afar-<N>, Module:
+                                       base/rocm/afar-<N>-<rocm>.lua (loaded as
+                                       rocm/afar-<N>-<rocm>). <rocm> is derived from
+                                       .info/version (or the tarball filename's NUMERIC
+                                       segment).
                                    * TheRock releases       e.g. therock-7.13, therock-7.13.0
-                                       Same wget+tar shape as AFAR but the source is the
-                                       distro-agnostic pre-built tarball from
-                                       https://repo.amd.com/rocm/tarball/ -- driven by
+                                       NON-flang channel: source is the distro-agnostic
+                                       pre-built tarball at https://repo.amd.com/rocm/tarball/
+                                       (NOT the flang/ site). Driven by
                                        run_rocm_therock_install.sh. Both X.Y (matching the
                                        github release tag therock-X.Y) and X.Y.Z forms are
                                        accepted; the install dir uses the .info/version-derived
                                        numeric (rocm-therock-X.Y.Z), the modulefile uses the
-                                       user-supplied token (therock-X.Y.lua or
-                                       therock-X.Y.Z.lua).
+                                       user-supplied token (base/rocm/therock-X.Y.lua or
+                                       base/rocm/therock-X.Y.Z.lua) -- this channel keeps
+                                       its pre-unified naming because it sources from a
+                                       different upstream.
    --partition NAME              Slurm partition (default $PARTITION)
    --min-per-version N           estimated minutes per numeric ROCm build (default $MIN_PER_VERSION)
    --afar-min-per-version N      estimated minutes per AFAR token (default $AFAR_MIN_PER_VERSION)

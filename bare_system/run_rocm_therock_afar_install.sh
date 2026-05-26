@@ -22,31 +22,48 @@
 #   therock-afar-23.2.1-gfx90a-7.13.0-7357b5084b.tar.bz2
 #   ...etc for gfx103X, gfx110X, gfx1150, gfx1151, gfx120X, gfx950.
 #
-# Naming-scheme decisions (locked in 2026-05-15 chat):
+# Naming-scheme decisions (unified flang-site naming, 2026-05-26):
 #   * Token shape passed in by the sweep / operator:   therock-afar-<REL>
 #                                                       (e.g. therock-afar-23.2.1)
 #     The `--therock-afar-release` flag accepts the bare <REL> (e.g. 23.2.1)
 #     OR the prefixed form (the helper strips the `therock-afar-` prefix).
-#   * Install dir:                                      rocm-therock-afar-<NUMERIC>
-#                                                       (e.g. rocm-therock-afar-7.13.0)
-#     -- keyed on .info/version-derived SDK numeric, not the AFAR release tag.
-#   * Modulefile basename:                              therock-afar-<REL>.lua
-#                                                       (e.g. therock-afar-23.2.1.lua)
-#     -- keyed on the user-supplied AFAR release tag for provenance.
-#   * Per-package rocmplus tree (downstream packages):  rocmplus-therock-afar-<NUMERIC>
-#                                                       (e.g. rocmplus-therock-afar-7.13.0)
-#     -- separate from `rocmplus-therock-<NUMERIC>` (which would correspond to
-#     the (deferred) TheRock-proper channel).
+#   * Upstream filename shape:                          (therock-afar|therock)-<REL>-<FAMILY>-<NUMERIC>-<SHA>.tar.bz2
+#     The "afar" infix is optional in the upstream filename -- the 23.1.x
+#     line on the flang/ listing publishes `therock-<REL>-...` (without
+#     the infix) while the 23.2.x line publishes `therock-afar-<REL>-...`.
+#     Phase 1 below tries the "afar"-infix shape first, then falls back
+#     to the bare shape for the same <REL>.
+#   * Install dir:                                      rocm-afar-<REL>
+#                                                       (e.g. rocm-afar-23.2.1)
+#     -- keyed on the compiler/AFAR release tag (NOT the SDK numeric).
+#     This is the UNIFIED naming shared with the AFAR-proper channel
+#     (run_rocm_afar_install.sh), so a single `rocm-afar-<N>` namespace
+#     covers both `afar-<N>` and `therock-afar-<N>` tokens.
+#   * Modulefile basename:                              afar-<REL>-<NUMERIC>.lua
+#                                                       (e.g. afar-23.2.1-7.13.0.lua)
+#     -- loaded as `module load rocm/afar-23.2.1-7.13.0`. Embeds BOTH the
+#     compiler release tag AND the SDK numeric (from .info/version).
+#   * Per-package rocmplus tree (downstream packages):  rocmplus-afar-<NUMERIC>
+#                                                       (e.g. rocmplus-afar-7.13.0)
+#     -- numeric-keyed, shared with the AFAR-proper channel; rocmplus
+#     modules built against ROCm 7.13.0 work for any flang-site drop
+#     that reports `.info/version == 7.13.0` regardless of which
+#     compiler release tag it carries.
 #
 # Phases:
-#   0. Pre-check: skip cleanly (exit 0) if both the modulefile AND any
-#      matching rocm-therock-afar-* install dir for this REL already
-#      exist and --replace-existing is not set. We don't yet know
-#      ROCM_NUMERIC at Phase 0 (that's Phase 3), so the install-dir
-#      side of the pre-check is a glob match plus the modulefile
-#      existence check (which IS keyed on REL directly).
+#   0. Pre-check: skip cleanly (exit 0) if BOTH the install dir
+#      (rocm-afar-<REL>) AND any matching afar-<REL>-*.lua modulefile
+#      already exist and --replace-existing is not set. The install dir
+#      basename is known at Phase 0 (it's keyed on the user-supplied
+#      release tag, NOT on the SDK numeric which is only learned in
+#      Phase 3), so this is a literal -d check; the modulefile side
+#      uses a glob because ROCM_NUMERIC is not yet known.
 #   1. Tarball URL discovery: scrape the flang/ listing for the matching
-#      filename (therock-afar-<REL>-<FAMILY>-<NUMERIC>-<SHA>.tar.bz2).
+#      filename. Two shapes are accepted for the same <REL>:
+#        (a) therock-afar-<REL>-<FAMILY>-<NUMERIC>-<SHA>.tar.bz2
+#        (b) therock-<REL>-<FAMILY>-<NUMERIC>-<SHA>.tar.bz2
+#      Shape (a) wins when both exist; (b) is the fallback (used by the
+#      23.1.x line on the flang listing).
 #      AMDGPU_FAMILY is derived from the FIRST gfx model in
 #      AMDGPU_GFXMODEL (per operator decision 2026-05-15) unless
 #      --amdgpu-family was passed explicitly. The script's
@@ -58,13 +75,13 @@
 #      are accepted by Phase 3; we don't pin a specific top-level
 #      directory name in the tarball.
 #   3. Read .info/version (at depth 0 OR a single wrapper subdir of
-#      depth 1) -> ROCM_NUMERIC.
+#      depth 1) -> ROCM_NUMERIC. Finalize MODULE_FILE.
 #   4. Move the .info/version-bearing dir to the final
-#      ${TOP_INSTALL_PATH}/rocm-therock-afar-${ROCM_NUMERIC}.
-#   5. Emit ${TOP_MODULE_PATH}/base/rocm/therock-afar-${REL}.lua matching
-#      the GPUSDK-shaped modulefile schema (same family("GPUSDK") +
-#      MODULEPATH-prepend pattern as run_rocm_afar_install.sh and
-#      run_rocm_therock_install.sh, with the family-tagged tree names).
+#      ${TOP_INSTALL_PATH}/rocm-afar-${THEROCK_AFAR_RELEASE}.
+#   5. Emit ${TOP_MODULE_PATH}/base/rocm/afar-${REL}-${ROCM_NUMERIC}.lua
+#      matching the GPUSDK-shaped modulefile schema (same family("GPUSDK")
+#      + MODULEPATH-prepend pattern as run_rocm_afar_install.sh, with
+#      rocm-afar-<REL> + rocmplus-afar-<NUMERIC> prepends).
 
 set -eo pipefail
 
@@ -103,8 +120,11 @@ Usage: $0 [opts]
   --top-install-path PATH       SDK extract destination; default ${TOP_INSTALL_PATH}
   --top-module-path  PATH       Lmod root for modulefile; default ${TOP_MODULE_PATH}
   --url-base URL                tarball listing base; default ${URL_BASE}
-  --replace-existing 0|1        overwrite existing rocm-therock-afar-<numeric>
-                                install + modulefile (default ${REPLACE_EXISTING})
+  --replace-existing 0|1        overwrite existing rocm-afar-<REL> install
+                                + afar-<REL>-*.lua modulefile (default ${REPLACE_EXISTING}).
+                                Also reaps legacy rocm-therock-afar-* dirs +
+                                therock-afar-<REL>.lua modulefiles from the
+                                pre-unified-naming layout.
   --keep-failed-installs 0|1    on failure, keep partial install + modulefile
                                 for post-mortem (default ${KEEP_FAILED_INSTALLS})
   --help
@@ -186,34 +206,40 @@ if [[ -z "${AMDGPU_FAMILY}" ]]; then
 fi
 
 MODULE_DIR="${TOP_MODULE_PATH}/base/rocm"
-MODULE_FILE="${MODULE_DIR}/therock-afar-${THEROCK_AFAR_RELEASE}.lua"
+# Unified flang-site naming: install dir is keyed on the compiler/AFAR
+# release number (not the ROCm SDK numeric), and the modulefile basename
+# embeds BOTH the release tag and the SDK numeric (afar-<REL>-<ROCM>.lua).
+# The install dir is known at Phase 0 (it doesn't depend on .info/version);
+# MODULE_FILE is finalized after Phase 3 once ROCM_NUMERIC is known. Phase
+# 0 uses a glob match (afar-${REL}-*.lua) to detect any rocm version that
+# may have been installed for this THEROCK_AFAR_RELEASE.
+INSTALL_DIR="${TOP_INSTALL_PATH}/rocm-afar-${THEROCK_AFAR_RELEASE}"
+MODULE_FILE=""   # set after Phase 3
+
+# Legacy paths from the pre-unified-naming scheme are tracked separately
+# so --replace-existing 1 can reap them on the migration run.
+LEGACY_MODULE_FILE="${MODULE_DIR}/therock-afar-${THEROCK_AFAR_RELEASE}.lua"
+LEGACY_INSTALL_GLOB="${TOP_INSTALL_PATH}/rocm-therock-afar-*"
 
 # ---------------- Phase 0: skip-if-installed pre-check ----------------
-# We don't know ROCM_NUMERIC until Phase 3 (it's inside the tarball's
-# .info/version), so the install-dir side of this pre-check is a glob
-# match against rocm-therock-afar-*. Combined with the modulefile
-# existence check (which IS keyed directly on THEROCK_AFAR_RELEASE),
-# this gives a conservative "is this same token already installed?"
-# signal -- a stale install-dir without the matching modulefile (e.g.
-# from a SIGKILL between Phase 4 and Phase 5) is NOT treated as
-# "already installed" and will rebuild.
+# Skip only if BOTH the install dir AND a new-shape modulefile
+# (afar-${REL}-<rocm>.lua) already exist. If only the install dir is
+# present (e.g. a SIGKILL between Phase 4 and Phase 5, OR a legacy
+# install before unified naming), fall through and rebuild.
 _skip_match=""
-if [[ -f "${MODULE_FILE}" ]]; then
+if [[ -d "${INSTALL_DIR}" ]]; then
    shopt -s nullglob
-   for _cand in "${TOP_INSTALL_PATH}"/rocm-therock-afar-*; do
-      if [[ -d "${_cand}" ]]; then
-         _skip_match="${_cand}"
-         break
-      fi
-   done
+   _existing_modules=( "${MODULE_DIR}"/afar-${THEROCK_AFAR_RELEASE}-*.lua )
    shopt -u nullglob
+   [[ ${#_existing_modules[@]} -gt 0 ]] && _skip_match="${INSTALL_DIR} + ${_existing_modules[0]}"
+   unset _existing_modules
 fi
 if [[ -n "${_skip_match}" && "${REPLACE_EXISTING}" != "1" ]]; then
-   echo "[$(date)] SKIP therock-afar-${THEROCK_AFAR_RELEASE}: ${_skip_match} + ${MODULE_FILE} already exist"
+   echo "[$(date)] SKIP therock-afar-${THEROCK_AFAR_RELEASE}: ${_skip_match} already exist"
    echo "         Pass --replace-existing 1 to re-download + re-extract."
    exit 0
 fi
-unset _skip_match _cand
+unset _skip_match
 
 # ---------------- Defensive remount of /nfsapps as rw -----------------
 # Identical to run_rocm_afar_install.sh:117-125 -- /etc/exports.d/
@@ -262,32 +288,56 @@ if [[ -z "${_listing}" ]]; then
    echo "ERROR: could not fetch directory listing at ${URL_BASE}/" >&2
    exit 1
 fi
-# Filename pattern (regex):
-#   therock-afar-<REL>-<FAMILY>-<X.Y.Z>-<SHA>.tar.bz2
+# Filename pattern (regex). Per the unified-naming spec (2026-05-26), the
+# upstream flang/ listing carries TWO equivalent shapes for the same REL:
+#   therock-afar-<REL>-<FAMILY>-<X.Y.Z>-<SHA>.tar.bz2   (23.2.x line)
+#   therock-<REL>-<FAMILY>-<X.Y.Z>-<SHA>.tar.bz2        (23.1.x line; no "afar" infix)
 # We don't pin <X.Y.Z> in the regex (only the operator-supplied REL +
-# FAMILY) so that AMD reposts (which we'd see as a different SHA + the
-# same .info/version) auto-pick the latest. sort -V -u | tail -n1 picks
-# the largest matching version then takes the most recent repost.
-_pattern="therock-afar-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-[0-9]+\.[0-9]+(\.[0-9]+)?-[a-f0-9]{4,}\.tar\.bz2"
-_matched=$(echo "${_listing}" | grep -oE "${_pattern}" | sort -V -u | tail -n1)
+# FAMILY) so AMD reposts (different SHA + same .info/version) auto-pick
+# the latest. Preference order when BOTH shapes exist for the same REL:
+# the explicit `therock-afar-` form wins (operator named the token with
+# the afar infix); fall back to the bare `therock-` form otherwise. This
+# lets `therock-afar-23.1.0` reach the existing `therock-23.1.0-*` files
+# on the flang site without needing a separate token shape.
+_pattern_afar="therock-afar-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-[0-9]+\.[0-9]+(\.[0-9]+)?-[a-f0-9]{4,}\.tar\.bz2"
+_pattern_bare="therock-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-[0-9]+\.[0-9]+(\.[0-9]+)?-[a-f0-9]{4,}\.tar\.bz2"
+_matched=$(echo "${_listing}" | grep -oE "${_pattern_afar}" | sort -V -u | tail -n1)
+_matched_shape="therock-afar"
 if [[ -z "${_matched}" ]]; then
-   echo "ERROR: no tarball matching 'therock-afar-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-*.tar.bz2' at ${URL_BASE}/" >&2
+   # Bare `therock-<REL>-...` fallback. grep -v excludes anything matching
+   # the afar-infix shape so we don't double-count (greedy regex protection).
+   _matched=$(echo "${_listing}" \
+      | grep -oE "${_pattern_bare}" \
+      | grep -v -E "^therock-afar-" \
+      | sort -V -u | tail -n1)
+   [[ -n "${_matched}" ]] && _matched_shape="therock"
+fi
+if [[ -z "${_matched}" ]]; then
+   echo "ERROR: no tarball matching 'therock-afar-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-*.tar.bz2'" >&2
+   echo "       or 'therock-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-*.tar.bz2' at ${URL_BASE}/" >&2
    echo "       Verify the release tag + gfx-family combination exists upstream." >&2
-   echo "       Available therock-afar-${THEROCK_AFAR_RELEASE} families on the listing:" >&2
-   echo "${_listing}" | grep -oE "therock-afar-${THEROCK_AFAR_RELEASE}-gfx[A-Za-z0-9]+-[0-9.]+-[a-f0-9]+\.tar\.bz2" | sed 's/^/         /' >&2 || true
+   echo "       Available therock[-afar]-${THEROCK_AFAR_RELEASE} families on the listing:" >&2
+   echo "${_listing}" | grep -oE "therock(-afar)?-${THEROCK_AFAR_RELEASE}-gfx[A-Za-z0-9]+-[0-9.]+-[a-f0-9]+\.tar\.bz2" | sed 's/^/         /' >&2 || true
    exit 1
 fi
+echo "Matched upstream filename shape: ${_matched_shape}-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-...tar.bz2"
 
 TARBALL_URL="${URL_BASE}/${_matched}"
 LOCAL_TARBALL="/tmp/${_matched}"
 # Parse expected NUMERIC + SHA from the chosen filename (we'll
-# cross-check against .info/version after extract in Phase 3).
+# cross-check against .info/version after extract in Phase 3). The sed
+# pattern uses _matched_shape so the prefix segment matches whatever we
+# actually selected above.
 EXPECTED_NUMERIC="$(echo "${_matched}" \
-   | sed -E "s|^therock-afar-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-([0-9]+\.[0-9]+(\.[0-9]+)?)-[a-f0-9]+\.tar\.bz2$|\1|")"
+   | sed -E "s|^${_matched_shape}-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-([0-9]+\.[0-9]+(\.[0-9]+)?)-[a-f0-9]+\.tar\.bz2$|\1|")"
 THEROCK_SHA="$(echo "${_matched}" \
-   | sed -E "s|^therock-afar-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-[0-9]+\.[0-9]+(\.[0-9]+)?-([a-f0-9]+)\.tar\.bz2$|\2|")"
+   | sed -E "s|^${_matched_shape}-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-[0-9]+\.[0-9]+(\.[0-9]+)?-([a-f0-9]+)\.tar\.bz2$|\2|")"
 
-STAGING_DIR="${TOP_INSTALL_PATH}/rocm-therock-afar-${EXPECTED_NUMERIC}.staging.$$"
+# Staging dir lives next to the final install dir so the Phase 4 mv is
+# rename-only (same filesystem == atomic, no NFS cross-mount copy). Keyed
+# on the THEROCK_AFAR_RELEASE so two parallel sweeps of different
+# releases can't collide on the staging name.
+STAGING_DIR="${TOP_INSTALL_PATH}/rocm-afar-${THEROCK_AFAR_RELEASE}.staging.$$"
 
 echo ""
 echo "============================================================"
@@ -296,13 +346,14 @@ echo "============================================================"
 echo "  THEROCK_AFAR_RELEASE : ${THEROCK_AFAR_RELEASE}"
 echo "  AMDGPU_GFXMODEL      : ${AMDGPU_GFXMODEL}  (informational; only first model drives family)"
 echo "  AMDGPU_FAMILY        : ${AMDGPU_FAMILY}"
+echo "  Filename shape       : ${_matched_shape}-<REL>-<FAMILY>-<NUMERIC>-<SHA>.tar.bz2"
 echo "  Expected NUMERIC     : ${EXPECTED_NUMERIC}"
 echo "  Upstream SHA prefix  : ${THEROCK_SHA}"
 echo "  Tarball URL          : ${TARBALL_URL}"
 echo "  Local tarball        : ${LOCAL_TARBALL}"
 echo "  Staging dir          : ${STAGING_DIR}"
-echo "  Module file          : ${MODULE_FILE}"
-echo "  Predicted install    : ${TOP_INSTALL_PATH}/rocm-therock-afar-${EXPECTED_NUMERIC}"
+echo "  Module file          : (set after Phase 3, shape afar-${THEROCK_AFAR_RELEASE}-<rocm>.lua)"
+echo "  Install dir          : ${INSTALL_DIR}"
 echo "  REPLACE_EXISTING     : ${REPLACE_EXISTING}"
 echo "  KEEP_FAILED_INSTALLS : ${KEEP_FAILED_INSTALLS}"
 echo "============================================================"
@@ -310,23 +361,33 @@ echo ""
 
 # ---------------- --replace-existing cleanup --------------------------
 # Runs AFTER URL discovery so we don't blow away an existing install for
-# a release that doesn't actually exist upstream. The install-dir cleanup
-# glob mirrors Phase 0 (we still don't know ROCM_NUMERIC); the modulefile
-# basename is unambiguous so we just rm it.
+# a release that doesn't actually exist upstream. Reap BOTH the legacy
+# layout (rocm-therock-afar-* install dirs + therock-afar-<REL>.lua
+# modulefile) AND the new unified layout (rocm-afar-<REL> install dir +
+# any afar-<REL>-*.lua modulefile glob), so a single --replace-existing
+# 1 cleanly migrates an in-place legacy install.
 if [[ "${REPLACE_EXISTING}" == "1" ]]; then
    shopt -s nullglob
-   for _cand in "${TOP_INSTALL_PATH}"/rocm-therock-afar-*; do
+   for _cand in ${LEGACY_INSTALL_GLOB}; do
       if [[ -d "${_cand}" ]]; then
-         echo "[--replace-existing 1] removing ${_cand}"
+         echo "[--replace-existing 1] removing legacy ${_cand}"
          sudo rm -rf "${_cand}"
       fi
    done
-   shopt -u nullglob
-   if [[ -f "${MODULE_FILE}" ]]; then
-      echo "[--replace-existing 1] removing ${MODULE_FILE}"
-      sudo rm -f "${MODULE_FILE}"
+   if [[ -d "${INSTALL_DIR}" ]]; then
+      echo "[--replace-existing 1] removing ${INSTALL_DIR}"
+      sudo rm -rf "${INSTALL_DIR}"
    fi
-   unset _cand
+   if [[ -f "${LEGACY_MODULE_FILE}" ]]; then
+      echo "[--replace-existing 1] removing legacy ${LEGACY_MODULE_FILE}"
+      sudo rm -f "${LEGACY_MODULE_FILE}"
+   fi
+   for _stale in "${MODULE_DIR}"/afar-${THEROCK_AFAR_RELEASE}-*.lua; do
+      echo "[--replace-existing 1] removing ${_stale}"
+      sudo rm -f "${_stale}"
+   done
+   shopt -u nullglob
+   unset _cand _stale
 fi
 
 # ---------------- EXIT-trap fail-cleanup ------------------------------
@@ -334,14 +395,17 @@ fi
 # the staging dir + (if promoted) the partial install dir + modulefile
 # so the next run starts clean. INSTALL_DIR is set after Phase 4 -- the
 # guard with -n no-ops when unset.
-INSTALL_DIR=""
+# PROMOTED_INSTALL tracks whether Phase 4 has run (and thus whether
+# INSTALL_DIR is a real on-disk install we should rm on failure). Phase
+# 0's early-bail sets it to 0; Phase 4 sets it to 1 after the mv.
+PROMOTED_INSTALL=0
 _therock_afar_on_exit() {
    local rc=$?
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[therock-afar fail-cleanup] rc=${rc}: removing staging + partial install"
       sudo rm -rf "${STAGING_DIR}" 2>/dev/null || true
-      [ -n "${INSTALL_DIR}" ] && sudo rm -rf "${INSTALL_DIR}" 2>/dev/null || true
-      sudo rm -f "${MODULE_FILE}" 2>/dev/null || true
+      [ "${PROMOTED_INSTALL}" = "1" ] && sudo rm -rf "${INSTALL_DIR}" 2>/dev/null || true
+      [ -n "${MODULE_FILE}" ] && sudo rm -f "${MODULE_FILE}" 2>/dev/null || true
    elif [ ${rc} -ne 0 ]; then
       echo "[therock-afar fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -411,12 +475,16 @@ echo "ROCM_NUMERIC (from .info/version): ${ROCM_NUMERIC}"
 # Sanity-check against filename-embedded version.
 if [[ "${EXPECTED_NUMERIC}" != "${ROCM_NUMERIC}" ]]; then
    echo "NOTE: tarball-filename version (${EXPECTED_NUMERIC}) differs from"
-   echo "      .info/version (${ROCM_NUMERIC}); install dir will use the"
-   echo "      .info/version-derived form (rocm-therock-afar-${ROCM_NUMERIC})."
+   echo "      .info/version (${ROCM_NUMERIC}); modulefile name will use"
+   echo "      the .info/version-derived form (afar-${THEROCK_AFAR_RELEASE}-${ROCM_NUMERIC}.lua)."
 fi
 
+# Finalize MODULE_FILE now that ROCM_NUMERIC is known. INSTALL_DIR was
+# set at the top of the script (keyed on THEROCK_AFAR_RELEASE, not on
+# ROCM_NUMERIC) per the unified flang-site naming.
+MODULE_FILE="${MODULE_DIR}/afar-${THEROCK_AFAR_RELEASE}-${ROCM_NUMERIC}.lua"
+
 # ---------------- Phase 4: promote staging to final install dir -------
-INSTALL_DIR="${TOP_INSTALL_PATH}/rocm-therock-afar-${ROCM_NUMERIC}"
 echo "============================================================"
 echo "  Phase 4: promote -> ${INSTALL_DIR}"
 echo "============================================================"
@@ -441,6 +509,7 @@ if [[ -n "${WRAPPER}" ]]; then
 else
    sudo mv "${STAGING_DIR}" "${INSTALL_DIR}"
 fi
+PROMOTED_INSTALL=1
 sudo chown -R root:root "${INSTALL_DIR}"
 sudo chmod 755 "${INSTALL_DIR}"
 rm -f "${LOCAL_TARBALL}"
@@ -473,17 +542,30 @@ echo "  Phase 5: write modulefile ${MODULE_FILE}"
 echo "============================================================"
 sudo mkdir -p "${MODULE_DIR}"
 
-# Modulefile shape matches the negotiated naming-scheme decision:
-#   * Module basename:   therock-afar-${REL}.lua  (release-tag-keyed)
-#   * ROCM_PATH:         ${INSTALL_DIR}  (numeric-keyed install dir)
-#   * Two MODULEPATH prepends, both numeric-keyed:
-#       rocm-therock-afar-${NUMERIC}        (per-package modules from SDK)
-#       rocmplus-therock-afar-${NUMERIC}    (rocmplus per-package modules)
-# This mirrors the layout of run_rocm_afar_install.sh's modulefile,
-# just with the `-therock-afar-` infix instead of the bare `-afar-`.
+# Modulefile shape matches the unified flang-site naming-scheme decision
+# (2026-05-26):
+#   * Module basename:   afar-${REL}-${ROCM_NUMERIC}.lua
+#                        (compiler/AFAR release tag + SDK numeric, same
+#                         shape used by run_rocm_afar_install.sh for the
+#                         AFAR-proper channel; loaded as
+#                         `module load rocm/afar-<REL>-<ROCM>`)
+#   * ROCM_PATH:         ${INSTALL_DIR}  (release-tag-keyed install dir,
+#                         e.g. /nfsapps/opt/rocm-afar-23.2.1)
+#   * Two MODULEPATH prepends:
+#       rocm-afar-${REL}            (release-tag-keyed; per-package
+#                                    modules from the SDK side, matches
+#                                    install dir basename)
+#       rocmplus-afar-${REL}-${ROCM_NUMERIC}
+#                                   (compiler-AND-rocm-keyed rocmplus
+#                                   stack, matches the AFAR-proper
+#                                   modulefile shape; two flang-site
+#                                   drops with different compiler
+#                                   release tags can't collide on the
+#                                   rocmplus side even if they happen
+#                                   to ship the same SDK numeric).
 sudo tee "${MODULE_FILE}" >/dev/null <<EOF
 whatis("Name: ROCm")
-whatis("Version: therock-afar-${THEROCK_AFAR_RELEASE}")
+whatis("Version: afar-${THEROCK_AFAR_RELEASE}-${ROCM_NUMERIC}")
 whatis("Category: AMD")
 whatis("ROCm")
 whatis("Set HIPCC_VERBOSE=7 to see what hipcc is doing for the compilation and link")
@@ -504,8 +586,8 @@ setenv("HSA_NO_SCRATCH_RECLAIM", "1")
 setenv("HIPCC_COMPILE_FLAGS_APPEND", "--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11")
 setenv("HIPCC_LINK_FLAGS_APPEND",    "--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11")
 setenv("ROCM_PATH", base)
-prepend_path("MODULEPATH", pathJoin(mbase, "rocm-therock-afar-${ROCM_NUMERIC}"))
-prepend_path("MODULEPATH", pathJoin(mbase, "rocmplus-therock-afar-${ROCM_NUMERIC}"))
+prepend_path("MODULEPATH", pathJoin(mbase, "rocm-afar-${THEROCK_AFAR_RELEASE}"))
+prepend_path("MODULEPATH", pathJoin(mbase, "rocmplus-afar-${THEROCK_AFAR_RELEASE}-${ROCM_NUMERIC}"))
 family("GPUSDK")
 
 -- Place the rocprof-sys-run wrapper (which applies a libbfd LD_PRELOAD
@@ -519,8 +601,8 @@ sudo chmod 644 "${MODULE_FILE}"
 
 echo ""
 echo "============================================================"
-echo "  Done: therock-afar-${THEROCK_AFAR_RELEASE} (ROCM_NUMERIC=${ROCM_NUMERIC})"
+echo "  Done: afar-${THEROCK_AFAR_RELEASE}-${ROCM_NUMERIC} (TheRock-AFAR drop)"
 echo "  Install: ${INSTALL_DIR}"
-echo "  Module : ${MODULE_FILE}  (loads rocm/therock-afar-${THEROCK_AFAR_RELEASE},"
+echo "  Module : ${MODULE_FILE}  (loads rocm/afar-${THEROCK_AFAR_RELEASE}-${ROCM_NUMERIC},"
 echo "                            ROCM_PATH=${INSTALL_DIR})"
 echo "============================================================"

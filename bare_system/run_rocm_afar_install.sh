@@ -16,18 +16,24 @@
 #     tar -xjf + write the GPUSDK-shaped modulefile.
 #
 # Phases:
-#   0. Pre-check: skip cleanly (exit 0) if ${TOP_INSTALL_PATH}/rocm-afar-
-#      ${FLANG_RELEASE_NUMBER} already exists and --replace-existing is not set.
+#   0. Pre-check: skip cleanly (exit 0) if BOTH ${TOP_INSTALL_PATH}/rocm-afar-
+#      ${FLANG_RELEASE_NUMBER} AND a matching afar-${FLANG_RELEASE_NUMBER}-*.lua
+#      modulefile (new unified naming) already exist and --replace-existing
+#      is not set. If only the install dir is present (legacy install from
+#      before the afar-<REL>-<ROCM>.lua naming), Phase 1+2 are skipped via
+#      SKIP_EXTRACT=1 and only the new-shape modulefile is emitted from the
+#      existing .info/version (soft cutover).
 #   1. AFAR_NUMBER auto-discovery from repo.radeon.com/rocm/misc/flang/ when
 #      --afar-number was not supplied. AMD reposts under monotonically
 #      increasing build numbers, so we tail -n1 the sorted matches.
 #   2. wget the tarball to /tmp, sudo tar -xjpf into ${TOP_INSTALL_PATH}/,
 #      sudo mv to drop the AFAR_NUMBER segment from the extracted dir name.
 #   3. Read .info/version from the extracted tree -> ROCM_NUMERIC.
-#   4. Emit ${TOP_MODULE_PATH}/base/rocm/afar-${FLANG_RELEASE_NUMBER}.lua
-#      matching the GPUSDK-shaped modulefile currently deployed at
-#      /shared/apps/modules/ubuntu/lmodfiles/base/rocm/afar-22.2.0.lua.
-#      That modulefile prepends MODULEPATH for BOTH the SDK-side module
+#   4. Emit ${TOP_MODULE_PATH}/base/rocm/afar-${FLANG_RELEASE_NUMBER}-${ROCM_NUMERIC}.lua
+#      using the unified flang-site naming scheme:
+#         install -> rocm-afar-<REL>          (compiler/AFAR number)
+#         module  -> afar-<REL>-<ROCM>.lua    (compiler + SDK numeric)
+#      The modulefile prepends MODULEPATH for BOTH the SDK-side module
 #      tree (rocm-afar-${FLANG_RELEASE_NUMBER}) and the rocmplus side
 #      (rocmplus-afar-${ROCM_NUMERIC}); the latter uses .info/version,
 #      hence the asymmetric naming.
@@ -66,7 +72,10 @@ Usage: $0 [opts]
   --top-install-path PATH       SDK extract destination; default ${TOP_INSTALL_PATH}
   --top-module-path  PATH       Lmod root for modulefile; default ${TOP_MODULE_PATH}
   --replace-existing 0|1        overwrite existing rocm-afar-<v> install
-                                + modulefile (default ${REPLACE_EXISTING})
+                                + afar-<v>-*.lua modulefile (default ${REPLACE_EXISTING}).
+                                Also reaps the legacy afar-<v>.lua modulefile
+                                (no -<rocm> suffix) from the pre-unified-naming
+                                layout.
   --keep-failed-installs 0|1    on failure, keep partial install + modulefile
                                 for post-mortem (default ${KEEP_FAILED_INSTALLS})
   --help
@@ -100,13 +109,37 @@ done
 ARCHIVE_DIR="rocm-afar-${FLANG_RELEASE_NUMBER}"
 INSTALL_DIR="${TOP_INSTALL_PATH}/${ARCHIVE_DIR}"
 MODULE_DIR="${TOP_MODULE_PATH}/base/rocm"
-MODULE_FILE="${MODULE_DIR}/afar-${FLANG_RELEASE_NUMBER}.lua"
+# MODULE_FILE is finalized AFTER Phase 3 once ROCM_NUMERIC is known (the
+# new naming embeds the SDK numeric: afar-<REL>-<ROCM>.lua). Phase 0
+# uses a glob match (afar-${REL}-*.lua) so we can detect any rocm
+# version that may have been installed for this FLANG_RELEASE_NUMBER.
+LEGACY_MODULE_FILE="${MODULE_DIR}/afar-${FLANG_RELEASE_NUMBER}.lua"
+MODULE_FILE=""   # set after Phase 3
 
 # ---------------- Phase 0: skip-if-installed pre-check ----------------
+# Skip only if BOTH the install dir AND a new-shape modulefile
+# (afar-${REL}-<rocm>.lua) already exist. If the install dir is present
+# but the new-shape modulefile is missing (e.g. a legacy install from
+# before the unified afar-<REL>-<ROCM>.lua naming), we fall through:
+# Phase 1's URL discovery and Phase 2's download/extract are skipped via
+# the SKIP_EXTRACT flag below, but Phase 3 will re-read .info/version
+# from the existing install and Phase 4 will emit the new-shape
+# modulefile -- soft cutover, no re-extraction needed.
+SKIP_EXTRACT=0
 if [[ -d "${INSTALL_DIR}" && "${REPLACE_EXISTING}" != "1" ]]; then
-   echo "[$(date)] SKIP afar-${FLANG_RELEASE_NUMBER}: ${INSTALL_DIR} already exists"
-   echo "         Pass --replace-existing 1 to re-download + re-extract."
-   exit 0
+   shopt -s nullglob
+   _existing_modules=( "${MODULE_DIR}"/afar-${FLANG_RELEASE_NUMBER}-*.lua )
+   shopt -u nullglob
+   if [[ ${#_existing_modules[@]} -gt 0 ]]; then
+      echo "[$(date)] SKIP afar-${FLANG_RELEASE_NUMBER}: ${INSTALL_DIR} + ${_existing_modules[0]} already exist"
+      echo "         Pass --replace-existing 1 to re-download + re-extract."
+      exit 0
+   fi
+   echo "[$(date)] NOTE afar-${FLANG_RELEASE_NUMBER}: ${INSTALL_DIR} exists but no afar-${FLANG_RELEASE_NUMBER}-*.lua modulefile found"
+   echo "         (legacy install from before unified afar-<REL>-<ROCM>.lua naming?);"
+   echo "         re-using existing install and emitting new-shape modulefile only."
+   SKIP_EXTRACT=1
+   unset _existing_modules
 fi
 
 # ---------------- Defensive remount of /nfsapps as rw -----------------
@@ -133,15 +166,27 @@ for d in "${TOP_INSTALL_PATH}" "${TOP_MODULE_PATH}" "${MODULE_DIR}"; do
 done
 
 # ---------------- --replace-existing cleanup --------------------------
+# Reap BOTH the legacy modulefile (afar-${REL}.lua, no -<rocm> suffix)
+# AND any new-shape afar-${REL}-*.lua glob, since the rocm-version
+# segment may have changed between runs (e.g. AMD reposts under a
+# different .info/version) -- leaving a stale numeric-suffixed module
+# behind would result in two visible modules for the same FLANG release.
 if [[ "${REPLACE_EXISTING}" == "1" ]]; then
    if [[ -d "${INSTALL_DIR}" ]]; then
       echo "[--replace-existing 1] removing ${INSTALL_DIR}"
       sudo rm -rf "${INSTALL_DIR}"
    fi
-   if [[ -f "${MODULE_FILE}" ]]; then
-      echo "[--replace-existing 1] removing ${MODULE_FILE}"
-      sudo rm -f "${MODULE_FILE}"
+   if [[ -f "${LEGACY_MODULE_FILE}" ]]; then
+      echo "[--replace-existing 1] removing legacy ${LEGACY_MODULE_FILE}"
+      sudo rm -f "${LEGACY_MODULE_FILE}"
    fi
+   shopt -s nullglob
+   for _stale in "${MODULE_DIR}"/afar-${FLANG_RELEASE_NUMBER}-*.lua; do
+      echo "[--replace-existing 1] removing ${_stale}"
+      sudo rm -f "${_stale}"
+   done
+   shopt -u nullglob
+   unset _stale
 fi
 
 # ---------------- EXIT-trap fail-cleanup ------------------------------
@@ -152,8 +197,14 @@ _afar_on_exit() {
    local rc=$?
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[afar fail-cleanup] rc=${rc}: removing partial install + modulefile"
-      sudo rm -rf "${INSTALL_DIR}" 2>/dev/null || true
-      sudo rm -f  "${MODULE_FILE}" 2>/dev/null || true
+      # Only blow away the install dir when WE created it this run (i.e.
+      # SKIP_EXTRACT=0). In the soft-cutover path (SKIP_EXTRACT=1) the
+      # install dir was already on disk before this run, so leave it
+      # alone -- the failure is in modulefile re-emission only.
+      if [ "${SKIP_EXTRACT}" != "1" ]; then
+         sudo rm -rf "${INSTALL_DIR}" 2>/dev/null || true
+      fi
+      [ -n "${MODULE_FILE}" ] && sudo rm -f "${MODULE_FILE}" 2>/dev/null || true
    elif [ ${rc} -ne 0 ]; then
       echo "[afar fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -169,70 +220,79 @@ trap _afar_on_exit EXIT
 # latest repost. The page is a plain Apache directory listing (href= the
 # filename), so a simple grep against the HTML works.
 URL_BASE="https://repo.radeon.com/rocm/misc/flang"
-if [[ -z "${AFAR_NUMBER}" ]]; then
+if [[ "${SKIP_EXTRACT}" == "1" ]]; then
    echo "============================================================"
-   echo "  Phase 1: discover AFAR_NUMBER for flang-release ${FLANG_RELEASE_NUMBER} on ${DISTRO}"
+   echo "  Phase 1+2: SKIPPED (soft-cutover: ${INSTALL_DIR} already on disk)"
    echo "============================================================"
-   PATTERN="rocm-afar-[0-9]+-drop-${FLANG_RELEASE_NUMBER}-${DISTRO}\.tar\.bz2"
-   AFAR_NUMBER=$(curl -fsSL "${URL_BASE}/" \
-      | grep -oE "${PATTERN}" \
-      | sort -u \
-      | tail -n1 \
-      | sed -E 's/^rocm-afar-([0-9]+)-drop-.*$/\1/')
+   ARCHIVE_NAME="(skipped)"
+   TARBALL_URL="(skipped)"
+   LOCAL_TARBALL=""
+else
    if [[ -z "${AFAR_NUMBER}" ]]; then
-      echo "ERROR: could not auto-discover AFAR_NUMBER for flang-release '${FLANG_RELEASE_NUMBER}' on distro '${DISTRO}'" >&2
-      echo "       (no match for pattern '${PATTERN}' at ${URL_BASE}/)" >&2
-      echo "       Pass --afar-number NUM explicitly, or verify the drop exists upstream." >&2
+      echo "============================================================"
+      echo "  Phase 1: discover AFAR_NUMBER for flang-release ${FLANG_RELEASE_NUMBER} on ${DISTRO}"
+      echo "============================================================"
+      PATTERN="rocm-afar-[0-9]+-drop-${FLANG_RELEASE_NUMBER}-${DISTRO}\.tar\.bz2"
+      AFAR_NUMBER=$(curl -fsSL "${URL_BASE}/" \
+         | grep -oE "${PATTERN}" \
+         | sort -u \
+         | tail -n1 \
+         | sed -E 's/^rocm-afar-([0-9]+)-drop-.*$/\1/')
+      if [[ -z "${AFAR_NUMBER}" ]]; then
+         echo "ERROR: could not auto-discover AFAR_NUMBER for flang-release '${FLANG_RELEASE_NUMBER}' on distro '${DISTRO}'" >&2
+         echo "       (no match for pattern '${PATTERN}' at ${URL_BASE}/)" >&2
+         echo "       Pass --afar-number NUM explicitly, or verify the drop exists upstream." >&2
+         exit 1
+      fi
+      echo "Discovered AFAR_NUMBER=${AFAR_NUMBER} for rocm-afar-${FLANG_RELEASE_NUMBER} (${DISTRO})"
+   fi
+
+   ARCHIVE_NAME="rocm-afar-${AFAR_NUMBER}-drop-${FLANG_RELEASE_NUMBER}"
+   FULL_ARCHIVE_NAME="${ARCHIVE_NAME}-${DISTRO}"
+   TARBALL_URL="${URL_BASE}/${FULL_ARCHIVE_NAME}.tar.bz2"
+   LOCAL_TARBALL="/tmp/${FULL_ARCHIVE_NAME}.tar.bz2"
+
+   echo ""
+   echo "============================================================"
+   echo "  AFAR install plan"
+   echo "============================================================"
+   echo "  FLANG_RELEASE_NUMBER : ${FLANG_RELEASE_NUMBER}"
+   echo "  AFAR_NUMBER          : ${AFAR_NUMBER}"
+   echo "  DISTRO               : ${DISTRO} ${DISTRO_VERSION}"
+   echo "  Tarball URL          : ${TARBALL_URL}"
+   echo "  Local tarball        : ${LOCAL_TARBALL}"
+   echo "  Install dir          : ${INSTALL_DIR}"
+   echo "  Modulefile           : (set after Phase 3, shape afar-${FLANG_RELEASE_NUMBER}-<rocm>.lua)"
+   echo "  REPLACE_EXISTING     : ${REPLACE_EXISTING}"
+   echo "  KEEP_FAILED_INSTALLS : ${KEEP_FAILED_INSTALLS}"
+   echo "============================================================"
+   echo ""
+
+   # ---------------- Phase 2: download + extract -------------------------
+   echo "============================================================"
+   echo "  Phase 2: wget + tar -xjpf -> ${TOP_INSTALL_PATH}/"
+   echo "============================================================"
+   rm -f "${LOCAL_TARBALL}"
+   wget -q --show-progress "${TARBALL_URL}" -O "${LOCAL_TARBALL}"
+   sudo tar -xjpf "${LOCAL_TARBALL}" -C "${TOP_INSTALL_PATH}/"
+
+   # Drop the AFAR_NUMBER segment so the on-disk dir matches the modulefile
+   # token. The tarball expands to rocm-afar-<NUM>-drop-<REL>/; we rename to
+   # rocm-afar-<REL>/. Bail loudly if the expected source dir is missing --
+   # that would mean AMD changed the in-archive layout.
+   EXTRACTED_DIR="${TOP_INSTALL_PATH}/${ARCHIVE_NAME}"
+   if [[ ! -d "${EXTRACTED_DIR}" ]]; then
+      echo "ERROR: expected extracted dir not found: ${EXTRACTED_DIR}" >&2
+      echo "       (Did the AFAR drop change its top-level dir name?)" >&2
+      sudo find "${TOP_INSTALL_PATH}" -maxdepth 1 -name 'rocm-afar-*' -type d -printf '       found: %p\n' || true
       exit 1
    fi
-   echo "Discovered AFAR_NUMBER=${AFAR_NUMBER} for rocm-afar-${FLANG_RELEASE_NUMBER} (${DISTRO})"
+   sudo mv "${EXTRACTED_DIR}" "${INSTALL_DIR}"
+   sudo chown -R root:root "${INSTALL_DIR}"
+   sudo chmod 755 "${INSTALL_DIR}"
+   rm -f "${LOCAL_TARBALL}"
+   echo "Extracted: ${INSTALL_DIR}"
 fi
-
-ARCHIVE_NAME="rocm-afar-${AFAR_NUMBER}-drop-${FLANG_RELEASE_NUMBER}"
-FULL_ARCHIVE_NAME="${ARCHIVE_NAME}-${DISTRO}"
-TARBALL_URL="${URL_BASE}/${FULL_ARCHIVE_NAME}.tar.bz2"
-LOCAL_TARBALL="/tmp/${FULL_ARCHIVE_NAME}.tar.bz2"
-
-echo ""
-echo "============================================================"
-echo "  AFAR install plan"
-echo "============================================================"
-echo "  FLANG_RELEASE_NUMBER : ${FLANG_RELEASE_NUMBER}"
-echo "  AFAR_NUMBER          : ${AFAR_NUMBER}"
-echo "  DISTRO               : ${DISTRO} ${DISTRO_VERSION}"
-echo "  Tarball URL          : ${TARBALL_URL}"
-echo "  Local tarball        : ${LOCAL_TARBALL}"
-echo "  Install dir          : ${INSTALL_DIR}"
-echo "  Modulefile           : ${MODULE_FILE}"
-echo "  REPLACE_EXISTING     : ${REPLACE_EXISTING}"
-echo "  KEEP_FAILED_INSTALLS : ${KEEP_FAILED_INSTALLS}"
-echo "============================================================"
-echo ""
-
-# ---------------- Phase 2: download + extract -------------------------
-echo "============================================================"
-echo "  Phase 2: wget + tar -xjpf -> ${TOP_INSTALL_PATH}/"
-echo "============================================================"
-rm -f "${LOCAL_TARBALL}"
-wget -q --show-progress "${TARBALL_URL}" -O "${LOCAL_TARBALL}"
-sudo tar -xjpf "${LOCAL_TARBALL}" -C "${TOP_INSTALL_PATH}/"
-
-# Drop the AFAR_NUMBER segment so the on-disk dir matches the modulefile
-# token. The tarball expands to rocm-afar-<NUM>-drop-<REL>/; we rename to
-# rocm-afar-<REL>/. Bail loudly if the expected source dir is missing --
-# that would mean AMD changed the in-archive layout.
-EXTRACTED_DIR="${TOP_INSTALL_PATH}/${ARCHIVE_NAME}"
-if [[ ! -d "${EXTRACTED_DIR}" ]]; then
-   echo "ERROR: expected extracted dir not found: ${EXTRACTED_DIR}" >&2
-   echo "       (Did the AFAR drop change its top-level dir name?)" >&2
-   sudo find "${TOP_INSTALL_PATH}" -maxdepth 1 -name 'rocm-afar-*' -type d -printf '       found: %p\n' || true
-   exit 1
-fi
-sudo mv "${EXTRACTED_DIR}" "${INSTALL_DIR}"
-sudo chown -R root:root "${INSTALL_DIR}"
-sudo chmod 755 "${INSTALL_DIR}"
-rm -f "${LOCAL_TARBALL}"
-echo "Extracted: ${INSTALL_DIR}"
 
 # ---------------- Phase 3: derive ROCM_NUMERIC from .info/version -----
 if [[ ! -f "${INSTALL_DIR}/.info/version" ]]; then
@@ -247,6 +307,11 @@ if [[ -z "${ROCM_NUMERIC}" ]]; then
    exit 1
 fi
 echo "ROCM_NUMERIC (from .info/version): ${ROCM_NUMERIC}"
+
+# Finalize MODULE_FILE now that ROCM_NUMERIC is known. The new unified
+# naming embeds both the FLANG release tag and the SDK numeric, so the
+# operator sees a single rocm/afar-<REL>-<ROCM> module per install.
+MODULE_FILE="${MODULE_DIR}/afar-${FLANG_RELEASE_NUMBER}-${ROCM_NUMERIC}.lua"
 
 # ---------------- Phase 4: emit GPUSDK modulefile ---------------------
 # Provenance: capture this leaf script's git state for the whatis() line.
@@ -274,17 +339,21 @@ echo "============================================================"
 sudo mkdir -p "${MODULE_DIR}"
 
 # Heredoc-pipe into sudo tee so the modulefile is created root-owned even
-# when this script runs as a non-root user. The modulefile shape matches
-# the currently-deployed /shared/apps/modules/ubuntu/lmodfiles/base/rocm/
-# afar-22.2.0.lua exactly (family("GPUSDK"), ROCM_PATH, and TWO MODULEPATH
-# prepends -- one to rocm-afar-<flang-rel> for SDK packages, one to
-# rocmplus-afar-<rocm-numeric> for the rocmplus stack).
+# when this script runs as a non-root user. The modulefile shape:
+#   family("GPUSDK"), ROCM_PATH, and TWO MODULEPATH prepends:
+#     rocm-afar-<flang-rel>           SDK-side per-package modules
+#     rocmplus-afar-<flang-rel>-<rocm-numeric>
+#                                     rocmplus stack (compiler-AND-rocm-keyed
+#                                     so two AFAR drops with the same SDK
+#                                     numeric but different compiler releases
+#                                     get separate rocmplus trees).
 sudo tee "${MODULE_FILE}" >/dev/null <<EOF
 whatis("Name: ROCm")
-whatis("Version: afar-${FLANG_RELEASE_NUMBER}")
+whatis("Version: afar-${FLANG_RELEASE_NUMBER}-${ROCM_NUMERIC}")
 whatis("Category: AMD")
 whatis("ROCm")
 whatis("Set HIPCC_VERBOSE=7 to see what hipcc is doing for the compilation and link")
+whatis("Source: AFAR drop ${FLANG_RELEASE_NUMBER} (build ${AFAR_NUMBER}, ROCm ${ROCM_NUMERIC} from .info/version)")
 whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
 local base  = "${INSTALL_DIR}"
@@ -301,7 +370,7 @@ setenv("HIPCC_COMPILE_FLAGS_APPEND", "--gcc-install-dir=/usr/lib/gcc/x86_64-linu
 setenv("HIPCC_LINK_FLAGS_APPEND",    "--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11")
 setenv("ROCM_PATH", base)
 prepend_path("MODULEPATH", pathJoin(mbase, "rocm-afar-${FLANG_RELEASE_NUMBER}"))
-prepend_path("MODULEPATH", pathJoin(mbase, "rocmplus-afar-${ROCM_NUMERIC}"))
+prepend_path("MODULEPATH", pathJoin(mbase, "rocmplus-afar-${FLANG_RELEASE_NUMBER}-${ROCM_NUMERIC}"))
 family("GPUSDK")
 
 -- Place the rocprof-sys-run wrapper (which applies a libbfd LD_PRELOAD
@@ -315,7 +384,8 @@ sudo chmod 644 "${MODULE_FILE}"
 
 echo ""
 echo "============================================================"
-echo "  Done: afar-${FLANG_RELEASE_NUMBER} (ROCM_NUMERIC=${ROCM_NUMERIC})"
+echo "  Done: afar-${FLANG_RELEASE_NUMBER}-${ROCM_NUMERIC}"
 echo "  Install: ${INSTALL_DIR}"
-echo "  Module : ${MODULE_FILE}"
+echo "  Module : ${MODULE_FILE}  (loads rocm/afar-${FLANG_RELEASE_NUMBER}-${ROCM_NUMERIC},"
+echo "                            ROCM_PATH=${INSTALL_DIR})"
 echo "============================================================"

@@ -12,8 +12,16 @@ There are THREE buckets, emitted in this order:
                                       keeps it manageable.
   2. `ROCm RC trees (therock + afar)`
                                    -- release-candidate flavours
-                                      (`therock-*`, `afar-*`). Always
-                                      narrow (<= 5 columns).
+                                      (`therock-*`, `afar-*`).
+                                      As of 2026-05-26 AFAR columns
+                                      carry both the compiler/AFAR
+                                      release tag AND the SDK numeric:
+                                      `afar-22.2.0-7.2.0`,
+                                      `afar-23.2.1-7.13.0` (the second
+                                      replaces the legacy
+                                      `therock-afar-7.13.0`). therock
+                                      columns stay single-numeric
+                                      (`therock-7.13.0`).
   3. `ROCm 6.x.x`                  -- numeric 6.x releases.
 
 For each canonical package family it reports:
@@ -228,33 +236,44 @@ def discover_versions(roots):
     return versions
 
 
+def _split_version_body(body):
+    """Tokenize a version body for sort-key purposes.
+
+    Splits on both '.' and '-' so multi-component AFAR suffixes
+    (`22.2.0-7.2.0`) sort coherently: each numeric chunk becomes its
+    own token. Returns a list of (sort_class, value) tuples where
+    sort_class=0 for integers (compared numerically) and sort_class=1
+    for non-numeric tokens (lexicographic). Without the '-' split the
+    middle chunk would land in a token like '0-7' that falls into the
+    string-compare branch and ruins ordering on the AFAR column set.
+    """
+    out = []
+    for p in re.split(r"[.-]", body):
+        try:
+            out.append((0, int(p)))
+        except ValueError:
+            out.append((1, p))
+    return out
+
+
 def version_sort_key(v):
     """Numeric first, then therock, then afar; semantic within each bucket."""
     if v.startswith("therock-"): bucket, body = 1, v[len("therock-"):]
     elif v.startswith("afar-"):  bucket, body = 2, v[len("afar-"):]
     else:                         bucket, body = 0, v
-    parts = re.split(r"\.", body)
-    key = []
-    for p in parts:
-        try: key.append((0, int(p)))
-        except ValueError: key.append((1, p))
-    return (bucket, key)
+    return (bucket, _split_version_body(body))
 
 
 def rc_version_sort_key(v):
     """Sort RC trees (therock-*, afar-*) by their numeric body only,
     ignoring the family prefix, so columns in the RC table read
     lowest-to-highest left-to-right regardless of family:
-      afar-7.1.0 < afar-7.2.0 < therock-7.12.0 < therock-7.13.0.
+      afar-22.2.0-7.2.0 < afar-23.2.1-7.13.0 < therock-7.13.0.
     """
     if v.startswith("therock-"): body = v[len("therock-"):]
     elif v.startswith("afar-"):  body = v[len("afar-"):]
     else:                        body = v
-    key = []
-    for p in re.split(r"\.", body):
-        try: key.append((0, int(p)))
-        except ValueError: key.append((1, p))
-    return key
+    return _split_version_body(body)
 
 
 def list_pkgs(root, version):
@@ -267,12 +286,17 @@ def list_pkgs(root, version):
 # For each rocmplus-<suffix> column we display the AMD-clang version that
 # ships with the corresponding rocm SDK. Mapping rocmplus-<suffix> back to
 # the SDK path is non-trivial for RC trees:
-#   rocmplus-7.2.1            <- rocm-7.2.1                (1:1)
-#   rocmplus-therock-7.13.0   <- rocm-therock-23.2.0       (numeric from .info/version)
-#   rocmplus-afar-7.2.0       <- rocm-afar-22.2.0          (ditto)
+#   rocmplus-7.2.1                  <- rocm-7.2.1            (1:1)
+#   rocmplus-therock-7.13.0         <- rocm-therock-7.13.0   (numeric from .info/version)
+#   rocmplus-afar-22.2.0-7.2.0      <- rocm-afar-22.2.0      (compiler tag from basename,
+#                                                             numeric from .info/version)
+#   rocmplus-afar-23.2.1-7.13.0     <- rocm-afar-23.2.1      (ditto; this is the
+#                                                             ex-therock-afar drop, now
+#                                                             unified under the afar
+#                                                             namespace)
 # So we scan rocm-* siblings of each root, and for non-numeric basenames
 # read .info/version to get the numeric -- mirroring main_setup.sh's
-# ROCM_NUMERIC / ROCM_RC_PREFIX derivation.
+# ROCM_NUMERIC / ROCM_RC_PREFIX / ROCM_RC_COMPILER derivation.
 _CLANG_RE = re.compile(r"clang version (\d+(?:\.\d+){0,2})")
 _NUMERIC_SUFFIX_RE = re.compile(r"^\d+(?:\.\d+){1,2}$")
 _ROCM_SDK_MAP_CACHE = {}  # tuple(roots) -> {suffix: rocm-path}
@@ -281,9 +305,25 @@ _ROCM_SDK_MAP_CACHE = {}  # tuple(roots) -> {suffix: rocm-path}
 def _rocm_sdk_map(roots):
     """Return {ROCMPLUS_SUFFIX: /path/to/rocm-<basename>} discovered under roots.
 
-    Suffix is what `main_setup.sh` would name the rocmplus tree (numeric
-    for regular releases; '<family>-<numeric>' for RC trees, where
-    numeric comes from .info/version).
+    Suffix is what `main_setup.sh` would name the rocmplus tree:
+      * numeric                       (regular release; SDK basename =
+                                       rocm-<numeric>)
+      * '<family>-<numeric>'          (non-afar RC tree; SDK basename =
+                                       rocm-<family>-<numeric>, e.g.
+                                       rocm-therock-7.13.0)
+      * 'afar-<compiler>-<numeric>'   (AFAR family; SDK basename =
+                                       rocm-afar-<compiler>, e.g.
+                                       rocm-afar-22.2.0; the numeric
+                                       still comes from .info/version
+                                       since the compiler tag in the
+                                       basename is the AFAR/clang
+                                       release number, NOT the ROCm
+                                       SDK numeric)
+
+    The afar branch matches main_setup.sh's ROCMPLUS_SUFFIX construction:
+    two AFAR drops with the same SDK numeric but different compiler
+    release tags live in distinct rocmplus trees, so the inventory has
+    to surface them as distinct columns.
     """
     key = tuple(roots)
     cached = _ROCM_SDK_MAP_CACHE.get(key)
@@ -315,7 +355,19 @@ def _rocm_sdk_map(roots):
                     pass
                 if not numeric:
                     continue
-                suffix = f"{family}-{numeric}"
+                if family == "afar":
+                    # rocm-afar-<compiler> -- the chunk after "afar-"
+                    # is the compiler/AFAR release number; SDK numeric
+                    # comes from .info/version. Skip shapes that don't
+                    # match the expected `afar-X.Y[.Z]` form (e.g. a
+                    # legacy `rocm-afar-22.2.0-rc1/` with a non-numeric
+                    # tail) -- they'd produce an ambiguous suffix.
+                    compiler = sx[len("afar-"):]
+                    if not _NUMERIC_SUFFIX_RE.match(compiler):
+                        continue
+                    suffix = f"afar-{compiler}-{numeric}"
+                else:
+                    suffix = f"{family}-{numeric}"
             # First occurrence wins; later roots are fallbacks.
             sdk_map.setdefault(suffix, full)
     _ROCM_SDK_MAP_CACHE[key] = sdk_map
@@ -387,9 +439,14 @@ def clang_version(roots, version):
 #
 # For numeric releases the rocmplus column suffix matches the SDK
 # suffix (rocmplus-7.0.0 <-> rocm-patches-7.0.0). For RC trees they
-# differ -- the rocmplus suffix is the numeric token in
-# `<sdk>/.info/version` while the SDK basename keeps the upstream RC
-# tag, so rocmplus-therock-7.13.0 <-> rocm-patches-therock-23.2.0.
+# can differ:
+#   * therock:   rocmplus suffix = SDK basename suffix (1:1 today --
+#                rocm-therock-7.13.0 -> rocmplus-therock-7.13.0 ->
+#                rocm-patches-therock-7.13.0).
+#   * afar:      rocmplus suffix carries the SDK numeric as a third
+#                segment (afar-22.2.0-7.2.0); the SDK basename keeps
+#                only the compiler tag (afar-22.2.0), so the overlay
+#                dir is rocm-patches-afar-22.2.0.
 # The amdclang row resolves the same mapping via _rocm_sdk_map; reuse
 # that here so RC columns line up correctly.
 #
