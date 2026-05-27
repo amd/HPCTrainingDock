@@ -503,6 +503,25 @@ EOF
 sudo chown root:root "${MODULE_FILE}"
 sudo chmod 644 "${MODULE_FILE}"
 
+# ---------------- Phase 5b: per-package secondary modulefiles ---------
+# Mirror what the regular numeric pipeline emits via deploy_module_package.sh
+# (amdclang / hipfort / opencl modulefiles under the rocm-therock-<ROCM>/
+# MODULEPATH prepended above). The helper feature-gates each emission on
+# disk presence (TheRock tarballs vary in what components ship).
+echo "============================================================"
+echo "  Phase 5b: per-package modulefiles under ${TOP_MODULE_PATH}/rocm-therock-${ROCM_NUMERIC}/"
+echo "============================================================"
+# shellcheck source=bare_system/leaf_modulefile_helpers.sh
+source "$(dirname "${LEAF_SCRIPT_PATH}")/leaf_modulefile_helpers.sh"
+emit_per_package_modulefiles \
+   "${TOP_MODULE_PATH}/rocm-therock-${ROCM_NUMERIC}" \
+   "${ROCM_NUMERIC}" \
+   "rocm/therock-${THEROCK_RELEASE}" \
+   "${INSTALL_DIR}" \
+   "${LEAF_SCRIPT_NAME}" \
+   "${LEAF_SCRIPT_COMMIT:0:12}" \
+   "${LEAF_SCRIPT_DIRTY}"
+
 echo ""
 echo "============================================================"
 echo "  Done: therock-${THEROCK_RELEASE} (ROCM_NUMERIC=${ROCM_NUMERIC})"

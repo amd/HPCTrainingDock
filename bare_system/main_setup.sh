@@ -125,6 +125,16 @@ SITE_CLI=0
 : ${QUICK_INSTALLS:="0"}     # 1 = skip packages whose wall is >= 20 min (long-pole gate) PLUS the explicit always-skip set likwid + mdb (see QUICK_INSTALLS_PKGS below)
 : ${REPLACE_EXISTING:="0"}   # 1 = remove prior rocmplus-<v> install + module dirs first
 : ${KEEP_FAILED_INSTALLS:="0"}  # 1 = keep partial install dirs/modulefiles when a package fails (for post-mortem)
+# SKIP_PATCHES: operator opt-out for the rocm_patches.sh step (line ~1651
+# / line ~1670 below). 0 (default) runs rocm_patches.sh; for most ROCm
+# versions the patches script self-no-ops via NOOP_RC=43 and the cost is
+# nil. Set to 1 to bypass the call entirely -- the rocmplus sweep
+# (bare_system/run_rocmplus_install_sweep.sh:--skip-patches) propagates
+# this through bare_system/run_rocmplus_install.sbatch. Mirrors the
+# bare_system/run_rocm_build.sh:--skip-patches gate which covers the
+# build-time (Phase 3.6) patches call; this one covers the install-time
+# call.
+: ${SKIP_PATCHES:="0"}
 
 # ── Per-package versions: leaf scripts own them ──────────────────────
 # Every per-package setup script under {extras,tools,comm,rocm}/scripts/
@@ -199,6 +209,7 @@ usage()
    echo "  --quick-installs [0 or 1]:  skip packages whose wall >= 20 min (measured from job 8065 sweep): pytorch (91m), tensorflow (70m), jax (34m, when policy gate allows). Also skips ftorch (transitive: needs pytorch), julia (dormant: no install wired), and likwid + mdb (explicit always-skip in quick mode regardless of wall, e.g. so per-tool iteration does not retrigger their builds and their occasional flakiness does not block the long-pole iteration loop). Threshold raised from 15 -> 20 min after job 8065 audit moved petsc (17m) and scorep (17m) under the cutoff. Default $QUICK_INSTALLS"
    echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf the versioned subdir under \${TOP_INSTALL_PATH} (the version itself lives in the leaf script). Default $REPLACE_EXISTING"
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
+   echo "  --skip-patches [0 or 1]:  operator opt-out for the rocm-patches step (rocm/scripts/rocm_patches.sh). Default 0 runs the step; for most ROCm versions the patches script self-no-ops via NOOP_RC=43 so the cost is nil. Set to 1 when targeting a tree where the patches overlay would mismatch the runtime (e.g. 7.2.0 / 7.2.1 patches built for a newer userland and running on Ubuntu 22.04 nodes). When skipped, the per-package summary records 'rocm-patches(--skip-patches)' in the DESELECTED bucket. Default $SKIP_PATCHES"
    echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, likwid, mdb, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, hpctoolkit, likwid, mdb, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Currently supported only for pytorch; keys are aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build."
    echo "  --rocm-rc-prefix [ FAMILY ]:  release-candidate family name (e.g. 'therock', 'afar'). Auto-detected from \${ROCM_PATH} basename for rocm-{therock,afar}-* trees. Empty for regular releases. When non-empty, install/module dirs become rocmplus-\${FAMILY}-\${ROCM_VERSION}/ instead of rocmplus-\${ROCM_VERSION}/ -- EXCEPT for FAMILY='afar', where the suffix is rocmplus-afar-\${ROCM_RC_COMPILER}-\${ROCM_VERSION}/ (compiler-AND-rocm-keyed; see --rocm-rc-compiler). Default: auto-detected (empty for regular releases)."
    echo "  --rocm-rc-compiler [ COMPILER ]:  compiler/AFAR release number for AFAR trees (e.g. '22.2.0' for rocm-afar-22.2.0, '23.2.1' for rocm-afar-23.2.1 a.k.a. the TheRock-AFAR drop). Auto-detected from \${ROCM_PATH} basename when ROCM_RC_PREFIX='afar'. Empty for non-afar trees. When non-empty AND ROCM_RC_PREFIX='afar', the rocmplus suffix becomes afar-\${COMPILER}-\${ROCM_VERSION} so two AFAR drops with the same SDK numeric but different compiler releases get distinct rocmplus trees. Default: auto-detected."
@@ -294,6 +305,11 @@ do
       "--keep-failed-installs")
           shift
           KEEP_FAILED_INSTALLS=${1}
+          reset-last
+          ;;
+      "--skip-patches")
+          shift
+          SKIP_PATCHES=${1}
           reset-last
           ;;
       "--packages")
@@ -1648,7 +1664,20 @@ if [ "${SKIP_ROCM_INSTALL}" == 0 ]; then
    # need a fix; everything else exits NOOP_RC=43 → SKIPPED(no-op) in the
    # per-package summary). See rocm/scripts/rocm_patches.sh and
    # rocm/sources/rocm-patches/README.md.
-   run_and_log rocm-patches rocm/scripts/rocm_patches.sh --rocm-version ${ROCM_VERSION}
+   #
+   # --skip-patches 1 (operator opt-out) bypasses the call entirely and
+   # records 'rocm-patches(--skip-patches)' in the DESELECTED bucket so
+   # the per-package summary makes the choice visible. Use this when the
+   # patches overlay would mismatch the runtime (e.g. 7.2.0 / 7.2.1
+   # patches binaries built for a newer GLIBC than the target nodes).
+   if [ "${SKIP_PATCHES}" == "1" ]; then
+      DESELECTED_PKGS+=("rocm-patches(--skip-patches)")
+      echo ""
+      echo "### deselected: rocm-patches (--skip-patches)"
+      echo ""
+   else
+      run_and_log rocm-patches rocm/scripts/rocm_patches.sh --rocm-version ${ROCM_VERSION}
+   fi
 else
    source ~/.bashrc
 
@@ -1667,9 +1696,20 @@ else
    # through so the prerequisite check in rocm_patches.sh resolves to
    # the cluster-specific SDK install path rather than the default
    # /opt/rocm-${ROCM_VERSION}.
-   run_and_log rocm-patches rocm/scripts/rocm_patches.sh \
-      --rocm-version ${ROCM_VERSION} \
-      --rocm-path "${ROCM_PATH}"
+   #
+   # --skip-patches 1 (operator opt-out): mirror the regular-SDK branch
+   # above. Same DESELECTED summary bucket so a sweep with --skip-patches
+   # 1 reports it uniformly across all token shapes (numeric and RC).
+   if [ "${SKIP_PATCHES}" == "1" ]; then
+      DESELECTED_PKGS+=("rocm-patches(--skip-patches)")
+      echo ""
+      echo "### deselected: rocm-patches (--skip-patches)"
+      echo ""
+   else
+      run_and_log rocm-patches rocm/scripts/rocm_patches.sh \
+         --rocm-version ${ROCM_VERSION} \
+         --rocm-path "${ROCM_PATH}"
+   fi
 fi
 
 # ── Package installation ─────────────────────────────────────────────

@@ -233,11 +233,16 @@ else
       echo "  Phase 1: discover AFAR_NUMBER for flang-release ${FLANG_RELEASE_NUMBER} on ${DISTRO}"
       echo "============================================================"
       PATTERN="rocm-afar-[0-9]+-drop-${FLANG_RELEASE_NUMBER}-${DISTRO}\.tar\.bz2"
-      AFAR_NUMBER=$(curl -fsSL "${URL_BASE}/" \
+      # `|| true` on the whole pipeline (brace group): this script has
+      # `set -eo pipefail` at the top, so a no-match grep would otherwise
+      # kill the script silently before the `if [[ -z "${AFAR_NUMBER}" ]]`
+      # ERROR diagnostic below could fire. Same class of bug observed in
+      # run_rocm_therock_afar_install.sh during job 10698 (2026-05-26).
+      AFAR_NUMBER=$( { curl -fsSL "${URL_BASE}/" \
          | grep -oE "${PATTERN}" \
          | sort -u \
          | tail -n1 \
-         | sed -E 's/^rocm-afar-([0-9]+)-drop-.*$/\1/')
+         | sed -E 's/^rocm-afar-([0-9]+)-drop-.*$/\1/'; } || true)
       if [[ -z "${AFAR_NUMBER}" ]]; then
          echo "ERROR: could not auto-discover AFAR_NUMBER for flang-release '${FLANG_RELEASE_NUMBER}' on distro '${DISTRO}'" >&2
          echo "       (no match for pattern '${PATTERN}' at ${URL_BASE}/)" >&2
@@ -381,6 +386,29 @@ prepend_path("PATH", pathJoin(base, "share/rocprofiler-systems/bin"))
 EOF
 sudo chown root:root "${MODULE_FILE}"
 sudo chmod 644 "${MODULE_FILE}"
+
+# ---------------- Phase 4b: per-package secondary modulefiles ---------
+# Mirror what the regular numeric pipeline emits via deploy_module_package.sh
+# (amdclang / hipfort / opencl modulefiles under the rocm-<v>/ MODULEPATH
+# prepended above) so `module load rocm/afar-${FLANG_RELEASE_NUMBER}-${ROCM_NUMERIC}`
+# is followed by a working `module avail amdclang|hipfort|opencl`. Each
+# emission is feature-gated on the actual presence of the component in
+# ${INSTALL_DIR}: AFAR drops typically ship llvm/bin/amdclang +
+# include/hipfort, but not opencl/bin -- the gating keeps us from writing
+# modulefiles that point at non-existent paths.
+echo "============================================================"
+echo "  Phase 4b: per-package modulefiles under ${TOP_MODULE_PATH}/rocm-afar-${FLANG_RELEASE_NUMBER}/"
+echo "============================================================"
+# shellcheck source=bare_system/leaf_modulefile_helpers.sh
+source "$(dirname "${LEAF_SCRIPT_PATH}")/leaf_modulefile_helpers.sh"
+emit_per_package_modulefiles \
+   "${TOP_MODULE_PATH}/rocm-afar-${FLANG_RELEASE_NUMBER}" \
+   "${ROCM_NUMERIC}" \
+   "rocm/afar-${FLANG_RELEASE_NUMBER}-${ROCM_NUMERIC}" \
+   "${INSTALL_DIR}" \
+   "${LEAF_SCRIPT_NAME}" \
+   "${LEAF_SCRIPT_COMMIT:0:12}" \
+   "${LEAF_SCRIPT_DIRTY}"
 
 echo ""
 echo "============================================================"

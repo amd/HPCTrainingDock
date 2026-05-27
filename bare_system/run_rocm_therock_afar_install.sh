@@ -301,15 +301,25 @@ fi
 # on the flang site without needing a separate token shape.
 _pattern_afar="therock-afar-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-[0-9]+\.[0-9]+(\.[0-9]+)?-[a-f0-9]{4,}\.tar\.bz2"
 _pattern_bare="therock-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-[0-9]+\.[0-9]+(\.[0-9]+)?-[a-f0-9]{4,}\.tar\.bz2"
-_matched=$(echo "${_listing}" | grep -oE "${_pattern_afar}" | sort -V -u | tail -n1)
+# `|| true` is REQUIRED on each discovery pipeline: this script runs under
+# `set -eo pipefail` (see top of file), so a grep that finds nothing returns
+# 1, pipefail propagates that to the command substitution, errexit kills the
+# script silently, and the operator never sees the "no tarball matching..."
+# diagnostic block below. The 23.1.x line on the flang/ listing publishes
+# ONLY the bare `therock-<REL>-...` shape (no afar infix), so the first
+# pipeline MUST be allowed to return empty so the second pipeline gets a
+# chance. Discovered 2026-05-26 via job 10698 (therock-afar-23.1.0 FAIL).
+_matched=$(echo "${_listing}" | grep -oE "${_pattern_afar}" | sort -V -u | tail -n1 || true)
 _matched_shape="therock-afar"
 if [[ -z "${_matched}" ]]; then
    # Bare `therock-<REL>-...` fallback. grep -v excludes anything matching
    # the afar-infix shape so we don't double-count (greedy regex protection).
-   _matched=$(echo "${_listing}" \
+   # Brace group + `|| true` on the whole pipeline (not just `tail`) so
+   # pipefail from the inner greps doesn't trip errexit on no-match.
+   _matched=$( { echo "${_listing}" \
       | grep -oE "${_pattern_bare}" \
       | grep -v -E "^therock-afar-" \
-      | sort -V -u | tail -n1)
+      | sort -V -u | tail -n1; } || true)
    [[ -n "${_matched}" ]] && _matched_shape="therock"
 fi
 if [[ -z "${_matched}" ]]; then
@@ -598,6 +608,27 @@ prepend_path("PATH", pathJoin(base, "share/rocprofiler-systems/bin"))
 EOF
 sudo chown root:root "${MODULE_FILE}"
 sudo chmod 644 "${MODULE_FILE}"
+
+# ---------------- Phase 5b: per-package secondary modulefiles ---------
+# Mirror what the regular numeric pipeline emits via deploy_module_package.sh
+# (amdclang / hipfort / opencl modulefiles under the rocm-afar-<REL>/
+# MODULEPATH prepended above). TheRock-AFAR drops typically ship
+# llvm/bin/amdclang but NOT include/hipfort and NOT opencl/bin -- the
+# helper feature-gates each emission on disk presence so absent
+# components don't produce broken modulefiles.
+echo "============================================================"
+echo "  Phase 5b: per-package modulefiles under ${TOP_MODULE_PATH}/rocm-afar-${THEROCK_AFAR_RELEASE}/"
+echo "============================================================"
+# shellcheck source=bare_system/leaf_modulefile_helpers.sh
+source "$(dirname "${LEAF_SCRIPT_PATH}")/leaf_modulefile_helpers.sh"
+emit_per_package_modulefiles \
+   "${TOP_MODULE_PATH}/rocm-afar-${THEROCK_AFAR_RELEASE}" \
+   "${ROCM_NUMERIC}" \
+   "rocm/afar-${THEROCK_AFAR_RELEASE}-${ROCM_NUMERIC}" \
+   "${INSTALL_DIR}" \
+   "${LEAF_SCRIPT_NAME}" \
+   "${LEAF_SCRIPT_COMMIT:0:12}" \
+   "${LEAF_SCRIPT_DIRTY}"
 
 echo ""
 echo "============================================================"

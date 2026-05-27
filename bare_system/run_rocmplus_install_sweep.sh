@@ -82,6 +82,16 @@ fi
 : ${QUICK_INSTALLS:="0"}
 : ${REPLACE_EXISTING:="0"}
 : ${KEEP_FAILED_INSTALLS:="0"}  # 1 = preserve partial install dirs / modulefiles for post-mortem
+# SKIP_PATCHES: operator opt-out for the rocm-patches step inside
+# main_setup.sh (the install-time patches call, lines ~1651 / ~1670
+# there). Default 0 runs the step; for most ROCm versions rocm_patches.sh
+# self-no-ops via NOOP_RC=43 and the cost is nil. Set to 1 to bypass
+# entirely -- useful when the patches overlay would mismatch the
+# runtime (e.g. 7.2.0 / 7.2.1 patches binaries compiled for a newer
+# GLIBC than the target nodes). Mirrors the same-named flag on
+# bare_system/run_rocm_build_sweep.sh which covers the build-time
+# (Phase 3.6) call; this flag covers the install-time call.
+: ${SKIP_PATCHES:="0"}
 : ${PACKAGES_LIST:=""}     # whitelist passed through to main_setup.sh --packages
 # PnetCDF version (2026-05-20). Empty -> netcdf_setup.sh's internal
 # default. Non-empty -> threaded to main_setup.sh --pnetcdf-version,
@@ -165,6 +175,17 @@ Usage: $0 [opts]
                                  (default ${QUICK_INSTALLS})
    --replace-existing 0|1        replace existing rocmplus-<v> packages per-pkg (default ${REPLACE_EXISTING})
    --keep-failed-installs 0|1    on per-package failure, keep partial install dirs / modulefiles for post-mortem (default ${KEEP_FAILED_INSTALLS}; default 0 wipes them so retries start clean)
+   --skip-patches 0|1            operator opt-out for the rocm-patches step inside main_setup.sh
+                                 (the install-time call -- skips rocm/scripts/rocm_patches.sh).
+                                 Default 0 runs the step; for most ROCm versions rocm_patches.sh
+                                 self-no-ops (NOOP_RC=43) so the cost is nil and the default is
+                                 fine. Set to 1 to bypass entirely when the patches overlay would
+                                 mismatch the runtime -- e.g. 7.2.0 / 7.2.1 patches binaries built
+                                 for a newer GLIBC than the target nodes. When skipped, the
+                                 per-package summary records 'rocm-patches(--skip-patches)' in the
+                                 DESELECTED bucket. Symmetric with --skip-patches on
+                                 bare_system/run_rocm_build_sweep.sh (which covers Phase 3.6 of the
+                                 SDK build). (default ${SKIP_PATCHES})
    --packages "name1 name2 ..."  whitelist (passed verbatim to main_setup.sh --packages); empty = all.
                                  Versioned form name=VERSION is supported for the subset of packages whose
                                  leaf script accepts a single --<name>-version flag (pytorch, jax, cupy,
@@ -232,6 +253,7 @@ while [[ $# -gt 0 ]]; do
       --quick-installs)    shift; QUICK_INSTALLS=${1} ;;
       --replace-existing)  shift; REPLACE_EXISTING=${1} ;;
       --keep-failed-installs) shift; KEEP_FAILED_INSTALLS=${1} ;;
+      --skip-patches)      shift; SKIP_PATCHES=${1} ;;
       --packages)          shift; PACKAGES_LIST=${1} ;;
       --pnetcdf-version)   shift; PNETCDF_VERSION=${1} ;;
       --max-parallel)      shift; MAX_PARALLEL=${1} ;;
@@ -345,6 +367,55 @@ if (( ${#MISSING[@]} > 0 )); then
    echo "       ${SITE_ROCM_MODDIR} (site tree)" >&2
    echo "       ${SYS_ROCM_MODDIR} (live system tree):" >&2
    for v in "${MISSING[@]}"; do echo "    rocm/${v}" >&2; done
+   # For afar / therock-afar SHORT-form tokens (e.g. afar-22.1.0,
+   # therock-afar-23.1.0) the unified-naming refactor on 2026-05-26
+   # renamed the modulefile to afar-<REL>-<ROCM>.lua (e.g.
+   # afar-22.1.0-7.1.0). This sweep deliberately requires the full
+   # modulefile name on input -- one canonical identifier from build
+   # through install through module load through inventory column.
+   # When the missing token looks like a short form, glob both module
+   # trees for candidates and offer them as a copy-pasteable "Did you
+   # mean:" suggestion so the operator can fix the command in place.
+   _gave_hint=0
+   for v in "${MISSING[@]}"; do
+      case "${v}" in
+         afar-*|therock-afar-*) _rel="afar-${v#*afar-}" ;;
+         *) continue ;;
+      esac
+      shopt -s nullglob
+      _cands=( "${SITE_ROCM_MODDIR}/${_rel}-"*.lua "${SYS_ROCM_MODDIR}/${_rel}-"*.lua )
+      shopt -u nullglob
+      # Dedup by basename: when SITE_ROCM_MODDIR == SYS_ROCM_MODDIR (e.g.
+      # --site shared-apps, where the operator's chosen tree IS the live
+      # system tree) the same file appears in both glob expansions.
+      _seen_bns=""
+      _unique_bns=()
+      for _c in "${_cands[@]}"; do
+         _bn="${_c##*/}"; _bn="${_bn%.lua}"
+         case " ${_seen_bns} " in
+            *" ${_bn} "*) continue ;;
+         esac
+         _seen_bns="${_seen_bns} ${_bn}"
+         _unique_bns+=( "${_bn}" )
+      done
+      if (( ${#_unique_bns[@]} > 0 )); then
+         if (( _gave_hint == 0 )); then
+            echo "" >&2
+            echo "Hint: afar / therock-afar modulefiles use the unified naming" >&2
+            echo "      afar-<REL>-<ROCM>.lua (since 2026-05-26). Pass the full" >&2
+            echo "      modulefile basename (no .lua, no 'therock-' prefix) on" >&2
+            echo "      --rocm-versions; this sweep does NOT auto-resolve short forms." >&2
+            _gave_hint=1
+         fi
+         echo "" >&2
+         echo "      For rocm/${v}, did you mean one of:" >&2
+         for _bn in "${_unique_bns[@]}"; do
+            echo "          rocm/${_bn}" >&2
+         done
+      fi
+   done
+   unset _gave_hint _rel _cands _c _bn _seen_bns _unique_bns
+   echo "" >&2
    echo "Install the rocm SDK + module on one of those trees (run_rocm_build_sweep.sh)" >&2
    echo "or update SYS_ROCM_MODDIR / pass --site / --top-module-path to point at the right tree." >&2
    exit 1
@@ -371,6 +442,7 @@ cat <<EOF
  QUICK_INSTALLS:    ${QUICK_INSTALLS}
  REPLACE_EXISTING:  ${REPLACE_EXISTING}
  KEEP_FAILED:       ${KEEP_FAILED_INSTALLS}
+ SKIP_PATCHES:      ${SKIP_PATCHES}
  PACKAGES:          ${PACKAGES_LIST:-<all>}
  PNETCDF_VERSION:   ${PNETCDF_VERSION:-<leaf default>}
  MAX_PARALLEL:      ${MAX_PARALLEL}   $( (( MAX_PARALLEL == 1 )) && echo "(strict serial chain)" || echo "(sliding window: up to ${MAX_PARALLEL} jobs RUNNING simultaneously)")
@@ -438,6 +510,7 @@ for v in "${VERSIONS_ARR[@]}"; do
    EXPORT_VARS+=",QUICK_INSTALLS=${QUICK_INSTALLS}"
    EXPORT_VARS+=",REPLACE_EXISTING=${REPLACE_EXISTING}"
    EXPORT_VARS+=",KEEP_FAILED_INSTALLS=${KEEP_FAILED_INSTALLS}"
+   EXPORT_VARS+=",SKIP_PATCHES=${SKIP_PATCHES}"
    # PACKAGES_LIST may contain spaces; sbatch --export uses commas as separators,
    # so leave the value un-comma'd. Spaces survive verbatim through to the sbatch.
    EXPORT_VARS+=",PACKAGES_LIST=${PACKAGES_LIST}"

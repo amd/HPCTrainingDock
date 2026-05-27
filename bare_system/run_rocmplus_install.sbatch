@@ -391,6 +391,7 @@ bare_system/main_setup.sh \
    --quick-installs       "${QUICK_INSTALLS}" \
    --replace-existing     "${REPLACE_EXISTING}" \
    --keep-failed-installs "${KEEP_FAILED_INSTALLS}" \
+   --skip-patches         "${SKIP_PATCHES:-0}" \
    "${PACKAGES_ARGS[@]}" \
    </dev/null
 rc=$?
