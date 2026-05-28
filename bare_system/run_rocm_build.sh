@@ -180,9 +180,14 @@ prune_cache() {
    echo "  Phase 4: prune CacheFiles/.../rocm-*.tgz (keep ${KEEP_TARBALLS} most recent)"
    echo "============================================================"
    df -h "$PWD/CacheFiles" 2>/dev/null || true
-   # Match rocm-X.Y.Z.tgz but exclude rocm-modules-*.tgz from the prune set.
+   # Match rocm-X.Y.Z.tgz but exclude rocm-modules-*.tgz and rocm-afar-*.tgz
+   # from the prune set. The afar tarballs are the AMD AFAR flang-new
+   # compiler payload (see Phase 3c); they are tied to a specific cache dir
+   # (and therefore a specific ROCm version) and do not consume the
+   # KEEP_TARBALLS budget the way the multi-GB rocm-X.Y.Z.tgz files do.
    mapfile -t TARBALLS < <(find CacheFiles -maxdepth 2 -type f -name 'rocm-*.tgz' \
                               ! -name 'rocm-modules-*.tgz' \
+                              ! -name 'rocm-afar-*.tgz' \
                               -printf '%T@ %p\n' 2>/dev/null \
                               | sort -n | awk '{print $2}')
    local N=${#TARBALLS[@]}
@@ -267,15 +272,31 @@ while [ "$(${BUILDER} ps | grep -w "${PORT_NUMBER}" | wc -l)" != "0" ]; do
 done
 
 # ---------------- Phase 2: container run ------------------------------
+# For ROCm 6.x.x, also build the AMD AFAR flang-new compiler (rocm/scripts/
+# flang-new_setup.sh). This is the in-tree replacement for the deprecated
+# ROCm 6 stock fortran toolchain; ROCm 7+ ships a working amdflang in the
+# SDK directly so this extra step is gated on the major version. The
+# Makefile target `flang-new` depends on `rocm.timestamp`; flang-new_package
+# (writes ${CACHE_DIR}/rocm-afar-<rel>.tgz) and flang-new_module_package
+# (writes ${CACHE_DIR}/amdflang-new-modules-${ROCM_VERSION}.tgz) are then
+# extracted on the host in Phase 3c and Phase 3b respectively.
+ROCM_MAJOR="${ROCM_VERSION%%.*}"
+MAKE_TARGETS="make rocm && make rocm_package && make rocm_module_package"
+if [[ "${ROCM_MAJOR}" == "6" ]]; then
+   MAKE_TARGETS="${MAKE_TARGETS} && make flang-new && make flang-new_package && make flang-new_module_package"
+   PHASE2_BANNER_TARGETS="rocm, rocm_package, rocm_module_package, flang-new, flang-new_package, flang-new_module_package"
+else
+   PHASE2_BANNER_TARGETS="rocm, rocm_package, rocm_module_package"
+fi
 echo "============================================================"
-echo "  Phase 2: container run -- make rocm, rocm_package, rocm_module_package"
+echo "  Phase 2: container run -- make ${PHASE2_BANNER_TARGETS}"
 echo "  NAME=${NAME}  PORT=${PORT_NUMBER}  (-> ${MAKE_LOG})"
 echo "============================================================"
 ${BUILDER} run --device=/dev/kfd --device=/dev/dri \
     --group-add video --group-add render ${ADD_OPTIONS_RUN} \
     -p ${PORT_NUMBER}:22 --name ${NAME}  --security-opt seccomp=unconfined \
     --rm -v $PWD/CacheFiles:/CacheFiles ${IMAGE_NAME} \
-    -c 'set -eo pipefail; cd /home/sysadmin && make rocm && make rocm_package && make rocm_module_package' \
+    -c "set -eo pipefail; cd /home/sysadmin && ${MAKE_TARGETS}" \
     2>&1 | tee "${MAKE_LOG}"
 
 # ---------------- Phase 3: extract tarballs ---------------------------
@@ -294,6 +315,23 @@ if [[ "${SKIP_EXTRACT}" != "1" ]]; then
    if [[ -d "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}" ]]; then
       echo "Removing existing ${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION} for re-extract (--replace-existing was set)"
       sudo rm -rf "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}"
+   fi
+   # Replacing the SDK invalidates any sibling rocm_patches.sh overlay
+   # built against the prior tree (the overlay's librocprof-sys.so /
+   # rocprof-compute.bin were linked to specific SDK headers/.so SONAMEs
+   # which the fresh extract may bump). When --skip-patches 1 is set the
+   # operator has explicitly opted out, so leaving the orphan tree on
+   # disk produces a confusing false-positive in inventory_packages.py
+   # (rocm_patches_presence() only checks file existence in the overlay
+   # tree, not whether the SDK modulefile actually loads it). When
+   # patches are enabled, Phase 3.6 rebuilds the overlay below, so the
+   # rm here is harmless either way. The check is unconditional within
+   # the REPLACE_EXISTING-gated block (the early-exit at the top of the
+   # script already guarantees we only reach here when --replace-existing
+   # 1 was supplied or the SDK dir was absent to begin with).
+   if [[ -d "${TOP_INSTALL_PATH}/rocm-patches-${ROCM_VERSION}" ]]; then
+      echo "Removing sibling overlay ${TOP_INSTALL_PATH}/rocm-patches-${ROCM_VERSION} (stale vs the fresh SDK extract)"
+      sudo rm -rf "${TOP_INSTALL_PATH}/rocm-patches-${ROCM_VERSION}"
    fi
    sudo tar -xzpf "${TARBALL}" -C "${TOP_INSTALL_PATH}/"
    sudo chown -R root:root "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}"
@@ -340,6 +378,41 @@ if [[ "${SKIP_EXTRACT}" != "1" ]]; then
    sudo chown root:root "${TOP_MODULE_PATH}"
    sudo chmod 755 "${TOP_MODULE_PATH}"
 
+   # ---------------- Phase 3c: extract rocm-afar-*.tgz (flang-new) ----
+   # ROCm 6.x.x adds the AMD AFAR flang-new compiler under /opt/rocmplus-<v>/
+   # rocm-afar-<release>/ inside the container; deploy_package.sh produces
+   # ${CACHE_DIR}/rocm-afar-<release>.tgz with `rocm-afar-<release>/...`
+   # as a top-level entry. Extract every such tarball under
+   # ${TOP_INSTALL_PATH}/rocmplus-${ROCM_VERSION}/ so the host modulefile's
+   # `local base = "/opt/rocmplus-${ROCM_VERSION}/rocm-afar-<release>"`
+   # (rewritten to ${TOP_INSTALL_PATH}/rocmplus-... in Phase 3.5) resolves.
+   # Skipped silently when no afar tarballs exist (i.e. ROCm 7.x sweeps).
+   shopt -s nullglob
+   AFAR_TARBALLS=( "${CACHE_DIR}"/rocm-afar-*.tgz )
+   shopt -u nullglob
+   if (( ${#AFAR_TARBALLS[@]} > 0 )); then
+      echo "============================================================"
+      echo "  Phase 3c: extract rocm-afar-*.tgz -> ${TOP_INSTALL_PATH}/rocmplus-${ROCM_VERSION}/"
+      echo "============================================================"
+      ROCMPLUS_DEST="${TOP_INSTALL_PATH}/rocmplus-${ROCM_VERSION}"
+      if [[ ! -d "${ROCMPLUS_DEST}" ]]; then
+         sudo install -d -o root -g root -m 0755 "${ROCMPLUS_DEST}"
+      fi
+      for ATGZ in "${AFAR_TARBALLS[@]}"; do
+         afar=$(basename "${ATGZ}")
+         afar=${afar%.tgz}
+         echo "Extracting ${afar}: ${ATGZ}"
+         if [[ "${REPLACE_EXISTING}" == "1" && -d "${ROCMPLUS_DEST}/${afar}" ]]; then
+            echo "  --replace-existing: removing existing ${ROCMPLUS_DEST}/${afar}"
+            sudo rm -rf "${ROCMPLUS_DEST}/${afar}"
+         fi
+         sudo tar -xzpf "${ATGZ}" -C "${ROCMPLUS_DEST}/"
+         sudo chown -R root:root "${ROCMPLUS_DEST}/${afar}"
+         sudo chmod 755 "${ROCMPLUS_DEST}/${afar}"
+      done
+      echo "Extracted: ${ROCMPLUS_DEST}/rocm-afar-*"
+   fi
+
    # ---------------- Phase 3.5: rewrite container-form paths ----------
    echo "============================================================"
    echo "  Phase 3.5: rewrite container-form paths in deployed .lua files"
@@ -360,6 +433,7 @@ if [[ "${SKIP_EXTRACT}" != "1" ]]; then
    done
    if (( ${#LUA_TARGETS[@]} > 0 )); then
       sudo find "${LUA_TARGETS[@]}" -name '*.lua' -print0 | sudo xargs -0 sed -i \
+         -e "s|/opt/rocmplus-${ROCM_VERSION}|${TOP_INSTALL_PATH}/rocmplus-${ROCM_VERSION}|g" \
          -e "s|/opt/rocm-${ROCM_VERSION}|${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}|g" \
          -e "s|local mbase = \" /etc/lmod/modules/ROCm/rocm\"|local mbase = \"${TOP_MODULE_PATH}\"|" \
          -e "s|local mbase = \"/etc/lmod/modules/ROCm/rocm\"|local mbase = \"${TOP_MODULE_PATH}\"|" \

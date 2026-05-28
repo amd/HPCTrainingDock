@@ -98,12 +98,17 @@ parsed out of the install dir basename (e.g. `magma-v2.10.0` ->
 `2.10.0`, `openmpi-5.0.10-ucc-...` -> `5.0.10`). The `N` / `B` / `-`
 glyphs and the `amdclang` / `count Y` rows are unaffected. A handful
 of packages that install to a versionless dir (hipifly, tau, pdt,
-hip-python, tensorflow) keep `Y` even under `--versions`. ftorch
-installs were versionless historically (single `${ROCMPLUS}/ftorch/`
-dir bound to the highest pytorch's libtorch ABI by chance) but are
-now versioned by the bound pytorch release: `ftorch-v<PYTORCH_VER>/`,
-mirroring `pytorch-v<PYTORCH_VER>/`. The ftorch cell shows the bound
-pytorch version under `--versions`.
+hip-python) keep `Y` even under `--versions`. ftorch installs were
+versionless historically (single `${ROCMPLUS}/ftorch/` dir bound to
+the highest pytorch's libtorch ABI by chance) but are now versioned
+by the bound pytorch release: `ftorch-v<PYTORCH_VER>/`, mirroring
+`pytorch-v<PYTORCH_VER>/`. The ftorch cell shows the bound pytorch
+version under `--versions`. tensorflow was likewise migrated from a
+versionless `${ROCMPLUS}/tensorflow/` dir to `tensorflow-v<TF_VER>/`,
+keyed on the TensorFlow release the leaf script just built (per the
+ROCm install-on-linux docs supported-versions table); legacy
+unversioned installs still render as `Y` so an in-flight migration
+shows up cleanly in the matrix.
 
 When two versions of the same package coexist in one rocmplus tree
 (e.g. `pytorch-v2.7.1/` next to `pytorch-v2.9.1/`), the rendering
@@ -199,7 +204,17 @@ PKG_LIST = [
     ("pytorch",    r"^pytorch-v.*$",                      r"^pytorch-v(.+)$"),
     ("jax",        r"^jax(-v.*)?$",                       r"^jax-v(.+)$"),
     ("jaxlib",     r"^jaxlib(-v.*)?$",                    r"^jaxlib-v(.+)$"),
-    ("tensorflow", r"^tensorflow$",                       None),
+    # tensorflow installs are now versioned by the built TF release
+    # (`tensorflow-v<VER>/`), mirroring pytorch's PKG_LIST entry. The
+    # alternation `(?:|-v.*)` keeps the brief presence check tolerant
+    # of the legacy unversioned `tensorflow/` install dir if a stale
+    # one is still on disk; the version_capture only matches the new
+    # versioned form, so a legacy dir renders as 'Y' (versionless)
+    # under --versions and the version cell switches to the parsed
+    # version string the moment a -v<VER> install lands. Multiple TF
+    # versions on one rocmplus tree slash-join in markdown / spill
+    # onto continuation rows in --text, the same as pytorch.
+    ("tensorflow", r"^tensorflow(?:|-v.*)$",               r"^tensorflow-v(.+)$"),
 ]
 
 
@@ -572,9 +587,11 @@ def presence_with_version(roots, version, pkg, presence_regex, version_regex):
                                      pytorch-v2.7.1 AND pytorch-v2.9.1 coexisting);
                                      semver-ascending order via _pkg_version_sort_key
       - ['Y']                     -- install present but version_regex is None
-                                     (versionless dirs: hipifly, tau, pdt, hip-python,
-                                     ftorch, tensorflow) OR version_regex didn't
-                                     capture against any matching basename
+                                     (versionless dirs: hipifly, tau, pdt, hip-python)
+                                     OR version_regex didn't capture against any
+                                     matching basename (e.g. a legacy unversioned
+                                     ftorch / tensorflow dir still on disk after the
+                                     versioning migration)
       - ['N'] / ['B'] / ['-']     -- same semantics as presence(): SKIPPED marker /
                                      BUNDLED marker / absent. Cells unaffected by
                                      --versions mode.
@@ -1311,10 +1328,13 @@ def main():
         help="replace 'Y' (or a multi-install count like '2') cells with "
              "the installed version string parsed out of the install dir "
              "basename (e.g. magma -> '2.10.0', openmpi -> '5.0.10'). "
-             "Versionless dirs (hipifly, tau, pdt, hip-python, "
-             "tensorflow) keep 'Y'. ftorch is versioned by the bound "
-             "pytorch release (ftorch-v<PYTV>) so its cell shows the "
-             "bound pytorch version too. When two or more versions of one "
+             "Versionless dirs (hipifly, tau, pdt, hip-python) keep 'Y'. "
+             "ftorch is versioned by the bound pytorch release "
+             "(ftorch-v<PYTV>) so its cell shows the bound pytorch "
+             "version too. tensorflow is versioned by the built TF "
+             "release (tensorflow-v<TF_VER>); legacy unversioned "
+             "tensorflow/ dirs still on disk render as 'Y'. When two "
+             "or more versions of one "
              "package coexist in the same rocmplus tree, --text spills "
              "the row onto continuation lines (label repeated, blanks "
              "in other columns), while markdown joins them with ' / ' "

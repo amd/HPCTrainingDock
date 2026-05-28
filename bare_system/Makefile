@@ -82,6 +82,7 @@ rocm_package: rocm_package.timestamp
 openmpi_package: openmpi_package.timestamp
 rocprof-sys_source_package: rocprof-sys_source_package.timestamp
 cupy_package: cupy_package.timestamp
+flang-new_package: flang-new_package.timestamp
 all_packages: all_packages.timestamp
 
 # From base rocm layer
@@ -499,6 +500,16 @@ cupy_package.timestamp: cupy.timestamp
 	bare_system/deploy_package.sh --selection-string cupy
 	touch cupy_package.timestamp
 
+# flang-new (AMD AFAR Fortran compiler) is installed at
+# /opt/rocmplus-${ROCM_VERSION}/rocm-afar-<release>; the deploy_package.sh
+# runs from that basedir and selects on "rocm-afar" so the produced
+# tarball is ${CACHE_DIR}/rocm-afar-<release>.tgz, ready to extract on
+# the host under ${TOP_INSTALL_PATH}/rocmplus-${ROCM_VERSION}/ via
+# run_rocm_build.sh Phase 3c.
+flang-new_package.timestamp: flang-new.timestamp
+	bare_system/deploy_package.sh --package-basedir /opt/rocmplus-${ROCM_VERSION} --selection-string rocm-afar
+	touch flang-new_package.timestamp
+
 kokkos_package.timestamp: kokkos.timestamp
 	bare_system/deploy_package.sh --selection-string kokkos
 	touch kokkos_package.timestamp
@@ -516,7 +527,7 @@ all_packages.timestamp: rocm_package.timestamp openmpi_package.timestamp rocprof
 # ----------------------------------------------------------------------------
 MODULE_PACKAGES := rocm openmpi rocprof-sys_source cupy kokkos
 
-.PHONY: $(addsuffix _module_package, $(MODULE_PACKAGES)) all_module_packages
+.PHONY: $(addsuffix _module_package, $(MODULE_PACKAGES)) flang-new_module_package all_module_packages
 
 $(foreach p,$(MODULE_PACKAGES),$(eval $(p)_module_package: $(p)_module_package.timestamp))
 
@@ -525,6 +536,22 @@ $(foreach p,$(MODULE_PACKAGES),$(eval $(p)_module_package: $(p)_module_package.t
 	  --package $(patsubst %_source,%,$*) \
 	  --rocm-version ${ROCM_VERSION}
 	touch $@
+
+# flang-new modulefiles live at /etc/lmod/modules/ROCm/amdflang-new (the
+# leaf script's MODULE_PATH default), not /etc/lmod/modules/ROCm/flang-new,
+# so the generic %_module_package pattern rule above (which would invoke
+# deploy_module_package.sh --package flang-new) does not match the on-disk
+# layout. This explicit rule overrides the pattern and passes the correct
+# --package amdflang-new. The produced tarball
+# ${CACHE_DIR}/amdflang-new-modules-${ROCM_VERSION}.tgz matches the
+# *-modules-${ROCM_VERSION}.tgz glob used by run_rocm_build.sh Phase 3b
+# so no host-side glue is needed for the modulefile extract.
+flang-new_module_package: flang-new_module_package.timestamp
+flang-new_module_package.timestamp: flang-new.timestamp
+	bare_system/deploy_module_package.sh \
+	  --package amdflang-new \
+	  --rocm-version ${ROCM_VERSION}
+	touch flang-new_module_package.timestamp
 
 all_module_packages: $(addsuffix _module_package.timestamp, $(MODULE_PACKAGES))
 	touch all_module_packages.timestamp

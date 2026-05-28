@@ -20,12 +20,63 @@ MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/tensorflow
 AMDGPU_GFXMODEL=""
 TF_PATH=/opt/rocmplus-${ROCM_VERSION}/tensorflow
 TF_PATH_INPUT=""
-TENSORFLOW_VERSION="r2.20-rocm-enhanced"
-GIT_BRANCH="${TENSORFLOW_VERSION}"
-# --replace 1: rm -rf prior install dir + ${GIT_BRANCH}.lua before build.
+# TENSORFLOW_VERSION default is the LAST-RESORT fallback for ROCm rows
+# not in TENSORFLOW_SUPPORTED_VERSIONS below. The runtime default is
+# auto-derived from the loaded/--rocm-version ROCm major.minor by
+# default_tensorflow_version_for_rocm() (defined further below). The
+# auto-derive runs when TENSORFLOW_VERSION_USER_SET=0; passing
+# --tensorflow-version flips the sentinel and bypasses the auto-derive.
+TENSORFLOW_VERSION="2.20.0"
+TENSORFLOW_VERSION_USER_SET=0
+# GIT_BRANCH default is empty: when empty, the resolver below derives it
+# from TENSORFLOW_VERSION's major.minor as `r${MAJ}.${MIN}-rocm-enhanced`,
+# which matches ROCm/tensorflow-upstream's branch-naming convention
+# (one branch per major.minor; the latest commit on that branch is the
+# highest patch release). Pass --git-branch to override (e.g. to pin to
+# a specific commit/tag like `v2.18.1-rocm-enhanced`).
+GIT_BRANCH=""
+# --replace 1: rm -rf prior install dir + ${TENSORFLOW_VERSION}.lua before build.
 # --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
 REPLACE=0
 KEEP_FAILED_INSTALLS=0
+
+# ── TensorFlow version table: ROCm major.minor → supported TF versions ──
+# Source: ROCm install-on-linux docs at
+#   https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/3rd-party/tensorflow-install.html
+# Each row lists the TensorFlow versions ROCm declares supported for
+# that ROCm major.minor, HIGHEST FIRST. The default for each ROCm
+# major.minor is therefore the first token (resolved by
+# default_tensorflow_version_for_rocm() below).
+#
+# Off-table ROCm (e.g. 5.x, 7.3+, RC trees like therock-/afar-): the
+# resolver returns empty so the file-default 2.20.0 above sticks. The
+# resolver also prints a clear "no auto-derive row" line in that case
+# so the operator notices.
+declare -A TENSORFLOW_SUPPORTED_VERSIONS=(
+   [6.3]="2.17.0 2.16.2 2.15.1"
+   [6.4]="2.18.1 2.17.1 2.16.2"
+   [7.0]="2.19.1 2.18.1 2.17.1"
+   [7.1]="2.20.0 2.19.1 2.18.1"
+   [7.2]="2.20.0 2.19.1 2.18.1"
+)
+
+default_tensorflow_version_for_rocm() {
+   local rocm_mm="$1"
+   local row="${TENSORFLOW_SUPPORTED_VERSIONS[${rocm_mm}]:-}"
+   [ -z "${row}" ] && return 0
+   # First token = highest supported version per the ROCm docs row.
+   awk '{print $1}' <<< "${row}"
+}
+
+is_tensorflow_supported_for_rocm() {
+   local rocm_mm="$1" tf_ver="$2" row tok
+   row="${TENSORFLOW_SUPPORTED_VERSIONS[${rocm_mm}]:-}"
+   [ -z "${row}" ] && return 1
+   for tok in ${row}; do
+      [ "${tok}" = "${tf_ver}" ] && return 0
+   done
+   return 1
+}
 
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
@@ -46,8 +97,15 @@ usage()
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
    echo "  --install-path [ TF_PATH ] default $TF_PATH "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION "
-   echo "  --tensorflow-version [ TENSORFLOW_VERSION ] git branch/tag of the upstream TensorFlow tree to build (synonym for --git-branch), default $TENSORFLOW_VERSION"
-   echo "  --git-branch [ GIT_BRANCH ] specify what commit git branch you want to build, default is $GIT_BRANCH"
+   echo "  --tensorflow-version [ TENSORFLOW_VERSION ] TensorFlow release (e.g. 2.20.0). Default is auto-derived"
+   echo "    from the loaded ROCm major.minor via default_tensorflow_version_for_rocm() (highest"
+   echo "    supported version per the ROCm install-on-linux docs). Mapping (ROCm -> highest TF):"
+   echo "      6.3 -> 2.17.0    6.4 -> 2.18.1    7.0 -> 2.19.1    7.1 -> 2.20.0    7.2 -> 2.20.0"
+   echo "    Pass --tensorflow-version VER to override the auto-derive. The leaf clones the"
+   echo "    matching r\${MAJOR}.\${MINOR}-rocm-enhanced upstream branch unless --git-branch is given."
+   echo "    File-default fallback (when no auto-derive row matches): $TENSORFLOW_VERSION"
+   echo "  --git-branch [ GIT_BRANCH ] override the upstream git branch/tag to clone. Default is empty,"
+   echo "    which makes the leaf script derive r\${MAJOR}.\${MINOR}-rocm-enhanced from TENSORFLOW_VERSION."
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --replace [ 0|1 ] remove prior install + modulefile before building, default $REPLACE"
    echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
@@ -89,7 +147,7 @@ do
       "--tensorflow-version")
           shift
           TENSORFLOW_VERSION=${1}
-          GIT_BRANCH=${1}
+          TENSORFLOW_VERSION_USER_SET=1
           reset-last
           ;;
       "--help")
@@ -138,6 +196,57 @@ else
    TF_PATH=/opt/rocmplus-${ROCM_VERSION}/tensorflow
 fi
 
+# ── Resolve TENSORFLOW_VERSION + GIT_BRANCH + versioned install path ──
+# Auto-derive TENSORFLOW_VERSION from the loaded ROCm if the user did
+# NOT pass --tensorflow-version. Mapping in
+# default_tensorflow_version_for_rocm() near the top of this script.
+# User flag wins (TENSORFLOW_VERSION_USER_SET=1 short-circuits this
+# branch); off-table ROCm leaves the file default untouched and prints
+# a clear "no auto-derive row" line.
+ROCM_MAJOR_MINOR=$(echo "${ROCM_VERSION}" | cut -f1-2 -d'.')
+if [ "${TENSORFLOW_VERSION_USER_SET}" -eq 1 ]; then
+   echo "tensorflow: TENSORFLOW_VERSION=${TENSORFLOW_VERSION} (user --tensorflow-version)"
+   if ! is_tensorflow_supported_for_rocm "${ROCM_MAJOR_MINOR}" "${TENSORFLOW_VERSION}"; then
+      _supp_row="${TENSORFLOW_SUPPORTED_VERSIONS[${ROCM_MAJOR_MINOR}]:-<no row>}"
+      echo "WARNING: TensorFlow ${TENSORFLOW_VERSION} is NOT in the ROCm-docs supported list" >&2
+      echo "         for ROCm ${ROCM_MAJOR_MINOR}. Supported: ${_supp_row}" >&2
+      echo "         Build will proceed (off-list versions are not blocked) but no compatibility" >&2
+      echo "         is promised by the ROCm install-on-linux docs." >&2
+      unset _supp_row
+   fi
+else
+   _tf_default=$(default_tensorflow_version_for_rocm "${ROCM_MAJOR_MINOR}")
+   if [ -n "${_tf_default}" ]; then
+      TENSORFLOW_VERSION="${_tf_default}"
+      echo "tensorflow: TENSORFLOW_VERSION auto-derived from ROCm ${ROCM_MAJOR_MINOR} -> ${TENSORFLOW_VERSION}"
+   else
+      echo "tensorflow: no auto-derive row for ROCm ${ROCM_MAJOR_MINOR}; using file default ${TENSORFLOW_VERSION}"
+   fi
+   unset _tf_default
+fi
+
+# Derive GIT_BRANCH from TENSORFLOW_VERSION if the user did not pin one
+# explicitly via --git-branch. ROCm/tensorflow-upstream uses one branch
+# per major.minor (`r2.18-rocm-enhanced`, `r2.19-rocm-enhanced`, ...);
+# the latest commit on that branch corresponds to the highest patch
+# release, which is what the ROCm docs publish.
+if [ -z "${GIT_BRANCH}" ]; then
+   _tf_mm=$(echo "${TENSORFLOW_VERSION}" | cut -f1-2 -d'.')
+   GIT_BRANCH="r${_tf_mm}-rocm-enhanced"
+   echo "tensorflow: GIT_BRANCH auto-derived from TENSORFLOW_VERSION ${TENSORFLOW_VERSION} -> ${GIT_BRANCH}"
+   unset _tf_mm
+else
+   echo "tensorflow: GIT_BRANCH=${GIT_BRANCH} (user --git-branch)"
+fi
+
+# Version-suffix the install dir: TF_PATH was either provided by the
+# parent (--install-path) as a version-agnostic parent dir (e.g.
+# ${ROCMPLUS}/tensorflow) or defaulted above. Append `-v${VER}` so
+# multiple versions can coexist on the same rocmplus tree, mirroring
+# the pytorch-v${VER} / ftorch-v${VER} layout. inventory_packages.py's
+# tensorflow row reads the version straight out of this dir basename.
+TF_PATH="${TF_PATH}-v${TENSORFLOW_VERSION}"
+
 # Fallback gfx autodetect: only fire if --amdgpu-gfxmodel was not supplied.
 # Stderr-silenced + `|| true` so a broken rocminfo (SDK/host glibc skew)
 # can't kill the script. AMDGPU_GFXMODEL stays empty if both autodetect
@@ -163,9 +272,9 @@ fi
 if [ "${REPLACE}" = "1" ]; then
    echo "[tensorflow --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${TF_PATH}"
-   echo "  modulefile:  ${MODULE_PATH}/${GIT_BRANCH}.lua"
+   echo "  modulefile:  ${MODULE_PATH}/${TENSORFLOW_VERSION}.lua"
    ${SUDO} rm -rf "${TF_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/${GIT_BRANCH}.lua"
+   ${SUDO} rm -f  "${MODULE_PATH}/${TENSORFLOW_VERSION}.lua"
 fi
 
 # ── Existence guard: skip if already installed (see hypre_setup.sh) ──
@@ -187,7 +296,7 @@ _tensorflow_on_exit() {
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[tensorflow fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO:-sudo} rm -rf "${TF_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${GIT_BRANCH}.lua"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${TENSORFLOW_VERSION}.lua"
    elif [ ${rc} -ne 0 ]; then
       echo "[tensorflow fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -241,6 +350,7 @@ echo "Starting TensorFlow Install with"
 echo "ROCM_VERSION: $ROCM_VERSION"
 echo "AMDGPU_GFXMODEL: $AMDGPU_GFXMODEL"
 echo "BUILD_TF: $BUILD_TF"
+echo "TENSORFLOW_VERSION: $TENSORFLOW_VERSION"
 echo "TF_PATH: $TF_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
 echo "Building from source off of git branch: $GIT_BRANCH"
@@ -266,22 +376,29 @@ else
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   if [ -f ${CACHE_FILES}/tensorflow.tgz ]; then
+   # Cache tarball is keyed on TENSORFLOW_VERSION so that multiple
+   # versions can coexist on the same rocmplus tree (mirrors the
+   # versioned install dir tensorflow-v<VER>/). Legacy unversioned
+   # `tensorflow.tgz` caches are no longer consumed here -- a newly
+   # versioned build replaces them on the next cache refresh.
+   TF_CACHE_BASENAME="$(basename "${TF_PATH}")"   # tensorflow-v${VER}
+   TF_CACHE_TGZ="${CACHE_FILES}/${TF_CACHE_BASENAME}.tgz"
+   TF_CACHE_PARENT="$(dirname "${TF_PATH}")"
+   if [ -f "${TF_CACHE_TGZ}" ]; then
       echo ""
       echo "============================"
       echo " Installing Cached TensorFlow"
+      echo " cache file: ${TF_CACHE_TGZ}"
+      echo " unpack dir: ${TF_CACHE_PARENT}"
       echo "============================"
       echo ""
 
       #install the cached version
-      ${SUDO} mkdir -p /opt/rocmplus-${ROCM_VERSION}/tensorflow
-      cd /opt/rocmplus-${ROCM_VERSION}
-      #${SUDO} chmod a+w /opt/rocmplus-${ROCM_VERSION}
-      ${SUDO} tar -xzpf ${CACHE_FILES}/tensorflow.tgz
-      #chown -R root:root /opt/rocmplus-${ROCM_VERSION}/tensorflow
-      #${SUDO} chmod og-w /opt/rocmplus-${ROCM_VERSION}
+      ${SUDO} mkdir -p "${TF_CACHE_PARENT}"
+      cd "${TF_CACHE_PARENT}"
+      ${SUDO} tar -xzpf "${TF_CACHE_TGZ}"
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm ${CACHE_FILES}/tensorflow.tgz
+         ${SUDO} rm "${TF_CACHE_TGZ}"
       fi
    else
       echo ""
@@ -558,9 +675,10 @@ else
    unset _leaf_dir
 
    # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${GIT_BRANCH}.lua
-	whatis("Tensorflow with ROCm support")
+   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${TENSORFLOW_VERSION}.lua
+	whatis("TensorFlow version ${TENSORFLOW_VERSION} with ROCm support")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
+	whatis("Upstream branch: ${GIT_BRANCH}")
 
 	prereq("${ROCM_MODULE_NAME}")
 	prepend_path("PYTHONPATH","$TF_PATH")

@@ -142,7 +142,7 @@ usage()
     print_default_option build-julia "[BUILD_JULIA: 0 or 1]" "include this flag to build version 1.12" "${BUILD_JULIA} (don't build)"
     print_default_option build-cupy "[BUILD_CUPY: 0 or 1]" "include this flag to build version 13.6.0" "${BUILD_CUPY} (don't build)"
     print_default_option build-hip-python "[BUILD_HIP_PYTHON: 0 or 1]" "include this flag to build version 13.6.0" "${BUILD_HIP_PYTHON} (don't build)"
-    print_default_option build-tensorflow "[BUILD_TENSORFLOW: 0 or 1]" "include this flag to build branch r2.20-rocm-enhanced" "${BUILD_TENSORFLOW} (don't build)"
+    print_default_option build-tensorflow "[BUILD_TENSORFLOW: 0 or 1]" "include this flag to build the highest TensorFlow version supported for the loaded ROCm SDK (per the ROCm install-on-linux docs; e.g. ROCm 7.2 -> tensorflow 2.20.0). Override with --packages tensorflow=<VER> from main_setup.sh." "${BUILD_TENSORFLOW} (don't build)"
     print_default_option build-jax "[BUILD_JAX: 0 or 1]" "include this flag to build version 0.8.0" "${BUILD_JAX} (don't build)"
     print_default_option build-kokkos "[BUILD_KOKKOS: 0 or 1]"  "include this flag to build version 4.7.02" "${BUILD_KOKKOS} (don't build)"
     print_default_option build-hpctoolkit "[BUILD_HPCTOOLKIT: 0 or 1]"  "include this flag to build version 2025.1.2" "${BUILD_HPCTOOLKIT} (don't build)"

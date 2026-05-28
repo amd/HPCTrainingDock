@@ -586,7 +586,7 @@ The training environment comes with a variety of modules installed, with their n
    hypre/3.0.0            pytorch/2.9.1                                 (D)
    jax/0.6.0              scorep/9.4
    kokkos/4.7.01          tau/dev
-   libxc/7.0.0            tensorflow/r2.20-rocm-enhanced
+   libxc/7.0.0            tensorflow/2.20.0
    likwid/5.5.1           umpire/2025.09.0
 
 --------------- /etc/lmod/modules/rocm-7.2.0 ---------------
