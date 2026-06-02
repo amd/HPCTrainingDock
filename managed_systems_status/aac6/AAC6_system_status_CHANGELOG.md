@@ -2,6 +2,14 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-06-02
+
+- ROCm versions:
+    - 7.13.0.lua.bak-pre-hipblaslt-autoload
+    - therock-23.1.0
+    - therock-23.2.1
+
+[Full snapshot](archive/AAC6_system_status_2026-06-02.md)
 ## 2026-05-27
 
 - ROCm default: 7.2.0 → 7.2.3
