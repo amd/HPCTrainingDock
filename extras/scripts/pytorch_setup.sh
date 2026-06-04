@@ -1555,19 +1555,66 @@ else
          ROCM_VERSION_WHEEL=`echo ${ROCM_VERSION} | cut -f1-2 -d'.'`
       fi
       echo "ROCM_VERSION_WHEEL is ${ROCM_VERSION_WHEEL}"
-      pip3 install torch==${PYTORCH_VERSION} --no-index -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${PYTORCH_PATH}
+
+      # ── --use-wheel index selection (legacy manylinux vs TheRock) ──
+      # The legacy https://repo.radeon.com/rocm/manylinux/rocm-rel-<ver>/
+      # index stops publishing wheels at ROCm 7.2.x. ROCm 7.11+ ("TheRock"
+      # builds) publish to https://repo.amd.com/rocm/whl/<gfx>/ instead,
+      # with version pins of the form "<pkg>==<X>+rocm<rocm-version>".
+      # See https://rocm.docs.amd.com/en/7.13.0-preview/frameworks/pytorch/install.html
+      # As of 2026-06 only the 7.13 install page is published; 7.11/7.12/7.14
+      # have no documented wheel layout yet, so refuse those up-front rather
+      # than 404 from the legacy index.
+      WHEEL_PIP_INDEX_OPT="--no-index -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/"
+      WHEEL_TORCH_LOCAL_VER=""
+      ROCM_MAJOR_MINOR_WHEEL=`echo ${ROCM_VERSION} | cut -f1-2 -d'.'`
+      case "${ROCM_MAJOR_MINOR_WHEEL}" in
+         7.11|7.12|7.14)
+            echo "ERROR: --use-wheel is not yet supported for ROCm ${ROCM_VERSION}."                                     >&2
+            echo "       The legacy https://repo.radeon.com/rocm/manylinux index does not publish wheels for ROCm 7.11+," >&2
+            echo "       and AMD has not yet published TheRock install instructions for ROCm ${ROCM_MAJOR_MINOR_WHEEL}.x" >&2
+            echo "       at https://rocm.docs.amd.com/.../frameworks/pytorch/install.html ."                              >&2
+            echo "       Re-run without --use-wheel (source build) or pick ROCm 7.13.0 or <= 7.2.x."                      >&2
+            exit 1
+            ;;
+         7.13)
+            case "${AMDGPU_GFXMODEL}" in
+               gfx950)                  THEROCK_GFX_SEGMENT="gfx950-dcgpu" ;;
+               gfx942|gfx941|gfx940)    THEROCK_GFX_SEGMENT="gfx94X-dcgpu" ;;
+               gfx90a)                  THEROCK_GFX_SEGMENT="gfx90a" ;;
+               gfx908)                  THEROCK_GFX_SEGMENT="gfx908" ;;
+               gfx1200|gfx1201)         THEROCK_GFX_SEGMENT="gfx120X-all" ;;
+               gfx1100|gfx1101|gfx1102) THEROCK_GFX_SEGMENT="gfx110X-all" ;;
+               gfx1030)                 THEROCK_GFX_SEGMENT="gfx103X-all" ;;
+               gfx1150|gfx1151|gfx1152) THEROCK_GFX_SEGMENT="${AMDGPU_GFXMODEL}" ;;
+               *)
+                  echo "ERROR: --use-wheel for ROCm 7.13 has no TheRock wheel index for AMDGPU_GFXMODEL='${AMDGPU_GFXMODEL}'." >&2
+                  echo "       Supported targets are listed at"                                                                >&2
+                  echo "       https://rocm.docs.amd.com/en/7.13.0-preview/frameworks/pytorch/install.html ."                  >&2
+                  echo "       Multi-arch values (e.g. 'gfx942;gfx90a') are not supported by TheRock per-arch indices --"      >&2
+                  echo "       pick a single gfx target."                                                                      >&2
+                  exit 1
+                  ;;
+            esac
+            WHEEL_PIP_INDEX_OPT="--index-url https://repo.amd.com/rocm/whl/${THEROCK_GFX_SEGMENT}/"
+            WHEEL_TORCH_LOCAL_VER="+rocm${ROCM_VERSION}"
+            echo "ROCm ${ROCM_VERSION} detected: using TheRock wheel index ${WHEEL_PIP_INDEX_OPT} with local version ${WHEEL_TORCH_LOCAL_VER}"
+            ;;
+      esac
+
+      pip3 install torch==${PYTORCH_VERSION}${WHEEL_TORCH_LOCAL_VER} ${WHEEL_PIP_INDEX_OPT} --no-cache-dir --target=${PYTORCH_PATH}
 
       export PYTHONPATH=$PYTORCH_PATH:$PYTHONPATH
 
       # Installing Torchaudio
 
-      pip3 install torchaudio==${TORCHAUDIO_VERSION} --no-index -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHAUDIO_PATH} --no-build-isolation
+      pip3 install torchaudio==${TORCHAUDIO_VERSION}${WHEEL_TORCH_LOCAL_VER} ${WHEEL_PIP_INDEX_OPT} --no-cache-dir --target=${TORCHAUDIO_PATH} --no-build-isolation
 
       export PYTHONPATH=$PYTORCH_PATH:$PYTHONPATH
 
       # Installing Torchvision
 
-      pip3 install torchvision==${TORCHVISION_VERSION} --no-index -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TORCHVISION_PATH} --no-build-isolation
+      pip3 install torchvision==${TORCHVISION_VERSION}${WHEEL_TORCH_LOCAL_VER} ${WHEEL_PIP_INDEX_OPT} --no-cache-dir --target=${TORCHVISION_PATH} --no-build-isolation
 
       export PYTHONPATH=$PYTORCH_PATH:$PYTHONPATH
 
@@ -1657,8 +1704,13 @@ else
         TRITON_WHEEL_NAME="pytorch_triton_rocm"
       fi
 
-      echo "pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation"
-      pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} -f https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VERSION_WHEEL}/ --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
+      # Reuse the index option resolved at the top of the wheel branch
+      # (legacy manylinux for ROCm <= 7.2.x, TheRock per-gfx index for 7.13).
+      # Strip the leading "--no-index " for the legacy form since this call
+      # historically only passed -f (not --no-index) for triton.
+      WHEEL_PIP_INDEX_OPT_TRITON="${WHEEL_PIP_INDEX_OPT#--no-index }"
+      echo "pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} ${WHEEL_PIP_INDEX_OPT_TRITON} --no-cache-dir --target=${TRITON_PATH} --no-build-isolation"
+      pip3 install ${TRITON_WHEEL_NAME}==${TRITON_VERSION} ${WHEEL_PIP_INDEX_OPT_TRITON} --no-cache-dir --target=${TRITON_PATH} --no-build-isolation
 
       export PYTHONPATH=$PYTORCH_PATH:$PYTHONPATH
 
