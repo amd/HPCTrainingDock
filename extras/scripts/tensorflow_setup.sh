@@ -476,6 +476,247 @@ else
          sed -i '$a build:rocm --copt=-Wno-error=c23-extensions' .bazelrc
       fi
 
+      # ── HIP kernel-arg API guard for ROCm 7.13+ ──────────────────────
+      # ROCm 7.13.0 introduced a breaking change in the kernel-arg packing
+      # API exposed by <rocm>/include/hip/amd_detail/amd_hip_runtime.h:
+      #
+      #   pArgs                <= 7.2.x: template <size_t n, typename... Ts>
+      #                                  void pArgs(const std::tuple<Ts...>&, void**)
+      #                                  (recursive, explicit <n>, returns void)
+      #                        >= 7.13:  template <typename... Ts>
+      #                                  std::array<void*, sizeof...(Ts)>
+      #                                      pArgs(std::tuple<Ts...>& formals)
+      #                                  (returns the array, no explicit <n>)
+      #
+      #   validateArgsCountType <= 7.2.x: (kernel, std::tuple<Actuals...>)
+      #                         >= 7.13:  (kernel, Actuals... actuals)   (variadic)
+      #
+      # The TF r2.20-rocm-enhanced (and earlier) callsites in
+      # tensorflow/core/util/gpu_kernel_helper.h (lines ~137-141) only
+      # compile against the old API. Without this patch, a ROCm 7.13+
+      # build dies at fill_empty_rows_functor_gpu.cu.cc with:
+      #   amd_hip_runtime.h:174: static_assert(sizeof...(Formals) ==
+      #                                        sizeof...(Actuals))
+      #                                        fails ('7 == 1', etc.)
+      #   gpu_kernel_helper.h:141: no matching function for call to 'pArgs'
+      # First diagnosed in slurm job 11561 (rocm-7.13.0, 2026-06-05).
+      #
+      # The patch wraps the existing call sites in
+      #   #if HIP_VERSION >= 71300000   // ROCm 7.13.0+ new API
+      #     ... new-API call ...
+      #   #else                          // ROCm <= 7.2.x legacy API
+      #     ... existing code ...
+      #   #endif
+      # so the SAME patched header compiles against BOTH API generations.
+      # HIP_VERSION is MAJOR*10_000_000 + MINOR*100_000 + PATCH (defined in
+      # <rocm>/include/hip/hip_version.h). 71300000 = 7.13.0.
+      #
+      # Branch gate: apply only on known pre-fix TF branches. When ROCm/
+      # tensorflow-upstream ships a branch with the fix, that branch will
+      # NOT match the case below and we leave its source untouched.
+      # If/when a new pre-fix branch shows up, extend the case.
+      #
+      # Verified syntax-only against both rocm-7.13.0 and rocm-7.2.3
+      # headers; preprocessor selects the right branch in each.
+      case "${GIT_BRANCH}" in
+         r2.20-rocm-enhanced|r2.19-rocm-enhanced|r2.18-rocm-enhanced|r2.17-rocm-enhanced|r2.16-rocm-enhanced|r2.15-rocm-enhanced)
+            _GKH_NEEDS_HIP713_PATCH=1
+            ;;
+         *)
+            _GKH_NEEDS_HIP713_PATCH=0
+            ;;
+      esac
+      if [[ "${_GKH_NEEDS_HIP713_PATCH}" == "1" ]]; then
+         _GKH_PATCH_FILE=tensorflow/core/util/gpu_kernel_helper.h
+         echo ""
+         echo "tensorflow: applying HIP 7.13+ kernel-arg API guard to ${_GKH_PATCH_FILE}"
+         echo "            (branch=${GIT_BRANCH}; see comment block in tensorflow_setup.sh)"
+         # Dry-run first so we fail loudly with a clear diagnostic if
+         # upstream has moved the call sites under us.
+         if ! patch --dry-run -p1 >/dev/null 2>&1 <<'GKH_PATCH_EOF'
+--- a/tensorflow/core/util/gpu_kernel_helper.h
++++ b/tensorflow/core/util/gpu_kernel_helper.h
+@@ -134,11 +134,21 @@
+       return errors::Internal(cudaGetErrorString(result));
+     }
+ #elif TENSORFLOW_USE_ROCM
++#if HIP_VERSION >= 71300000
++    // ROCm 7.13+: new HIP kernel-arg API. validateArgsCountType is variadic;
++    // pArgs takes a single std::tuple<> reference and returns
++    // std::array<void*, N>. See <rocm>/include/hip/amd_detail/amd_hip_runtime.h.
++    auto tup = validateArgsCountType(function, arguments...);
++    auto _ArgsArr = pArgs(tup);
++    void** _Args = _ArgsArr.data();
++#else
++    // ROCm <= 7.2.x: legacy HIP kernel-arg API (tuple form + explicit <0> index).
+     constexpr size_t count = sizeof...(Args);
+     auto tup_ = std::tuple<Args...>{arguments...};
+     auto tup = validateArgsCountType(function, tup_);
+     void* _Args[count];
+     pArgs<0>(tup, _Args);
++#endif
+     auto k = reinterpret_cast<void*>(function);
+     auto result =
+         hipLaunchKernel(k, grid_dim, block_dim, _Args, shared_memory_size_bytes, stream);
+GKH_PATCH_EOF
+         then
+            echo "ERROR: gpu_kernel_helper.h HIP 7.13+ patch dry-run failed."
+            echo "       Upstream may have moved the call sites; inspect ${_GKH_PATCH_FILE}"
+            echo "       around the 'pArgs<0>(tup, _Args)' / 'validateArgsCountType(function, tup_)'"
+            echo "       call sites and refresh the patch hunk. (branch=${GIT_BRANCH})"
+            exit 1
+         fi
+         patch -p1 <<'GKH_PATCH_EOF'
+--- a/tensorflow/core/util/gpu_kernel_helper.h
++++ b/tensorflow/core/util/gpu_kernel_helper.h
+@@ -134,11 +134,21 @@
+       return errors::Internal(cudaGetErrorString(result));
+     }
+ #elif TENSORFLOW_USE_ROCM
++#if HIP_VERSION >= 71300000
++    // ROCm 7.13+: new HIP kernel-arg API. validateArgsCountType is variadic;
++    // pArgs takes a single std::tuple<> reference and returns
++    // std::array<void*, N>. See <rocm>/include/hip/amd_detail/amd_hip_runtime.h.
++    auto tup = validateArgsCountType(function, arguments...);
++    auto _ArgsArr = pArgs(tup);
++    void** _Args = _ArgsArr.data();
++#else
++    // ROCm <= 7.2.x: legacy HIP kernel-arg API (tuple form + explicit <0> index).
+     constexpr size_t count = sizeof...(Args);
+     auto tup_ = std::tuple<Args...>{arguments...};
+     auto tup = validateArgsCountType(function, tup_);
+     void* _Args[count];
+     pArgs<0>(tup, _Args);
++#endif
+     auto k = reinterpret_cast<void*>(function);
+     auto result =
+         hipLaunchKernel(k, grid_dim, block_dim, _Args, shared_memory_size_bytes, stream);
+GKH_PATCH_EOF
+         echo "tensorflow: HIP 7.13+ kernel-arg API guard applied."
+         echo ""
+         unset _GKH_PATCH_FILE
+      fi
+      unset _GKH_NEEDS_HIP713_PATCH
+
+      # ── ROCm 7.13+ flatbuffers shadowing fix ─────────────────────────
+      # ROCm 7.13.0 is the FIRST ROCm release that ships a flatbuffers
+      # header tree at <rocm>/include/flatbuffers/ (v25.9.23, consumed
+      # internally by hipdnn/flatbuffers_sdk). Older ROCm (6.x .. 7.2.x)
+      # ships no such directory (verified by direct file listing on
+      # /shared/apps/ubuntu/opt/rocm-*.*.x/include).
+      #
+      # TF's XLA `rocm_headers_includes` cc_library glob in
+      # third_party/xla/third_party/gpus/rocm/BUILD.tpl:
+      #
+      #   cc_library(
+      #     name = "rocm_headers_includes",
+      #     hdrs = glob(["%{rocm_root}/include/**"]),
+      #     strip_include_prefix = "%{rocm_root}/include",
+      #   )
+      #
+      # picks up <rocm>/include/flatbuffers/base.h on 7.13.0 and, because
+      # of `strip_include_prefix`, exposes it as a bare
+      # `flatbuffers/base.h` on the -isystem path. That SHADOWS TF's
+      # bundled flatbuffers v24 (vendored under the @flatbuffers external
+      # repo at v24) and trips the static_assert in
+      # tensorflow/compiler/mlir/lite/schema/schema_generated.h:25
+      #
+      #   static_assert(FLATBUFFERS_VERSION_MAJOR == 24 && ...);
+      #
+      # which fires `25 == 24` and kills the
+      # //tensorflow/compiler/mlir/lite:tensorflow_lite_optimize compile
+      # (first diagnosed in slurm job 11562, rocm-7.13.0, 2026-06-05).
+      #
+      # The patch adds an `exclude = ["%{rocm_root}/include/flatbuffers/**"]`
+      # arg to the same glob. On older ROCm this is a no-op (nothing to
+      # exclude). TF code that needs flatbuffers continues to resolve it
+      # through @flatbuffers (the bundled v24). TF code never wants
+      # ROCm's flatbuffers tree -- only hipdnn does, and TF does not
+      # consume hipdnn.
+      #
+      # Branch gate: same set as the HIP API patch above. Future ROCm/
+      # tensorflow-upstream branches that change the BUILD.tpl shape
+      # will fail the dry-run; abort with a loud diagnostic.
+      if [[ "${_GKH_NEEDS_HIP713_PATCH:-}" == "1" || \
+            "${GIT_BRANCH}" == "r2.20-rocm-enhanced" || \
+            "${GIT_BRANCH}" == "r2.19-rocm-enhanced" || \
+            "${GIT_BRANCH}" == "r2.18-rocm-enhanced" || \
+            "${GIT_BRANCH}" == "r2.17-rocm-enhanced" || \
+            "${GIT_BRANCH}" == "r2.16-rocm-enhanced" || \
+            "${GIT_BRANCH}" == "r2.15-rocm-enhanced" ]]; then
+         _ROCM_FB_PATCH_FILE=third_party/xla/third_party/gpus/rocm/BUILD.tpl
+         echo ""
+         echo "tensorflow: applying ROCm-flatbuffers shadowing fix to ${_ROCM_FB_PATCH_FILE}"
+         echo "            (branch=${GIT_BRANCH}; see comment block in tensorflow_setup.sh)"
+         if ! patch --dry-run -p1 >/dev/null 2>&1 <<'ROCM_FB_PATCH_EOF'
+--- a/third_party/xla/third_party/gpus/rocm/BUILD.tpl
++++ b/third_party/xla/third_party/gpus/rocm/BUILD.tpl
+@@ -75,9 +75,20 @@
+ # and remove include prefix that is used to include rocm headers.
+ cc_library(
+     name = "rocm_headers_includes",
+-    hdrs = glob([
+-        "%{rocm_root}/include/**",
+-    ]),
++    hdrs = glob(
++        include = ["%{rocm_root}/include/**"],
++        # ROCm 7.13.0 ships a `flatbuffers/` header tree (v25.9.23)
++        # under <rocm>/include/. TF's schema_generated.h was generated
++        # against flatbuffers v24 and contains
++        #   static_assert(FLATBUFFERS_VERSION_MAJOR == 24 && ...);
++        # Without this exclude, ROCm 7.13's flatbuffers/base.h shadows
++        # TF's bundled v24 via -isystem on _virtual_includes/
++        # rocm_headers_includes and the static_assert fires.
++        # Older ROCm (<=7.2.x) ships no flatbuffers/ tree, so the
++        # exclude is a no-op there. Patched by HPCTrainingDock
++        # extras/scripts/tensorflow_setup.sh.
++        exclude = ["%{rocm_root}/include/flatbuffers/**"],
++    ),
+     strip_include_prefix = "%{rocm_root}/include",
+ )
+ 
+ROCM_FB_PATCH_EOF
+         then
+            echo "ERROR: BUILD.tpl flatbuffers-exclude patch dry-run failed."
+            echo "       Upstream may have changed the rocm_headers_includes shape;"
+            echo "       inspect ${_ROCM_FB_PATCH_FILE} around the"
+            echo "       'name = \"rocm_headers_includes\"' cc_library and refresh"
+            echo "       the patch hunk. (branch=${GIT_BRANCH})"
+            exit 1
+         fi
+         patch -p1 <<'ROCM_FB_PATCH_EOF'
+--- a/third_party/xla/third_party/gpus/rocm/BUILD.tpl
++++ b/third_party/xla/third_party/gpus/rocm/BUILD.tpl
+@@ -75,9 +75,20 @@
+ # and remove include prefix that is used to include rocm headers.
+ cc_library(
+     name = "rocm_headers_includes",
+-    hdrs = glob([
+-        "%{rocm_root}/include/**",
+-    ]),
++    hdrs = glob(
++        include = ["%{rocm_root}/include/**"],
++        # ROCm 7.13.0 ships a `flatbuffers/` header tree (v25.9.23)
++        # under <rocm>/include/. TF's schema_generated.h was generated
++        # against flatbuffers v24 and contains
++        #   static_assert(FLATBUFFERS_VERSION_MAJOR == 24 && ...);
++        # Without this exclude, ROCm 7.13's flatbuffers/base.h shadows
++        # TF's bundled v24 via -isystem on _virtual_includes/
++        # rocm_headers_includes and the static_assert fires.
++        # Older ROCm (<=7.2.x) ships no flatbuffers/ tree, so the
++        # exclude is a no-op there. Patched by HPCTrainingDock
++        # extras/scripts/tensorflow_setup.sh.
++        exclude = ["%{rocm_root}/include/flatbuffers/**"],
++    ),
+     strip_include_prefix = "%{rocm_root}/include",
+ )
+ 
+ROCM_FB_PATCH_EOF
+         echo "tensorflow: ROCm-flatbuffers shadowing fix applied."
+         echo ""
+         unset _ROCM_FB_PATCH_FILE
+      fi
+
       # AMDGPU_GFXMODEL is auto-detected from `rocminfo` (line 7) and on
       # multi-GPU nodes can be a `;`-separated list, e.g. "gfx942;gfx90a".
       # TensorFlow's MLIR `hlo_to_kernel` (the kernel-gen tool fed
@@ -527,7 +768,34 @@ else
       echo "tensorflow: HERMETIC_PYTHON_VERSION=${HERMETIC_PYTHON_VERSION}"
 
       # configure tensorflow
-      yes "" | TF_NEED_CLANG=1 ROCM_PATH=$ROCM_PATH TF_NEED_ROCM=1 PYTHON_BIN_PATH=/usr/bin/python3 TF_ROCM_AMDGPU_TARGETS=${AMDGPU_GFXMODEL_SINGLE} HERMETIC_PYTHON_VERSION=${HERMETIC_PYTHON_VERSION} ./configure
+      #
+      # CLANG_COMPILER_PATH: force TF's configure.py to use the ROCm
+      # clang we already resolved at line 470 (`export CLANG_COMPILER`),
+      # instead of letting it auto-detect.
+      #
+      # configure.py:819 (set_clang_compiler_path) defaults to
+      # /usr/lib/llvm-18/bin/clang, then /usr/lib/llvm-17/, then
+      # /usr/lib/llvm-16/, then shutil.which('clang'). On compute nodes
+      # where Ubuntu ships a STUB /usr/lib/llvm-18/bin/clang (the
+      # ubuntu-22.04 image has a 140KB binary at that path on some
+      # Warewulf-deployed nodes -- a normal clang is 50-100MB), the
+      # default is picked, the stub returns empty `--version` output,
+      # and configure.py crashes at line 922 with
+      #   IndexError: string index out of range
+      # at curr_version[0] in retrieve_clang_version().
+      # Repro: slurm job 11563 (rocm-7.2.3, 2026-06-05) on node
+      # sh5-pl1-s12-15. Job 11562 (rocm-7.13.0) on sh5-pl1-s12-09
+      # happened to succeed only because that node lacks the stub and
+      # the fallback `shutil.which('clang')` picked the ROCm clang. So
+      # the prior "success path" was a node-side accident, not a
+      # robust configure.
+      #
+      # prompt_loop_or_load_from_env (configure.py:583) uses
+      # `environ_cp.get(var_name) or var_default` -- if
+      # CLANG_COMPILER_PATH is set in the environment, it bypasses the
+      # default chain AND the prompt entirely. Setting it here is
+      # idempotent across all ROCm versions.
+      yes "" | TF_NEED_CLANG=1 ROCM_PATH=$ROCM_PATH TF_NEED_ROCM=1 PYTHON_BIN_PATH=/usr/bin/python3 TF_ROCM_AMDGPU_TARGETS=${AMDGPU_GFXMODEL_SINGLE} HERMETIC_PYTHON_VERSION=${HERMETIC_PYTHON_VERSION} CLANG_COMPILER_PATH=${CLANG_COMPILER} ./configure
 
       # build and install tensorflow
       #
