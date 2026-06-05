@@ -100,6 +100,12 @@ LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$
 : ${REPLACE_EXISTING:="0"}
 : ${KEEP_FAILED_INSTALLS:="0"}
 : ${URL_BASE:="https://repo.radeon.com/rocm/misc/flang"}
+# Phase 6 (rocm_patches.sh) controls -- mirror the numeric branch's
+# run_rocm_build.sh:31 SKIP_PATCHES default of 0 (run patches by default).
+# PATCHES_LOG is finalized after THEROCK_AFAR_RELEASE is parsed below so
+# the on-disk filename reflects the actual release.
+: ${SKIP_PATCHES:="0"}
+PATCHES_LOG=""
 
 usage() {
    cat <<EOF
@@ -127,6 +133,11 @@ Usage: $0 [opts]
                                 pre-unified-naming layout.
   --keep-failed-installs 0|1    on failure, keep partial install + modulefile
                                 for post-mortem (default ${KEEP_FAILED_INSTALLS})
+  --skip-patches 0|1            skip Phase 6 (rocm_patches.sh on the TheRock-AFAR
+                                tree; mirrors run_rocm_build.sh's --skip-patches).
+                                Default ${SKIP_PATCHES} (run patches).
+  --patches-log PATH            log file for the Phase 6 rocm_patches.sh tee;
+                                default patches_afar-\${THEROCK_AFAR_RELEASE}.out
   --help
 EOF
    exit 1
@@ -148,6 +159,8 @@ while [[ $# -gt 0 ]]; do
       "--url-base")             shift; URL_BASE=${1};             reset-last ;;
       "--replace-existing")     shift; REPLACE_EXISTING=${1};     reset-last ;;
       "--keep-failed-installs") shift; KEEP_FAILED_INSTALLS=${1}; reset-last ;;
+      "--skip-patches")         shift; SKIP_PATCHES=${1};         reset-last ;;
+      "--patches-log")          shift; PATCHES_LOG=${1};          reset-last ;;
       "--help"|"-h")            usage ;;
       *)                        last ${1} ;;
    esac
@@ -164,6 +177,12 @@ THEROCK_AFAR_RELEASE="${THEROCK_AFAR_RELEASE#therock-afar-}"
 if [[ ! "${THEROCK_AFAR_RELEASE}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
    send-error "--therock-afar-release must be X.Y or X.Y.Z (got '${THEROCK_AFAR_RELEASE}')"
 fi
+
+# Phase 6 default log basename. Set AFTER THEROCK_AFAR_RELEASE is parsed
+# + sanitized so the filename reflects the actual release. An explicit
+# --patches-log on the command line still wins (the parse loop set
+# PATCHES_LOG to that value, which short-circuits the default below).
+: ${PATCHES_LOG:="patches_afar-${THEROCK_AFAR_RELEASE}.out"}
 
 # ---------------- gfx-model -> family mapping -------------------------
 # Maps a per-model gfx ID (what `rocminfo` reports, e.g. gfx942) to the
@@ -629,6 +648,71 @@ emit_per_package_modulefiles \
    "${LEAF_SCRIPT_NAME}" \
    "${LEAF_SCRIPT_COMMIT:0:12}" \
    "${LEAF_SCRIPT_DIRTY}"
+
+# ---------------- Phase 6: rocm_patches.sh on the TheRock-AFAR tree ----
+# Mirror Phase 3.6 of bare_system/run_rocm_build.sh:483-512 (the numeric
+# branch's patch-overlay step). rocm_patches.sh's dispatch table has
+# entries for afar-23.{1.0,2.1} (TheRock-AFAR rocprof-compute overlay);
+# for releases without a registered bundle the script returns NOOP_RC=43
+# and we treat that as success.
+#
+# Note: TheRock-AFAR and AFAR-proper share the unified `afar-<REL>` key
+# in rocm_version_to_patches() -- the release-tag namespaces don't
+# collide (AFAR-proper = 22.x.y, TheRock-AFAR = 23.x.y). The matching
+# overlay sits at rocm-patches-afar-<REL> (sibling of the unified
+# rocm-afar-<REL> install dir). See the dispatch-table comment in
+# rocm_patches.sh for the full naming rationale.
+#
+# Path conventions:
+#   --rocm-version    afar-${THEROCK_AFAR_RELEASE}
+#   --rocm-path       ${INSTALL_DIR}
+#                     (= ${TOP_INSTALL_PATH}/rocm-afar-${REL})
+#   --install-prefix  auto-derived by rocm_patches.sh:371-379 from
+#                     ${ROCM_PATH} to ${TOP_INSTALL_PATH}/rocm-patches-afar-${REL}
+#   --module-file     ${MODULE_FILE}  (afar-${REL}-${ROCM_NUMERIC}.lua)
+#
+# Exit codes (rocm_patches.sh):
+#   0  -- patches applied (or already up to date)
+#   43 -- intentional no-op (no vendored fix for this version)
+#   *  -- hard error -- propagate to the EXIT trap
+#
+# Gated by --skip-patches (operator opt-out), mirrors the numeric
+# branch's SKIP_PATCHES flag in run_rocm_build.sh:31.
+if [[ "${SKIP_PATCHES}" != "1" ]]; then
+   echo "============================================================"
+   echo "  Phase 6: rocm_patches.sh on ${INSTALL_DIR} (-> ${PATCHES_LOG})"
+   echo "============================================================"
+   _patches_sh="$(dirname "${LEAF_SCRIPT_PATH}")/../rocm/scripts/rocm_patches.sh"
+   if [[ ! -x "${_patches_sh}" ]]; then
+      echo "[Phase 6] WARNING: rocm_patches.sh not found / not executable at ${_patches_sh}; skipping"
+   else
+      PATCHES_RC=0
+      set +e
+      "${_patches_sh}" \
+            --rocm-version    "afar-${THEROCK_AFAR_RELEASE}" \
+            --rocm-path       "${INSTALL_DIR}" \
+            --module-path     "${TOP_MODULE_PATH}/base" \
+            --module-file     "${MODULE_FILE}" \
+            2>&1 | tee "${PATCHES_LOG}"
+      PATCHES_RC=${PIPESTATUS[0]}
+      set -e
+      if [[ "${PATCHES_RC}" -eq 43 ]]; then
+         echo "[Phase 6] rocm_patches.sh returned 43 (NOOP_RC) -- no vendored fix for afar-${THEROCK_AFAR_RELEASE}; treating as success"
+      elif [[ "${PATCHES_RC}" -ne 0 ]]; then
+         echo "ERROR: rocm_patches.sh failed for afar-${THEROCK_AFAR_RELEASE} (rc=${PATCHES_RC})" >&2
+         exit "${PATCHES_RC}"
+      else
+         _overlay="${TOP_INSTALL_PATH}/rocm-patches-afar-${THEROCK_AFAR_RELEASE}"
+         if [[ -d "${_overlay}" ]]; then
+            sudo chown -R root:root "${_overlay}"
+            sudo find "${_overlay}" -type d -exec chmod 755 {} +
+         fi
+         unset _overlay
+         echo "[Phase 6] patches applied for afar-${THEROCK_AFAR_RELEASE}"
+      fi
+   fi
+   unset _patches_sh
+fi
 
 echo ""
 echo "============================================================"

@@ -258,7 +258,8 @@ for v in "${VERSIONS[@]}"; do
             --distro "${DISTRO}" --distro-version "${DISTRO_VERSION}" \
             --top-install-path "${TOP_INSTALL_PATH}" \
             --top-module-path  "${TOP_MODULE_PATH}" \
-            --replace-existing "${REPLACE_EXISTING}"
+            --replace-existing "${REPLACE_EXISTING}" \
+            --skip-patches     "${SKIP_PATCHES}"
       then
          echo "[$(date)] OK   rocm-${v}" | tee -a "${SUMMARY}"
          OK+=("${v}")
@@ -327,7 +328,8 @@ for v in "${VERSIONS[@]}"; do
             --distro "${DISTRO}" --distro-version "${DISTRO_VERSION}" \
             --top-install-path "${TOP_INSTALL_PATH}" \
             --top-module-path  "${TOP_MODULE_PATH}" \
-            --replace-existing "${REPLACE_EXISTING}"
+            --replace-existing "${REPLACE_EXISTING}" \
+            --skip-patches     "${SKIP_PATCHES}"
       then
          echo "[$(date)] OK   rocm-${v}" | tee -a "${SUMMARY}"
          OK+=("${v}")

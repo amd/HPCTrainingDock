@@ -28,6 +28,40 @@
 #                            builder). Use --module-file-only to
 #                            backfill the modulefile entry once the
 #                            standalone build has produced the .so.
+#   * AFAR-22.1.0 /         -- same five-patch v1.2.0 stack as the
+#     AFAR-22.2.0              7.1.x line above, but driven IN-TREE
+#                              via build_rocprof_sys_1_2_0() (the
+#                              upstream tag pin is hard-coded to
+#                              rocm-7.1.0 because no rocm-afar-22.X.0
+#                              tag exists upstream; rocm-7.1.0's
+#                              projects/rocprofiler-systems/VERSION
+#                              is 1.2.0 -- matches the AFAR-22.x
+#                              ship .so's SONAME). rocprof-compute is
+#                              NOT dispatched for AFAR (build.sh
+#                              always soft-no-ops because VERSION.sha
+#                              points at an AMD-internal commit).
+#   * AFAR-23.2.1          -- libomp.so symlink fix only (same shape
+#                              as 7.13.0 below); the rocprof-sys
+#                              cherry-picks cannot land because the
+#                              v1.5/1.6 init refactored
+#                              sdk_tool_configure out of the patched
+#                              code path. AFAR-23.1.0 has neither
+#                              issue and dispatches nothing.
+#   * ROCm 7.13.0          -- symlink libomp.so into the SDK's Dyninst
+#                            lib dir so it resolves for the libs that
+#                            need it transitively (libcommon /
+#                            libparseAPI / libsymtabAPI under
+#                            lib/rocprofiler-systems, whose RUNPATH lists
+#                            bare $ORIGIN). The OpenMP runtime ships at
+#                            lib/llvm/lib/libomp.so; the libs' broken
+#                            "$ORIGIN/llvm/lib" entry points one level
+#                            too deep. Without the symlink the instrument
+#                            binary fails to load ("libomp.so => not
+#                            found") and the Rocprof-sys_ROCm_Instrument_Check
+#                            test fails. No build, no vendored .patch, no
+#                            modulefile edit, no ELF modification -- just
+#                            lib/rocprofiler-systems/libomp.so ->
+#                            ../llvm/lib/libomp.so.
 #
 # The patch text is vendored under rocm/sources/rocm-patches/ and is the
 # *only* delta this script applies; everything else (clone of the
@@ -78,9 +112,13 @@
 #   modulefile overlay edit + fix_overlay_runpath_and_libunwind +
 #   swap_sdk_lib_symlink. Use this on clusters where the patched .so
 #   was produced by the standalone /opt/rocm-patches-X.Y.Z/apply_and_build.sh
-#   (out-of-tree builder for the 7.1.x / 7.0.x / 6.4.x / afar-22.x
-#   release lines), and the in-tree script has nothing to build but
-#   still has to finish the deployment.
+#   (out-of-tree builder for the 7.1.x / 7.0.x / 6.4.x release lines),
+#   and the in-tree script has nothing to build but still has to finish
+#   the deployment. As of 2026-06 the afar-22.x line is now built
+#   IN-TREE by build_rocprof_sys_1_2_0(), so --module-file-only is no
+#   longer the recommended path for AFAR; use the regular dispatch
+#   (`rocm_patches.sh --rocm-version afar-22.X.0 ...`) to build and
+#   wire in one shot.
 
 LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
 LEAF_DIR="$(dirname "${LEAF_SCRIPT_PATH}")"
@@ -115,6 +153,16 @@ INSTALL_PREFIX=""
 PATCH_SOURCE_DIR=""
 MODULE_FILE_ONLY=0
 ROCM_PATH_OVERRIDE=""
+# --module-file is an explicit FULL-PATH override for the modulefile
+# we should edit. The default derivation below is
+#   ${MODULE_PATH}/rocm/${ROCM_VERSION}.lua
+# which matches the numeric branch's naming (rocm/<X.Y.Z>.lua) but does
+# NOT match the AFAR / TheRock-AFAR branches, whose modulefiles use the
+# unified flang-site naming `afar-<REL>-<ROCM>.lua` (where <ROCM> comes
+# from .info/version, not from the input token). Without this override,
+# patch_module_file() and already_installed_check() would look at the
+# wrong path on the AFAR side. Empty == use the default derivation.
+MODULE_FILE_OVERRIDE=""
 NOOP_RC=43
 : ${ALLOW_LOGIN_NODE:=0}
 ORIGINAL_ARGS=("$@")
@@ -139,6 +187,10 @@ usage() {
    echo "  --rocm-path       [ DIR ]             default /opt/rocm-\${ROCM_VERSION}"
    echo "                                        (the SDK install rocm_setup.sh produced;"
    echo "                                        prerequisite-existence check uses this)"
+   echo "  --module-file     [ PATH ]            full-path override of the .lua modulefile to edit"
+   echo "                                        (default: \${MODULE_PATH}/rocm/\${ROCM_VERSION}.lua)."
+   echo "                                        Required for AFAR / TheRock-AFAR tokens whose"
+   echo "                                        modulefile is afar-<REL>-<ROCM>.lua, NOT <token>.lua."
    echo "  --patch-source-dir [ DIR ]            auto-detected; vendored .patch tree"
    echo "  --module-file-only                    skip build; just apply the modulefile"
    echo "                                        LD_LIBRARY_PATH overlay edit (idempotent)."
@@ -173,6 +225,7 @@ while [[ $# -gt 0 ]]; do
       "--module-path")       shift; MODULE_PATH=${1};        reset-last ;;
       "--install-prefix")    shift; INSTALL_PREFIX=${1};     reset-last ;;
       "--rocm-path")         shift; ROCM_PATH_OVERRIDE=${1}; reset-last ;;
+      "--module-file")       shift; MODULE_FILE_OVERRIDE=${1}; reset-last ;;
       "--patch-source-dir")  shift; PATCH_SOURCE_DIR=${1};   reset-last ;;
       "--module-file-only")         MODULE_FILE_ONLY=1;      reset-last ;;
       "--allow-login-node")         ALLOW_LOGIN_NODE=1;      reset-last ;;
@@ -225,15 +278,16 @@ unset _host
 rocm_version_to_patches() {
    local v="$1"
    case "$v" in
-      # rocprof-sys cherry-picks: only the v1.3.0 source line is currently
-      # handled in-tree (rocm-7.2.x). The 6.4.x / 7.0.x / 7.1.x rocprof-sys
-      # overlays are still built out-of-tree via the per-version
-      # apply_and_build.sh in /opt/rocm-patches-X.Y.Z/. The afar-22.{1,2}.0
-      # rocprof-sys overlays follow the same out-of-tree pattern
-      # (apply_and_build.sh pinned to upstream tag rocm-7.1.0 = v1.2.0
-      # source baseline matching the afar-22.x .deb's librocprof-sys.so.1.2.0);
-      # use rocm_patches.sh --module-file-only --rocm-version afar-22.X.0
-      # to backfill the modulefile entry after the standalone build.
+      # rocprof-sys cherry-picks: TWO source baselines are handled
+      # in-tree -- v1.3.0 (rocm-7.2.x) and v1.2.0 (rocm-7.1.x and
+      # the AFAR-22.{1,2}.0 RC trees, which both ship v1.2.0 from
+      # internal AMD branches). The 6.4.x / 7.0.x / 7.1.x official
+      # release-line rocprof-sys overlays are still built out-of-tree
+      # via the per-version apply_and_build.sh in
+      # /opt/rocm-patches-X.Y.Z/; the in-tree builder for AFAR-22.x
+      # pins upstream tag rocm-7.1.0 (= v1.2.0 source baseline matching
+      # the AFAR-22.x .deb's librocprof-sys.so.1.2.0). See
+      # build_rocprof_sys_1_2_0() below for the builder body.
       #
       # rocprof-compute overlay (see rocprof-compute/ bundle): produces a
       # nuitka onefile of upstream rocprofiler-compute, drops it under
@@ -257,15 +311,26 @@ rocm_version_to_patches() {
       # after build_rocprof_sys_1_3_0() because the dispatch iterates
       # PATCH_BUNDLES in order.
       #
-      # Empirical NOTE (2026-05): for the RC trees afar-22.{1,2}.0 and
-      # therock-23.{1,2}.0, the VERSION.sha on disk does NOT resolve to
-      # a public commit on github.com/ROCm/rocprofiler-compute -- the
-      # RC .debs are built from internal AMD branches.  build.sh's
-      # RC-mode catches this in `git rev-parse --verify` and returns
-      # exit 43 (soft no-op).  We still LIST the trees here so that
-      # any future RC .deb whose VERSION.sha gets pushed upstream
-      # gets the overlay automatically; right now no overlay is
-      # actually produced for those RC trees.
+      # Empirical NOTE (2026-05/06): for the RC trees afar-22.{1,2}.0,
+      # afar-23.{1.0,2.1} (TheRock-AFAR), and therock-23.{1,2}.0, the
+      # VERSION.sha on disk does NOT resolve to a public commit on
+      # github.com/ROCm/rocprofiler-compute -- the RC .debs / tarballs are
+      # built from internal AMD branches.  build.sh's RC-mode catches this
+      # in `git rev-parse --verify` and returns exit 43 (soft no-op).
+      #
+      # 2026-06-04 policy change: the AFAR rows (afar-22.{1,2}.0,
+      # afar-23.{1.0,2.1}) used to LIST `rocprof-compute` here so any
+      # future RC drop with a public VERSION.sha would automatically
+      # produce an overlay. The empirical reality was that EVERY
+      # dispatched AFAR build.sh soft-no-op'd, leaving a useless empty
+      # `rocprof-compute/{bin,lib,build,doc}/` skeleton on disk with no
+      # `rocprof-compute.bin` and no modulefile edit (the inventory's
+      # `rocm_patches` row stays '-' because rocm_patches_presence()
+      # correctly distinguishes "populated artefact" from "stub dir").
+      # We now drop `rocprof-compute` from the AFAR dispatches entirely
+      # so we don't litter `rocm-patches-afar-*/rocprof-compute/`. The
+      # therock-* rows keep the dispatch because the policy still
+      # applies there.
       7.2.0)            echo "rocprof-sys-1.3.0 rocprof-compute" ;;
       7.2.1)            echo "rocprof-sys-1.3.0 rocprof-compute" ;;
       # 7.2.2: the 4 vendored rocprof-sys 1.3.0 patches apply cleanly to
@@ -286,14 +351,89 @@ rocm_version_to_patches() {
       # produces a working librocprof-sys.so.1.3.0 against rocm-7.2.3's
       # rocprofiler-sdk 1.1.0.
       7.2.3)            echo "rocprof-sys-1.3.0 rocprof-compute" ;;
+      # 7.13.0 (AFAR / TheRock RC line, e.g. rocm-afar-23.2.1-7.13.0):
+      # ships rocprof-sys 1.6.0 and exhibits TWO independent bugs that
+      # both need fixing:
+      #
+      #   1. rocprof-sys-instrument fails to load with "libomp.so =>
+      #      not found".  libomp.so is a TRANSITIVE dep of the
+      #      Dyninst libs (libcommon / libparseAPI / libsymtabAPI)
+      #      under lib/rocprofiler-systems; their RUNPATH lists bare
+      #      $ORIGIN (that dir) plus a broken "$ORIGIN/llvm/lib" that
+      #      points one level too deep.  The OpenMP runtime ships at
+      #      lib/llvm/lib/libomp.so.  Fix = symlink
+      #         lib/rocprofiler-systems/libomp.so -> ../llvm/lib/libomp.so
+      #      so the libs resolve it via their $ORIGIN entry
+      #      (idempotent).  No vendored .patch files, no modulefile
+      #      edit, no ELF modification.  Bundle key:
+      #      `rocprof-sys-instrument-libomp`.
+      #
+      #   2. The instrumented binary SIGSEGVs during static-init
+      #      under MPI + OpenMP-target offload (see
+      #      PROFILING_TEAM_REPORT_rocprof-sys_v1.6.0_2026_05_20.md
+      #      and last night's MPI_Ghost_Exchange_Ver2_Rocprof-Sys
+      #      CTest capture).  This is the same bug-family our v1.3.0
+      #      cherry-pick closes for 7.2.x, but the v1.5+ refactor
+      #      means the v1.3.0 patch stack does not apply textually.
+      #      Bundle key: `rocprof-sys-1.6.0`.  Pin =
+      #      upstream tag `therock-7.13` (no `rocm-7.13.0` tag
+      #      exists -- 7.13.0 was cut from the TheRock RC line).
+      #
+      # Order matters: the rocprof-sys-1.6.0 build is the slow step
+      # (~30 min) so we list it first to fail fast on a misconfigured
+      # cluster; the libomp symlink is a few-millisecond no-op.
+      7.13.0)           echo "rocprof-sys-1.6.0 rocprof-sys-instrument-libomp" ;;
       6.3.*)            echo "rocprof-compute" ;;
       6.4.*)            echo "rocprof-compute" ;;
       7.0.*)            echo "rocprof-compute" ;;
       7.1.*)            echo "rocprof-compute" ;;
-      afar-22.1.0)      echo "rocprof-compute" ;;
-      afar-22.2.0)      echo "rocprof-compute" ;;
+      # AFAR-22.{1,2}.0 dispatch the v1.2.0 rocprof-sys cherry-pick
+      # bundle (NOT rocprof-compute -- see soft-no-op note above).
+      # build_rocprof_sys_1_2_0() clones rocm-systems @ tag rocm-7.1.0
+      # (= projects/rocprofiler-systems VERSION 1.2.0, matching the
+      # `librocprof-sys.so.1.2.0` shipped by AFAR-22.x's internal
+      # branch), applies patches 0001-0005 from
+      # sources/rocm-patches/rocprof-sys-1.2.0/, and drops a patched
+      # `librocprof-sys.so.1.2.0` into rocm-patches-afar-22.X.0/lib/.
+      # The post-install finishing steps (fix_overlay_runpath_and_libunwind,
+      # swap_sdk_lib_symlink, patch_module_file) are mode-agnostic so they
+      # work identically against either 1.2.0 or 1.3.0 outputs.
+      afar-22.1.0)      echo "rocprof-sys-1.2.0" ;;
+      afar-22.2.0)      echo "rocprof-sys-1.2.0" ;;
+      # afar-23.x.y is the unified flang-site key used by BOTH the
+      # AFAR-proper channel (run_rocm_afar_install.sh) and the TheRock-AFAR
+      # channel (run_rocm_therock_afar_install.sh). The release-tag
+      # namespaces don't collide in practice -- AFAR-proper uses 22.x.y,
+      # TheRock-AFAR uses 23.x.y -- so a single `afar-<REL>` key suffices
+      # for both. The matching overlay sits at rocm-patches-afar-<REL>
+      # (sibling of the unified rocm-afar-<REL> install dir, written by
+      # the AFAR install helpers).
+      #
+      # afar-23.1.0 (SDK 7.12.0, ships rocprof-sys 1.5.0): rocprof-sys
+      # init was refactored into sdk_tool_configure() in v1.5.0+, so
+      # the v1.3.0 cherry-pick stack does NOT apply textually -- there
+      # is no rocprof-sys overlay we can produce in-tree today.
+      # rocprof-sys-instrument's libomp.so resolves correctly via the
+      # binary's own RUNPATH walk on this SDK, so the libomp symlink
+      # fix is not needed either. Net: no dispatch (clean NOOP_RC).
+      #
+      # afar-23.2.1 (SDK 7.13.0, ships rocprof-sys 1.6.0): same two
+      # independent bugs as the 7.13.0 numeric release -- the
+      # libomp.so RUNPATH issue at instrument time, and the v1.6.0
+      # outer-once-guard race at runtime.  Both bundles dispatch
+      # together (same comment-block as 7.13.0 above).  The
+      # `therock-7.13` upstream tag (= projects/rocprofiler-systems
+      # VERSION 1.6.0) is the source pin used by build_rocprof_sys_1_6_0().
+      afar-23.1.0)      echo "" ;;
+      afar-23.2.1)      echo "rocprof-sys-1.6.0 rocprof-sys-instrument-libomp" ;;
       therock-23.1.0)   echo "rocprof-compute" ;;
-      therock-23.2.0)   echo "rocprof-compute" ;;
+      # therock-23.2.0 also ships rocprof-sys 1.6.0 from the same
+      # upstream baseline, so the v1.6.0 patch bundle applies (the
+      # finishing-step machinery in this script is mode-agnostic and
+      # picks up `librocprof-sys.so.[0-9]*.[0-9]*.[0-9]*` by glob).
+      # Documented as "not engineered" in earlier README revisions;
+      # backfilled here together with 7.13.0 / afar-23.2.1.
+      therock-23.2.0)   echo "rocprof-sys-1.6.0 rocprof-compute" ;;
       *)                echo "" ;;
    esac
 }
@@ -351,7 +491,16 @@ if [ "${INSTALL_PREFIX_EXPLICIT}" -eq 0 ] \
    unset _derived
 fi
 
-MODULE_FILE="${MODULE_PATH}/rocm/${ROCM_VERSION}.lua"
+# --module-file (when set) is the ground truth and bypasses the default
+# ${MODULE_PATH}/rocm/${ROCM_VERSION}.lua derivation. This is the only
+# way to point the editor at AFAR's `afar-<REL>-<ROCM>.lua` shape, where
+# the <ROCM> suffix comes from the SDK's .info/version and cannot be
+# inferred from the input ROCM_VERSION token alone.
+if [ -n "${MODULE_FILE_OVERRIDE}" ]; then
+   MODULE_FILE="${MODULE_FILE_OVERRIDE}"
+else
+   MODULE_FILE="${MODULE_PATH}/rocm/${ROCM_VERSION}.lua"
+fi
 
 echo ""
 echo "=================================="
@@ -362,6 +511,7 @@ echo "  ROCM_VERSION      : $ROCM_VERSION"
 echo "  ROCM_PATH         : $ROCM_PATH"
 echo "  INSTALL_PREFIX    : $INSTALL_PREFIX"
 echo "  MODULE_FILE       : $MODULE_FILE"
+echo "  MODULE_FILE_OVERRIDE : ${MODULE_FILE_OVERRIDE:-<none, derived from --module-path + --rocm-version>}"
 echo "  PATCH_SOURCE_DIR  : $PATCH_SOURCE_DIR"
 echo "  PATCH_BUNDLES     : $PATCH_BUNDLES"
 echo "  REPLACE           : $REPLACE"
@@ -429,17 +579,25 @@ already_installed_check() {
    [ "${REPLACE}" -eq 0 ]          || return 1
    [ -d "${INSTALL_PREFIX}" ]      || return 1
 
-   local -a mf_candidates=(
-      "${MODULE_PATH}/rocm/${ROCM_VERSION}.lua"
-      "${MODULE_PATH}/rocm/${ROCM_VERSION}"
-      "/shared/apps/modules/ubuntu/lmodfiles/base/rocm/${ROCM_VERSION}.lua"
-      "/nfsapps/modules/base/rocm/${ROCM_VERSION}.lua"
-      "/etc/lmod/modules/ROCm/rocm/${ROCM_VERSION}.lua"
-   )
+   # When --module-file was passed, the caller has already resolved
+   # the on-disk path (e.g. AFAR's afar-<REL>-<ROCM>.lua shape), so
+   # the default-derived candidate scan would only confuse us. Trust
+   # the override and short-circuit the scan.
    local mf=""
-   for cand in "${mf_candidates[@]}"; do
-      if [ -f "${cand}" ]; then mf="${cand}"; break; fi
-   done
+   if [ -n "${MODULE_FILE_OVERRIDE}" ]; then
+      [ -f "${MODULE_FILE_OVERRIDE}" ] && mf="${MODULE_FILE_OVERRIDE}"
+   else
+      local -a mf_candidates=(
+         "${MODULE_PATH}/rocm/${ROCM_VERSION}.lua"
+         "${MODULE_PATH}/rocm/${ROCM_VERSION}"
+         "/shared/apps/modules/ubuntu/lmodfiles/base/rocm/${ROCM_VERSION}.lua"
+         "/nfsapps/modules/base/rocm/${ROCM_VERSION}.lua"
+         "/etc/lmod/modules/ROCm/rocm/${ROCM_VERSION}.lua"
+      )
+      for cand in "${mf_candidates[@]}"; do
+         if [ -f "${cand}" ]; then mf="${cand}"; break; fi
+      done
+   fi
    [ -n "${mf}" ] || return 1
 
    local bundle bin lib
@@ -457,6 +615,63 @@ already_installed_check() {
             [ -f "${lib}" ] || return 1
             grep -qE "rocm-patches-${ROCM_VERSION}/lib" "${mf}" \
                || return 1
+            # Half-built trees (slurm-11507, 2026-06-04): the .so
+            # landed but fix_overlay_runpath_and_libunwind() bailed
+            # because patchelf was missing on the compute node, so
+            # the .so still has bogus build-tree DT_RUNPATH and
+            # libunwind.so.99 is missing alongside it. Detect both
+            # so a fresh --replace=0 invocation falls through and
+            # auto-heals via the post-build hooks (build itself
+            # short-circuits on the existing .so).
+            [ -e "${INSTALL_PREFIX}/lib/libunwind.so.99" ] || return 1
+            if command -v patchelf >/dev/null 2>&1; then
+               patchelf --print-rpath "${lib}" 2>/dev/null \
+                  | grep -qE "${INSTALL_PREFIX}/build/" \
+                  && return 1
+            fi
+            ;;
+         rocprof-sys-1.2.0)
+            # Same shape as the 1.3.0 case; only the SO filename
+            # changes. Modulefile + half-built-tree checks are
+            # identical.
+            lib="${INSTALL_PREFIX}/lib/librocprof-sys.so.1.2.0"
+            [ -f "${lib}" ] || return 1
+            grep -qE "rocm-patches-${ROCM_VERSION}/lib" "${mf}" \
+               || return 1
+            [ -e "${INSTALL_PREFIX}/lib/libunwind.so.99" ] || return 1
+            if command -v patchelf >/dev/null 2>&1; then
+               patchelf --print-rpath "${lib}" 2>/dev/null \
+                  | grep -qE "${INSTALL_PREFIX}/build/" \
+                  && return 1
+            fi
+            ;;
+         rocprof-sys-1.6.0)
+            # Same shape as the 1.3.0 / 1.2.0 cases; only the SO
+            # filename changes. The post-build finishing steps
+            # (fix_overlay_runpath_and_libunwind, swap_sdk_lib_symlink,
+            # patch_module_file) are version-agnostic so the
+            # half-built-tree probe is identical too.
+            lib="${INSTALL_PREFIX}/lib/librocprof-sys.so.1.6.0"
+            [ -f "${lib}" ] || return 1
+            grep -qE "rocm-patches-${ROCM_VERSION}/lib" "${mf}" \
+               || return 1
+            [ -e "${INSTALL_PREFIX}/lib/libunwind.so.99" ] || return 1
+            if command -v patchelf >/dev/null 2>&1; then
+               patchelf --print-rpath "${lib}" 2>/dev/null \
+                  | grep -qE "${INSTALL_PREFIX}/build/" \
+                  && return 1
+            fi
+            ;;
+         rocprof-sys-instrument-libomp)
+            # No INSTALL_PREFIX artifact; the fix is a single symlink in
+            # the SDK's Dyninst lib dir that makes the transitively
+            # NEEDed libomp.so resolve via those libs' $ORIGIN RUNPATH.
+            # "Already installed" == that symlink already points at the
+            # OpenMP runtime.
+            local _link="${ROCM_PATH}/lib/rocprofiler-systems/libomp.so"
+            local _omp="${ROCM_PATH}/lib/llvm/lib/libomp.so"
+            [ -L "${_link}" ] || return 1
+            [ "$(readlink -f "${_link}")" = "$(readlink -f "${_omp}")" ] || return 1
             ;;
          *)
             return 1
@@ -477,15 +692,50 @@ if already_installed_check; then
 fi
 
 # ─────────────────────────────────────────────────────────────────────
-# build_rocprof_sys_1_3_0
-# -----------------------
-# Cherry-picks PR #3412 (just the 6-line crash fix) onto the v1.3.0
-# parent commit, builds librocprof-sys.so.1.3.0 with flags that match
-# the ROCm 7.2.x ship build, installs it into ${INSTALL_PREFIX}/lib.
+# _build_rocprof_sys_helper
+# -------------------------
+# Shared body of the per-baseline rocprof-sys builders. Parameterised
+# on the rocprof-sys SO version, the upstream rocm-systems tag, and
+# the patch-bundle subdir name. Three thin wrappers below pick the
+# parameters for:
+#   * v1.6.0 (therock-7.13, rocm-7.13.0 / AFAR-23.2.x RC trees)
+#   * v1.3.0 (rocm-7.2.x)
+#   * v1.2.0 (rocm-7.1.x + AFAR-22.x)
+# source baselines respectively.
+#
+# Args:
+#   $1 = so_version    "1.6.0" | "1.3.0" | "1.2.0"
+#   $2 = base_commit   upstream rocm-systems tag whose
+#                       projects/rocprofiler-systems/VERSION equals
+#                       $so_version. Hard-coded for AFAR (no per-AFAR
+#                       upstream tag exists), hard-coded "therock-7.13"
+#                       for v1.6.0 (no per-7.13.x tag exists upstream),
+#                       and computed from the caller's ROCM_VERSION
+#                       for official 7.2.x releases.
+#   $3 = bundle_subdir patch directory under PATCH_SOURCE_DIR
+#                       ("rocprof-sys-1.6.0" | "rocprof-sys-1.3.0"
+#                        | "rocprof-sys-1.2.0")
+#
+# Per-source-baseline behavioural differences this helper handles
+# transparently:
+#   * binutils version: 2.42 (1.2.0/1.3.0) vs 2.46.0 (1.6.0).
+#   * FindTBB.cmake oneapi/tbb fallback edit: required for 1.2.0/1.3.0
+#     only -- 1.6.0 already has it upstream.
+#   * DyninstBoost.cmake Boost_FOUND-early-return fix: required for
+#     all three baselines, but the cmake option name changed from
+#     `BUILD_BOOST` (1.2.0/1.3.0) to `ROCPROFSYS_BUILD_BOOST` (1.6.0).
+#   * Packages.cmake libunwind include-order fix: required for all
+#     three baselines (same textual block).
+#   * CPATH /llvm/include scrub: required for all three baselines.
+#   * .patch files: each baseline has its own
+#     sources/rocm-patches/rocprof-sys-${so_version}/*.patch set.
 # ─────────────────────────────────────────────────────────────────────
-build_rocprof_sys_1_3_0() {
-   local bundle_dir="${PATCH_SOURCE_DIR}/rocprof-sys-1.3.0"
-   local out_lib="${INSTALL_PREFIX}/lib/librocprof-sys.so.1.3.0"
+_build_rocprof_sys_helper() {
+   local so_version="$1"
+   local base_commit="$2"
+   local bundle_subdir="$3"
+   local bundle_dir="${PATCH_SOURCE_DIR}/${bundle_subdir}"
+   local out_lib="${INSTALL_PREFIX}/lib/librocprof-sys.so.${so_version}"
 
    [ -d "${bundle_dir}" ] || send-error "patch bundle missing: ${bundle_dir}"
 
@@ -500,12 +750,13 @@ build_rocprof_sys_1_3_0() {
    # whose `projects/rocprofiler-systems/VERSION` matches the .so
    # version that the SDK installs:
    #     rocm-7.2.0, rocm-7.2.1   -> rocprof-sys VERSION 1.3.0
+   #     rocm-7.1.0, rocm-7.1.1   -> rocprof-sys VERSION 1.2.0 (and
+   #                                  matches the AFAR-22.x ship .so)
    # Building from this tag (vs the develop branch where v1.5.0+
    # refactored sdk_tool_configure and bumped the SONAME to 1.6.0)
    # is what makes our .so an ABI-compatible drop-in for the SDK's
-   # librocprof-sys.so.1.3.0.
+   # librocprof-sys.so.${so_version}.
    local repo="https://github.com/ROCm/rocm-systems.git"
-   local base_commit="rocm-${ROCM_VERSION}"
 
    # Where we do the heavy lifting. Use a stable path under
    # ${INSTALL_PREFIX} so re-runs reuse the clone.
@@ -522,9 +773,17 @@ build_rocprof_sys_1_3_0() {
    fi
 
    # ── build deps ───────────────────────────────────────────────────
+   # patchelf is needed by fix_overlay_runpath_and_libunwind() to
+   # rewrite the build-tree DT_RUNPATH on the patched .so to a
+   # portable $ORIGIN-rooted form. It is NOT a build-time dep so
+   # we keep it cheap, but missing it half-bricks the overlay
+   # (the .so lands with absolute build-tree paths that ld.so
+   # cannot resolve on a clean install; slurm-11507, 2026-06-04).
+   # Adding it here means a compute node that lacks it picks it
+   # up before the .so is even built.
    if [ "${DISTRO}" = "ubuntu" ]; then
       ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y \
-         build-essential cmake git ca-certificates pkg-config \
+         build-essential cmake git ca-certificates pkg-config patchelf \
          libelf-dev libdw-dev libdrm-dev libnuma-dev libsqlite3-dev \
          zlib1g-dev libzstd-dev libssl-dev || true
    fi
@@ -534,7 +793,19 @@ build_rocprof_sys_1_3_0() {
       echo "[rocm_patches] cloning ${repo} (large; ~5-10 min) ..."
       git clone --filter=blob:none --no-checkout "${repo}" "${src_root}"
    fi
+   # `set -e` inside the subshell so silent failures in any of the
+   # git steps abort the bundle build cleanly instead of cascading
+   # into a confusing "patch failed to apply" message later. The
+   # canonical example (slurm-11504, 2026-06-04) is `git submodule
+   # update` failing on a compute node whose `/bin/sh` symlink was
+   # dangling: git-submodule (a #!/bin/sh script) fails with `fatal:
+   # 'submodule' appears to be a git command, but we were not able
+   # to execute it`, but git itself exits 1 -- without `set -e` the
+   # for-loop below proceeded to apply patches against a half-
+   # checked-out tree where the timemory submodule (target of patch
+   # 0004) was an empty dir.
    (
+      set -e
       cd "${src_root}"
       echo "[rocm_patches] fetching tag ${base_commit} ..."
       git fetch --depth=1 origin "refs/tags/${base_commit}:refs/tags/${base_commit}"
@@ -544,8 +815,15 @@ build_rocprof_sys_1_3_0() {
       git sparse-checkout init --cone
       git sparse-checkout set projects/rocprofiler-systems
       echo "[rocm_patches] initialising submodules ..."
-      git submodule update --init --recursive --depth 1 \
-         -- projects/rocprofiler-systems
+      if ! git submodule update --init --recursive --depth 1 \
+            -- projects/rocprofiler-systems; then
+         echo "[rocm_patches] ERROR: git submodule update failed for ${base_commit}" >&2
+         echo "[rocm_patches]   common cause: compute node's /bin/sh is broken" >&2
+         echo "[rocm_patches]   (git-submodule is a #!/bin/sh script). Check:" >&2
+         echo "[rocm_patches]     ls -la /bin/sh /bin/dash" >&2
+         echo "[rocm_patches]   and resubmit with --exclude=<broken-node> if so." >&2
+         exit 1
+      fi
 
       # ── apply vendored patches ────────────────────────────────────
       for p in "${bundle_dir}"/*.patch; do
@@ -561,26 +839,54 @@ build_rocprof_sys_1_3_0() {
       done
    ) || return 1
 
-   # ── pre-fetch timemory's binutils-2.42 tarball ───────────────────
+   # ── pre-fetch timemory's bundled binutils tarball ────────────────
    # ExternalProject_Add has no retry loop; a single mid-stream RST
    # against the gnu.org mirrors aborts a 30+ minute build. We curl
    # the tarball ourselves with --retry across several mirrors, then
    # point timemory at the local file:// URL via the cmake flag below.
+   #
+   # The bundled binutils version differs across rocprof-sys source
+   # baselines:
+   #   * v1.2.0 / v1.3.0 (rocm-7.{1,2}.x):  binutils-2.42.tar.gz
+   #     SHA256 5d2a6c1d49686a557869caae08b6c2e83699775efd27505e01b2f4db1a024ffc
+   #   * v1.6.0 (therock-7.13, rocm-7.13.0): binutils-2.46.0.tar.gz
+   #     SHA256 8608fe44ab7de645f6ad0a898313b75338842490d609adb85c9fb2827c376af2
+   #     (verified 2026-06-05 against ftp.gnu.org/gnu/binutils/binutils-2.46.0.tar.gz)
+   # The two cmake URL blocks also differ slightly -- v1.6.0 switched
+   # from `http://` to `https://` for ftpmirror / mirrors.kernel.org,
+   # and the version segment moves from `2.42` to `2.46.0` -- so the
+   # ConfigBinutils.cmake regex below is parameterised on both.
    local tarball_dir="${INSTALL_PREFIX}/source/tarballs"
-   local binutils_tar="${tarball_dir}/binutils-2.42.tar.gz"
-   local binutils_sha="5d2a6c1d49686a557869caae08b6c2e83699775efd27505e01b2f4db1a024ffc"
+   local binutils_ver binutils_sha binutils_url_proto
+   case "${so_version}" in
+      1.2.0|1.3.0)
+         binutils_ver="2.42"
+         binutils_sha="5d2a6c1d49686a557869caae08b6c2e83699775efd27505e01b2f4db1a024ffc"
+         binutils_url_proto="http"
+         ;;
+      1.6.0)
+         binutils_ver="2.46.0"
+         binutils_sha="8608fe44ab7de645f6ad0a898313b75338842490d609adb85c9fb2827c376af2"
+         binutils_url_proto="https"
+         ;;
+      *)
+         echo "[rocm_patches] ERROR: unknown so_version '${so_version}' for binutils pin" >&2
+         return 1
+         ;;
+   esac
+   local binutils_tar="${tarball_dir}/binutils-${binutils_ver}.tar.gz"
    mkdir -p "${tarball_dir}"
    if [ -f "${binutils_tar}" ] \
       && echo "${binutils_sha}  ${binutils_tar}" | sha256sum -c - >/dev/null 2>&1; then
-      echo "[rocm_patches] binutils-2.42 tarball already cached at ${binutils_tar}"
+      echo "[rocm_patches] binutils-${binutils_ver} tarball already cached at ${binutils_tar}"
    else
       rm -f "${binutils_tar}"
-      echo "[rocm_patches] pre-fetching binutils-2.42.tar.gz (retry across mirrors) ..."
+      echo "[rocm_patches] pre-fetching binutils-${binutils_ver}.tar.gz (retry across mirrors) ..."
       local urls=(
-         "https://ftp.gnu.org/gnu/binutils/binutils-2.42.tar.gz"
-         "http://ftpmirror.gnu.org/gnu/binutils/binutils-2.42.tar.gz"
-         "http://mirrors.kernel.org/sourceware/binutils/releases/binutils-2.42.tar.gz"
-         "https://sourceware.org/pub/binutils/releases/binutils-2.42.tar.gz"
+         "https://ftp.gnu.org/gnu/binutils/binutils-${binutils_ver}.tar.gz"
+         "http://ftpmirror.gnu.org/gnu/binutils/binutils-${binutils_ver}.tar.gz"
+         "http://mirrors.kernel.org/sourceware/binutils/releases/binutils-${binutils_ver}.tar.gz"
+         "https://sourceware.org/pub/binutils/releases/binutils-${binutils_ver}.tar.gz"
       )
       local got=0 url
       for url in "${urls[@]}"; do
@@ -601,7 +907,7 @@ build_rocprof_sys_1_3_0() {
             rm -f "${binutils_tar}"
          fi
       done
-      [ "${got}" -eq 1 ] || { echo "[rocm_patches] ERROR: could not fetch binutils-2.42.tar.gz" >&2; return 1; }
+      [ "${got}" -eq 1 ] || { echo "[rocm_patches] ERROR: could not fetch binutils-${binutils_ver}.tar.gz" >&2; return 1; }
    fi
 
    # ── rewrite timemory ConfigBinutils.cmake to use local tarball ───
@@ -619,28 +925,30 @@ build_rocprof_sys_1_3_0() {
    local cfg_file="${src_root}/projects/rocprofiler-systems/external/timemory/cmake/Modules/ConfigBinutils.cmake"
    [ -f "${cfg_file}" ] || { echo "[rocm_patches] ERROR: expected ${cfg_file}" >&2; return 1; }
    if ! grep -Fq "rocm-patches-localurl" "${cfg_file}"; then
-      echo "[rocm_patches] rewriting ConfigBinutils.cmake to use local binutils-2.42 tarball ..."
-      python3 - "${cfg_file}" "${binutils_tar}" <<'PY' || return 1
+      echo "[rocm_patches] rewriting ConfigBinutils.cmake to use local binutils-${binutils_ver} tarball ..."
+      python3 - "${cfg_file}" "${binutils_tar}" "${binutils_ver}" "${binutils_url_proto}" <<'PY' || return 1
 import re, sys, pathlib
-cfg, tarball = sys.argv[1], sys.argv[2]
+cfg, tarball, ver, proto = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 text = pathlib.Path(cfg).read_text()
 new_url = (
     "    # rocm-patches-localurl: collapsed URL list to the cluster-cached tarball.\n"
     "    # CMake 3.31 ExternalProject_Add rejects mixed path+url URL lists.\n"
     f"    URL {tarball}\n"
 )
+ver_re = re.escape(ver)
+proto_re = re.escape(proto)
 text2 = re.sub(
     r"    URL \$\{TIMEMORY_BINUTILS_DOWNLOAD_URL\}\n"
-    r"        http://ftpmirror\.gnu\.org/gnu/binutils/binutils-2\.42\.tar\.gz\n"
-    r"        http://mirrors\.kernel\.org/sourceware/binutils/releases/binutils-2\.42\.tar\.gz\n",
+    rf"        {proto_re}://ftpmirror\.gnu\.org/gnu/binutils/binutils-{ver_re}\.tar\.gz\n"
+    rf"        {proto_re}://mirrors\.kernel\.org/sourceware/binutils/releases/binutils-{ver_re}\.tar\.gz\n",
     new_url, text, count=1)
 if text == text2:
-    sys.exit("could not locate the URL block in ConfigBinutils.cmake; upstream layout drifted")
+    sys.exit(f"could not locate the URL block for binutils-{ver} in ConfigBinutils.cmake; upstream layout drifted")
 pathlib.Path(cfg).write_text(text2)
 PY
    fi
 
-   # ── workaround upstream FindTBB.cmake bug in v1.3.0 ──────────────
+   # ── workaround upstream FindTBB.cmake bug in v1.3.0 / v1.2.0 ─────
    # The FindTBB.cmake shipped in rocprofiler-systems v1.3.0 only
    # checks $TBB_INCLUDE_DIRS/{tbb/tbb_stddef.h,tbb/version.h}. On
    # Ubuntu 22.04 (libtbb-dev = TBB 2021.5) the version macros live
@@ -653,11 +961,17 @@ PY
    # rocm-7.2.x release line. Append the oneapi path so the foreach
    # (LAST-existing-wins) picks it on systems where it exists and
    # falls back to the original behaviour everywhere else.
-   local ftbb_file="${src_root}/projects/rocprofiler-systems/cmake/Modules/FindTBB.cmake"
-   [ -f "${ftbb_file}" ] || { echo "[rocm_patches] ERROR: expected ${ftbb_file}" >&2; return 1; }
-   if ! grep -Fq "rocm-patches-oneapi-fallback" "${ftbb_file}"; then
-      echo "[rocm_patches] rewriting FindTBB.cmake to handle Ubuntu 22.04 oneapi/tbb layout ..."
-      python3 - "${ftbb_file}" <<'PY' || return 1
+   #
+   # v1.6.0 (therock-7.13) already has the oneapi/tbb/version.h entry
+   # baked into FindTBB.cmake's _version_files list -- the upstream fix
+   # finally landed before that source baseline -- so we skip this
+   # python edit on 1.6.0 entirely.
+   if [ "${so_version}" = "1.3.0" ] || [ "${so_version}" = "1.2.0" ]; then
+      local ftbb_file="${src_root}/projects/rocprofiler-systems/cmake/Modules/FindTBB.cmake"
+      [ -f "${ftbb_file}" ] || { echo "[rocm_patches] ERROR: expected ${ftbb_file}" >&2; return 1; }
+      if ! grep -Fq "rocm-patches-oneapi-fallback" "${ftbb_file}"; then
+         echo "[rocm_patches] rewriting FindTBB.cmake to handle Ubuntu 22.04 oneapi/tbb layout ..."
+         python3 - "${ftbb_file}" <<'PY' || return 1
 import sys, pathlib
 f = sys.argv[1]
 text = pathlib.Path(f).read_text()
@@ -683,6 +997,7 @@ if old not in text:
     sys.exit("could not locate the _version_files block in FindTBB.cmake; upstream layout drifted")
 pathlib.Path(f).write_text(text.replace(old, new, 1))
 PY
+      fi
    fi
 
    # ── workaround upstream DyninstBoost.cmake bug in v1.3.0 ─────────
@@ -735,16 +1050,33 @@ pathlib.Path(f).write_text(text.replace(old, new, 1))
 PY
    fi
 
+   # The same DyninstBoost.cmake bug exists in BOTH the v1.2.0 / v1.3.0
+   # source line AND the v1.6.0 source line, but the surrounding text
+   # differs by a single token: v1.6.0 renamed the cmake option
+   # `BUILD_BOOST` to `ROCPROFSYS_BUILD_BOOST` so the prefix line of
+   # the python `old` pattern below has to be parameterised. The body
+   # of the early-return replacement is identical across versions
+   # (the `Dyninst::Boost{,_headers}` targets are also Dyninst-side
+   # artefacts that don't depend on the rocprof-sys version).
    local dboost_file="${src_root}/projects/rocprofiler-systems/cmake/DyninstBoost.cmake"
    [ -f "${dboost_file}" ] || { echo "[rocm_patches] ERROR: expected ${dboost_file}" >&2; return 1; }
+   local dboost_var
+   case "${so_version}" in
+      1.2.0|1.3.0) dboost_var="BUILD_BOOST" ;;
+      1.6.0)       dboost_var="ROCPROFSYS_BUILD_BOOST" ;;
+      *)
+         echo "[rocm_patches] ERROR: unknown so_version '${so_version}' for DyninstBoost edit" >&2
+         return 1
+         ;;
+   esac
    if ! grep -Fq "rocm-patches-boost-headers-import" "${dboost_file}"; then
-      echo "[rocm_patches] rewriting DyninstBoost.cmake to create Dyninst::Boost{_headers} in the Boost_FOUND path ..."
-      python3 - "${dboost_file}" <<'PY' || return 1
+      echo "[rocm_patches] rewriting DyninstBoost.cmake to create Dyninst::Boost{_headers} in the Boost_FOUND path (option=${dboost_var}) ..."
+      python3 - "${dboost_file}" "${dboost_var}" <<'PY' || return 1
 import sys, pathlib
-f = sys.argv[1]
+f, var = sys.argv[1], sys.argv[2]
 text = pathlib.Path(f).read_text()
 old = (
-    "if(NOT BUILD_BOOST)\n"
+    f"if(NOT {var})\n"
     "    find_package(Boost)\n"
     "endif()\n"
     "\n"
@@ -753,12 +1085,12 @@ old = (
     "endif()\n"
 )
 new = (
-    "if(NOT BUILD_BOOST)\n"
+    f"if(NOT {var})\n"
     "    find_package(Boost)\n"
     "endif()\n"
     "\n"
     "if(Boost_FOUND)\n"
-    "    # rocm-patches-boost-headers-import: in v1.3.0, BOTH\n"
+    "    # rocm-patches-boost-headers-import: BOTH\n"
     "    # add_library(Dyninst::Boost_headers ...) and the linkable\n"
     "    # Dyninst::Boost target are unreachable on the Boost_FOUND\n"
     "    # early-return path. external/dyninst/common/CMakeLists.txt\n"
@@ -803,7 +1135,7 @@ new = (
     "endif()\n"
 )
 if old not in text:
-    sys.exit("could not locate the Boost_FOUND early-return block; upstream layout drifted")
+    sys.exit(f"could not locate the Boost_FOUND early-return block (option={var}); upstream layout drifted")
 pathlib.Path(f).write_text(text.replace(old, new, 1))
 PY
    fi
@@ -871,29 +1203,29 @@ PY
       -DAMDDeviceLibs_DIR="${ROCM_PATH}/lib/cmake/AMDDeviceLibs" \
       || return 1
 
-   # In the v1.3.0 baseline (rocm-7.2.x source line),
-   # librocprof-sys.so.1.3.0 is produced by the default aggregating
-   # target and pulls in perfetto's static lib via its build deps.
-   # Building the shared-library target alone leaves
+   # In both v1.2.0 (rocm-7.1.x) and v1.3.0 (rocm-7.2.x) source lines,
+   # librocprof-sys.so.${so_version} is produced by the default
+   # aggregating target and pulls in perfetto's static lib via its
+   # build deps. Building the shared-library target alone leaves
    # external/perfetto/.../libperfetto.a unbuilt and the link fails.
-   # Build everything; we install only the .so.1.3.0 artifact below.
+   # Build everything; we install only the .so.${so_version} artifact below.
    echo "[rocm_patches] building all rocprofiler-systems targets (slow) ..."
    cmake --build "${build_dir}" --parallel "${NJOBS:-$(nproc)}" || return 1
 
    # ── install patched .so ──────────────────────────────────────────
    local built
-   built="$(find "${build_dir}" -maxdepth 6 -name 'librocprof-sys.so.1.3.0' \
+   built="$(find "${build_dir}" -maxdepth 6 -name "librocprof-sys.so.${so_version}" \
               -type f -printf '%T@ %p\n' | sort -rn | head -1 | cut -d' ' -f2-)"
-   [ -n "${built}" ] || { echo "[rocm_patches] ERROR: built .so not found" >&2; return 1; }
+   [ -n "${built}" ] || { echo "[rocm_patches] ERROR: built .so not found (expected librocprof-sys.so.${so_version})" >&2; return 1; }
 
    echo "[rocm_patches] installing ${built} -> ${lib_dir}/ ..."
-   ${SUDO} install -m 0755 "${built}" "${lib_dir}/librocprof-sys.so.1.3.0"
-   ${SUDO} ln -sfn librocprof-sys.so.1.3.0 "${lib_dir}/librocprof-sys.so.1"
-   ${SUDO} ln -sfn librocprof-sys.so.1     "${lib_dir}/librocprof-sys.so"
+   ${SUDO} install -m 0755 "${built}" "${lib_dir}/librocprof-sys.so.${so_version}"
+   ${SUDO} ln -sfn "librocprof-sys.so.${so_version}" "${lib_dir}/librocprof-sys.so.1"
+   ${SUDO} ln -sfn librocprof-sys.so.1               "${lib_dir}/librocprof-sys.so"
 
    # ── SONAME sanity check ──────────────────────────────────────────
    local soname
-   soname="$(readelf -d "${lib_dir}/librocprof-sys.so.1.3.0" 2>/dev/null \
+   soname="$(readelf -d "${lib_dir}/librocprof-sys.so.${so_version}" 2>/dev/null \
               | awk '/SONAME/{print $NF}' | tr -d '[]')"
    if [ "${soname}" != "librocprof-sys.so.1" ]; then
       echo "[rocm_patches] ERROR: SONAME mismatch (got '${soname}', expected 'librocprof-sys.so.1')" >&2
@@ -910,13 +1242,86 @@ compiler:      $(${CXX:-g++} --version 2>/dev/null | head -1)
 cmake:         $(cmake --version 2>/dev/null | head -1)
 host:          $(hostname)
 date:          $(date -u +%Y-%m-%dT%H:%M:%SZ)
-size:          $(stat -c%s "${lib_dir}/librocprof-sys.so.1.3.0") bytes
+size:          $(stat -c%s "${lib_dir}/librocprof-sys.so.${so_version}") bytes
 soname:        ${soname}
+so-version:    ${so_version}
+base-commit:   ${base_commit}
+bundle:        ${bundle_subdir}
 rocm-version:  ${ROCM_VERSION}
 EOF
    echo "[rocm_patches] wrote ${lib_dir}/.build-info"
 
    return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# build_rocprof_sys_1_3_0
+# -----------------------
+# Thin wrapper: rocprof-sys v1.3.0 baseline. Used for ROCm 7.2.x
+# (7.2.0 / 7.2.1 / 7.2.2 / 7.2.3) where the SDK ships
+# librocprof-sys.so.1.3.0 and the upstream rocm-systems tag
+# rocm-${ROCM_VERSION} exists (and has VERSION 1.3.0).
+# ─────────────────────────────────────────────────────────────────────
+build_rocprof_sys_1_3_0() {
+   _build_rocprof_sys_helper "1.3.0" "rocm-${ROCM_VERSION}" "rocprof-sys-1.3.0"
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# build_rocprof_sys_1_2_0
+# -----------------------
+# Thin wrapper: rocprof-sys v1.2.0 baseline. Used for the
+# AFAR-22.{1,2}.0 RC trees, which ship librocprof-sys.so.1.2.0 from
+# AMD-internal branches (no upstream rocm-systems tag rocm-afar-22.X.0
+# exists). The upstream rocm-systems tag rocm-7.1.0 has the matching
+# projects/rocprofiler-systems VERSION = 1.2.0 and is the source-of-
+# truth pin for the AFAR-22.x ship .so's ABI. All five patches in
+# sources/rocm-patches/rocprof-sys-1.2.0/ are vendored cherry-picks:
+# 0001-0004 are the same minimum-surface fixes that ship in
+# rocprof-sys-1.3.0/ (same code paths exist in v1.2.0), plus a
+# v1.2.0-specific 0005-tim-signals-skip-eager-bfd-file-map-preload
+# that defends against the rocm-7.1.x binutils-2.42 BFD SIGSEGV in
+# _bfd_x86_elf_get_synthetic_symtab (not needed on v1.3.0 because
+# the rocm-7.2.x ship .so already linked a newer binutils).
+# ─────────────────────────────────────────────────────────────────────
+build_rocprof_sys_1_2_0() {
+   _build_rocprof_sys_helper "1.2.0" "rocm-7.1.0" "rocprof-sys-1.2.0"
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# build_rocprof_sys_1_6_0
+# -----------------------
+# Thin wrapper: rocprof-sys v1.6.0 baseline. Used for ROCm 7.13.0
+# (and the AFAR/TheRock 23.2.x RC trees, all of which ship the same
+# v1.6.0 source). There is NO upstream rocm-systems tag named
+# `rocm-7.13.0` (verified 2026-06-05 via the public tags API): the
+# 7.13 numeric release was cut from the TheRock RC line, whose
+# upstream tag is `therock-7.13` (sha 79e85e1). That tag's
+# projects/rocprofiler-systems/VERSION reads `1.6.0`, matching the
+# librocprof-sys.so.1.6.0 the SDK installs.
+#
+# Why the v1.3.0 patch stack doesn't apply here:
+#   * v1.5+ refactored the inline guard logic from
+#     rocprofiler_configure() into a separate sdk_tool_configure()
+#     helper and ALREADY promoted sdk_configured to atomic + flipped
+#     `&&` to `||` in the settings/state guard (= two of the three
+#     pieces of our v1.3.0 cherry-pick).
+#   * What v1.6.0 STILL gets wrong is the OUTER once-guard in
+#     rocprofiler_configure() itself (lines 3081-3083 of the v1.6.0
+#     rocprofiler-sdk.cpp): it remains a non-atomic `static bool
+#     _first`. Two threads racing past that guard (the OMPT static-
+#     init path + the rocprofiler-sdk pthread_once-driven path) both
+#     reach the static `cfg` initializer; the second thread's caller
+#     starts using `tool_data` while the first thread is still
+#     populating its containers (agent_type map etc.) inside
+#     rocprofsys_init_tooling_hidden(), which is the SIGSEGV signature
+#     last night's MPI_Ghost_Exchange_Ver2_Rocprof-Sys CTest captured.
+#
+# The single .patch under sources/rocm-patches/rocprof-sys-1.6.0/
+# promotes that one outer once-guard to std::atomic<bool> + exchange.
+# That is the entire functional change (3 source lines).
+# ─────────────────────────────────────────────────────────────────────
+build_rocprof_sys_1_6_0() {
+   _build_rocprof_sys_helper "1.6.0" "therock-7.13" "rocprof-sys-1.6.0"
 }
 
 # ─────────────────────────────────────────────────────────────────────
@@ -979,6 +1384,8 @@ rocprof_compute_detail_block() {
       7.2.3) echo 'Upstream tag `rocm-7.2.3` -- monorepo (rocm-systems @ rocm-7.2.3), `projects/rocprofiler-compute` subtree.  Builds alongside the rocprof-sys 1.3.0 cherry-pick.' ;;
       afar-22.1.0)    echo 'RC tree (no `rocm-afar-22.1.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (afar-22.1.0 ships `167a9576`, upstream VERSION `3.3.0`).' ;;
       afar-22.2.0)    echo 'RC tree (no `rocm-afar-22.2.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (afar-22.2.0 ships `bad92dc4`, upstream VERSION `3.3.0`).' ;;
+      afar-23.1.0)    echo 'TheRock-AFAR RC tree (no `rocm-afar-23.1.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (afar-23.1.0 SDK is ROCm 7.12.0; soft no-op if VERSION.sha cannot be resolved upstream).' ;;
+      afar-23.2.1)    echo 'TheRock-AFAR RC tree (no `rocm-afar-23.2.1` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (afar-23.2.1 SDK is ROCm 7.13.0; soft no-op if VERSION.sha cannot be resolved upstream).' ;;
       therock-23.1.0) echo 'RC tree (no `rocm-therock-23.1.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (when present).' ;;
       therock-23.2.0) echo 'RC tree (no `rocm-therock-23.2.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (therock-23.2.0 ships `bc96f0a`, upstream VERSION `3.6.0`).' ;;
       *)     echo "Upstream tag \`rocm-$1\`." ;;
@@ -1056,6 +1463,101 @@ build_rocprof_compute() {
    MODULEFILE="${MODULE_FILE}" \
    bash "${overlay_dir}/install.sh" || return 1
 
+   return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# fix_rocprof_sys_instrument_libomp
+# ---------------------------------
+# ROCm 7.13.0 (AFAR / TheRock RC line) ships rocprof-sys-instrument with
+# an UNRESOLVED libomp.so dependency. ldd on
+# ${ROCM_PATH}/bin/rocprof-sys-instrument shows:
+#     libomp.so => not found      (x3)
+# and the Rocprof-sys_ROCm_Instrument_Check test fails at load time.
+#
+# Root cause (verified on /shared/apps/ubuntu/opt/rocm-7.13.0):
+#   * libomp.so is NOT a direct NEEDED of the executable. It is a
+#     TRANSITIVE dependency, pulled in by the Dyninst libraries
+#         lib/rocprofiler-systems/libcommon.so.13.0.0
+#         lib/rocprofiler-systems/libparseAPI.so.13.0.0
+#         lib/rocprofiler-systems/libsymtabAPI.so.13.0.0
+#   * Those libs carry RUNPATH
+#         $ORIGIN:$ORIGIN/rocprofiler-systems:$ORIGIN/llvm/lib:...
+#     where $ORIGIN is lib/rocprofiler-systems. The "$ORIGIN/llvm/lib"
+#     entry resolves to the NONEXISTENT lib/rocprofiler-systems/llvm/lib;
+#     the OpenMP runtime actually lives one level up at
+#     lib/llvm/lib/libomp.so.
+#   * DT_RUNPATH does NOT propagate to transitive dependencies, so the
+#     executable's own RUNPATH cannot help resolve libomp.so for those
+#     grandchild libs; the fix has to make libomp.so reachable from the
+#     libs' OWN RUNPATH.
+#
+# Fix (symlink, not patchelf): the FIRST entry of those libs' RUNPATH is
+# bare "$ORIGIN" -- i.e. lib/rocprofiler-systems itself. So a single
+# symlink
+#     lib/rocprofiler-systems/libomp.so -> ../llvm/lib/libomp.so
+# makes libomp.so resolve for ALL three libs at once (they share that
+# directory), with NO ELF modification. Verified: dropping such a
+# symlink flips `ldd libcommon.so.13.0.0` from "libomp.so => not found"
+# to a resolved path. A relative symlink target keeps it relocation-safe.
+#
+# This is preferred over rewriting the libs' RUNPATH with patchelf:
+# nothing in the SDK's binaries is touched, and the fix is a one-line
+# `rm` to revert.
+#
+# Idempotent: if the symlink already points at the OpenMP runtime, no-op.
+# Returns:
+#   0  -- linked, or already linked
+#   43 -- soft no-op (no rocprofiler-systems lib dir, or no libomp runtime)
+#   1  -- hard error (symlink creation failed)
+# ─────────────────────────────────────────────────────────────────────
+fix_rocprof_sys_instrument_libomp() {
+   local lib_dir="${ROCM_PATH}/lib/rocprofiler-systems"
+   local omp_lib="${ROCM_PATH}/lib/llvm/lib/libomp.so"
+   local link="${lib_dir}/libomp.so"
+   # Relative to ${lib_dir}: ../llvm/lib/libomp.so == ${ROCM_PATH}/lib/llvm/lib/libomp.so
+   local rel_target="../llvm/lib/libomp.so"
+
+   if [ ! -d "${lib_dir}" ]; then
+      echo "[rocm_patches] ${lib_dir} not present; nothing to link (soft no-op)"
+      return 43
+   fi
+
+   if [ ! -e "${omp_lib}" ]; then
+      echo "[rocm_patches] ${omp_lib} not on disk; no OpenMP runtime to link to (soft no-op)"
+      return 43
+   fi
+
+   # ── idempotency / safety ─────────────────────────────────────────
+   if [ -L "${link}" ]; then
+      if [ "$(readlink -f "${link}")" = "$(readlink -f "${omp_lib}")" ]; then
+         echo "[rocm_patches] ${link} already points at the OpenMP runtime (idempotent)"
+         return 0
+      fi
+      echo "[rocm_patches] ${link} exists but points at $(readlink "${link}"); repointing to ${rel_target}"
+      ${SUDO} ln -sfn "${rel_target}" "${link}" || return 1
+   elif [ -e "${link}" ]; then
+      echo "[rocm_patches] WARNING: ${link} exists and is NOT a symlink; leaving it untouched." >&2
+      echo "[rocm_patches]          (refusing to clobber a real file)" >&2
+      return 0
+   else
+      echo "[rocm_patches] linking libomp.so into the Dyninst lib dir:"
+      echo "[rocm_patches]   ${link} -> ${rel_target}"
+      ${SUDO} ln -s "${rel_target}" "${link}" || return 1
+   fi
+
+   # ── verify libomp.so now resolves via the instrument binary ──────
+   local exe="${ROCM_PATH}/bin/rocprof-sys-instrument"
+   if [ -e "${exe}" ]; then
+      local still
+      still="$(ldd "${exe}" 2>/dev/null | grep -E 'libomp\.so[^ ]* +=> +not found')"
+      if [ -n "${still}" ]; then
+         echo "[rocm_patches] WARNING: libomp.so still unresolved for rocprof-sys-instrument:" >&2
+         echo "${still}" | sed 's/^/[rocm_patches]   /' >&2
+      else
+         echo "[rocm_patches] libomp.so now resolves for rocprof-sys-instrument"
+      fi
+   fi
    return 0
 }
 
@@ -1411,12 +1913,43 @@ EOF
 #     is updated in a later commit.
 # ─────────────────────────────────────────────────────────────────────
 install_rocprof_sys_run_wrapper() {
-   local src="${PATCH_SOURCE_DIR}/rocprof-sys-1.3.0/rocprof-sys-run"
+   # The wrapper is the same shell script for v1.2.0, v1.3.0, and
+   # v1.6.0 bundles (it's an LD_PRELOAD shim that doesn't care about
+   # the rocprof-sys VERSION); a copy ships in each bundle so the
+   # wrapper installer can stay decoupled from the source-baseline
+   # dispatch. Search the bundles in PATCH_BUNDLES order so we pick
+   # the one matching the version we just built.
+   local src=""
+   local cand probe
+   for cand in ${PATCH_BUNDLES}; do
+      case "${cand}" in
+         rocprof-sys-1.6.0|rocprof-sys-1.3.0|rocprof-sys-1.2.0)
+            probe="${PATCH_SOURCE_DIR}/${cand}/rocprof-sys-run"
+            if [ -f "${probe}" ]; then
+               src="${probe}"
+               break
+            fi
+            ;;
+      esac
+   done
+   # Fallback: prefer 1.6.0, then 1.3.0, then 1.2.0, when PATCH_BUNDLES
+   # is empty (e.g. --module-file-only backfill where PATCH_BUNDLES is
+   # never computed). All three copies are byte-identical by
+   # construction; ordering is purely a stable-iteration choice.
+   if [ -z "${src}" ]; then
+      for cand in rocprof-sys-1.6.0 rocprof-sys-1.3.0 rocprof-sys-1.2.0; do
+         probe="${PATCH_SOURCE_DIR}/${cand}/rocprof-sys-run"
+         if [ -f "${probe}" ]; then
+            src="${probe}"
+            break
+         fi
+      done
+   fi
    local dst_dir="${ROCM_PATH}/share/rocprofiler-systems/bin"
    local dst="${dst_dir}/rocprof-sys-run"
 
-   if [ ! -f "${src}" ]; then
-      echo "[rocm_patches] WARNING: vendored wrapper not found: ${src}"
+   if [ -z "${src}" ] || [ ! -f "${src}" ]; then
+      echo "[rocm_patches] WARNING: vendored wrapper not found under ${PATCH_SOURCE_DIR}/rocprof-sys-{1.2.0,1.3.0,1.6.0}/"
       echo "[rocm_patches]          libbfd LD_PRELOAD workaround will NOT be applied;"
       echo "[rocm_patches]          rocprof-sys-instrumented MPI programs may SegFault"
       echo "[rocm_patches]          on hosts whose system libbfd is older than 2.42."
@@ -1540,11 +2073,25 @@ fi
 # when the matching bundle was built this run.
 built_rocprof_sys=0
 built_rocprof_compute=0
+built_instrument_libomp=0
 
 for bundle in ${PATCH_BUNDLES}; do
    case "${bundle}" in
       rocprof-sys-1.3.0)
          build_rocprof_sys_1_3_0 && built_rocprof_sys=1 || rc=$? ;;
+      rocprof-sys-1.2.0)
+         # Same post-build finishing-step set as 1.3.0
+         # (patch_module_file + install_rocprof_sys_run_wrapper +
+         # fix_overlay_runpath_and_libunwind + swap_sdk_lib_symlink),
+         # all keyed off built_rocprof_sys=1 below.
+         build_rocprof_sys_1_2_0 && built_rocprof_sys=1 || rc=$? ;;
+      rocprof-sys-1.6.0)
+         # Same post-build finishing-step set as 1.3.0 / 1.2.0; the
+         # finishing-step helpers pick up the patched .so by glob
+         # (`librocprof-sys.so.[0-9]*.[0-9]*.[0-9]*`) so they work
+         # against any of the three SO versions without a special
+         # case.
+         build_rocprof_sys_1_6_0 && built_rocprof_sys=1 || rc=$? ;;
       rocprof-compute)
          # build_rocprof_compute runs the bundle's own install.sh which
          # edits the modulefile (prepend_path PATH), so there's no
@@ -1561,6 +2108,21 @@ for bundle in ${PATCH_BUNDLES}; do
             built_rocprof_compute=1
          elif [ "${bundle_rc}" -eq 43 ]; then
             : # soft skip; leave built_rocprof_compute=0, rc unchanged
+         else
+            rc=${bundle_rc}
+         fi ;;
+      rocprof-sys-instrument-libomp)
+         # Lightweight symlink fix: drop libomp.so into the SDK's Dyninst
+         # lib dir so the transitively NEEDed libomp.so resolves via
+         # those libs' $ORIGIN RUNPATH -> rocprof-sys-instrument loads.
+         # No build, no modulefile edit, no ELF modification. Exit 43 =
+         # soft skip (no rocprofiler-systems lib dir, or no libomp runtime).
+         fix_rocprof_sys_instrument_libomp
+         bundle_rc=$?
+         if [ "${bundle_rc}" -eq 0 ]; then
+            built_instrument_libomp=1
+         elif [ "${bundle_rc}" -eq 43 ]; then
+            : # soft skip; leave built_instrument_libomp=0, rc unchanged
          else
             rc=${bundle_rc}
          fi ;;
@@ -1605,13 +2167,16 @@ fi
 # write_rocm_patches_provenance() for the full idempotency story.
 if [ "${rc}" -eq 0 ] \
      && { [ "${built_rocprof_sys}" -eq 1 ] \
-          || [ "${built_rocprof_compute}" -eq 1 ]; }; then
+          || [ "${built_rocprof_compute}" -eq 1 ] \
+          || [ "${built_instrument_libomp}" -eq 1 ]; }; then
    write_rocm_patches_provenance || rc=$?
 fi
 
 if [ "${rc}" -eq 0 ]; then
    echo ""
-   if [ "${built_rocprof_sys}" -eq 0 ] && [ "${built_rocprof_compute}" -eq 0 ]; then
+   if [ "${built_rocprof_sys}" -eq 0 ] \
+        && [ "${built_rocprof_compute}" -eq 0 ] \
+        && [ "${built_instrument_libomp}" -eq 0 ]; then
       # All bundles dispatched ran (or were skipped) without error, but
       # nothing landed on disk -- e.g. every dispatched bundle was a
       # soft no-op (RC tree without a public-resolvable VERSION.sha).
@@ -1621,10 +2186,25 @@ if [ "${rc}" -eq 0 ]; then
    else
       echo "[rocm_patches] ROCm ${ROCM_VERSION} patch overlay applied successfully."
       if [ "${built_rocprof_sys}" -eq 1 ]; then
-         echo "[rocm_patches]   rocprof-sys library: ${INSTALL_PREFIX}/lib/librocprof-sys.so.1.3.0"
+         # Print whichever versioned .so the build actually produced.
+         # The post-build finishing-step helpers and this summary all
+         # use the same `librocprof-sys.so.[0-9]*.[0-9]*.[0-9]*` glob
+         # so the line stays correct across 1.2.0 / 1.3.0 / 1.6.0.
+         # NB: this block runs at top level (not inside a function),
+         # so we cannot use `local`; pick a name that does not collide
+         # with any global.
+         _rocm_patches_built_so=$(ls -1 "${INSTALL_PREFIX}/lib"/librocprof-sys.so.[0-9]*.[0-9]*.[0-9]* 2>/dev/null \
+                                    | grep -vE '\.orig$' | head -1)
+         echo "[rocm_patches]   rocprof-sys library: ${_rocm_patches_built_so:-${INSTALL_PREFIX}/lib/librocprof-sys.so.<unknown>}"
+         unset _rocm_patches_built_so
       fi
       if [ "${built_rocprof_compute}" -eq 1 ]; then
          echo "[rocm_patches]   rocprof-compute:     ${INSTALL_PREFIX}/rocprof-compute/bin/rocprof-compute"
+      fi
+      if [ "${built_instrument_libomp}" -eq 1 ]; then
+         echo "[rocm_patches]   rocprof-sys-instrument: libomp.so symlinked into Dyninst lib dir"
+         echo "[rocm_patches]                          (${ROCM_PATH}/lib/rocprofiler-systems/libomp.so"
+         echo "[rocm_patches]                           -> ../llvm/lib/libomp.so)"
       fi
       echo "[rocm_patches]   module file:         ${MODULE_FILE}"
    fi

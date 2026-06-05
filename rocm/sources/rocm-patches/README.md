@@ -47,6 +47,43 @@ under the appropriate directory and extend that mapping.
 
 ## Currently vendored patches
 
+### `rocprof-sys-1.6.0/` -- one cherry-pick onto v1.6.0's outer once-guard
+
+Affected ROCm releases: **7.13.0, afar-23.2.1, therock-23.2.0**
+(all three ship `librocprof-sys.so.1.6.0` from the same upstream
+source baseline).
+
+Without the cherry-pick, every MPI rank of an instrumented MPI +
+OpenMP-target offload binary SIGSEGVs during static-init in
+`rocprofiler_configure → sdk_tool_configure → rocprofsys_init_tooling_hidden`,
+inside the `agent_type` map's `operator[]`. The crash chain enters
+via the OMPT path (`__tgt_register_lib → ompt_libomp_connect →
+ompt_start_tool → rocprofiler_set_api_table → rocprofiler_configure`)
+and is reproduced cleanly by `MPI_Ghost_Exchange_Ver2_Rocprof-Sys`
+in CTest.
+
+Two of the three pieces of our v1.3.0 cherry-pick already landed
+upstream in v1.6.0 via [PR #3412](https://github.com/ROCm/rocm-systems/pull/3412)
+(merged 2026-04-08): `sdk_configured` is already a `std::atomic<bool>`
+exchange in `sdk_tool_configure()`, and the
+`settings_are_configured() || state < Active` guard already uses `||`
+instead of `&&`. The third piece -- the **outer** once-guard in
+`rocprofiler_configure()` itself -- was left non-atomic in PR #3412,
+which permits a race that double-enters the body and lets the second
+thread's caller use a half-populated `tool_data`. This bundle's
+single 3-line patch promotes that outer guard to `std::atomic<bool>`,
+closing the remaining hole.
+
+Pin: upstream tag `therock-7.13` (sha `79e85e1`,
+`projects/rocprofiler-systems/VERSION` = `1.6.0`). There is no
+`rocm-7.13.0` tag upstream -- 7.13.0 was cut from the TheRock RC
+line. `build_rocprof_sys_1_6_0()` hard-codes the pin accordingly.
+
+References:
+* upstream PR (parent of the same logical fix): https://github.com/ROCm/rocm-systems/pull/3412
+* full bug write-up: `../../PROFILING_TEAM_REPORT_rocprof-sys_v1.6.0_2026_05_20.md`
+* CTest reproducer: `/shareddata/cdash_testing/HPCTrainingExamples/tests/mpi_ghost_exchange_ver2.sh`
+
 ### `rocprof-sys-1.3.0/` -- one cherry-pick from upstream PR #3412
 
 Affected ROCm releases: **7.2.0, 7.2.1**.
@@ -137,13 +174,17 @@ Coverage matrix for these two finishing steps:
 
 | ROCm release line | rocprof-sys overlay | runpath+libunwind fix | SDK symlink swap |
 |-------------------|---------------------|-----------------------|------------------|
-| `7.2.0`, `7.2.1`            | yes (in-tree build) | yes | yes |
-| `7.1.0`, `7.1.1`            | yes (apply_and_build.sh) | yes | yes |
-| `7.0.0`, `7.0.1`, `7.0.2`   | yes (apply_and_build.sh) | yes | yes |
+| `7.13.0`                    | yes (in-tree build, v1.6.0) | yes | yes |
+| `afar-23.2.1`               | yes (in-tree build, v1.6.0) | yes | yes |
+| `therock-23.2.0`            | yes (in-tree build, v1.6.0) | yes | yes |
+| `7.2.0`, `7.2.1`            | yes (in-tree build, v1.3.0) | yes | yes |
+| `7.2.2`, `7.2.3`            | yes (in-tree build, v1.3.0) | yes | yes |
+| `7.1.0`, `7.1.1`            | yes (apply_and_build.sh)    | yes | yes |
+| `7.0.0`, `7.0.1`, `7.0.2`   | yes (apply_and_build.sh)    | yes | yes |
 | `6.4.0`, `6.4.1`, `6.4.2`, `6.4.3` | yes (apply_and_build.sh) | yes | yes |
 | `afar-22.1.0`, `afar-22.2.0`       | yes (shortcut from rocm-patches-7.1.0/lib) | yes | yes |
 | `6.3.0` -- `6.3.4`          | not engineered (different bug surface) | n/a | n/a |
-| `therock-23.1.0`, `therock-23.2.0` | not engineered                          | n/a | n/a |
+| `therock-23.1.0`            | not engineered (v1.5.0 source; documented as passing MPI_Ghost_Exchange_Ver2) | n/a | n/a |
 
 Rollback is one command per overlay: `mv ${ROCM_PATH}/lib/librocprof-sys.so.X.Y.Z.orig ${ROCM_PATH}/lib/librocprof-sys.so.X.Y.Z`.
 
@@ -235,7 +276,7 @@ of `main_setup.sh`), and its current per-tree coverage is:
 | `afar-22.2.0`        | Track A attempted, **soft no-op**: VERSION.sha `bad92dc4` not in any public ref (HTTP 422 from commits API). Same root cause as 22.1.0. | Track B (same as 22.1.0) |
 | `afar-7.0.5`         | not in dispatch (no `rocprof-compute` install on this tree) | n/a (no `rocprof-sys` install) |
 | `therock-23.1.0`     | not in dispatch (empty `VERSION.sha`; cannot pin upstream commit) | not engineered (v1.5.0 source; documented as passing `MPI_Ghost_Exchange_Ver2`) |
-| `therock-23.2.0`     | Track A attempted, **soft no-op**: VERSION.sha `bc96f0a` not in any public ref (HTTP 422 from commits API). Same root cause as the afar trees: built from internal AMD branch. | not engineered (v1.6.0 init refactor regression; would need a v1.6.0-shaped patch bundle from scratch -- separate effort) |
+| `therock-23.2.0`     | Track A attempted, **soft no-op**: VERSION.sha `bc96f0a` not in any public ref (HTTP 422 from commits API). Same root cause as the afar trees: built from internal AMD branch. | yes (in-tree build via `rocprof-sys-1.6.0` bundle, pinned to upstream tag `therock-7.13` = VERSION 1.6.0) |
 
 Net Track A outcome for RC trees: on this cluster all three RC trees
 that had a populated `VERSION.sha` produced *unresolvable* commits, so
