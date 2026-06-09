@@ -109,6 +109,7 @@ SITE_CLI=0
 # whitelist so each block becomes uniformly gated.
 : ${BUILD_OPENMPI:="1"}
 : ${BUILD_MVAPICH:="1"}
+: ${BUILD_ROCSHMEM:="1"}
 : ${BUILD_ROCPROF_SYS:="1"}
 : ${BUILD_ROCPROF_COMPUTE:="1"}
 : ${BUILD_HIPIFLY:="1"}
@@ -756,6 +757,7 @@ declare -A PKG_FLAG=(
    [openmpi]=BUILD_OPENMPI
    [mpi4py]=BUILD_MPI4PY
    [mvapich]=BUILD_MVAPICH
+   [rocshmem]=BUILD_ROCSHMEM
    [rocprof-sys]=BUILD_ROCPROF_SYS
    [rocprof-compute]=BUILD_ROCPROF_COMPUTE
    [hpctoolkit]=BUILD_HPCTOOLKIT
@@ -796,6 +798,7 @@ declare -A PKG_FLAG=(
 declare -A PKG_VER_FLAG=(
    [openmpi]="--openmpi-version"
    [mpi4py]="--mpi4py-version"
+   [rocshmem]="--rocshmem-version"
    [hpctoolkit]="--hpctoolkit-version"
    [likwid]="--likwid-version"
    [mdb]="--mdb-version"
@@ -1759,6 +1762,12 @@ run_and_log flang-new rocm/scripts/flang-new_setup.sh ${COMMON_OPTIONS} --build-
 # openmpi_setup.sh; we just thread --build-openmpi through.
 run_and_log_versioned openmpi comm/scripts/openmpi_setup.sh ${COMMON_OPTIONS} --build-openmpi ${BUILD_OPENMPI} --build-xpmem 1 ${REPLACE_OPTS} \
    $(path_args " " rocmplus-${ROCMPLUS_SUFFIX}/openmpi)
+
+# rocshmem's RO backend uses the openmpi module built just above, so this
+# block follows openmpi. BUILD_ROCSHMEM=0 opt-out + existence check both
+# live in rocshmem_setup.sh; we thread --build-rocshmem and --mpi-module.
+run_and_log_versioned rocshmem comm/scripts/rocshmem_setup.sh ${COMMON_OPTIONS} --build-rocshmem ${BUILD_ROCSHMEM} --mpi-module openmpi ${REPLACE_OPTS} \
+   $(path_args " " rocmplus-${ROCMPLUS_SUFFIX}/rocshmem)
 
 # mpi4py owns its own version (see comment block at the version pins
 # above). main_setup.sh passes only --install-path (the parent dir);

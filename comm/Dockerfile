@@ -19,6 +19,7 @@ FROM ${DOCKER_USER}/rocm:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VE
 ARG ROCM_VERSION
 ARG AMDGPU_GFXMODEL
 ARG BUILD_MPI4PY
+ARG BUILD_ROCSHMEM
 
 LABEL maintainer="bob.robey@amd.com"
 
@@ -42,6 +43,12 @@ RUN  /tmp/comm/mvapich_setup.sh --rocm-version ${ROCM_VERSION} && \
 COPY comm/scripts/mpi4py_setup.sh /tmp/comm/mpi4py_setup.sh
 RUN  /tmp/comm/mpi4py_setup.sh --rocm-version ${ROCM_VERSION}  --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-mpi4py ${BUILD_MPI4PY} && \
      rm -f /tmp/comm/mpi4py_setup.sh
+
+# Install rocSHMEM (RO + IPC backend). Runs after openmpi so the
+# openmpi module needed by the RO backend is present.
+COPY comm/scripts/rocshmem_setup.sh /tmp/comm/rocshmem_setup.sh
+RUN  /tmp/comm/rocshmem_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-rocshmem ${BUILD_ROCSHMEM} && \
+     rm -f /tmp/comm/rocshmem_setup.sh
 
 ENV LC_ALL C.UTF-8
 

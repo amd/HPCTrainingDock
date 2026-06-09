@@ -22,6 +22,7 @@
 : ${BUILD_TAU:="0"}
 : ${BUILD_SCOREP:="0"}
 : ${BUILD_MPI4PY:="0"}
+: ${BUILD_ROCSHMEM:="0"}
 : ${BUILD_FFTW:="0"}
 : ${BUILD_MINICONDA3:="0"}
 : ${BUILD_MINIFORGE3:="0"}
@@ -154,6 +155,7 @@ usage()
     print_default_option build-petsc "[BUILD_PETSC: 0 or 1]" "include this flag to build version 3.24.1" "${BUILD_PETSC} (don't build)"
     print_default_option build-hypre "[BUILD_HYPRE: 0 or 1]" "include this flag to build version 3.0.0" "${BUILD_HYPRE} (don't build)"
     print_default_option build-mpi4py "[BUILD_MPI4PY: 0 or 1]" "include this flag to build version 4.1.0" "${BUILD_MPI4PY} (don't build)"
+    print_default_option build-rocshmem "[BUILD_ROCSHMEM: 0 or 1]" "include this flag to build rocSHMEM (RO + IPC backend)" "${BUILD_ROCSHMEM} (don't build)"
     print_default_option build-fftw "[BUILD_FFTW: 0 or 1]" "include this flag to build version 3.3.10" "${BUILD_FFTW} (don't build)"
     print_default_option build-flang-new "[BUILD_FLANGNEW: 0 or 1]" "include this flag to unpack the latest ROCm AFAR drop" "${BUILD_FLANGNEW} (don't build)"
     print_default_option install-grafana "[INSTALL_GRAFANA: 0 or 1]" "include this flag to install Grafana" "${INSTALL_GRAFANA} (don't build)"
@@ -346,6 +348,10 @@ do
             BUILD_MPI4PY="1"
             reset-last
             ;;
+        "--build-rocshmem")
+            BUILD_ROCSHMEM="1"
+            reset-last
+            ;;
         "--build-fftw")
             BUILD_FFTW="1"
             reset-last
@@ -404,6 +410,7 @@ do
 	    BUILD_TAU="1"
 	    BUILD_SCOREP="1"
 	    BUILD_MPI4PY="1"
+	    BUILD_ROCSHMEM="1"
 	    BUILD_FFTW="1"
 	    BUILD_HPCTOOLKIT="1"
 	    BUILD_MDB="1"
@@ -451,6 +458,10 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
          "mpi4py")
 	    echo "Setting MPI4PY build"
             BUILD_MPI4PY=1
+	    ;;
+         "rocshmem")
+	    echo "Setting rocSHMEM build"
+            BUILD_ROCSHMEM=1
 	    ;;
 	 # optional tool packages
          "grafana")
@@ -605,6 +616,7 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
 	    BUILD_FFTW="1"
             BUILD_SCOREP="1"
             BUILD_MPI4PY="1"
+            BUILD_ROCSHMEM="1"
             BUILD_HDF5="1"
             BUILD_NETCDF="1"
             BUILD_ADIOS2="1"
@@ -705,6 +717,7 @@ do
        --build-arg AMDGPU_GFXMODEL=\"${AMDGPU_GFXMODEL}\" \
        --build-arg AMDGPU_GFXMODEL_STRING=\"${AMDGPU_GFXMODEL_STRING}\" \
        --build-arg BUILD_MPI4PY=${BUILD_MPI4PY} \
+       --build-arg BUILD_ROCSHMEM=${BUILD_ROCSHMEM} \
        -t ${DOCKER_USER}/comm:release-base-${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION} \
        -f comm/Dockerfile .
 
