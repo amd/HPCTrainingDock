@@ -2,6 +2,16 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-06-09
+
+- User-facing modules:
+    + uprof
+- Modules:
+    + uprof/5.3-518
+- /shared/apps/ubuntu/opt:
+    + AMDuProf_5.3-518
+
+[Full snapshot](archive/AAC6_system_status_2026-06-09.md)
 ## 2026-06-05
 
 - Modules:
