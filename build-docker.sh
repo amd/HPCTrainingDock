@@ -28,6 +28,7 @@
 : ${BUILD_MINIFORGE3:="0"}
 : ${BUILD_HPCTOOLKIT:="0"}
 : ${BUILD_MDB:="0"}
+: ${BUILD_INTELLIKIT:="0"}
 : ${BUILD_HDF5:="0"}
 : ${BUILD_PETSC:="0"}
 : ${BUILD_HYPRE:="0"}
@@ -150,6 +151,7 @@ usage()
     print_default_option build-tau "[BUILD_TAU: 0 or 1]"  "include this flag to build version dev" "${BUILD_TAU} (don't build)"
     print_default_option build-scorep "[BUILD_SCOREP: 0 or 1]" "include this flag to build version 9.4" "${BUILD_SCOREP} (don't build)"
     print_default_option build-mdb "[BUILD_MDB: 0 or 1]" "include this flag to build the MPI Debugger (mdb)" "${BUILD_MDB} (don't build)"
+    print_default_option build-intellikit "[BUILD_INTELLIKIT: 0 or 1]" "include this flag to build the AMDResearch IntelliKit toolset (accordo, kerncap, linex, metrix, nexus, rocm_mcp, uprof_mcp)" "${BUILD_INTELLIKIT} (don't build)"
     print_default_option build-magma "[BUILD_MAGMA: 0 or 1]" "include this flag to build version master" "${BUILD_MAGMA} (don't build)"
     print_default_option build-x11vnc "[BUILD_X11VNC: 0 or 1]" "include this flag to enable x11 screen forwarding in the container" "${BUILD_X11VNC} (don't build)"
     print_default_option build-petsc "[BUILD_PETSC: 0 or 1]" "include this flag to build version 3.24.1" "${BUILD_PETSC} (don't build)"
@@ -364,6 +366,10 @@ do
             BUILD_MDB="1"
             reset-last
             ;;
+        "--build-intellikit")
+            BUILD_INTELLIKIT="1"
+            reset-last
+            ;;
         "--build-x11vnc")
             BUILD_X11VNC="1"
             reset-last
@@ -414,6 +420,7 @@ do
 	    BUILD_FFTW="1"
 	    BUILD_HPCTOOLKIT="1"
 	    BUILD_MDB="1"
+	    BUILD_INTELLIKIT="1"
 	    BUILD_X11VNC="1"
 	    BUILD_FLANGNEW="1"
 	    BUILD_FTORCH="1"
@@ -511,6 +518,10 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
          "mdb")
 	    echo "Setting mdb build"
             BUILD_MDB=1
+	    ;;
+         "intellikit")
+	    echo "Setting intellikit build"
+            BUILD_INTELLIKIT=1
 	    ;;
          "tau")
 	    echo "Setting TAU build"
@@ -622,6 +633,7 @@ if [ "${BUILD_OPTIONS}" != "" ]; then
             BUILD_ADIOS2="1"
             BUILD_HPCTOOLKIT="1"
             BUILD_MDB="1"
+            BUILD_INTELLIKIT="1"
             BUILD_X11VNC="1"
             BUILD_FLANGNEW="1"
             BUILD_FTORCH="1"
@@ -729,6 +741,7 @@ do
        --build-arg BUILD_TAU=${BUILD_TAU}  \
        --build-arg BUILD_SCOREP=${BUILD_SCOREP} \
        --build-arg BUILD_MDB=${BUILD_MDB} \
+       --build-arg BUILD_INTELLIKIT=${BUILD_INTELLIKIT} \
        --build-arg PYTHON_VERSION=${PYTHON_VERSION}  \
        --build-arg INSTALL_ROCPROF_SYS_FROM_SOURCE=${INSTALL_ROCPROF_SYS_FROM_SOURCE} \
        --build-arg INSTALL_ROCPROF_COMPUTE_FROM_SOURCE=${INSTALL_ROCPROF_COMPUTE_FROM_SOURCE} \

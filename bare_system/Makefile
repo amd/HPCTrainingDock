@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
-all: rocm openmpi rocprof-sys_rocm rocprof-sys_source rocprof-compute_rocm rocprof-compute_source kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk compiler petsc hypre tensorflow ftorch julia smartsim lammps
-.PHONY: baseospackages rocm openmpi mvapich slurm rocprof-sys_rocm rocprof-sys_source amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk rocprof-compute_rocm rocprof-compute_source compiler petsc hypre tensorflow ftorch julia smartsim lammps
+all: rocm openmpi rocprof-sys_rocm rocprof-sys_source rocprof-compute_rocm rocprof-compute_source kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk compiler petsc hypre tensorflow ftorch julia smartsim lammps likwid mdb intellikit
+.PHONY: baseospackages rocm openmpi mvapich slurm rocprof-sys_rocm rocprof-sys_source amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk rocprof-compute_rocm rocprof-compute_source compiler petsc hypre tensorflow ftorch julia smartsim lammps likwid mdb intellikit
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
@@ -26,6 +26,9 @@ hipfort: hipfort.timestamp
 hipifly: hipifly.timestamp
 tau: tau.timestamp
 scorep: scorep.timestamp
+likwid: likwid.timestamp
+mdb: mdb.timestamp
+intellikit: intellikit.timestamp
 mpi4py: mpi4py.timestamp
 hpctoolkit: hpctoolkit.timestamp
 cupy: cupy.timestamp
@@ -57,6 +60,7 @@ rocm_tests: rocm_tests.timestamp
 openmpi_tests: openmpi_tests.timestamp
 tau_tests: tau_tests.timestamp
 scorep_tests: scorep_tests.timestamp
+intellikit_tests: intellikit_tests.timestamp
 aomp_tests: aomp_tests.timestamp
 kokkos_tests: kokkos_tests.timestamp
 miniconda3_tests: miniconda3_tests.timestamp
@@ -172,6 +176,28 @@ hpctoolkit.timestamp: rocm.timestamp
 	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
 	   --build-hpctoolkit 1
 	touch hpctoolkit.timestamp
+
+likwid.timestamp: rocm.timestamp
+	tools/scripts/likwid_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
+	   --build-likwid 1
+	touch likwid.timestamp
+
+mdb.timestamp: rocm.timestamp
+	tools/scripts/mdb_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
+	   --build-mdb 1
+	touch mdb.timestamp
+
+intellikit.timestamp: rocm.timestamp
+	tools/scripts/intellikit_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
+	   --python-version '${PYTHON_VERSION}' \
+	   --build-intellikit 1
+	touch intellikit.timestamp
 
 # From Training layer
 
@@ -400,6 +426,10 @@ rocprofiler-sdk_tests.timestamp: rocprofiler-sdk.timestamp HPCTrainingExamples
 scorep_tests.timestamp: scorep.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R Score-P
 	touch scorep_tests.timestamp
+
+intellikit_tests.timestamp: intellikit.timestamp HPCTrainingExamples
+	cd HPCTrainingExamples/tests/build && ctest -R IntelliKit
+	touch intellikit_tests.timestamp
 
 mpi4py_tests.timestamp: mpi4py.timestamp HPCTrainingExamples
 	cd HPCTrainingExamples/tests/build && ctest -R MPI4PY

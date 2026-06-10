@@ -96,6 +96,7 @@ SITE_CLI=0
 : ${BUILD_MINIFORGE3:="1"}
 : ${BUILD_LIKWID:="1"}
 : ${BUILD_MDB:="1"}
+: ${BUILD_INTELLIKIT:="1"}
 : ${BUILD_HPCTOOLKIT:="1"}
 : ${BUILD_MPI4PY:="1"}
 : ${BUILD_TAU:="1"}
@@ -207,11 +208,11 @@ usage()
    echo "  --install-rocprof-compute-from-source [0 or 1]:  default is $INSTALL_ROCPROF_COMPUTE_FROM_SOURCE (false)"
    echo "  --install-rocprof-sys-from-source [0 or 1]:  default is $INSTALL_ROCPROF_SYS_FROM_SOURCE (false)"
    echo "  --use-makefile [0 or 1]:  default is 0 (false)"
-   echo "  --quick-installs [0 or 1]:  skip packages whose wall >= 20 min (measured from job 8065 sweep): pytorch (91m), tensorflow (70m), jax (34m, when policy gate allows). Also skips ftorch (transitive: needs pytorch), julia (dormant: no install wired), and likwid + mdb (explicit always-skip in quick mode regardless of wall, e.g. so per-tool iteration does not retrigger their builds and their occasional flakiness does not block the long-pole iteration loop). Threshold raised from 15 -> 20 min after job 8065 audit moved petsc (17m) and scorep (17m) under the cutoff. Default $QUICK_INSTALLS"
+   echo "  --quick-installs [0 or 1]:  skip packages whose wall >= 20 min (measured from job 8065 sweep): pytorch (91m), tensorflow (70m), jax (34m, when policy gate allows). Also skips ftorch (transitive: needs pytorch), julia (dormant: no install wired), and likwid + mdb + intellikit (explicit always-skip in quick mode regardless of wall, e.g. so per-tool iteration does not retrigger their builds and their occasional flakiness does not block the long-pole iteration loop). Threshold raised from 15 -> 20 min after job 8065 audit moved petsc (17m) and scorep (17m) under the cutoff. Default $QUICK_INSTALLS"
    echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf the versioned subdir under \${TOP_INSTALL_PATH} (the version itself lives in the leaf script). Default $REPLACE_EXISTING"
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
    echo "  --skip-patches [0 or 1]:  operator opt-out for the rocm-patches step (rocm/scripts/rocm_patches.sh). Default 0 runs the step; for most ROCm versions the patches script self-no-ops via NOOP_RC=43 so the cost is nil. Set to 1 when targeting a tree where the patches overlay would mismatch the runtime (e.g. 7.2.0 / 7.2.1 patches built for a newer userland and running on Ubuntu 22.04 nodes). When skipped, the per-package summary records 'rocm-patches(--skip-patches)' in the DESELECTED bucket. Default $SKIP_PATCHES"
-   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, likwid, mdb, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, hpctoolkit, likwid, mdb, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Currently supported only for pytorch; keys are aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build."
+   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, likwid, mdb, intellikit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, hpctoolkit, likwid, mdb, intellikit, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Currently supported only for pytorch; keys are aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build."
    echo "  --rocm-rc-prefix [ FAMILY ]:  release-candidate family name (e.g. 'therock', 'afar'). Auto-detected from \${ROCM_PATH} basename for rocm-{therock,afar}-* trees. Empty for regular releases. When non-empty, install/module dirs become rocmplus-\${FAMILY}-\${ROCM_VERSION}/ instead of rocmplus-\${ROCM_VERSION}/ -- EXCEPT for FAMILY='afar', where the suffix is rocmplus-afar-\${ROCM_RC_COMPILER}-\${ROCM_VERSION}/ (compiler-AND-rocm-keyed; see --rocm-rc-compiler). Default: auto-detected (empty for regular releases)."
    echo "  --rocm-rc-compiler [ COMPILER ]:  compiler/AFAR release number for AFAR trees (e.g. '22.2.0' for rocm-afar-22.2.0, '23.2.1' for rocm-afar-23.2.1 a.k.a. the TheRock-AFAR drop). Auto-detected from \${ROCM_PATH} basename when ROCM_RC_PREFIX='afar'. Empty for non-afar trees. When non-empty AND ROCM_RC_PREFIX='afar', the rocmplus suffix becomes afar-\${COMPILER}-\${ROCM_VERSION} so two AFAR drops with the same SDK numeric but different compiler releases get distinct rocmplus trees. Default: auto-detected."
    echo "  --pnetcdf-version [ PNETCDF_VERSION ]:  PnetCDF version threaded through to extras/scripts/netcdf_setup.sh --pnetcdf-version. Empty (default) -> leaf script's internal default. Install lands at rocmplus-<v>/pnetcdf-v\$PNETCDF_VERSION/ with a pnetcdf/\$PNETCDF_VERSION modulefile."
@@ -642,11 +643,13 @@ declare -A DESELECTED_BY=()
 # sides of the line.
 #
 # Plus an explicit always-skip set (packages added to QUICK_INSTALLS_PKGS
-# regardless of wall time): likwid + mdb. Both are sub-minute builds in
-# practice (see the wall-time table below for the most recent sample),
-# so they are NOT here for the wall-time reason -- they are an operator
-# opt-out for the quick-installs iteration loop. Operators who do want
-# them in a quick run can pass --packages "... likwid mdb ..."
+# regardless of wall time): likwid + mdb + intellikit. likwid and mdb are
+# sub-minute builds in practice (see the wall-time table below for the most
+# recent sample); intellikit is heavier (~7 min: clones the monorepo, builds
+# the C++ tools, pulls many PyPI deps) and network-dependent. None are here
+# for the wall-time reason (intellikit is under the 20-min cutoff) -- they are
+# an operator opt-out for the quick-installs iteration loop. Operators who do
+# want them in a quick run can pass --packages "... likwid mdb intellikit ..."
 # explicitly: --packages always wins over --quick-installs.
 #
 # Wall-time data sources, newest first (delta is mtime of the per-package
@@ -679,6 +682,10 @@ declare -A DESELECTED_BY=()
 #   mdb          <1m          <1m          n/a          SKIP  (operator opt-out, not wall:
 #                                                              explicit always-skip in
 #                                                              QUICK_INSTALLS_PKGS)
+#   intellikit   ~7m          n/a          n/a          SKIP  (operator opt-out, not wall:
+#                                                              explicit always-skip in
+#                                                              QUICK_INSTALLS_PKGS;
+#                                                              network-heavy monorepo build)
 #   ftorch        0:49        <1m         <1m          SKIP  (transitive: preflight
 #                                                              requires pytorch which
 #                                                              is itself SKIP-ed)
@@ -699,7 +706,7 @@ declare -A DESELECTED_BY=()
 # package by exporting BUILD_<name>=1 between this point and sub-script
 # invocation; we don't expose per-package CLI flags here on purpose.
 QUICK_INSTALLS_PKGS=( BUILD_PYTORCH BUILD_TENSORFLOW BUILD_JAX BUILD_FTORCH \
-                     BUILD_JULIA BUILD_LIKWID BUILD_MDB )
+                     BUILD_JULIA BUILD_LIKWID BUILD_MDB BUILD_INTELLIKIT )
 QUICK_INSTALLS_THRESHOLD_MIN=20
 if [[ "${QUICK_INSTALLS}" == "1" ]]; then
    echo ""
@@ -728,6 +735,7 @@ if [[ "${QUICK_INSTALLS}" == "1" ]]; then
                            DESELECTED_BY[ftorch_amdflang]="quick-installs" ;;
          BUILD_LIKWID)     DESELECTED_BY[likwid]="quick-installs" ;;
          BUILD_MDB)        DESELECTED_BY[mdb]="quick-installs" ;;
+         BUILD_INTELLIKIT) DESELECTED_BY[intellikit]="quick-installs" ;;
          BUILD_JULIA)      ;;  # dormant: no run_and_log call exists
       esac
    done
@@ -763,6 +771,7 @@ declare -A PKG_FLAG=(
    [hpctoolkit]=BUILD_HPCTOOLKIT
    [likwid]=BUILD_LIKWID
    [mdb]=BUILD_MDB
+   [intellikit]=BUILD_INTELLIKIT
    [scorep]=BUILD_SCOREP
    [tau]=BUILD_TAU
    [cupy]=BUILD_CUPY
@@ -802,6 +811,7 @@ declare -A PKG_VER_FLAG=(
    [hpctoolkit]="--hpctoolkit-version"
    [likwid]="--likwid-version"
    [mdb]="--mdb-version"
+   [intellikit]="--intellikit-version"
    [scorep]="--scorep-version"
    [cupy]="--cupy-version"
    [hip-python]="--hip-python-version"
@@ -1796,6 +1806,14 @@ run_and_log_versioned likwid tools/scripts/likwid_setup.sh ${COMMON_OPTIONS} --b
 
 run_and_log_versioned mdb tools/scripts/mdb_setup.sh ${COMMON_OPTIONS} --build-mdb ${BUILD_MDB} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/mdb)
+
+# intellikit installs the AMDResearch IntelliKit Python monorepo (accordo,
+# kerncap, linex, metrix, nexus, rocm_mcp, uprof_mcp) into a venv-backed
+# --target tree and writes one VERSION.lua module. --python-version drives
+# the venv interpreter (IntelliKit needs Python 3.10+). Like mdb/likwid it
+# is an explicit always-skip under --quick-installs (see QUICK_INSTALLS_PKGS).
+run_and_log_versioned intellikit tools/scripts/intellikit_setup.sh ${COMMON_OPTIONS} --build-intellikit ${BUILD_INTELLIKIT} --python-version ${PYTHON_VERSION} ${REPLACE_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/intellikit)
 
 run_and_log_versioned hpctoolkit tools/scripts/hpctoolkit_setup.sh ${COMMON_OPTIONS} --build-hpctoolkit ${BUILD_HPCTOOLKIT} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/hpctoolkit)

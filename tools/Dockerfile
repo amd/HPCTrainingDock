@@ -25,6 +25,7 @@ ARG INSTALL_ROCPROF_COMPUTE_FROM_SOURCE
 ARG BUILD_ROCPROFILER_SDK
 ARG BUILD_AQLPROFILE
 ARG BUILD_MDB
+ARG BUILD_INTELLIKIT
 
 LABEL maintainer="bob.robey@amd.com"
 
@@ -79,6 +80,10 @@ RUN  /tmp/tools/scorep_setup.sh --rocm-version ${ROCM_VERSION} --build-scorep ${
 COPY tools/scripts/mdb_setup.sh /tmp/tools/mdb_setup.sh
 RUN  /tmp/tools/mdb_setup.sh --rocm-version ${ROCM_VERSION} --build-mdb ${BUILD_MDB} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
      rm -f /tmp/tools/mdb_setup.sh
+
+COPY tools/scripts/intellikit_setup.sh /tmp/tools/intellikit_setup.sh
+RUN  /tmp/tools/intellikit_setup.sh --rocm-version ${ROCM_VERSION} --build-intellikit ${BUILD_INTELLIKIT} --python-version ${PYTHON_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
+     rm -f /tmp/tools/intellikit_setup.sh
 
 #
 # Install Grafana
