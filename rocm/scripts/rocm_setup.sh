@@ -353,18 +353,23 @@ fi
 # AMDGPU_INSTALL_VERSION
 version-set
 
-# ROCm 7.13.0 Tech Preview (and any later preview release in this branch)
-# uses a fundamentally different package distribution from the legacy
-# 5.x-7.2 stream:
+# ROCm 7.12+ Tech Preview (the TheRock preview stream -- 7.12.0, 7.13.0,
+# and any later preview release in this branch) uses a fundamentally
+# different package distribution from the legacy 5.x-7.2 stream. Note
+# that 7.12 / 7.13 are NOT published on repo.radeon.com at all (the
+# legacy amdgpu-install path 404s for them); they exist ONLY on the new
+# repo.amd.com TheRock-preview host below, which is why the gate must
+# catch 7.12+ and route them here:
 #   * apt source lives at repo.amd.com/rocm/packages/<distro> (NOT
-#     repo.radeon.com/rocm/apt/<X.Y.Z>); the legacy host has no 7.13 tree.
+#     repo.radeon.com/rocm/apt/<X.Y.Z>); the legacy host has no 7.12/7.13 tree.
 #   * GPG key at repo.amd.com/rocm/packages/gpg/rocm.gpg, installed to
 #     /etc/apt/keyrings/amdrocm.gpg (separate keyring filename from the
 #     legacy /etc/apt/keyrings/rocm.gpg so the two can coexist).
 #   * amdgpu-install installer is series 31.30 (e.g.
 #     amdgpu-install_31.30.313000-1_all.deb) with first-class
 #     --rocmrelease=<X.Y>  + --gfxversion=<gfx-family>  flags. Package
-#     names are gfx-tagged (e.g. amdrocm7.13-gfx94x for gfx942/MI300).
+#     names are gfx-tagged (e.g. amdrocm7.12-gfx94x / amdrocm7.13-gfx94x
+#     for gfx942/MI300).
 #   * Packages install into /opt/rocm/core-<X.Y>/ (NOT /opt/rocm-<X.Y.Z>/).
 #     We add compatibility symlinks below so the rest of this script and
 #     all downstream rocm/, extras/, comm/, tools/ scripts that hard-code
@@ -379,11 +384,11 @@ version-set
 # Reference: https://rocm.docs.amd.com/en/7.13.0-preview/install/rocm.html
 IS_ROCM_PREVIEW=0
 ROCM_MAJORMINOR=""
-if [ "$(printf '%s\n' "7.13" "${ROCM_VERSION}" | sort -V | head -n1)" = "7.13" ]; then
+if [ "$(printf '%s\n' "7.12" "${ROCM_VERSION}" | sort -V | head -n1)" = "7.12" ]; then
    IS_ROCM_PREVIEW=1
    ROCM_MAJORMINOR=$(echo "${ROCM_VERSION}" | awk -F. '{print $1"."$2}')
    if [ -n "${BASE_ROCM_VERSION}" ]; then
-      echo "[rocm_setup] NOTE: --base-rocm-version=${BASE_ROCM_VERSION} is not applicable to ROCm 7.13+ preview; clearing it"
+      echo "[rocm_setup] NOTE: --base-rocm-version=${BASE_ROCM_VERSION} is not applicable to ROCm 7.12+ preview; clearing it"
       BASE_ROCM_VERSION=""
    fi
 fi
@@ -482,7 +487,7 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
 
       if [[ "${IS_ROCM_PREVIEW}" == "1" ]]; then
          # ------------------------------------------------------------------
-         # ROCm 7.13+ TECH PREVIEW INSTALL PATH
+         # ROCm 7.12+ TECH PREVIEW INSTALL PATH (TheRock stream: 7.12, 7.13, ...)
          # ------------------------------------------------------------------
          # Sourced from https://rocm.docs.amd.com/en/7.13.0-preview/install/rocm.html
          # (fam=instinct, os=ubuntu, i=pkgman). Distinct from the legacy
@@ -500,7 +505,7 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
          # paths unmodified.
          echo ""
          echo "============================================================"
-         echo " ROCm 7.13+ TECH PREVIEW install path"
+         echo " ROCm 7.12+ TECH PREVIEW install path"
          echo " ROCM_VERSION=${ROCM_VERSION}, ROCM_MAJORMINOR=${ROCM_MAJORMINOR}"
          echo "============================================================"
          echo ""
@@ -874,7 +879,7 @@ EOF
       # Legacy belt-and-suspenders extra amdgpu-install (unchanged): a
       # second pass with the explicit rocm/hip/hiplibsdk usecases catches
       # any package that didn't make it into the first invocation's
-      # usecase set. Skipped for ROCm 7.13+ preview because the new
+      # usecase set. Skipped for ROCm 7.12+ preview because the new
       # amdgpu-install's --rocmrelease=X.Y.Z form would mis-resolve
       # (the new amdrocm packages are tagged X.Y, not X.Y.Z).
       amdgpu-install -q -y --usecase=rocm,hip,hiplibsdk --no-dkms --rocmrelease=${ROCM_VERSION}
