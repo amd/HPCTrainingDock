@@ -2,6 +2,21 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-06-10
+
+- ROCm versions:
+    + 7.12.0
+    + 7.2.4
+- Modules:
+    + rocm/7.12.0
+    + rocm/7.2.4
+- /shared/apps/ubuntu/opt:
+    + rocm-7.12.0
+    + rocm-7.2.4
+    + rocmplus-7.12.0
+    + rocmplus-7.2.4
+
+[Full snapshot](archive/AAC6_system_status_2026-06-10.md)
 ## 2026-06-09
 
 - User-facing modules:
