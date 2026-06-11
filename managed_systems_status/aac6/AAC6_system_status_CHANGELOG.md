@@ -2,6 +2,17 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-06-11
+
+- Slurm partitions:
+    + 1CN192C4G1H_MI300A_Ubuntu22:4
+    - 1CN192C4G1H_MI300A_Ubuntu22:3
+- Down/drained nodes:
+    + ppac-pl1-s24-35:down*
+    + sh5-pl1-s12-36:drain*
+    - sh5-pl1-s12-12:down*
+
+[Full snapshot](archive/AAC6_system_status_2026-06-11.md)
 ## 2026-06-10
 
 - ROCm versions:
