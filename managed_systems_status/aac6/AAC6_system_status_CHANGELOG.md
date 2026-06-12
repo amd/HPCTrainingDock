@@ -2,6 +2,18 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-06-12
+
+- Slurm partitions:
+    + 1CN48C6G1H_MI300A_Ubuntu22:4
+    + sh5_cpx_admin_long:4
+    - 1CN48C6G1H_MI300A_Ubuntu22:5
+    - sh5_cpx_admin_long:5
+- Down/drained nodes:
+    - ppac-pl1-s24-35:down*
+    - sh5-pl1-s12-36:drain*
+
+[Full snapshot](archive/AAC6_system_status_2026-06-12.md)
 ## 2026-06-11
 
 - Slurm partitions:
