@@ -2,6 +2,19 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-06-13
+
+- ROCm versions:
+    + afar-23.3.0-7.14.0
+- Modules:
+    + rocm/afar-23.3.0-7.14.0
+- Down/drained nodes:
+    + sh5-pl1-s12-09:down
+- /shared/apps/ubuntu/opt:
+    + rocm-afar-23.3.0
+    + rocmplus-afar-23.3.0-7.14.0
+
+[Full snapshot](archive/AAC6_system_status_2026-06-13.md)
 ## 2026-06-12
 
 - Slurm partitions:
