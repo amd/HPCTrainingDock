@@ -2,6 +2,14 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-06-14
+
+- Down/drained nodes:
+    - sh5-pl1-s12-09:down
+- /shared/apps/ubuntu/opt:
+    + rocm-patches-7.2.4
+
+[Full snapshot](archive/AAC6_system_status_2026-06-14.md)
 ## 2026-06-13
 
 - ROCm versions:
