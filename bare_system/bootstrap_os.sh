@@ -18,7 +18,15 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    groupadd render -g 109
    groupadd renderalt -g 110
 elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
-   yum update -y
+   # NOTE: deliberately NOT running a blanket `yum update -y` here. On the
+   # rolling RHEL-family base images (almalinux/rockylinux), a full update
+   # upgrades the *-release package and bumps /etc/os-release VERSION_ID to the
+   # newest minor (e.g. 9.6 -> 9.8). rocm_setup.sh derives the amdgpu-install
+   # repo path from VERSION_ID (.../rhel/<minor>/), and repo.radeon.com only
+   # publishes the minors AMD has qualified (e.g. 9.4/9.6/9.7 for ROCm 7.2.4),
+   # so a bumped 9.8 yields a 404 and the ROCm install silently no-ops. The
+   # base image already pins the requested minor, so we just refresh metadata.
+   yum makecache -y || true
    yum install -y ${SUDO} make which yum
    groupadd render -g 109
    groupadd renderalt -g 110

@@ -351,6 +351,12 @@ rocm_version_to_patches() {
       # produces a working librocprof-sys.so.1.3.0 against rocm-7.2.3's
       # rocprofiler-sdk 1.1.0.
       7.2.3)            echo "rocprof-sys-1.3.0 rocprof-compute" ;;
+      # 7.2.4: same source baseline as 7.2.0 / 7.2.1 / 7.2.2 / 7.2.3
+      # (rocm-systems tag rocm-7.2.4 ships projects/rocprofiler-systems
+      # VERSION 1.3.0 and the 4 vendored patches apply cleanly).  Added
+      # to the enumerated 7.2.x list rather than a 7.2.* wildcard so each
+      # new tag is verified to apply before being enabled.
+      7.2.4)            echo "rocprof-sys-1.3.0 rocprof-compute" ;;
       # 7.13.0 (AFAR / TheRock RC line, e.g. rocm-afar-23.2.1-7.13.0):
       # ships rocprof-sys 1.6.0 and exhibits TWO independent bugs that
       # both need fixing:
@@ -1382,6 +1388,7 @@ rocprof_compute_detail_block() {
       7.2.1) echo 'Upstream tag `rocm-7.2.1` -- monorepo (rocm-systems @ rocm-7.2.1), `projects/rocprofiler-compute` subtree.  Builds alongside the rocprof-sys 1.3.0 cherry-pick.' ;;
       7.2.2) echo 'Upstream tag `rocm-7.2.2` -- monorepo (rocm-systems @ rocm-7.2.2), `projects/rocprofiler-compute` subtree.  Builds alongside the rocprof-sys 1.3.0 cherry-pick.' ;;
       7.2.3) echo 'Upstream tag `rocm-7.2.3` -- monorepo (rocm-systems @ rocm-7.2.3), `projects/rocprofiler-compute` subtree.  Builds alongside the rocprof-sys 1.3.0 cherry-pick.' ;;
+      7.2.4) echo 'Upstream tag `rocm-7.2.4` -- monorepo (rocm-systems @ rocm-7.2.4), `projects/rocprofiler-compute` subtree.  Builds alongside the rocprof-sys 1.3.0 cherry-pick.' ;;
       afar-22.1.0)    echo 'RC tree (no `rocm-afar-22.1.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (afar-22.1.0 ships `167a9576`, upstream VERSION `3.3.0`).' ;;
       afar-22.2.0)    echo 'RC tree (no `rocm-afar-22.2.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (afar-22.2.0 ships `bad92dc4`, upstream VERSION `3.3.0`).' ;;
       afar-23.1.0)    echo 'TheRock-AFAR RC tree (no `rocm-afar-23.1.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (afar-23.1.0 SDK is ROCm 7.12.0; soft no-op if VERSION.sha cannot be resolved upstream).' ;;

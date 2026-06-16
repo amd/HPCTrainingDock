@@ -25,7 +25,10 @@ if [ "${DISTRO}" = "ubuntu" ]; then
    systemctl enable ssh
    service ssh start
 elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
-   yum update -y
+   # Skip the blanket update: it bumps the *-release minor (9.6 -> 9.8) on
+   # rolling RHEL-family images, which breaks rocm_setup.sh's amdgpu-install
+   # repo path (.../rhel/<minor>/ 404 for unpublished minors).
+   yum makecache -y || true
    yum install -y net-tools iproute openssh-server iputils
    #systemctl enable ssh
 #elif [ "${DISTRO}" = "opensuse leap" ]; then

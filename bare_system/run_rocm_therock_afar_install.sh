@@ -59,11 +59,20 @@
 #      Phase 3), so this is a literal -d check; the modulefile side
 #      uses a glob because ROCM_NUMERIC is not yet known.
 #   1. Tarball URL discovery: scrape the flang/ listing for the matching
-#      filename. Two shapes are accepted for the same <REL>:
+#      filename. Two filename shapes are accepted for the same <REL>:
 #        (a) therock-afar-<REL>-<FAMILY>-<NUMERIC>-<SHA>.tar.bz2
 #        (b) therock-<REL>-<FAMILY>-<NUMERIC>-<SHA>.tar.bz2
 #      Shape (a) wins when both exist; (b) is the fallback (used by the
 #      23.1.x line on the flang listing).
+#      TWO directories are scanned, in order: the public listing
+#        https://repo.radeon.com/rocm/misc/flang/
+#      first, then the HIDDEN pre-release / release-candidate subdir
+#        https://repo.radeon.com/rocm/misc/flang/.pre/
+#      The .pre/ subdir is not linked from the public index, so RC drops
+#      (e.g. therock-afar-23.3.0, RC'd 2026-06) are invisible there until
+#      AMD promotes them; checking the public dir first means a promoted
+#      GA drop always wins over a lingering .pre/ copy. The download URL
+#      below is built from whichever directory the match was found in.
 #      AMDGPU_FAMILY is derived from the FIRST gfx model in
 #      AMDGPU_GFXMODEL (per operator decision 2026-05-15) unless
 #      --amdgpu-family was passed explicitly. The script's
@@ -300,13 +309,8 @@ done
 # on 23.2.1 builds -- 7357b5084b -- but use a generous [a-f0-9]{4,}
 # pattern in case AMD shortens or lengthens it).
 echo "============================================================"
-echo "  Phase 1: discover TheRock-AFAR tarball at ${URL_BASE}/"
+echo "  Phase 1: discover TheRock-AFAR tarball at ${URL_BASE}/ (then .pre/)"
 echo "============================================================"
-_listing="$(curl -fsSL --max-time 60 "${URL_BASE}/" 2>/dev/null || true)"
-if [[ -z "${_listing}" ]]; then
-   echo "ERROR: could not fetch directory listing at ${URL_BASE}/" >&2
-   exit 1
-fi
 # Filename pattern (regex). Per the unified-naming spec (2026-05-26), the
 # upstream flang/ listing carries TWO equivalent shapes for the same REL:
 #   therock-afar-<REL>-<FAMILY>-<X.Y.Z>-<SHA>.tar.bz2   (23.2.x line)
@@ -320,38 +324,79 @@ fi
 # on the flang site without needing a separate token shape.
 _pattern_afar="therock-afar-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-[0-9]+\.[0-9]+(\.[0-9]+)?-[a-f0-9]{4,}\.tar\.bz2"
 _pattern_bare="therock-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-[0-9]+\.[0-9]+(\.[0-9]+)?-[a-f0-9]{4,}\.tar\.bz2"
+
+# Search directories, in priority order. Pre-release / release-candidate
+# drops (e.g. therock-afar-23.3.0, RC'd 2026-06) land in the HIDDEN .pre/
+# subdir FIRST -- it isn't linked from the public flang/ index, so it
+# stays invisible to anyone browsing https://repo.radeon.com/rocm/misc/flang/
+# until AMD promotes it to the top-level listing. We therefore check the
+# public dir first (so promoted/GA drops win) and fall back to .pre/ for
+# RCs. The directory where the match is found drives the download URL
+# below (a .pre/ match must wget from .pre/, not the public root).
+# NOTE: trailing slash is required on each entry -- Apache directory
+# listings 301-redirect a dir request without it, and curl -fsSL would
+# need --location; keeping the slash avoids the round-trip.
+_search_dirs=( "${URL_BASE}/" "${URL_BASE}/.pre/" )
+
 # `|| true` is REQUIRED on each discovery pipeline: this script runs under
 # `set -eo pipefail` (see top of file), so a grep that finds nothing returns
 # 1, pipefail propagates that to the command substitution, errexit kills the
 # script silently, and the operator never sees the "no tarball matching..."
 # diagnostic block below. The 23.1.x line on the flang/ listing publishes
-# ONLY the bare `therock-<REL>-...` shape (no afar infix), so the first
-# pipeline MUST be allowed to return empty so the second pipeline gets a
+# ONLY the bare `therock-<REL>-...` shape (no afar infix), so the afar
+# pipeline MUST be allowed to return empty so the bare pipeline gets a
 # chance. Discovered 2026-05-26 via job 10698 (therock-afar-23.1.0 FAIL).
-_matched=$(echo "${_listing}" | grep -oE "${_pattern_afar}" | sort -V -u | tail -n1 || true)
-_matched_shape="therock-afar"
-if [[ -z "${_matched}" ]]; then
-   # Bare `therock-<REL>-...` fallback. grep -v excludes anything matching
-   # the afar-infix shape so we don't double-count (greedy regex protection).
-   # Brace group + `|| true` on the whole pipeline (not just `tail`) so
-   # pipefail from the inner greps doesn't trip errexit on no-match.
-   _matched=$( { echo "${_listing}" \
+_matched=""
+_matched_shape=""
+EFFECTIVE_URL_DIR=""
+for _dir in "${_search_dirs[@]}"; do
+   echo "  scanning ${_dir}"
+   _listing="$(curl -fsSL --max-time 60 "${_dir}" 2>/dev/null || true)"
+   if [[ -z "${_listing}" ]]; then
+      echo "  (no directory listing at ${_dir}; skipping)"
+      continue
+   fi
+   # afar-infix shape first ...
+   _cand=$(echo "${_listing}" | grep -oE "${_pattern_afar}" | sort -V -u | tail -n1 || true)
+   if [[ -n "${_cand}" ]]; then
+      _matched="${_cand}"; _matched_shape="therock-afar"; EFFECTIVE_URL_DIR="${_dir}"
+      break
+   fi
+   # ... then the bare `therock-<REL>-...` fallback. grep -v excludes
+   # anything matching the afar-infix shape so we don't double-count
+   # (greedy regex protection). Brace group + `|| true` on the whole
+   # pipeline (not just `tail`) so pipefail from the inner greps doesn't
+   # trip errexit on no-match.
+   _cand=$( { echo "${_listing}" \
       | grep -oE "${_pattern_bare}" \
       | grep -v -E "^therock-afar-" \
       | sort -V -u | tail -n1; } || true)
-   [[ -n "${_matched}" ]] && _matched_shape="therock"
-fi
+   if [[ -n "${_cand}" ]]; then
+      _matched="${_cand}"; _matched_shape="therock"; EFFECTIVE_URL_DIR="${_dir}"
+      break
+   fi
+done
+unset _cand _dir
 if [[ -z "${_matched}" ]]; then
    echo "ERROR: no tarball matching 'therock-afar-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-*.tar.bz2'" >&2
-   echo "       or 'therock-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-*.tar.bz2' at ${URL_BASE}/" >&2
+   echo "       or 'therock-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-*.tar.bz2' in any of:" >&2
+   for _dir in "${_search_dirs[@]}"; do echo "         ${_dir}" >&2; done
    echo "       Verify the release tag + gfx-family combination exists upstream." >&2
-   echo "       Available therock[-afar]-${THEROCK_AFAR_RELEASE} families on the listing:" >&2
-   echo "${_listing}" | grep -oE "therock(-afar)?-${THEROCK_AFAR_RELEASE}-gfx[A-Za-z0-9]+-[0-9.]+-[a-f0-9]+\.tar\.bz2" | sed 's/^/         /' >&2 || true
+   echo "       Available therock[-afar]-${THEROCK_AFAR_RELEASE} families on the listings:" >&2
+   for _dir in "${_search_dirs[@]}"; do
+      curl -fsSL --max-time 60 "${_dir}" 2>/dev/null \
+         | grep -oE "therock(-afar)?-${THEROCK_AFAR_RELEASE}-gfx[A-Za-z0-9]+-[0-9.]+-[a-f0-9]+\.tar\.bz2" \
+         | sed "s|^|         ${_dir} |" >&2 || true
+   done
+   unset _dir
    exit 1
 fi
 echo "Matched upstream filename shape: ${_matched_shape}-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-...tar.bz2"
+echo "Found in directory: ${EFFECTIVE_URL_DIR}"
 
-TARBALL_URL="${URL_BASE}/${_matched}"
+# EFFECTIVE_URL_DIR already carries a trailing slash (public root or
+# .pre/), so just concatenate the matched filename.
+TARBALL_URL="${EFFECTIVE_URL_DIR}${_matched}"
 LOCAL_TARBALL="/tmp/${_matched}"
 # Parse expected NUMERIC + SHA from the chosen filename (we'll
 # cross-check against .info/version after extract in Phase 3). The sed
@@ -378,6 +423,7 @@ echo "  AMDGPU_FAMILY        : ${AMDGPU_FAMILY}"
 echo "  Filename shape       : ${_matched_shape}-<REL>-<FAMILY>-<NUMERIC>-<SHA>.tar.bz2"
 echo "  Expected NUMERIC     : ${EXPECTED_NUMERIC}"
 echo "  Upstream SHA prefix  : ${THEROCK_SHA}"
+echo "  Found in dir         : ${EFFECTIVE_URL_DIR}$([[ "${EFFECTIVE_URL_DIR}" == */.pre/ ]] && echo '  (pre-release / RC channel)')"
 echo "  Tarball URL          : ${TARBALL_URL}"
 echo "  Local tarball        : ${LOCAL_TARBALL}"
 echo "  Staging dir          : ${STAGING_DIR}"
@@ -598,7 +644,9 @@ whatis("Version: afar-${THEROCK_AFAR_RELEASE}-${ROCM_NUMERIC}")
 whatis("Category: AMD")
 whatis("ROCm")
 whatis("Set HIPCC_VERBOSE=7 to see what hipcc is doing for the compilation and link")
-whatis("Source: TheRock-AFAR ${THEROCK_AFAR_RELEASE} (family ${AMDGPU_FAMILY}, tarball ${_matched})")
+whatis("autoBLAS: link with -lautoBLAS-ilp64 or -lautoBLAS-lp64 (Michael Klemm's autoBLAS ships in this drop)")
+whatis("PIE: TheRock is built -DCLANG_DEFAULT_PIE_ON_LINUX=ON (defaults to -fPIE/-pie). Do NOT link objects/libs built with ROCm <= 7.2.4 (PIE OFF) or you hit: relocation R_X86_64_32S against .rodata can not be used when making a PIE object; recompile with -fPIE")
+whatis("Source: TheRock-AFAR ${THEROCK_AFAR_RELEASE} (family ${AMDGPU_FAMILY}, tarball ${_matched}, from ${EFFECTIVE_URL_DIR})")
 whatis("SDK numeric: ${ROCM_NUMERIC} (from .info/version) -> ROCM_PATH=${INSTALL_DIR}")
 whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 

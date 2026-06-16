@@ -178,7 +178,7 @@ Coverage matrix for these two finishing steps:
 | `afar-23.2.1`               | yes (in-tree build, v1.6.0) | yes | yes |
 | `therock-23.2.0`            | yes (in-tree build, v1.6.0) | yes | yes |
 | `7.2.0`, `7.2.1`            | yes (in-tree build, v1.3.0) | yes | yes |
-| `7.2.2`, `7.2.3`            | yes (in-tree build, v1.3.0) | yes | yes |
+| `7.2.2`, `7.2.3`, `7.2.4`   | yes (in-tree build, v1.3.0) | yes | yes |
 | `7.1.0`, `7.1.1`            | yes (apply_and_build.sh)    | yes | yes |
 | `7.0.0`, `7.0.1`, `7.0.2`   | yes (apply_and_build.sh)    | yes | yes |
 | `6.4.0`, `6.4.1`, `6.4.2`, `6.4.3` | yes (apply_and_build.sh) | yes | yes |

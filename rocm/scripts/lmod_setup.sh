@@ -64,8 +64,13 @@ echo "DISTRO is ${DISTRO}"
 if [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    ${PKG_SUDO} yum -y install epel-release
    ${PKG_SUDO} yum repolist
-   ${PKG_SUDO} yum update -y
-   ${PKG_SUDO} yum upgrade -y
+   # NOTE: skip the blanket update/upgrade here. On rolling RHEL-family base
+   # images (almalinux/rockylinux) it upgrades the *-release package and bumps
+   # /etc/os-release VERSION_ID to the newest minor (e.g. 9.6 -> 9.8), which
+   # then breaks rocm_setup.sh's amdgpu-install URL (.../rhel/<minor>/) for
+   # minors AMD has not published (404). Refresh metadata only and pin the
+   # requested minor.
+   ${PKG_SUDO} yum makecache -y || true
    ${PKG_SUDO} dnf -y install Lmod
    export BASH_INIT_FILE=/etc/bashrc
 fi
