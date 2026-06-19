@@ -55,6 +55,10 @@ case "${CATEGORY}" in
    ROCm)
       if [[ "${PACKAGE}" == "rocm" ]]; then
          SLOT="base/rocm"
+      elif [[ "${PACKAGE}" == "amd" ]]; then
+         # Cray builds emit a separate 'amd' (LLVM compiler) base module modeled
+         # on /opt/modulefiles/amd/<v>; it belongs in base/ alongside rocm.
+         SLOT="base/amd"
       else
          SLOT="rocm-${ROCM_VERSION}/${PACKAGE}"
       fi
@@ -96,6 +100,8 @@ if [[ "${PACKAGE}" == "rocm" && "${CATEGORY}" == "ROCm" ]]; then
       name=$(basename "${sub}")
       if [[ "${name}" == "rocm" ]]; then
          cp -r "${sub}" "${STAGE}/base/rocm"
+      elif [[ "${name}" == "amd" ]]; then
+         cp -r "${sub}" "${STAGE}/base/amd"
       else
          cp -r "${sub}" "${STAGE}/rocm-${ROCM_VERSION}/${name}"
       fi

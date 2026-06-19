@@ -115,6 +115,21 @@ LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$
 # the on-disk filename reflects the actual release.
 : ${SKIP_PATCHES:="0"}
 PATCHES_LOG=""
+# NO_SUDO: "" = auto-detect (no sudo when the install parent is directly
+# user-writable, e.g. a $HOME install on a login node), 1 = force sudo-free,
+# 0 = force the root-owned /nfsapps behavior. SUDO is derived below.
+: ${NO_SUDO:=""}
+# CRAY_SYSTEM: "" = auto-detect a Cray PE host, 1 = force classic Tcl
+# modulefiles instead of Lmod .lua. Mirrors rocm/scripts/rocm_setup.sh.
+: ${CRAY_SYSTEM:=""}
+SUDO="sudo"
+
+# chown to root only when running with sudo (a plain user can't, and doesn't
+# need to since the files are theirs). No-op in no-sudo mode.
+chown_root() { [ "${NO_SUDO}" = "1" ] && return 0; sudo chown "$@"; }
+make_dir_root() {
+   if [ "${NO_SUDO}" = "1" ]; then mkdir -p "$1"; else sudo install -d -o root -g root -m 0755 "$1"; fi
+}
 
 usage() {
    cat <<EOF
@@ -170,6 +185,8 @@ while [[ $# -gt 0 ]]; do
       "--keep-failed-installs") shift; KEEP_FAILED_INSTALLS=${1}; reset-last ;;
       "--skip-patches")         shift; SKIP_PATCHES=${1};         reset-last ;;
       "--patches-log")          shift; PATCHES_LOG=${1};          reset-last ;;
+      "--no-sudo")              shift; NO_SUDO=${1};              reset-last ;;
+      "--cray-modules")         CRAY_SYSTEM=1;                    reset-last ;;
       "--help"|"-h")            usage ;;
       *)                        last ${1} ;;
    esac
@@ -269,11 +286,36 @@ if [[ -n "${_skip_match}" && "${REPLACE_EXISTING}" != "1" ]]; then
 fi
 unset _skip_match
 
+# ---------------- Resolve sudo + Cray module flavor -------------------
+INSTALL_PARENT="${TOP_INSTALL_PATH%/*}"
+if [ -z "${NO_SUDO}" ]; then
+   if [ -w "${INSTALL_PARENT}" ] 2>/dev/null \
+      || { [ ! -e "${INSTALL_PARENT}" ] && [ -w "$(dirname "${INSTALL_PARENT}")" ] 2>/dev/null; }; then
+      NO_SUDO=1
+   else
+      NO_SUDO=0
+   fi
+fi
+[ "${NO_SUDO}" = "1" ] && SUDO="" || SUDO="sudo"
+if [ -z "${CRAY_SYSTEM}" ]; then
+   if [ -d /opt/cray/pe ] || [ -f /etc/cray-release ] || [ -n "${CRAYPE_VERSION:-}" ]; then
+      CRAY_SYSTEM=1
+   else
+      CRAY_SYSTEM=0
+   fi
+fi
+echo "[therock-afar] NO_SUDO=${NO_SUDO}  CRAY_SYSTEM=${CRAY_SYSTEM}  (sudo='${SUDO}')"
+
 # ---------------- Defensive remount of /nfsapps as rw -----------------
-# Identical to run_rocm_afar_install.sh:117-125 -- /etc/exports.d/
-# nfsapps_sh5_rw.exports grants rw to sh5 admin nodes, but the
-# warewulf-managed fstab still mounts /nfsapps ro by default. Skipped
-# unless TOP_INSTALL_PATH actually lives under /nfsapps.
+# /etc/exports.d/nfsapps_sh5_rw.exports grants rw to sh5 admin nodes, but the
+# warewulf-managed fstab still mounts /nfsapps ro by default. Skipped unless
+# TOP_INSTALL_PATH lives under /nfsapps (i.e. a root-owned cluster install).
+if [ "${NO_SUDO}" = "1" ]; then
+   if [ ! -w "${INSTALL_PARENT}" ]; then
+      echo "ERROR: ${INSTALL_PARENT} is not writable by $(id -un) on $(hostname); aborting." >&2
+      exit 1
+   fi
+else
 case "${TOP_INSTALL_PATH}" in
    /nfsapps|/nfsapps/*)
       NFS_MOUNT_ROOT="/nfsapps"
@@ -288,12 +330,13 @@ case "${TOP_INSTALL_PATH}" in
       fi
       ;;
 esac
+fi
 
 # Self-heal install/module roots if missing.
 for d in "${TOP_INSTALL_PATH}" "${TOP_MODULE_PATH}" "${MODULE_DIR}"; do
-   if ! sudo -n test -d "${d}" 2>/dev/null; then
+   if [ ! -d "${d}" ]; then
       echo "Creating missing ${d} (with parents)"
-      sudo install -d -o root -g root -m 0755 "${d}"
+      make_dir_root "${d}"
    fi
 done
 
@@ -446,20 +489,23 @@ if [[ "${REPLACE_EXISTING}" == "1" ]]; then
    for _cand in ${LEGACY_INSTALL_GLOB}; do
       if [[ -d "${_cand}" ]]; then
          echo "[--replace-existing 1] removing legacy ${_cand}"
-         sudo rm -rf "${_cand}"
+         ${SUDO} rm -rf "${_cand}"
       fi
    done
    if [[ -d "${INSTALL_DIR}" ]]; then
       echo "[--replace-existing 1] removing ${INSTALL_DIR}"
-      sudo rm -rf "${INSTALL_DIR}"
+      ${SUDO} rm -rf "${INSTALL_DIR}"
    fi
    if [[ -f "${LEGACY_MODULE_FILE}" ]]; then
       echo "[--replace-existing 1] removing legacy ${LEGACY_MODULE_FILE}"
-      sudo rm -f "${LEGACY_MODULE_FILE}"
+      ${SUDO} rm -f "${LEGACY_MODULE_FILE}"
    fi
-   for _stale in "${MODULE_DIR}"/afar-${THEROCK_AFAR_RELEASE}-*.lua; do
+   # Both Lmod (.lua) and Cray (extensionless) stale modulefiles.
+   for _stale in "${MODULE_DIR}"/afar-${THEROCK_AFAR_RELEASE}-*.lua \
+                 "${MODULE_DIR}"/afar-${THEROCK_AFAR_RELEASE}-[0-9]*; do
+      [[ -f "${_stale}" ]] || continue
       echo "[--replace-existing 1] removing ${_stale}"
-      sudo rm -f "${_stale}"
+      ${SUDO} rm -f "${_stale}"
    done
    shopt -u nullglob
    unset _cand _stale
@@ -478,9 +524,9 @@ _therock_afar_on_exit() {
    local rc=$?
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[therock-afar fail-cleanup] rc=${rc}: removing staging + partial install"
-      sudo rm -rf "${STAGING_DIR}" 2>/dev/null || true
-      [ "${PROMOTED_INSTALL}" = "1" ] && sudo rm -rf "${INSTALL_DIR}" 2>/dev/null || true
-      [ -n "${MODULE_FILE}" ] && sudo rm -f "${MODULE_FILE}" 2>/dev/null || true
+      ${SUDO} rm -rf "${STAGING_DIR}" 2>/dev/null || true
+      [ "${PROMOTED_INSTALL}" = "1" ] && ${SUDO} rm -rf "${INSTALL_DIR}" 2>/dev/null || true
+      [ -n "${MODULE_FILE}" ] && ${SUDO} rm -f "${MODULE_FILE}" 2>/dev/null || true
    elif [ ${rc} -ne 0 ]; then
       echo "[therock-afar fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -499,9 +545,9 @@ wget -q --show-progress "${TARBALL_URL}" -O "${LOCAL_TARBALL}"
 
 # Staging dir under TOP_INSTALL_PATH so the final mv in Phase 4 is
 # rename-only (same filesystem == atomic, no NFS cross-mount copy).
-sudo rm -rf "${STAGING_DIR}"
-sudo install -d -o root -g root -m 0755 "${STAGING_DIR}"
-sudo tar -xjpf "${LOCAL_TARBALL}" -C "${STAGING_DIR}"
+${SUDO} rm -rf "${STAGING_DIR}"
+make_dir_root "${STAGING_DIR}"
+${SUDO} tar -xjpf "${LOCAL_TARBALL}" -C "${STAGING_DIR}"
 echo "Extracted into staging: ${STAGING_DIR}"
 
 # ---------------- Phase 3: locate .info/version + derive ROCM_NUMERIC -
@@ -517,15 +563,15 @@ echo "============================================================"
 
 SOURCE_DIR=""
 WRAPPER=""
-if sudo test -f "${STAGING_DIR}/.info/version" 2>/dev/null; then
+if ${SUDO} test -f "${STAGING_DIR}/.info/version" 2>/dev/null; then
    SOURCE_DIR="${STAGING_DIR}"
    echo "Tarball layout: FLAT (.info/version at depth 0)"
 else
    # Look for a single top-level subdir whose .info/version exists.
    _wrappers=()
    while IFS= read -r -d $'\0' _d; do _wrappers+=("${_d}"); done \
-      < <(sudo find "${STAGING_DIR}" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
-   if [[ ${#_wrappers[@]} -eq 1 ]] && sudo test -f "${_wrappers[0]}/.info/version" 2>/dev/null; then
+      < <(${SUDO} find "${STAGING_DIR}" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+   if [[ ${#_wrappers[@]} -eq 1 ]] && ${SUDO} test -f "${_wrappers[0]}/.info/version" 2>/dev/null; then
       SOURCE_DIR="${_wrappers[0]}"
       WRAPPER="${_wrappers[0]##*/}"
       echo "Tarball layout: WRAPPER (.info/version inside wrapper dir '${WRAPPER}')"
@@ -535,12 +581,12 @@ fi
 if [[ -z "${SOURCE_DIR}" ]]; then
    echo "ERROR: could not find .info/version at depth 0 or 1 of ${STAGING_DIR}" >&2
    echo "       (Did the TheRock-AFAR tarball layout change?)" >&2
-   sudo find "${STAGING_DIR}" -maxdepth 2 -type f -name version -printf '       found: %p\n' 2>/dev/null || true
-   sudo ls -la "${STAGING_DIR}" 2>&1 | sed 's/^/       /' || true
+   ${SUDO} find "${STAGING_DIR}" -maxdepth 2 -type f -name version -printf '       found: %p\n' 2>/dev/null || true
+   ${SUDO} ls -la "${STAGING_DIR}" 2>&1 | sed 's/^/       /' || true
    exit 1
 fi
 
-ROCM_NUMERIC=$(sudo cut -f1 -d- "${SOURCE_DIR}/.info/version" 2>/dev/null || true)
+ROCM_NUMERIC=$(${SUDO} cut -f1 -d- "${SOURCE_DIR}/.info/version" 2>/dev/null || true)
 if [[ -z "${ROCM_NUMERIC}" ]]; then
    echo "ERROR: ${SOURCE_DIR}/.info/version is empty or unreadable" >&2
    exit 1
@@ -557,7 +603,11 @@ fi
 # Finalize MODULE_FILE now that ROCM_NUMERIC is known. INSTALL_DIR was
 # set at the top of the script (keyed on THEROCK_AFAR_RELEASE, not on
 # ROCM_NUMERIC) per the unified flang-site naming.
-MODULE_FILE="${MODULE_DIR}/afar-${THEROCK_AFAR_RELEASE}-${ROCM_NUMERIC}.lua"
+if [ "${CRAY_SYSTEM}" = "1" ]; then
+   MODULE_FILE="${MODULE_DIR}/afar-${THEROCK_AFAR_RELEASE}-${ROCM_NUMERIC}"
+else
+   MODULE_FILE="${MODULE_DIR}/afar-${THEROCK_AFAR_RELEASE}-${ROCM_NUMERIC}.lua"
+fi
 
 # ---------------- Phase 4: promote staging to final install dir -------
 echo "============================================================"
@@ -567,7 +617,7 @@ echo "============================================================"
 if [[ -d "${INSTALL_DIR}" ]]; then
    if [[ "${REPLACE_EXISTING}" == "1" ]]; then
       echo "[--replace-existing 1] removing pre-existing ${INSTALL_DIR}"
-      sudo rm -rf "${INSTALL_DIR}"
+      ${SUDO} rm -rf "${INSTALL_DIR}"
    else
       echo "ERROR: ${INSTALL_DIR} already exists but --replace-existing is 0;" >&2
       echo "       Phase 0 should have caught this. Pass --replace-existing 1" >&2
@@ -579,14 +629,14 @@ fi
 if [[ -n "${WRAPPER}" ]]; then
    # Move just the wrapper subtree to the final install dir, then reap
    # the (now-empty) staging container.
-   sudo mv "${SOURCE_DIR}" "${INSTALL_DIR}"
-   sudo rmdir "${STAGING_DIR}" 2>/dev/null || true
+   ${SUDO} mv "${SOURCE_DIR}" "${INSTALL_DIR}"
+   ${SUDO} rmdir "${STAGING_DIR}" 2>/dev/null || true
 else
-   sudo mv "${STAGING_DIR}" "${INSTALL_DIR}"
+   ${SUDO} mv "${STAGING_DIR}" "${INSTALL_DIR}"
 fi
 PROMOTED_INSTALL=1
-sudo chown -R root:root "${INSTALL_DIR}"
-sudo chmod 755 "${INSTALL_DIR}"
+chown_root -R root:root "${INSTALL_DIR}"
+${SUDO} chmod 755 "${INSTALL_DIR}"
 rm -f "${LOCAL_TARBALL}"
 echo "Installed: ${INSTALL_DIR}"
 
@@ -615,7 +665,7 @@ unset _leaf_dir
 echo "============================================================"
 echo "  Phase 5: write modulefile ${MODULE_FILE}"
 echo "============================================================"
-sudo mkdir -p "${MODULE_DIR}"
+${SUDO} mkdir -p "${MODULE_DIR}"
 
 # Modulefile shape matches the unified flang-site naming-scheme decision
 # (2026-05-26):
@@ -638,7 +688,46 @@ sudo mkdir -p "${MODULE_DIR}"
 #                                   release tags can't collide on the
 #                                   rocmplus side even if they happen
 #                                   to ship the same SDK numeric).
-sudo tee "${MODULE_FILE}" >/dev/null <<EOF
+if [ "${CRAY_SYSTEM}" = "1" ]; then
+# ---- Cray Tcl modulefile (classic environment-modules) ----
+${SUDO} tee "${MODULE_FILE}" >/dev/null <<EOF
+#%Module
+#
+# ROCm (TheRock-AFAR ${THEROCK_AFAR_RELEASE}, SDK ${ROCM_NUMERIC}) -- Tcl modulefile.
+# Source: family ${AMDGPU_FAMILY}, tarball ${_matched}, from ${EFFECTIVE_URL_DIR}
+# Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})
+#
+# autoBLAS: link with -lautoBLAS-ilp64 or -lautoBLAS-lp64.
+# PIE: built -DCLANG_DEFAULT_PIE_ON_LINUX=ON; do NOT link objects/libs built
+#      with ROCm <= 7.2.4 (PIE OFF) or you hit R_X86_64_32S relocation errors.
+
+conflict rocm
+
+module-whatis "ROCm TheRock-AFAR afar-${THEROCK_AFAR_RELEASE}-${ROCM_NUMERIC} (SDK ${ROCM_NUMERIC})"
+
+set base ${INSTALL_DIR}
+
+setenv ROCM_PATH               \$base
+setenv HSA_NO_SCRATCH_RECLAIM  1
+setenv HIPCC_COMPILE_FLAGS_APPEND "--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11"
+setenv HIPCC_LINK_FLAGS_APPEND    "--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11"
+
+prepend-path LD_LIBRARY_PATH    \$base/lib
+prepend-path C_INCLUDE_PATH     \$base/include
+prepend-path CPLUS_INCLUDE_PATH \$base/include
+prepend-path CPATH              \$base/include
+prepend-path INCLUDE            \$base/include
+prepend-path PATH               \$base/bin
+prepend-path PATH               \$base/share/rocprofiler-systems/bin
+
+set _self    [file normalize \${ModulesCurrentModulefile}]
+set _modroot [file dirname [file dirname [file dirname \$_self]]]
+prepend-path MODULEPATH \$_modroot/rocm-afar-${THEROCK_AFAR_RELEASE}
+prepend-path MODULEPATH \$_modroot/rocmplus-afar-${THEROCK_AFAR_RELEASE}-${ROCM_NUMERIC}
+EOF
+else
+# ---- Lmod .lua modulefile ----
+${SUDO} tee "${MODULE_FILE}" >/dev/null <<EOF
 whatis("Name: ROCm")
 whatis("Version: afar-${THEROCK_AFAR_RELEASE}-${ROCM_NUMERIC}")
 whatis("Category: AMD")
@@ -673,8 +762,9 @@ family("GPUSDK")
 -- where the system libbfd is new enough.
 prepend_path("PATH", pathJoin(base, "share/rocprofiler-systems/bin"))
 EOF
-sudo chown root:root "${MODULE_FILE}"
-sudo chmod 644 "${MODULE_FILE}"
+fi
+chown_root root:root "${MODULE_FILE}"
+${SUDO} chmod 644 "${MODULE_FILE}"
 
 # ---------------- Phase 5b: per-package secondary modulefiles ---------
 # Mirror what the regular numeric pipeline emits via deploy_module_package.sh
@@ -752,8 +842,8 @@ if [[ "${SKIP_PATCHES}" != "1" ]]; then
       else
          _overlay="${TOP_INSTALL_PATH}/rocm-patches-afar-${THEROCK_AFAR_RELEASE}"
          if [[ -d "${_overlay}" ]]; then
-            sudo chown -R root:root "${_overlay}"
-            sudo find "${_overlay}" -type d -exec chmod 755 {} +
+            chown_root -R root:root "${_overlay}"
+            ${SUDO} find "${_overlay}" -type d -exec chmod 755 {} +
          fi
          unset _overlay
          echo "[Phase 6] patches applied for afar-${THEROCK_AFAR_RELEASE}"

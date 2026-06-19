@@ -82,6 +82,28 @@ LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$
 : ${REPLACE_EXISTING:="0"}
 : ${KEEP_FAILED_INSTALLS:="0"}
 : ${URL_BASE:="https://repo.amd.com/rocm/tarball"}
+# NO_SUDO: "" = auto-detect (no sudo when the install parent is directly
+# user-writable, e.g. a $HOME install on a login node), 1 = force sudo-free,
+# 0 = force the root-owned /nfsapps behavior. SUDO is derived from it below.
+: ${NO_SUDO:=""}
+# CRAY_SYSTEM: "" = auto-detect a Cray PE host, 1 = force Cray-style Tcl
+# modulefiles instead of Lmod .lua (the classic Tcl `module` on Cray PE login
+# nodes cannot read .lua). Mirrors rocm/scripts/rocm_setup.sh.
+: ${CRAY_SYSTEM:=""}
+# PE_VERSION: the stock PrgEnv-amd version that the generated
+# PrgEnv-amd-new/<pe>-<rocm> module wraps. "" = auto-detect on a Cray box
+# (highest PrgEnv-amd/<ver> available); override with --pe-version.
+: ${PE_VERSION:=""}
+SUDO="sudo"
+
+# chown to root:root only when running with sudo; a plain user can't chown to
+# root and doesn't need to (the files are theirs). No-op in no-sudo mode.
+chown_root() { [ "${NO_SUDO}" = "1" ] && return 0; sudo chown "$@"; }
+# Create a directory: root-owned 0755 when sudo is in play, else a plain
+# user-owned mkdir -p.
+make_dir_root() {
+   if [ "${NO_SUDO}" = "1" ]; then mkdir -p "$1"; else sudo install -d -o root -g root -m 0755 "$1"; fi
+}
 
 usage() {
    cat <<EOF
@@ -115,6 +137,12 @@ Usage: $0 [opts]
                                 install + modulefile (default ${REPLACE_EXISTING})
   --keep-failed-installs 0|1    on failure, keep partial install + modulefile
                                 for post-mortem (default ${KEEP_FAILED_INSTALLS})
+  --cray-modules                force Cray-style classic Tcl modulefiles +
+                                the PrgEnv-amd-new ecosystem (auto-detected on
+                                Cray PE hosts otherwise)
+  --pe-version VER              stock PrgEnv-amd version the generated
+                                PrgEnv-amd-new/<pe>-<rocm> wraps (Cray only).
+                                Default: auto-detect the highest PrgEnv-amd.
   --help
 EOF
    exit 1
@@ -135,6 +163,9 @@ while [[ $# -gt 0 ]]; do
       "--url-base")             shift; URL_BASE=${1};             reset-last ;;
       "--replace-existing")     shift; REPLACE_EXISTING=${1};     reset-last ;;
       "--keep-failed-installs") shift; KEEP_FAILED_INSTALLS=${1}; reset-last ;;
+      "--no-sudo")              shift; NO_SUDO=${1};              reset-last ;;
+      "--cray-modules")         CRAY_SYSTEM=1;                    reset-last ;;
+      "--pe-version")           shift; PE_VERSION=${1};           reset-last ;;
       "--help"|"-h")            usage ;;
       *)                        last ${1} ;;
    esac
@@ -190,26 +221,63 @@ if [[ "${REPLACE_EXISTING}" != "1" ]]; then
    unset _cand
 fi
 
-# ---------------- Defensive remount of /nfsapps as rw -----------------
-# /etc/exports.d/nfsapps_sh5_rw.exports grants rw to sh5 admin nodes,
-# but the warewulf-managed fstab still mounts /nfsapps ro by default.
-# Mirrors the same block in run_rocm_afar_install.sh:117-125.
+# ---------------- Resolve sudo + Cray module flavor -------------------
 INSTALL_PARENT="${TOP_INSTALL_PATH%/*}"
-if ! sudo -n test -w "${INSTALL_PARENT}" 2>/dev/null; then
-   echo "Attempting to remount ${INSTALL_PARENT} rw..."
-   sudo mount -o remount,rw "${INSTALL_PARENT}" 2>/dev/null || true
+
+# no-sudo auto-detect: a $HOME install on a login node has a directly
+# user-writable install parent and needs neither sudo nor root ownership.
+if [ -z "${NO_SUDO}" ]; then
+   if [ -w "${INSTALL_PARENT}" ] 2>/dev/null \
+      || { [ ! -e "${INSTALL_PARENT}" ] && [ -w "$(dirname "${INSTALL_PARENT}")" ] 2>/dev/null; }; then
+      NO_SUDO=1
+   else
+      NO_SUDO=0
+   fi
 fi
-if ! sudo -n test -w "${INSTALL_PARENT}" 2>/dev/null; then
-   echo "ERROR: ${INSTALL_PARENT} is not writable on $(hostname); aborting." >&2
-   mount | grep nfsapps || true
-   exit 1
+[ "${NO_SUDO}" = "1" ] && SUDO="" || SUDO="sudo"
+
+# Cray PE detection (override with --cray-modules / CRAY_SYSTEM=1).
+if [ -z "${CRAY_SYSTEM}" ]; then
+   if [ -d /opt/cray/pe ] || [ -f /etc/cray-release ] || [ -n "${CRAYPE_VERSION:-}" ]; then
+      CRAY_SYSTEM=1
+   else
+      CRAY_SYSTEM=0
+   fi
+fi
+echo "[therock] NO_SUDO=${NO_SUDO}  CRAY_SYSTEM=${CRAY_SYSTEM}  (sudo='${SUDO}')"
+
+# Cray uses classic Tcl modulefiles (extensionless); Lmod uses .lua.
+if [ "${CRAY_SYSTEM}" = "1" ]; then
+   MODULE_FILE="${MODULE_DIR}/therock-${THEROCK_RELEASE}"
+else
+   MODULE_FILE="${MODULE_DIR}/therock-${THEROCK_RELEASE}.lua"
+fi
+
+if [ "${NO_SUDO}" = "1" ]; then
+   # User-writable install: no remount, no root test -- just check directly.
+   if [ ! -w "${INSTALL_PARENT}" ]; then
+      echo "ERROR: ${INSTALL_PARENT} is not writable by $(id -un) on $(hostname); aborting." >&2
+      exit 1
+   fi
+else
+   # Defensive remount of a root-owned /nfsapps as rw (warewulf fstab mounts ro
+   # by default; the sh5 admin export grants rw). Mirrors run_rocm_afar_install.sh.
+   if ! sudo -n test -w "${INSTALL_PARENT}" 2>/dev/null; then
+      echo "Attempting to remount ${INSTALL_PARENT} rw..."
+      sudo mount -o remount,rw "${INSTALL_PARENT}" 2>/dev/null || true
+   fi
+   if ! sudo -n test -w "${INSTALL_PARENT}" 2>/dev/null; then
+      echo "ERROR: ${INSTALL_PARENT} is not writable on $(hostname); aborting." >&2
+      mount | grep nfsapps || true
+      exit 1
+   fi
 fi
 
 # Self-heal install/module roots if missing (mirrors the sweep sbatch).
 for d in "${TOP_INSTALL_PATH}" "${TOP_MODULE_PATH}" "${MODULE_DIR}"; do
-   if ! sudo -n test -d "${d}" 2>/dev/null; then
+   if [ ! -d "${d}" ]; then
       echo "Creating missing ${d}"
-      sudo install -d -o root -g root -m 0755 "${d}"
+      make_dir_root "${d}"
    fi
 done
 
@@ -311,12 +379,12 @@ if [[ "${REPLACE_EXISTING}" == "1" ]]; then
    for _cand in "${SKIP_CANDIDATES[@]}"; do
       if [[ -d "${_cand}" ]]; then
          echo "[--replace-existing 1] removing ${_cand}"
-         sudo rm -rf "${_cand}"
+         ${SUDO} rm -rf "${_cand}"
       fi
    done
    if [[ -f "${MODULE_FILE}" ]]; then
       echo "[--replace-existing 1] removing ${MODULE_FILE}"
-      sudo rm -f "${MODULE_FILE}"
+      ${SUDO} rm -f "${MODULE_FILE}"
    fi
    unset _cand
 fi
@@ -331,9 +399,9 @@ _therock_on_exit() {
    local rc=$?
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[therock fail-cleanup] rc=${rc}: removing staging + partial install"
-      sudo rm -rf "${STAGING_DIR}" 2>/dev/null || true
-      [ -n "${INSTALL_DIR}" ] && sudo rm -rf "${INSTALL_DIR}" 2>/dev/null || true
-      sudo rm -f "${MODULE_FILE}" 2>/dev/null || true
+      ${SUDO} rm -rf "${STAGING_DIR}" 2>/dev/null || true
+      [ -n "${INSTALL_DIR}" ] && ${SUDO} rm -rf "${INSTALL_DIR}" 2>/dev/null || true
+      ${SUDO} rm -f "${MODULE_FILE}" 2>/dev/null || true
    elif [ ${rc} -ne 0 ]; then
       echo "[therock fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -362,9 +430,9 @@ curl -fSL --output "${LOCAL_TARBALL}" "${TARBALL_URL}"
 # Pre-empt a stale staging dir from an earlier interrupted run that the
 # fail-cleanup didn't reach (e.g. SIGKILL). Same-PID collision is
 # implausible (we're in $$) but defense in depth costs nothing.
-sudo rm -rf "${STAGING_DIR}"
-sudo install -d -o root -g root -m 0755 "${STAGING_DIR}"
-sudo tar -xzpf "${LOCAL_TARBALL}" -C "${STAGING_DIR}"
+${SUDO} rm -rf "${STAGING_DIR}"
+make_dir_root "${STAGING_DIR}"
+${SUDO} tar -xzpf "${LOCAL_TARBALL}" -C "${STAGING_DIR}"
 echo "Extracted into staging: ${STAGING_DIR}"
 
 # ---------------- Phase 3: derive ROCM_NUMERIC from .info/version -----
@@ -374,7 +442,7 @@ echo "Extracted into staging: ${STAGING_DIR}"
 if [[ ! -f "${STAGING_DIR}/.info/version" ]]; then
    echo "ERROR: ${STAGING_DIR}/.info/version missing; cannot derive ROCM_NUMERIC" >&2
    echo "       (Did the TheRock tarball layout change?)" >&2
-   sudo find "${STAGING_DIR}" -maxdepth 2 -type f -name version -printf '       found: %p\n' || true
+   ${SUDO} find "${STAGING_DIR}" -maxdepth 2 -type f -name version -printf '       found: %p\n' || true
    exit 1
 fi
 ROCM_NUMERIC=$(cut -f1 -d- "${STAGING_DIR}/.info/version")
@@ -413,7 +481,7 @@ echo "============================================================"
 if [[ -d "${INSTALL_DIR}" ]]; then
    if [[ "${REPLACE_EXISTING}" == "1" ]]; then
       echo "[--replace-existing 1] removing pre-existing ${INSTALL_DIR}"
-      sudo rm -rf "${INSTALL_DIR}"
+      ${SUDO} rm -rf "${INSTALL_DIR}"
    else
       echo "ERROR: ${INSTALL_DIR} already exists but --replace-existing is 0;" >&2
       echo "       Phase 0 should have caught this. Either pass --replace-existing 1" >&2
@@ -421,9 +489,9 @@ if [[ -d "${INSTALL_DIR}" ]]; then
       exit 1
    fi
 fi
-sudo mv "${STAGING_DIR}" "${INSTALL_DIR}"
-sudo chown -R root:root "${INSTALL_DIR}"
-sudo chmod 755 "${INSTALL_DIR}"
+${SUDO} mv "${STAGING_DIR}" "${INSTALL_DIR}"
+chown_root -R root:root "${INSTALL_DIR}"
+${SUDO} chmod 755 "${INSTALL_DIR}"
 rm -f "${LOCAL_TARBALL}"
 echo "Installed: ${INSTALL_DIR}"
 
@@ -450,24 +518,53 @@ unset _leaf_dir
 echo "============================================================"
 echo "  Phase 5: write modulefile ${MODULE_FILE}"
 echo "============================================================"
-sudo mkdir -p "${MODULE_DIR}"
+${SUDO} mkdir -p "${MODULE_DIR}"
 
-# Heredoc-pipe into sudo tee so the modulefile is created root-owned
-# even when this script runs as a non-root user. Shape matches the
-# existing cluster-deployed therock-23.x.y.lua modules and
-# run_rocm_afar_install.sh:282-312:
-#   * Module basename uses THEROCK_RELEASE (the github release tag
-#     the user asked for) so provenance is obvious.
-#   * `local base = "${INSTALL_DIR}"` and `setenv("ROCM_PATH", base)`
-#     point at the .info/version-derived install dir so runtime
-#     version checks (which read either ${ROCM_PATH}/.info/version or
-#     basename ${ROCM_PATH}) see the authoritative SDK numeric (e.g.
-#     7.13.0), NOT the github tag form (7.13).
-#   * Two MODULEPATH prepends (rocm-therock-<numeric> for SDK
-#     packages, rocmplus-therock-<numeric> for the rocmplus stack)
-#     also use the numeric so all downstream package modules
-#     organize under the same authoritative version key.
-sudo tee "${MODULE_FILE}" >/dev/null <<EOF
+# The modulefile points `base` at the .info/version-derived install dir so
+# runtime version checks see the authoritative SDK numeric (e.g. 7.13.0), not
+# the github tag form (7.13). Two MODULEPATH prepends expose the per-package
+# (rocm-therock-<numeric>) and rocmplus (rocmplus-therock-<numeric>) trees.
+if [ "${CRAY_SYSTEM}" = "1" ]; then
+# ---- Cray Tcl modulefile (classic environment-modules) ----
+${SUDO} tee "${MODULE_FILE}" >/dev/null <<EOF
+#%Module
+#
+# ROCm (TheRock release therock-${THEROCK_RELEASE}) -- Tcl modulefile.
+# Source: tarball ${ACTUAL_VERSION}, family ${AMDGPU_FAMILY}
+# SDK numeric: ${ROCM_NUMERIC} (.info/version) -> ROCM_PATH=${INSTALL_DIR}
+# Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})
+
+conflict rocm
+
+module-whatis "ROCm TheRock therock-${THEROCK_RELEASE} (SDK ${ROCM_NUMERIC})"
+
+set base  ${INSTALL_DIR}
+
+setenv ROCM_PATH               \$base
+setenv HSA_NO_SCRATCH_RECLAIM  1
+setenv HIPCC_COMPILE_FLAGS_APPEND "--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11"
+setenv HIPCC_LINK_FLAGS_APPEND    "--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11"
+
+prepend-path LD_LIBRARY_PATH    \$base/lib
+prepend-path C_INCLUDE_PATH     \$base/include
+prepend-path CPLUS_INCLUDE_PATH \$base/include
+prepend-path CPATH              \$base/include
+prepend-path INCLUDE            \$base/include
+prepend-path PATH               \$base/bin
+# rocprof-sys-run wrapper (libbfd LD_PRELOAD workaround; no-op when unneeded)
+prepend-path PATH               \$base/share/rocprofiler-systems/bin
+
+# Expose the per-package and rocmplus modulefile trees (self-locating: this
+# file is at <module-root>/base/rocm/therock-<rel>, so three dirname's give
+# the module-root that holds rocm-therock-<numeric>/ and rocmplus-...).
+set _self    [file normalize \${ModulesCurrentModulefile}]
+set _modroot [file dirname [file dirname [file dirname \$_self]]]
+prepend-path MODULEPATH \$_modroot/rocm-therock-${ROCM_NUMERIC}
+prepend-path MODULEPATH \$_modroot/rocmplus-therock-${ROCM_NUMERIC}
+EOF
+else
+# ---- Lmod .lua modulefile ----
+${SUDO} tee "${MODULE_FILE}" >/dev/null <<EOF
 whatis("Name: ROCm")
 whatis("Version: therock-${THEROCK_RELEASE}")
 whatis("Category: AMD")
@@ -500,8 +597,9 @@ family("GPUSDK")
 -- where the system libbfd is new enough.
 prepend_path("PATH", pathJoin(base, "share/rocprofiler-systems/bin"))
 EOF
-sudo chown root:root "${MODULE_FILE}"
-sudo chmod 644 "${MODULE_FILE}"
+fi
+chown_root root:root "${MODULE_FILE}"
+${SUDO} chmod 644 "${MODULE_FILE}"
 
 # ---------------- Phase 5b: per-package secondary modulefiles ---------
 # Mirror what the regular numeric pipeline emits via deploy_module_package.sh
@@ -521,6 +619,46 @@ emit_per_package_modulefiles \
    "${LEAF_SCRIPT_NAME}" \
    "${LEAF_SCRIPT_COMMIT:0:12}" \
    "${LEAF_SCRIPT_DIRTY}"
+
+# ---------------- Phase 5c: rocm-<ver>.pc + Cray PrgEnv ecosystem -----
+# The pkg-config file is generically useful and harmless, so emit it for every
+# install. The PrgEnv-amd-new ecosystem (which wires PKG_CONFIG_PATH at it and
+# exposes the craype cc/CC/ftn wrappers against this SDK) is Cray-only.
+echo "============================================================"
+echo "  Phase 5c: pkg-config file + (Cray) PrgEnv-amd-new ecosystem"
+echo "============================================================"
+emit_rocm_pc "${INSTALL_DIR}" "${ROCM_NUMERIC}"
+
+if [ "${CRAY_SYSTEM}" = "1" ]; then
+   # Resolve the stock PrgEnv-amd version to wrap (override: --pe-version).
+   if [ -z "${PE_VERSION}" ]; then
+      if [ -d /opt/cray/pe/modulefiles/PrgEnv-amd ]; then
+         PE_VERSION=$(ls -1 /opt/cray/pe/modulefiles/PrgEnv-amd 2>/dev/null \
+                      | grep -E '^[0-9]+\.' | sort -V | tail -n1)
+      fi
+      if [ -z "${PE_VERSION}" ] && command -v module >/dev/null 2>&1; then
+         PE_VERSION=$(module -t avail PrgEnv-amd 2>&1 \
+                      | grep -oE 'PrgEnv-amd/[0-9][^ ]*' \
+                      | sed 's#PrgEnv-amd/##' | sort -V | tail -n1)
+      fi
+   fi
+   if [ -z "${PE_VERSION}" ]; then
+      echo "WARNING: could not auto-detect a stock PrgEnv-amd version; skipping"
+      echo "         the PrgEnv-amd-new ecosystem. Re-run with --pe-version VER."
+   else
+      echo "  PrgEnv-amd version to wrap: ${PE_VERSION}"
+      emit_cray_prgenv_ecosystem \
+         "${TOP_MODULE_PATH}/cray" \
+         "${ROCM_NUMERIC}" \
+         "${INSTALL_DIR}" \
+         "${PE_VERSION}" \
+         "${LEAF_SCRIPT_NAME}" \
+         "${LEAF_SCRIPT_COMMIT:0:12}" \
+         "${LEAF_SCRIPT_DIRTY}"
+      echo "  -> expose with: module use ${TOP_MODULE_PATH}/cray"
+      echo "  -> then:        module swap PrgEnv-cray PrgEnv-amd-new/${PE_VERSION}-${ROCM_NUMERIC}"
+   fi
+fi
 
 echo ""
 echo "============================================================"

@@ -1,6 +1,12 @@
 ARG DISTRO=ubuntu
 ARG DISTRO_VERSION=22.04
-FROM ${DISTRO}:${DISTRO_VERSION}
+# BASE_IMAGE decouples the pullable container image from the DISTRO token used
+# for cache paths and in-container distro detection. Defaults to ${DISTRO}
+# (ubuntu/almalinux pull directly), but RHEL-family tokens whose image name
+# differs are overridden by run_rocm_build.sh (e.g. rhel -> redhat/ubi9,
+# rocky -> rockylinux/rockylinux).
+ARG BASE_IMAGE=${DISTRO}
+FROM ${BASE_IMAGE}:${DISTRO_VERSION}
 
 ARG DISTRO
 ARG DISTRO_VERSION
@@ -16,6 +22,10 @@ ARG ROCM_INSTALLPATH
 ARG AMDGPU_GFXMODEL
 ARG PYTHON_VERSION
 ARG USE_MAKEFILE
+# When set to 1, rocm_setup.sh emits Cray-style Tcl modulefiles instead of Lmod
+# .lua. The build host is a non-Cray container, so this can't be autodetected
+# here; it is forwarded from run_rocm_build.sh (CRAY_SYSTEM / --cray-modules).
+ARG CRAY_SYSTEM=""
 
 LABEL maintainer="bob.robey@amd.com"
 
@@ -74,6 +84,7 @@ ENV PYTHON_VERSION=$PYTHON_VERSION
 ENV OMNITRACE_BUILD_FROM_SOURCE=1
 ENV DISTRO=${DISTRO}
 ENV DISTRO_VERSION=${DISTRO_VERSION}
+ENV CRAY_SYSTEM=${CRAY_SYSTEM}
 
 ADD bare_system bare_system
 ADD bare_system/Makefile Makefile

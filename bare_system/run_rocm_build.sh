@@ -29,6 +29,16 @@ set -eo pipefail
 : ${SKIP_EXTRACT:="0"}
 : ${SKIP_PRUNE:="0"}
 : ${SKIP_PATCHES:="0"}
+# --skip-build: extract-only mode. Skips the builder detection, Phase 1
+# (docker/podman build) and Phase 2 (container run) entirely and goes straight
+# to Phase 3 using a pre-staged ${TARBALL} (and *-modules-${ROCM_VERSION}.tgz)
+# already present in CacheFiles. Used to install on a host that has no
+# docker/podman/GPU (e.g. a login node) from tarballs built elsewhere.
+: ${SKIP_BUILD:="0"}
+# --no-sudo: extract into a user-writable destination (e.g. a home dir) without
+# sudo. When set, Phase 3 drops the `sudo` prefix and skips the chown root:root
+# normalization, leaving the extracted tree owned by the invoking user.
+: ${NO_SUDO:="0"}
 # --replace-existing is the rocm-sweep analog of run_rocmplus_install_sweep.sh's
 # flag of the same name: when set, the existing /opt/rocm-<v> tree (and the
 # matching modulefiles) are deleted and re-extracted from a fresh tarball.
@@ -77,6 +87,8 @@ usage() {
    echo "  --skip-extract [0 or 1]:                skip phase 3 (default $SKIP_EXTRACT)"
    echo "  --skip-patches [0 or 1]:                skip phase 3.6 (rocm_patches.sh) (default $SKIP_PATCHES)"
    echo "  --skip-prune [0 or 1]:                  skip phase 4 (default $SKIP_PRUNE)"
+   echo "  --skip-build [0 or 1]:                  extract-only: skip builder detection + phase 1 (build) + phase 2 (container), install from pre-staged CacheFiles tarballs (default $SKIP_BUILD)"
+   echo "  --no-sudo [0 or 1]:                     extract without sudo / chown root:root into a user-writable destination (default $NO_SUDO)"
    echo "  --help"
    exit 1
 }
@@ -107,6 +119,8 @@ while [[ $# -gt 0 ]]; do
       "--skip-extract")        shift; SKIP_EXTRACT=${1};       reset-last ;;
       "--skip-patches")        shift; SKIP_PATCHES=${1};       reset-last ;;
       "--skip-prune")          shift; SKIP_PRUNE=${1};         reset-last ;;
+      "--skip-build")          shift; SKIP_BUILD=${1};         reset-last ;;
+      "--no-sudo")             shift; NO_SUDO=${1};            reset-last ;;
       "--help")                usage ;;
       *)                       last ${1} ;;
    esac
@@ -122,6 +136,35 @@ if [[ "${PYTHON_VERSION_INPUT}" == "" ]]; then
 else
    PYTHON_VERSION=${PYTHON_VERSION_INPUT}
 fi
+
+# ---------------- Privilege escalation prefix ------------------------
+# Phase 3 (extract/chown/chmod/mkdir) defaults to running its filesystem
+# mutations through sudo so it can write a root-owned tree under /nfsapps,
+# /shared/apps, etc. When --no-sudo 1 is passed (e.g. a home-dir install on a
+# login node where the user has no passwordless sudo), drop the prefix and let
+# the ownership fall to the invoking user; the chown root:root normalizations
+# are skipped in that mode (guarded individually below).
+if [[ "${NO_SUDO}" == "1" ]]; then
+   SUDO=""
+else
+   SUDO="sudo"
+fi
+
+# chown-to-root helper: chowning to root only works with privilege, so in
+# --no-sudo mode it is a no-op (the tree stays owned by the invoking user).
+chown_root() {
+   [[ "${NO_SUDO}" == "1" ]] && return 0
+   ${SUDO} chown "$@"
+}
+# directory-create helper: root-owned 0755 dir with sudo, plain mkdir -p in
+# --no-sudo mode (so the user-owned parents are created without privilege).
+make_dir_root() {
+   if [[ "${NO_SUDO}" == "1" ]]; then
+      mkdir -p "$1"
+   else
+      ${SUDO} install -d -o root -g root -m 0755 "$1"
+   fi
+}
 
 # ---------------- Delta-release auto-detect from conf -----------------
 # If the user did not pass --base-rocm-version, consult the registry file
@@ -211,12 +254,18 @@ trap prune_cache EXIT
 # warewulf-managed fstab still mounts /nfsapps ro by default. Remount rw if
 # possible so Phase 3's sudo tar can write. No-op on hosts where rw is already
 # granted or where we can't write regardless.
-if [[ "${SKIP_EXTRACT}" != "1" ]]; then
+if [[ "${SKIP_EXTRACT}" != "1" && "${NO_SUDO}" != "1" ]]; then
    if ! sudo -n test -w "${TOP_INSTALL_PATH}" 2>/dev/null; then
       echo "Attempting to remount ${TOP_INSTALL_PATH%/*} rw..."
       sudo mount -o remount,rw "${TOP_INSTALL_PATH%/*}" 2>/dev/null || true
    fi
 fi
+
+# ---------------- Phases 1+2 (build) -- skipped in extract-only mode --
+# --skip-build 1 jumps straight to Phase 3 using a pre-staged ${TARBALL}
+# (and *-modules-${ROCM_VERSION}.tgz) already present in CacheFiles, so a host
+# with no docker/podman/GPU can install tarballs built elsewhere.
+if [[ "${SKIP_BUILD}" != "1" ]]; then
 
 # ---------------- Builder detection (docker/podman) -------------------
 ADD_OPTIONS=""
@@ -231,15 +280,31 @@ else
 fi
 [[ "$BUILDER" == "podman" ]] && ADD_OPTIONS="${ADD_OPTIONS} --format docker"
 
-DISTRO_BUILD_ARG="${DISTRO}"
-[[ "${DISTRO_BUILD_ARG}" == *"rocky"* ]] && DISTRO_BUILD_ARG="rockylinux/rockylinux"
+# Base container image (FROM ...) decoupled from the DISTRO token. The DISTRO
+# token is kept clean (no slashes) so it can be used verbatim in the host/
+# container cache-dir name (${DISTRO}-${DISTRO_VERSION}-rocm-...); only the
+# pullable image name is remapped here for RHEL-family distros whose Docker Hub
+# image name differs from the os-release NAME.
+#   rhel / "red hat enterprise linux" -> redhat/ubi9 (os-release reports
+#                                        "Red Hat Enterprise Linux" / 9.6, so
+#                                        the RHEL-compatible branches and the
+#                                        amdgpu-install rhel/<minor> URL both
+#                                        resolve correctly).
+#   rocky / "rocky linux"             -> rockylinux/rockylinux
+BASE_IMAGE="${DISTRO}"
+case "${DISTRO}" in
+   *rocky*)                          BASE_IMAGE="rockylinux/rockylinux" ;;
+   rhel|"red hat enterprise linux")  BASE_IMAGE="redhat/ubi9" ;;
+esac
 
 # ---------------- Phase 1: docker build -------------------------------
 echo "============================================================"
 echo "  Phase 1: docker build (-> ${BARE_LOG})"
 echo "============================================================"
 ${BUILDER} build --no-cache ${ADD_OPTIONS} \
-             --build-arg DISTRO=${DISTRO_BUILD_ARG}  \
+             --build-arg DISTRO="${DISTRO}"  \
+             --build-arg BASE_IMAGE="${BASE_IMAGE}" \
+             --build-arg CRAY_SYSTEM="${CRAY_SYSTEM:-}" \
              --build-arg DISTRO_VERSION=${DISTRO_VERSION} \
              --build-arg ROCM_VERSION=${ROCM_VERSION} \
              --build-arg ROCM_INSTALLPATH=${ROCM_INSTALLPATH} \
@@ -299,6 +364,13 @@ ${BUILDER} run --device=/dev/kfd --device=/dev/dri \
     -c "set -eo pipefail; cd /home/sysadmin && ${MAKE_TARGETS}" \
     2>&1 | tee "${MAKE_LOG}"
 
+else
+   echo "============================================================"
+   echo "  --skip-build 1: skipping builder detection + Phase 1 (build) + Phase 2 (container)"
+   echo "  Installing from pre-staged tarballs in ${CACHE_DIR}"
+   echo "============================================================"
+fi
+
 # ---------------- Phase 3: extract tarballs ---------------------------
 if [[ "${SKIP_EXTRACT}" != "1" ]]; then
    echo "============================================================"
@@ -310,11 +382,11 @@ if [[ "${SKIP_EXTRACT}" != "1" ]]; then
    fi
    if [[ ! -d "${TOP_INSTALL_PATH}" ]]; then
       echo "Creating missing ${TOP_INSTALL_PATH}"
-      sudo install -d -o root -g root -m 0755 "${TOP_INSTALL_PATH}"
+      make_dir_root "${TOP_INSTALL_PATH}"
    fi
    if [[ -d "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}" ]]; then
       echo "Removing existing ${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION} for re-extract (--replace-existing was set)"
-      sudo rm -rf "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}"
+      ${SUDO} rm -rf "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}"
    fi
    # Replacing the SDK invalidates any sibling rocm_patches.sh overlay
    # built against the prior tree (the overlay's librocprof-sys.so /
@@ -331,18 +403,18 @@ if [[ "${SKIP_EXTRACT}" != "1" ]]; then
    # 1 was supplied or the SDK dir was absent to begin with).
    if [[ -d "${TOP_INSTALL_PATH}/rocm-patches-${ROCM_VERSION}" ]]; then
       echo "Removing sibling overlay ${TOP_INSTALL_PATH}/rocm-patches-${ROCM_VERSION} (stale vs the fresh SDK extract)"
-      sudo rm -rf "${TOP_INSTALL_PATH}/rocm-patches-${ROCM_VERSION}"
+      ${SUDO} rm -rf "${TOP_INSTALL_PATH}/rocm-patches-${ROCM_VERSION}"
    fi
-   sudo tar -xzpf "${TARBALL}" -C "${TOP_INSTALL_PATH}/"
-   sudo chown -R root:root "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}"
-   sudo chmod 755 "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}"
+   ${SUDO} tar -xzpf "${TARBALL}" -C "${TOP_INSTALL_PATH}/"
+   chown_root -R root:root "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}"
+   ${SUDO} chmod 755 "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}"
    echo "Extracted: ${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}"
 
    echo "============================================================"
    echo "  Phase 3b: extract every *-modules-${ROCM_VERSION}.tgz -> ${TOP_MODULE_PATH}/"
    echo "============================================================"
    if [[ ! -d "${TOP_MODULE_PATH}" ]]; then
-      sudo mkdir -p "${TOP_MODULE_PATH}"
+      ${SUDO} mkdir -p "${TOP_MODULE_PATH}"
    fi
    shopt -s nullglob
    MOD_TARBALLS=( "${CACHE_DIR}"/*-modules-"${ROCM_VERSION}".tgz )
@@ -355,12 +427,12 @@ if [[ "${SKIP_EXTRACT}" != "1" ]]; then
       pkg=${pkg%-modules-${ROCM_VERSION}.tgz}
       echo "Extracting modules for ${pkg}: ${MTGZ}"
       if [[ "${REPLACE_EXISTING}" == "1" ]]; then
-         sudo rm -f "${TOP_MODULE_PATH}/base/${pkg}/${ROCM_VERSION}.lua" 2>/dev/null || true
-         [[ "${pkg}" == "rocm" ]] && sudo rm -f "${TOP_MODULE_PATH}/base/rocm/${ROCM_VERSION}.lua" 2>/dev/null || true
-         sudo rm -rf "${TOP_MODULE_PATH}/rocm-${ROCM_VERSION}/${pkg}" 2>/dev/null || true
-         sudo rm -rf "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/${pkg}" 2>/dev/null || true
+         ${SUDO} rm -f "${TOP_MODULE_PATH}/base/${pkg}/${ROCM_VERSION}.lua" 2>/dev/null || true
+         [[ "${pkg}" == "rocm" ]] && ${SUDO} rm -f "${TOP_MODULE_PATH}/base/rocm/${ROCM_VERSION}.lua" 2>/dev/null || true
+         ${SUDO} rm -rf "${TOP_MODULE_PATH}/rocm-${ROCM_VERSION}/${pkg}" 2>/dev/null || true
+         ${SUDO} rm -rf "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/${pkg}" 2>/dev/null || true
       fi
-      sudo tar -xzpf "${MTGZ}" -C "${TOP_MODULE_PATH}/"
+      ${SUDO} tar -xzpf "${MTGZ}" -C "${TOP_MODULE_PATH}/"
    done
 
    # Normalize ownership/perms on extracted module trees: the tarball entries
@@ -371,12 +443,12 @@ if [[ "${SKIP_EXTRACT}" != "1" ]]; then
             "${TOP_MODULE_PATH}/rocm-${ROCM_VERSION}" \
             "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}" ; do
       [[ -e "${d}" ]] || continue
-      sudo chown -R root:root "${d}"
-      sudo find "${d}" -type d -exec chmod 755 {} +
-      sudo find "${d}" -type f -exec chmod 644 {} +
+      chown_root -R root:root "${d}"
+      ${SUDO} find "${d}" -type d -exec chmod 755 {} +
+      ${SUDO} find "${d}" -type f -exec chmod 644 {} +
    done
-   sudo chown root:root "${TOP_MODULE_PATH}"
-   sudo chmod 755 "${TOP_MODULE_PATH}"
+   chown_root root:root "${TOP_MODULE_PATH}"
+   ${SUDO} chmod 755 "${TOP_MODULE_PATH}"
 
    # ---------------- Phase 3c: extract rocm-afar-*.tgz (flang-new) ----
    # ROCm 6.x.x adds the AMD AFAR flang-new compiler under /opt/rocmplus-<v>/
@@ -396,7 +468,7 @@ if [[ "${SKIP_EXTRACT}" != "1" ]]; then
       echo "============================================================"
       ROCMPLUS_DEST="${TOP_INSTALL_PATH}/rocmplus-${ROCM_VERSION}"
       if [[ ! -d "${ROCMPLUS_DEST}" ]]; then
-         sudo install -d -o root -g root -m 0755 "${ROCMPLUS_DEST}"
+         make_dir_root "${ROCMPLUS_DEST}"
       fi
       for ATGZ in "${AFAR_TARBALLS[@]}"; do
          afar=$(basename "${ATGZ}")
@@ -404,11 +476,11 @@ if [[ "${SKIP_EXTRACT}" != "1" ]]; then
          echo "Extracting ${afar}: ${ATGZ}"
          if [[ "${REPLACE_EXISTING}" == "1" && -d "${ROCMPLUS_DEST}/${afar}" ]]; then
             echo "  --replace-existing: removing existing ${ROCMPLUS_DEST}/${afar}"
-            sudo rm -rf "${ROCMPLUS_DEST}/${afar}"
+            ${SUDO} rm -rf "${ROCMPLUS_DEST}/${afar}"
          fi
-         sudo tar -xzpf "${ATGZ}" -C "${ROCMPLUS_DEST}/"
-         sudo chown -R root:root "${ROCMPLUS_DEST}/${afar}"
-         sudo chmod 755 "${ROCMPLUS_DEST}/${afar}"
+         ${SUDO} tar -xzpf "${ATGZ}" -C "${ROCMPLUS_DEST}/"
+         chown_root -R root:root "${ROCMPLUS_DEST}/${afar}"
+         ${SUDO} chmod 755 "${ROCMPLUS_DEST}/${afar}"
       done
       echo "Extracted: ${ROCMPLUS_DEST}/rocm-afar-*"
    fi
@@ -417,22 +489,22 @@ if [[ "${SKIP_EXTRACT}" != "1" ]]; then
    echo "============================================================"
    echo "  Phase 3.5: rewrite container-form paths in deployed .lua files"
    echo "============================================================"
+   # Cover the whole base/ tree (base/rocm, base/amd, base/<pkg>) plus the
+   # versioned component/add-on trees. Using directories (rather than specific
+   # *.lua paths) means the rewrite also reaches the extensionless Tcl
+   # modulefiles emitted for Cray systems.
    LUA_TARGETS=()
    for cand in \
-      "${TOP_MODULE_PATH}/base/rocm/${ROCM_VERSION}.lua" \
+      "${TOP_MODULE_PATH}/base" \
       "${TOP_MODULE_PATH}/rocm-${ROCM_VERSION}" \
       "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}" ; do
       [[ -e "${cand}" ]] && LUA_TARGETS+=("${cand}")
    done
-   for MTGZ in "${MOD_TARBALLS[@]}"; do
-      pkg=$(basename "${MTGZ}")
-      pkg=${pkg%-modules-${ROCM_VERSION}.tgz}
-      [[ "${pkg}" == "rocm" ]] && continue
-      cand="${TOP_MODULE_PATH}/base/${pkg}/${ROCM_VERSION}.lua"
-      [[ -e "${cand}" ]] && LUA_TARGETS+=("${cand}")
-   done
    if (( ${#LUA_TARGETS[@]} > 0 )); then
-      sudo find "${LUA_TARGETS[@]}" -name '*.lua' -print0 | sudo xargs -0 sed -i \
+      # -type f matches both .lua (Lmod) and extensionless Tcl modulefiles. The
+      # Lmod-specific mbase / .lua rules below simply don't match Tcl content,
+      # while the /opt/rocm-<v> rewrite (needed by both) applies to all files.
+      ${SUDO} find "${LUA_TARGETS[@]}" -type f -print0 | ${SUDO} xargs -0 sed -i \
          -e "s|/opt/rocmplus-${ROCM_VERSION}|${TOP_INSTALL_PATH}/rocmplus-${ROCM_VERSION}|g" \
          -e "s|/opt/rocm-${ROCM_VERSION}|${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}|g" \
          -e "s|local mbase = \" /etc/lmod/modules/ROCm/rocm\"|local mbase = \"${TOP_MODULE_PATH}\"|" \
@@ -504,8 +576,8 @@ if [[ "${SKIP_EXTRACT}" != "1" && "${SKIP_PATCHES}" != "1" ]]; then
       # SDK tree extracted in Phase 3a (root:root, dirs 755, files
       # preserved by `install -m 0755` inside the script).
       if [[ -d "${TOP_INSTALL_PATH}/rocm-patches-${ROCM_VERSION}" ]]; then
-         sudo chown -R root:root "${TOP_INSTALL_PATH}/rocm-patches-${ROCM_VERSION}"
-         sudo find "${TOP_INSTALL_PATH}/rocm-patches-${ROCM_VERSION}" -type d -exec chmod 755 {} +
+         chown_root -R root:root "${TOP_INSTALL_PATH}/rocm-patches-${ROCM_VERSION}"
+         ${SUDO} find "${TOP_INSTALL_PATH}/rocm-patches-${ROCM_VERSION}" -type d -exec chmod 755 {} +
       fi
       echo "[Phase 3.6] patches applied for ROCm ${ROCM_VERSION}"
    fi

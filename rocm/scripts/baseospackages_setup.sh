@@ -57,9 +57,20 @@ elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    if [[ `type sudo |& grep "not found" | wc -l` == "1" ]]; then
       yum install -y which sudo
    fi
+   # EPEL + CRB (CodeReady Builder) provide the -devel packages below
+   # (dpkg-devel, numactl-devel, papi-devel, ...) and many ROCm runtime deps.
+   # rocky/alma ship an `epel-release` package and name the CRB repo `crb`;
+   # Red Hat UBI (redhat/ubi9) has neither -- it has no epel-release package
+   # (install the Fedora EPEL RPM by URL) and names CRB
+   # `ubi-9-codeready-builder-rpms`. Enable all candidates so the same code
+   # path works on rocky, almalinux and UBI.
+   ${PKG_SUDO} yum install -y epel-release || \
+      ${PKG_SUDO} dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm || true
+   ${PKG_SUDO} dnf config-manager --set-enabled crb 2>/dev/null || true
+   ${PKG_SUDO} dnf config-manager --set-enabled ubi-9-codeready-builder-rpms 2>/dev/null || true
+   ${PKG_SUDO} /usr/bin/crb enable 2>/dev/null || true
    ${PKG_SUDO} yum groupinstall -y "Development Tools"
    #${PKG_SUDO} yum install -y ${SUDO}
-   ${PKG_SUDO} yum install -y epel-release
    ${PKG_SUDO} yum install -y --allowerasing curl dpkg-devel numactl-devel openmpi-devel papi-devel python3-pip wget zlib-devel 
    ${PKG_SUDO} yum clean all
 elif [ "${DISTRO}" = "opensuse leap" ]; then

@@ -35,6 +35,19 @@ if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" = "rocky linux" ||
    RHEL_COMPATIBLE=1
 fi
 
+# Cray-system module flavor. On a Cray PE (HPE Cray) system the site modulefiles
+# are classic Tcl (produced with craypkg-gen) and the module command cannot read
+# Lmod .lua modulefiles. When targeting such a system we emit Tcl modulefiles
+# modeled on the site /opt/modulefiles/{amd,rocm} layout instead of .lua.
+#
+# "Cray-ness" is a property of the TARGET, not necessarily the build host: the
+# Docker/Podman build runs in a non-Cray container, so on-host autodetection
+# would never fire there. We therefore honor an explicit override
+# (CRAY_SYSTEM=1 in the environment, or --cray-modules on the command line) and
+# fall back to autodetecting a Cray host (/opt/cray/pe, /etc/cray-release,
+# $CRAYPE_VERSION) when no override is given.
+: ${CRAY_SYSTEM:=""}
+
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
@@ -61,6 +74,7 @@ usage()
    echo "  --python-version [ PYTHON_VERSION ] Python3 minor version, default not set"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
    echo "  --include-tools [INCLUDE_TOOLS] default $INCLUDE_TOOLS "
+   echo "  --cray-modules: emit Cray-style Tcl modulefiles instead of Lmod .lua (also via CRAY_SYSTEM=1; autodetected on Cray PE hosts)"
    echo "  --help: this usage information"
    exit 1
 }
@@ -121,6 +135,10 @@ do
       "--include-tools")
           shift
           INCLUDE_TOOLS=${1}
+          reset-last
+          ;;
+      "--cray-modules")
+          CRAY_SYSTEM=1
           reset-last
           ;;
       "--*")
@@ -809,7 +827,11 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
             fi
          fi
       elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
-	 ${PKG_SUDO} dnf config-manager --set-enabled crb
+	 # CRB repo id is `crb` on rocky/alma but `ubi-9-codeready-builder-rpms`
+	 # on Red Hat UBI; enable whichever exists (ignore the absent one).
+	 ${PKG_SUDO} dnf config-manager --set-enabled crb 2>/dev/null || true
+	 ${PKG_SUDO} dnf config-manager --set-enabled ubi-9-codeready-builder-rpms 2>/dev/null || true
+	 ${PKG_SUDO} /usr/bin/crb enable 2>/dev/null || true
          ${PKG_SUDO} dnf install -y python3-setuptools python3-wheel python3-devel
 #	 ${PKG_SUDO} dnf --enablerepo=crb install python3-wheel -y
 #	 ${PKG_SUDO} dnf install python3-setuptools python3-wheel -y
@@ -1096,6 +1118,25 @@ unset _leaf_dir
 
 # set up up module files
 
+# Resolve the Cray module flavor now: autodetect a Cray PE host only when no
+# explicit override (CRAY_SYSTEM=1 / --cray-modules) was supplied.
+if [ -z "${CRAY_SYSTEM}" ]; then
+   if [ -d /opt/cray/pe ] || [ -f /etc/cray-release ] || [ -n "${CRAYPE_VERSION:-}" ]; then
+      CRAY_SYSTEM=1
+   else
+      CRAY_SYSTEM=0
+   fi
+fi
+if [[ "${CRAY_SYSTEM}" == 1 ]]; then
+   echo "[rocm_setup] Cray system: emitting Tcl (craypkg-gen style) modulefiles"
+else
+   echo "[rocm_setup] non-Cray system: emitting Lmod .lua modulefiles"
+fi
+
+# Root of the module tree (before the per-package leaf is appended), used by the
+# Cray branch to place the separate 'amd' (compiler) base module alongside 'rocm'.
+MODULE_ROOT=${MODULE_PATH}
+
 # Create a module file for rocm sdk
 MODULE_PATH=${MODULE_PATH}/rocm
 
@@ -1104,7 +1145,119 @@ ${SUDO} mkdir -p ${MODULE_PATH}
 # autodetecting default version for distro and getting available gcc version list
 GCC_BASE_VERSION=`ls /usr/bin/gcc-* | cut -f2 -d'-' | grep '^[[:digit:]]' | head -1`
 
-if [ "${DISTRO}" == "ubuntu" ]; then
+if [[ "${CRAY_SYSTEM}" == 1 ]]; then
+# ---- Cray base 'rocm' module (Tcl), modeled on /opt/modulefiles/rocm/<v> ----
+# AMD_CURPATH uses the container-form /opt/rocm-<v> placeholder; run_rocm_build.sh
+# Phase 3.5 rewrites it to the real install prefix. The MODULEPATH additions are
+# self-locating (derived from this file's own path) so they need no rewriting:
+# this file lands at <module-root>/base/rocm/<v>, so three dirname's give the
+# module-root that contains rocm-<v>/ and rocmplus-<v>/.
+${SUDO} mkdir -p ${MODULE_ROOT}/amd
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}
+	#%Module
+	#
+	# rocm module (${ROCM_VERSION}) -- modeled on the Cray system module
+	# /opt/modulefiles/rocm/<v> (craypkg-gen), retargeted to this ROCm install.
+	# Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})
+
+	conflict rocm
+
+	proc ModulesHelp {} {
+	    puts stderr "Defines the system paths and variables for the ROCm ${ROCM_VERSION} Toolkit."
+	}
+
+	module-whatis "The module file defines the system paths and variables for the ROCm Toolkit."
+
+	set MOD_LEVEL         ${ROCM_VERSION}
+	set AMD_CURPATH       /opt/rocm-${ROCM_VERSION}
+	set PKG_CONFIG_PREFIX /usr/lib64
+
+	set CPE_PRODUCT_NAME      CRAY_ROCM
+	set CPE_PKGCONFIG_LIB     rocm-\$MOD_LEVEL
+	set CPE_PKGCONFIG_PATH    \$PKG_CONFIG_PREFIX/pkgconfig
+
+	set AMD_LIB           \$AMD_CURPATH/lib
+	set AMD_BIN           \$AMD_CURPATH/bin
+	set AMD_INCLUDE       \$AMD_CURPATH/include
+	set AMD_MAN           \$AMD_CURPATH/share/man
+	set AMD_ROCP_LIB      \$AMD_CURPATH/lib/rocprofiler
+	set AMD_ROCP_INCLUDE  \$AMD_CURPATH/include/rocprofiler
+	set AMD_ROCT_LIB      \$AMD_CURPATH/lib/roctracer
+	set AMD_ROCT_INCLUDE  \$AMD_CURPATH/include/roctracer
+	set AMD_HIP_CMAKE     \$AMD_CURPATH/lib/cmake/hip
+	set AMD_HIP_INCLUDE   \$AMD_CURPATH/include/hip
+
+	setenv CRAY_ROCM_DIR      \$AMD_CURPATH
+	setenv CRAY_ROCM_PREFIX   \$AMD_CURPATH
+	setenv CRAY_ROCM_VERSION  \$MOD_LEVEL
+	setenv ROCM_PATH          \$AMD_CURPATH
+	setenv HIP_LIB_PATH       \$AMD_LIB
+
+	prepend-path PATH         \$AMD_BIN
+	prepend-path MANPATH      \$AMD_MAN
+	prepend-path CMAKE_PREFIX_PATH \$AMD_HIP_CMAKE
+	prepend-path C_INCLUDE_PATH      \$AMD_INCLUDE
+	prepend-path CPLUS_INCLUDE_PATH  \$AMD_INCLUDE
+	prepend-path CPATH        \$AMD_INCLUDE
+
+	setenv CRAY_ROCM_INCLUDE_OPTS "-I\$AMD_INCLUDE -I\$AMD_ROCP_INCLUDE -I\$AMD_ROCT_INCLUDE -I\$AMD_HIP_INCLUDE -D__HIP_PLATFORM_AMD__"
+	setenv CRAY_ROCM_POST_LINK_OPTS    "-L\$AMD_LIB -L\$AMD_ROCP_LIB -L\$AMD_ROCT_LIB -lamdhip64"
+
+	prepend-path LD_LIBRARY_PATH    \$AMD_LIB
+	prepend-path LD_LIBRARY_PATH    \$AMD_ROCP_LIB
+	prepend-path LD_LIBRARY_PATH    \$AMD_ROCT_LIB
+
+	append-path PE_PRODUCT_LIST     \$CPE_PRODUCT_NAME
+	prepend-path PKG_CONFIG_PATH    \$CPE_PKGCONFIG_PATH
+	prepend-path PE_PKGCONFIG_LIBS  \$CPE_PKGCONFIG_LIB
+
+	# Expose the component (rocm-<v>) and add-on (rocmplus-<v>) modulefile trees,
+	# matching the Lmod base/rocm behavior. Self-locating: no path rewrite needed.
+	set _self    [file normalize \${ModulesCurrentModulefile}]
+	set _modroot [file dirname [file dirname [file dirname \$_self]]]
+	prepend-path MODULEPATH   \$_modroot/rocm-${ROCM_VERSION}
+	prepend-path MODULEPATH   \$_modroot/rocmplus-${ROCM_VERSION}
+EOF
+
+# ---- Cray base 'amd' (LLVM compiler) module (Tcl), from /opt/modulefiles/amd/<v> ----
+cat <<-EOF | ${SUDO} tee ${MODULE_ROOT}/amd/${ROCM_VERSION}
+	#%Module
+	#
+	# amd module (${ROCM_VERSION}) -- modeled on the Cray system module
+	# /opt/modulefiles/amd/<v> (craypkg-gen), retargeted to this ROCm install.
+	# Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})
+
+	conflict amd
+
+	proc ModulesHelp {} {
+	    puts stderr "Defines paths/variables for the AMD ROCM LLVM Compilers (${ROCM_VERSION})."
+	}
+
+	module-whatis "AMD LLVM Compiler"
+
+	set AMD_LEVEL ${ROCM_VERSION}
+	set AMD_CURPATH /opt/rocm-${ROCM_VERSION}
+
+	set AMD_BIN          \$AMD_CURPATH/bin
+	set AMD_LIB          \$AMD_CURPATH/lib
+	set AMD_LLVM         \$AMD_CURPATH/llvm
+	set AMD_LLVM_LIB     \$AMD_CURPATH/llvm/lib
+	set AMD_LLVM_INCLUDE \$AMD_CURPATH/llvm/include
+
+	prepend-path PATH                \$AMD_BIN
+	prepend-path C_INCLUDE_PATH      \$AMD_LLVM_INCLUDE
+	prepend-path CPLUS_INCLUDE_PATH  \$AMD_LLVM_INCLUDE
+	prepend-path CMAKE_PREFIX_PATH   \$AMD_CURPATH
+
+	setenv ROCM_COMPILER_PATH        \$AMD_LLVM
+	setenv ROCM_COMPILER_VERSION     \$AMD_LEVEL
+	setenv CRAY_AMD_COMPILER_PREFIX  \$AMD_CURPATH
+	setenv CRAY_AMD_COMPILER_VERSION \$AMD_LEVEL
+
+	prepend-path LD_LIBRARY_PATH     \$AMD_LLVM_LIB
+	prepend-path LD_LIBRARY_PATH     \$AMD_LIB
+EOF
+elif [ "${DISTRO}" == "ubuntu" ]; then
 # The - option suppresses tabs
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ROCm")
@@ -1165,6 +1318,16 @@ fi
 # from the target module, avoiding family-collision errors.
 if [ -n "${SUPERSEDES_VERSION}" ] && [ "${SUPERSEDES_VERSION}" != "${ROCM_VERSION}" ]; then
    echo "[rocm_setup] writing tombstone modulefile: rocm/${SUPERSEDES_VERSION} -> rocm/${ROCM_VERSION}"
+if [[ "${CRAY_SYSTEM}" == 1 ]]; then
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${SUPERSEDES_VERSION}
+	#%Module
+	# ROCm ${SUPERSEDES_VERSION} is superseded by ${ROCM_VERSION}; load that instead.
+	# Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})
+	module-whatis "ROCm ${SUPERSEDES_VERSION} [superseded by ${ROCM_VERSION}]"
+	puts stderr "[NOTICE] rocm/${SUPERSEDES_VERSION} is superseded by rocm/${ROCM_VERSION}; loading rocm/${ROCM_VERSION} instead."
+	module load rocm/${ROCM_VERSION}
+EOF
+else
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${SUPERSEDES_VERSION}.lua
 	whatis("Name: ROCm (DEPRECATED)")
 	whatis("Version: ${SUPERSEDES_VERSION} [superseded by ${ROCM_VERSION}]")
@@ -1177,6 +1340,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${SUPERSEDES_VERSION}.lua
 	load("rocm/${ROCM_VERSION}")
 EOF
 fi
+fi
 
 # Create a module file for amdclang compiler
 export MODULE_PATH=/etc/lmod/modules/ROCm/amdclang
@@ -1185,6 +1349,39 @@ ${SUDO} mkdir -p ${MODULE_PATH}
 AMDCLANG_VERSION=`/opt/rocm-${ROCM_VERSION}/llvm/bin/amdclang --version |head -1 | cut -f 4 -d' ' | tr -d -c '[:digit:]\.'`
 
 # The - option suppresses tabs
+if [[ "${CRAY_SYSTEM}" == 1 ]]; then
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}
+	#%Module
+	#
+	# amdclang component module (${ROCM_VERSION}) -- Tcl. Exposed via MODULEPATH
+	# when the base rocm/${ROCM_VERSION} module is loaded.
+	# Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})
+
+	conflict amdclang
+
+	module-whatis "AMDCLANG ${ROCM_VERSION} (AMD LLVM compiler drivers)"
+
+	prereq rocm/${ROCM_VERSION}
+
+	set base      /opt/rocm-${ROCM_VERSION}/llvm
+	set rocm_base /opt/rocm-${ROCM_VERSION}
+
+	setenv CC          \$base/bin/amdclang
+	setenv CXX         \$base/bin/amdclang++
+	setenv FC          \$base/bin/amdflang
+	setenv OMPI_CC     \$base/bin/amdclang
+	setenv OMPI_CXX    \$base/bin/amdclang++
+	setenv OMPI_FC     \$base/bin/amdflang
+	setenv F77         \$base/bin/amdflang
+	setenv F90         \$base/bin/amdflang
+	setenv STDPAR_PATH \$rocm_base/include/thrust/system/hip/hipstdpar
+	setenv STDPAR_CXX  \$base/bin/amdclang++
+	prepend-path PATH            \$base/bin
+	prepend-path LD_LIBRARY_PATH \$base/lib
+	prepend-path LD_RUN_PATH     \$base/lib
+	prepend-path CPATH           \$base/include
+EOF
+else
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${AMDCLANG_VERSION}-${ROCM_VERSION}.lua
 	whatis("Name: AMDCLANG")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
@@ -1213,6 +1410,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${AMDCLANG_VERSION}-${ROCM_VERSION}.lua
 	prereq("${ROCM_MODULE_NAME}")
 	family("compiler")
 EOF
+fi
 
 # Create a module file for hipfort package
 export MODULE_PATH=/etc/lmod/modules/ROCm/hipfort
@@ -1220,6 +1418,26 @@ export MODULE_PATH=/etc/lmod/modules/ROCm/hipfort
 ${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
+if [[ "${CRAY_SYSTEM}" == 1 ]]; then
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}
+	#%Module
+	#
+	# hipfort component module (${ROCM_VERSION}) -- Tcl.
+	# Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})
+
+	module-whatis "ROCm HIPFort ${ROCM_VERSION}"
+
+	# hipfort builds on the AMD LLVM compiler drivers
+	module load amdclang/${ROCM_VERSION}
+
+	set base /opt/rocm-${ROCM_VERSION}
+
+	append-path  LD_LIBRARY_PATH \$base/lib
+	setenv LIBS        "-L\$base/lib -lhipfort-amdgcn.a"
+	setenv HIPFORT_LIB \$base/lib
+	setenv HIPFORT_INC \$base/include/hipfort
+EOF
+else
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ROCm HIPFort")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
@@ -1231,6 +1449,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	setenv("HIPFORT_LIB", pathJoin(base, "/lib"))
 	setenv("HIPFORT_INC", pathJoin(base, "/include/hipfort"))
 EOF
+fi
 
 # Create a module file for opencl compiler
 export MODULE_PATH=/etc/lmod/modules/ROCm/opencl
@@ -1238,6 +1457,22 @@ export MODULE_PATH=/etc/lmod/modules/ROCm/opencl
 ${SUDO} mkdir -p ${MODULE_PATH}
 
 # The - option suppresses tabs
+if [[ "${CRAY_SYSTEM}" == 1 ]]; then
+cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}
+	#%Module
+	#
+	# opencl component module (${ROCM_VERSION}) -- Tcl.
+	# Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})
+
+	conflict opencl
+
+	module-whatis "ROCm OpenCL ${ROCM_VERSION}"
+
+	set base /opt/rocm-${ROCM_VERSION}/opencl
+
+	prepend-path PATH \$base/bin
+EOF
+else
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Name: ROCm OpenCL")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
@@ -1251,6 +1486,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	prepend_path("PATH", pathJoin(base, "bin"))
 	family("OpenCL")
 EOF
+fi
 
 echo "DEBUG INCLUDE_TOOLS is ${INCLUDE_TOOLS}"
 
