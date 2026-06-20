@@ -81,7 +81,23 @@ LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$
 : ${TOP_MODULE_PATH:="/nfsapps/modules"}
 : ${REPLACE_EXISTING:="0"}
 : ${KEEP_FAILED_INSTALLS:="0"}
+# WORLD_READABLE: 1 = make install + module trees group/other readable (o+rX)
+# for a shared location (e.g. /shareddata); 0 = leave as-is; "auto" (default) =
+# enable iff TOP_INSTALL_PATH is NOT under $HOME.
+: ${WORLD_READABLE:="auto"}
 : ${URL_BASE:="https://repo.amd.com/rocm/tarball"}
+# LOCAL_TARBALL_INPUT: when set to an existing therock-dist-linux-*.tar.gz
+# path, Phase 1 URL discovery + the Phase 2 curl are skipped and this file is
+# extracted directly. This is the AAC6-build -> transfer -> AAC7-extract path:
+# the build node stages the tarball, the Cray login node extracts it and
+# writes the modulefiles + PrgEnv-amd-new ecosystem. ACTUAL_VERSION is parsed
+# from the filename; .info/version is still authoritative for the install dir.
+: ${LOCAL_TARBALL_INPUT:=""}
+# STAGE_ONLY_DIR: when set, Phase 1 discovery + Phase 2 download run as usual
+# but the tarball is saved into this dir and the script EXITS before extract.
+# This is the AAC6 (build-host) half of the transfer pipeline: stage the
+# distro-agnostic TheRock tarball, then ship it to AAC7 for extract+modules.
+: ${STAGE_ONLY_DIR:=""}
 # NO_SUDO: "" = auto-detect (no sudo when the install parent is directly
 # user-writable, e.g. a $HOME install on a login node), 1 = force sudo-free,
 # 0 = force the root-owned /nfsapps behavior. SUDO is derived from it below.
@@ -137,6 +153,15 @@ Usage: $0 [opts]
                                 install + modulefile (default ${REPLACE_EXISTING})
   --keep-failed-installs 0|1    on failure, keep partial install + modulefile
                                 for post-mortem (default ${KEEP_FAILED_INSTALLS})
+  --local-tarball PATH          extract this already-downloaded
+                                therock-dist-linux-<family>-<ver>.tar.gz
+                                instead of discovering + curl-ing it (the
+                                AAC6-build -> transfer -> AAC7-extract path).
+                                --therock-release is still required.
+  --stage-only DIR              discover + download the tarball into DIR and
+                                EXIT before extract (the AAC6 build-host half
+                                of the transfer pipeline). Mutually exclusive
+                                with --local-tarball.
   --cray-modules                force Cray-style classic Tcl modulefiles +
                                 the PrgEnv-amd-new ecosystem (auto-detected on
                                 Cray PE hosts otherwise)
@@ -165,6 +190,8 @@ while [[ $# -gt 0 ]]; do
       "--keep-failed-installs") shift; KEEP_FAILED_INSTALLS=${1}; reset-last ;;
       "--no-sudo")              shift; NO_SUDO=${1};              reset-last ;;
       "--cray-modules")         CRAY_SYSTEM=1;                    reset-last ;;
+      "--local-tarball")        shift; LOCAL_TARBALL_INPUT=${1};  reset-last ;;
+      "--stage-only")           shift; STAGE_ONLY_DIR=${1};       reset-last ;;
       "--pe-version")           shift; PE_VERSION=${1};           reset-last ;;
       "--help"|"-h")            usage ;;
       *)                        last ${1} ;;
@@ -183,6 +210,9 @@ THEROCK_RELEASE="${THEROCK_RELEASE#therock-}"
 # names, so loose parsing here would propagate confusing failures).
 if [[ ! "${THEROCK_RELEASE}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
    send-error "--therock-release must be X.Y or X.Y.Z (got '${THEROCK_RELEASE}')"
+fi
+if [[ -n "${STAGE_ONLY_DIR}" && -n "${LOCAL_TARBALL_INPUT}" ]]; then
+   send-error "--stage-only and --local-tarball are mutually exclusive"
 fi
 
 MODULE_DIR="${TOP_MODULE_PATH}/base/rocm"
@@ -210,7 +240,9 @@ MODULE_FILE="${MODULE_DIR}/therock-${THEROCK_RELEASE}.lua"
 SKIP_CANDIDATES=( "${TOP_INSTALL_PATH}/rocm-therock-${THEROCK_RELEASE}" )
 [[ "${THEROCK_RELEASE}" =~ ^[0-9]+\.[0-9]+$ ]] \
    && SKIP_CANDIDATES+=( "${TOP_INSTALL_PATH}/rocm-therock-${THEROCK_RELEASE}.0" )
-if [[ "${REPLACE_EXISTING}" != "1" ]]; then
+# In --stage-only mode we only download the tarball; an existing install
+# is irrelevant and must NOT short-circuit the download.
+if [[ -z "${STAGE_ONLY_DIR}" && "${REPLACE_EXISTING}" != "1" ]]; then
    for _cand in "${SKIP_CANDIDATES[@]}"; do
       if [[ -d "${_cand}" ]]; then
          echo "[$(date)] SKIP therock-${THEROCK_RELEASE}: ${_cand} already exists"
@@ -292,14 +324,39 @@ done
 # This mirrors the auto-discovery pattern in install_rocm_tarball.sh
 # upstream (see WebFetch output committed in this script's history).
 echo "============================================================"
-echo "  Phase 1: discover tarball for therock-${THEROCK_RELEASE} (${AMDGPU_FAMILY})"
+echo "  Phase 1: ${LOCAL_TARBALL_INPUT:+use --local-tarball, skip discovery}${LOCAL_TARBALL_INPUT:-discover tarball for therock-${THEROCK_RELEASE} (${AMDGPU_FAMILY})}"
 echo "============================================================"
+
+# KEEP_LOCAL_TARBALL: 1 means ${LOCAL_TARBALL} is the operator's staged input
+# (transfer path) and must NOT be reaped by the EXIT trap / post-extract rm.
+KEEP_LOCAL_TARBALL=0
 
 curl_head_ok() {
    # 1 = URL responds 200/302; 0 = otherwise. Avoids downloading on probe.
    local _u="$1"
    curl -fsI -o /dev/null --max-time 30 "${_u}" 2>/dev/null
 }
+
+if [[ -n "${LOCAL_TARBALL_INPUT}" ]]; then
+   # ---- --local-tarball mode: AAC6-build -> transfer -> AAC7-extract ----
+   if [[ ! -f "${LOCAL_TARBALL_INPUT}" ]]; then
+      echo "ERROR: --local-tarball '${LOCAL_TARBALL_INPUT}' does not exist" >&2
+      exit 1
+   fi
+   _abs="$(cd "$(dirname "${LOCAL_TARBALL_INPUT}")" && pwd -P)/$(basename "${LOCAL_TARBALL_INPUT}")"
+   _bn="$(basename "${_abs}")"
+   # Parse ACTUAL_VERSION from therock-dist-linux-<family>-<ver>.tar.gz. The
+   # family segment in the filename wins over --amdgpu-family (the staged file
+   # is authoritative). Fall back to THEROCK_RELEASE if the name is unusual.
+   ACTUAL_VERSION="$(echo "${_bn}" | sed -nE 's|^therock-dist-linux-.*-([0-9]+\.[0-9]+(\.[0-9]+)?[a-z0-9]*)\.tar\.gz$|\1|p')"
+   [[ -z "${ACTUAL_VERSION}" ]] && ACTUAL_VERSION="${THEROCK_RELEASE}"
+   TARBALL_URL="file://${_abs}"
+   LOCAL_TARBALL="${_abs}"
+   KEEP_LOCAL_TARBALL=1
+   STAGING_DIR="${TOP_INSTALL_PATH}/rocm-therock-${ACTUAL_VERSION}.staging.$$"
+   echo "Using local tarball: ${_abs}  (parsed version ${ACTUAL_VERSION})"
+   unset _abs _bn
+else
 
 CANDIDATE_VERSIONS=( "${THEROCK_RELEASE}" )
 [[ "${THEROCK_RELEASE}" =~ ^[0-9]+\.[0-9]+$ ]] \
@@ -347,6 +404,15 @@ LOCAL_TARBALL="/tmp/therock-dist-linux-${AMDGPU_FAMILY}-${ACTUAL_VERSION}.tar.gz
 # Staging dir under the install root so the final mv is rename-only
 # (same filesystem == atomic, no NFS cross-mount data copy).
 STAGING_DIR="${TOP_INSTALL_PATH}/rocm-therock-${ACTUAL_VERSION}.staging.$$"
+fi   # end discovery-vs-local-tarball
+
+# --stage-only: redirect the download into the staging dir and protect it
+# from the cleanup trap; Phase 2 will download then exit before extract.
+if [[ -n "${STAGE_ONLY_DIR}" ]]; then
+   make_dir_root "${STAGE_ONLY_DIR}"
+   LOCAL_TARBALL="${STAGE_ONLY_DIR}/$(basename "${LOCAL_TARBALL}")"
+   KEEP_LOCAL_TARBALL=1
+fi
 
 echo ""
 echo "============================================================"
@@ -375,7 +441,12 @@ echo ""
 # ROCM_NUMERIC, so the install-dir cleanup glob mirrors the Phase 0
 # candidates. The modulefile is unambiguous (basename uses the user-
 # supplied download tag verbatim) so just rm MODULE_FILE.
-if [[ "${REPLACE_EXISTING}" == "1" ]]; then
+#
+# Skipped entirely in --stage-only mode: staging only downloads the
+# tarball into STAGE_ONLY_DIR and must never delete an install tree
+# (which may be root-owned on the build host, causing a Permission
+# denied abort before the download even starts).
+if [[ -z "${STAGE_ONLY_DIR}" && "${REPLACE_EXISTING}" == "1" ]]; then
    for _cand in "${SKIP_CANDIDATES[@]}"; do
       if [[ -d "${_cand}" ]]; then
          echo "[--replace-existing 1] removing ${_cand}"
@@ -405,8 +476,9 @@ _therock_on_exit() {
    elif [ ${rc} -ne 0 ]; then
       echo "[therock fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
-   # Always reap the local tarball -- it's regenerated next run.
-   rm -f "${LOCAL_TARBALL}" 2>/dev/null || true
+   # Reap the local tarball ONLY when we downloaded it ourselves. In
+   # --local-tarball mode it's the operator's staged input and must survive.
+   [ "${KEEP_LOCAL_TARBALL}" = "1" ] || rm -f "${LOCAL_TARBALL}" 2>/dev/null || true
    return ${rc}
 }
 trap _therock_on_exit EXIT
@@ -418,14 +490,26 @@ trap _therock_on_exit EXIT
 # straight into it -- no `mv extracted_subdir staging_dir` step like
 # the AFAR installer needs.
 echo "============================================================"
-echo "  Phase 2: curl + tar -xzpf -> ${STAGING_DIR}"
+echo "  Phase 2: ${LOCAL_TARBALL_INPUT:+extract staged tarball}${LOCAL_TARBALL_INPUT:-curl} + tar -xzpf -> ${STAGING_DIR}"
 echo "============================================================"
-rm -f "${LOCAL_TARBALL}"
 # curl is preferred over wget here because it's what install_rocm_tarball.sh
 # upstream uses, and the AMD tarball server (repo.amd.com) returns the
 # same redirects either way. -fSL == fail on errors, follow redirects,
-# show errors but no progress meter (we're in a slurm log).
-curl -fSL --output "${LOCAL_TARBALL}" "${TARBALL_URL}"
+# show errors but no progress meter (we're in a slurm log). In
+# --local-tarball mode the file is already present; skip the download.
+if [[ -z "${LOCAL_TARBALL_INPUT}" ]]; then
+   rm -f "${LOCAL_TARBALL}"
+   curl -fSL --output "${LOCAL_TARBALL}" "${TARBALL_URL}"
+else
+   echo "Skipping download; extracting staged ${LOCAL_TARBALL}"
+fi
+
+# --stage-only: tarball is now in STAGE_ONLY_DIR; we're done (no extract).
+if [[ -n "${STAGE_ONLY_DIR}" ]]; then
+   echo "STAGED: ${LOCAL_TARBALL}"
+   echo "  token=therock-${THEROCK_RELEASE}  kind=therock  version=${ACTUAL_VERSION}"
+   exit 0
+fi
 
 # Pre-empt a stale staging dir from an earlier interrupted run that the
 # fail-cleanup didn't reach (e.g. SIGKILL). Same-PID collision is
@@ -492,7 +576,7 @@ fi
 ${SUDO} mv "${STAGING_DIR}" "${INSTALL_DIR}"
 chown_root -R root:root "${INSTALL_DIR}"
 ${SUDO} chmod 755 "${INSTALL_DIR}"
-rm -f "${LOCAL_TARBALL}"
+[ "${KEEP_LOCAL_TARBALL}" = "1" ] || rm -f "${LOCAL_TARBALL}"
 echo "Installed: ${INSTALL_DIR}"
 
 # ---------------- Phase 5: emit GPUSDK modulefile ---------------------
@@ -648,17 +732,41 @@ if [ "${CRAY_SYSTEM}" = "1" ]; then
    else
       echo "  PrgEnv-amd version to wrap: ${PE_VERSION}"
       emit_cray_prgenv_ecosystem \
-         "${TOP_MODULE_PATH}/cray" \
+         "${TOP_MODULE_PATH}/base" \
+         "${TOP_MODULE_PATH}/rocm-therock-${ROCM_NUMERIC}" \
+         "${TOP_MODULE_PATH}/rocmplus-therock-${ROCM_NUMERIC}" \
          "${ROCM_NUMERIC}" \
          "${INSTALL_DIR}" \
          "${PE_VERSION}" \
          "${LEAF_SCRIPT_NAME}" \
          "${LEAF_SCRIPT_COMMIT:0:12}" \
          "${LEAF_SCRIPT_DIRTY}"
-      echo "  -> expose with: module use ${TOP_MODULE_PATH}/cray"
+      echo "  -> expose with: module use ${TOP_MODULE_PATH}/base"
       echo "  -> then:        module swap PrgEnv-cray PrgEnv-amd-new/${PE_VERSION}-${ROCM_NUMERIC}"
+      echo "  -> or (CCE+ROCm): module swap PrgEnv-cray PrgEnv-cray-new/${PE_VERSION}-${ROCM_NUMERIC}"
    fi
 fi
+
+# ---------------- world-readable perms (shared install locations) -----
+_world_ro=0
+case "${WORLD_READABLE}" in
+   1) _world_ro=1 ;;
+   auto)
+      if [ -n "${HOME}" ]; then
+         case "${TOP_INSTALL_PATH}" in "${HOME}"/*|"${HOME}") _world_ro=0 ;; *) _world_ro=1 ;; esac
+      else
+         _world_ro=1
+      fi ;;
+esac
+if [ "${_world_ro}" = "1" ]; then
+   make_world_readable \
+      "${INSTALL_DIR}" \
+      "${TOP_MODULE_PATH}/base" \
+      "${TOP_MODULE_PATH}/rocm-therock-${ROCM_NUMERIC}" \
+      "${TOP_MODULE_PATH}/rocmplus-therock-${ROCM_NUMERIC}" \
+      "${MODULE_FILE}"
+fi
+unset _world_ro
 
 echo ""
 echo "============================================================"

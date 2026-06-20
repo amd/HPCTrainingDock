@@ -108,7 +108,27 @@ LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$
 : ${TOP_MODULE_PATH:="/nfsapps/modules"}
 : ${REPLACE_EXISTING:="0"}
 : ${KEEP_FAILED_INSTALLS:="0"}
+# WORLD_READABLE: 1 = make the install + module trees group/other readable
+# (o+rX) so a shared location (e.g. /shareddata) is usable by other users;
+# 0 = leave perms as-is; "auto" (default) = enable iff TOP_INSTALL_PATH is NOT
+# under $HOME (i.e. a shared install root).
+: ${WORLD_READABLE:="auto"}
 : ${URL_BASE:="https://repo.radeon.com/rocm/misc/flang"}
+# LOCAL_TARBALL_INPUT: when set to an existing .tar.bz2 path, Phase 1 URL
+# discovery + the Phase 2 wget are skipped and this file is extracted
+# directly. This is the AAC6-build -> transfer -> AAC7-extract path: the
+# build node stages the flang tarball, the Cray login node extracts it and
+# writes the modulefiles. The release/family/numeric still come from the
+# usual flags/filename so the install-dir + modulefile names are unchanged.
+: ${LOCAL_TARBALL_INPUT:=""}
+# STAGE_ONLY_DIR: when set, Phase 1 discovery (incl. the .pre/ fallback) +
+# Phase 2 download run as usual but the tarball is saved into this dir and the
+# script EXITS before extract. AAC6 build-host half of the transfer pipeline.
+: ${STAGE_ONLY_DIR:=""}
+# PE_VERSION: stock PrgEnv-amd version that the generated
+# PrgEnv-amd-new/<pe>-<rocm> ecosystem wraps (Cray only). "" = auto-detect
+# the highest PrgEnv-amd/<ver> available; override with --pe-version.
+: ${PE_VERSION:=""}
 # Phase 6 (rocm_patches.sh) controls -- mirror the numeric branch's
 # run_rocm_build.sh:31 SKIP_PATCHES default of 0 (run patches by default).
 # PATCHES_LOG is finalized after THEROCK_AFAR_RELEASE is parsed below so
@@ -157,6 +177,18 @@ Usage: $0 [opts]
                                 pre-unified-naming layout.
   --keep-failed-installs 0|1    on failure, keep partial install + modulefile
                                 for post-mortem (default ${KEEP_FAILED_INSTALLS})
+  --local-tarball PATH          extract this already-downloaded flang .tar.bz2
+                                instead of discovering + wget-ing it (the
+                                AAC6-build -> transfer -> AAC7-extract path).
+                                --therock-afar-release is still required so the
+                                install dir + module names are deterministic.
+  --stage-only DIR              discover (incl. .pre/ fallback) + download the
+                                tarball into DIR and EXIT before extract (AAC6
+                                build-host half). Mutually exclusive with
+                                --local-tarball.
+  --pe-version VER              stock PrgEnv-amd version the generated
+                                PrgEnv-amd-new/<pe>-<rocm> wraps (Cray only).
+                                Default: auto-detect the highest PrgEnv-amd.
   --skip-patches 0|1            skip Phase 6 (rocm_patches.sh on the TheRock-AFAR
                                 tree; mirrors run_rocm_build.sh's --skip-patches).
                                 Default ${SKIP_PATCHES} (run patches).
@@ -187,6 +219,9 @@ while [[ $# -gt 0 ]]; do
       "--patches-log")          shift; PATCHES_LOG=${1};          reset-last ;;
       "--no-sudo")              shift; NO_SUDO=${1};              reset-last ;;
       "--cray-modules")         CRAY_SYSTEM=1;                    reset-last ;;
+      "--local-tarball")        shift; LOCAL_TARBALL_INPUT=${1};  reset-last ;;
+      "--stage-only")           shift; STAGE_ONLY_DIR=${1};       reset-last ;;
+      "--pe-version")           shift; PE_VERSION=${1};           reset-last ;;
       "--help"|"-h")            usage ;;
       *)                        last ${1} ;;
    esac
@@ -202,6 +237,9 @@ THEROCK_AFAR_RELEASE="${THEROCK_AFAR_RELEASE#therock-afar-}"
 # module names, so loose parsing here would produce confusing errors.
 if [[ ! "${THEROCK_AFAR_RELEASE}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
    send-error "--therock-afar-release must be X.Y or X.Y.Z (got '${THEROCK_AFAR_RELEASE}')"
+fi
+if [[ -n "${STAGE_ONLY_DIR}" && -n "${LOCAL_TARBALL_INPUT}" ]]; then
+   send-error "--stage-only and --local-tarball are mutually exclusive"
 fi
 
 # Phase 6 default log basename. Set AFTER THEROCK_AFAR_RELEASE is parsed
@@ -279,7 +317,9 @@ if [[ -d "${INSTALL_DIR}" ]]; then
    [[ ${#_existing_modules[@]} -gt 0 ]] && _skip_match="${INSTALL_DIR} + ${_existing_modules[0]}"
    unset _existing_modules
 fi
-if [[ -n "${_skip_match}" && "${REPLACE_EXISTING}" != "1" ]]; then
+# In --stage-only mode we only download the tarball; an existing install
+# is irrelevant and must NOT short-circuit the download.
+if [[ -z "${STAGE_ONLY_DIR}" && -n "${_skip_match}" && "${REPLACE_EXISTING}" != "1" ]]; then
    echo "[$(date)] SKIP therock-afar-${THEROCK_AFAR_RELEASE}: ${_skip_match} already exist"
    echo "         Pass --replace-existing 1 to re-download + re-extract."
    exit 0
@@ -352,8 +392,46 @@ done
 # on 23.2.1 builds -- 7357b5084b -- but use a generous [a-f0-9]{4,}
 # pattern in case AMD shortens or lengthens it).
 echo "============================================================"
-echo "  Phase 1: discover TheRock-AFAR tarball at ${URL_BASE}/ (then .pre/)"
+echo "  Phase 1: ${LOCAL_TARBALL_INPUT:+use --local-tarball, skip discovery}${LOCAL_TARBALL_INPUT:-discover TheRock-AFAR tarball at ${URL_BASE}/ (then .pre/)}"
 echo "============================================================"
+
+# KEEP_LOCAL_TARBALL: 1 means the file in ${LOCAL_TARBALL} is the operator's
+# staged input (transfer path) and must NOT be reaped by the EXIT trap /
+# post-extract cleanup. Set in the --local-tarball branch below; the
+# discovery branch leaves it 0 (the /tmp download is ours to delete).
+KEEP_LOCAL_TARBALL=0
+
+if [[ -n "${LOCAL_TARBALL_INPUT}" ]]; then
+   # ---- --local-tarball mode: AAC6-build -> transfer -> AAC7-extract ----
+   # The build node already wget'd the flang tarball and shipped it here;
+   # skip URL discovery + download entirely and extract this file in place.
+   if [[ ! -f "${LOCAL_TARBALL_INPUT}" ]]; then
+      echo "ERROR: --local-tarball '${LOCAL_TARBALL_INPUT}' does not exist" >&2
+      exit 1
+   fi
+   _abs="$(cd "$(dirname "${LOCAL_TARBALL_INPUT}")" && pwd -P)/$(basename "${LOCAL_TARBALL_INPUT}")"
+   _matched="$(basename "${_abs}")"
+   case "${_matched}" in
+      therock-afar-*) _matched_shape="therock-afar" ;;
+      therock-*)      _matched_shape="therock"      ;;
+      *) echo "ERROR: --local-tarball name '${_matched}' is not a therock[-afar]-<REL>-<FAMILY>-<NUMERIC>-<SHA>.tar.bz2" >&2
+         exit 1 ;;
+   esac
+   EFFECTIVE_URL_DIR="(local file)"
+   TARBALL_URL="file://${_abs}"
+   LOCAL_TARBALL="${_abs}"            # extract in place; no wget, no /tmp copy
+   KEEP_LOCAL_TARBALL=1              # operator's staged file -- never reap it
+   # Parse NUMERIC + SHA from the staged filename (same upstream name).
+   # Tolerate a non-conforming name by leaving these blank (Phase 3 reads
+   # the authoritative .info/version regardless).
+   EXPECTED_NUMERIC="$(echo "${_matched}" \
+      | sed -nE "s|^${_matched_shape}-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-([0-9]+\.[0-9]+(\.[0-9]+)?)-[a-f0-9]+\.tar\.bz2$|\1|p")"
+   THEROCK_SHA="$(echo "${_matched}" \
+      | sed -nE "s|^${_matched_shape}-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-[0-9]+\.[0-9]+(\.[0-9]+)?-([a-f0-9]+)\.tar\.bz2$|\2|p")"
+   echo "Using local tarball: ${_abs}"
+   echo "  shape=${_matched_shape}  numeric=${EXPECTED_NUMERIC:-<from .info/version>}  sha=${THEROCK_SHA:-<unknown>}"
+   unset _abs
+else
 # Filename pattern (regex). Per the unified-naming spec (2026-05-26), the
 # upstream flang/ listing carries TWO equivalent shapes for the same REL:
 #   therock-afar-<REL>-<FAMILY>-<X.Y.Z>-<SHA>.tar.bz2   (23.2.x line)
@@ -449,6 +527,15 @@ EXPECTED_NUMERIC="$(echo "${_matched}" \
    | sed -E "s|^${_matched_shape}-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-([0-9]+\.[0-9]+(\.[0-9]+)?)-[a-f0-9]+\.tar\.bz2$|\1|")"
 THEROCK_SHA="$(echo "${_matched}" \
    | sed -E "s|^${_matched_shape}-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-[0-9]+\.[0-9]+(\.[0-9]+)?-([a-f0-9]+)\.tar\.bz2$|\2|")"
+fi   # end discovery-vs-local-tarball
+
+# --stage-only: redirect the wget into STAGE_ONLY_DIR + protect it from the
+# cleanup trap; Phase 2 downloads then exits before extract.
+if [[ -n "${STAGE_ONLY_DIR}" ]]; then
+   make_dir_root "${STAGE_ONLY_DIR}"
+   LOCAL_TARBALL="${STAGE_ONLY_DIR}/${_matched}"
+   KEEP_LOCAL_TARBALL=1
+fi
 
 # Staging dir lives next to the final install dir so the Phase 4 mv is
 # rename-only (same filesystem == atomic, no NFS cross-mount copy). Keyed
@@ -484,7 +571,12 @@ echo ""
 # modulefile) AND the new unified layout (rocm-afar-<REL> install dir +
 # any afar-<REL>-*.lua modulefile glob), so a single --replace-existing
 # 1 cleanly migrates an in-place legacy install.
-if [[ "${REPLACE_EXISTING}" == "1" ]]; then
+#
+# Skipped entirely in --stage-only mode: staging only downloads the
+# tarball into STAGE_ONLY_DIR and must never delete an install tree
+# (which may be root-owned on the build host, causing a Permission
+# denied abort before the download even starts).
+if [[ -z "${STAGE_ONLY_DIR}" && "${REPLACE_EXISTING}" == "1" ]]; then
    shopt -s nullglob
    for _cand in ${LEGACY_INSTALL_GLOB}; do
       if [[ -d "${_cand}" ]]; then
@@ -530,18 +622,31 @@ _therock_afar_on_exit() {
    elif [ ${rc} -ne 0 ]; then
       echo "[therock-afar fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
-   # Always reap the local tarball -- it's regenerated next run.
-   rm -f "${LOCAL_TARBALL}" 2>/dev/null || true
+   # Reap the local tarball ONLY when we downloaded it ourselves. In
+   # --local-tarball mode it's the operator's staged input (transfer path)
+   # and must survive.
+   [ "${KEEP_LOCAL_TARBALL}" = "1" ] || rm -f "${LOCAL_TARBALL}" 2>/dev/null || true
    return ${rc}
 }
 trap _therock_afar_on_exit EXIT
 
 # ---------------- Phase 2: download + extract -------------------------
 echo "============================================================"
-echo "  Phase 2: wget + tar -xjpf -> ${STAGING_DIR}"
+echo "  Phase 2: ${LOCAL_TARBALL_INPUT:+extract staged tarball}${LOCAL_TARBALL_INPUT:-wget} + tar -xjpf -> ${STAGING_DIR}"
 echo "============================================================"
-rm -f "${LOCAL_TARBALL}"
-wget -q --show-progress "${TARBALL_URL}" -O "${LOCAL_TARBALL}"
+if [[ -z "${LOCAL_TARBALL_INPUT}" ]]; then
+   rm -f "${LOCAL_TARBALL}"
+   wget -q --show-progress "${TARBALL_URL}" -O "${LOCAL_TARBALL}"
+else
+   echo "Skipping download; extracting staged ${LOCAL_TARBALL}"
+fi
+
+# --stage-only: tarball is now in STAGE_ONLY_DIR; we're done (no extract).
+if [[ -n "${STAGE_ONLY_DIR}" ]]; then
+   echo "STAGED: ${LOCAL_TARBALL}"
+   echo "  token=therock-afar-${THEROCK_AFAR_RELEASE}  kind=afar  release=${THEROCK_AFAR_RELEASE}  numeric=${EXPECTED_NUMERIC:-<unknown>}"
+   exit 0
+fi
 
 # Staging dir under TOP_INSTALL_PATH so the final mv in Phase 4 is
 # rename-only (same filesystem == atomic, no NFS cross-mount copy).
@@ -637,7 +742,7 @@ fi
 PROMOTED_INSTALL=1
 chown_root -R root:root "${INSTALL_DIR}"
 ${SUDO} chmod 755 "${INSTALL_DIR}"
-rm -f "${LOCAL_TARBALL}"
+[ "${KEEP_LOCAL_TARBALL}" = "1" ] || rm -f "${LOCAL_TARBALL}"
 echo "Installed: ${INSTALL_DIR}"
 
 # ---------------- Phase 5: emit GPUSDK modulefile ---------------------
@@ -787,6 +892,64 @@ emit_per_package_modulefiles \
    "${LEAF_SCRIPT_COMMIT:0:12}" \
    "${LEAF_SCRIPT_DIRTY}"
 
+# ---------------- Phase 5c: rocm-<ver>.pc + Cray PrgEnv ecosystem -----
+# Identical to run_rocm_therock_install.sh's Phase 5c: the pkg-config file is
+# generically useful (emit for every install) while the PrgEnv-amd-new
+# ecosystem (which wires PKG_CONFIG_PATH at the in-tree .pc and exposes the
+# craype cc/CC/ftn wrappers against this SDK) is Cray-only. This is what makes
+# a TheRock-AFAR drop on AAC7 behave "like 7.13.0" -- without it the flang
+# drop is invisible to the Cray compiler wrappers.
+echo "============================================================"
+echo "  Phase 5c: pkg-config file + (Cray) PrgEnv-amd-new ecosystem"
+echo "============================================================"
+emit_rocm_pc "${INSTALL_DIR}" "${ROCM_NUMERIC}"
+
+if [ "${CRAY_SYSTEM}" = "1" ]; then
+   # Resolve the stock PrgEnv-amd version to wrap (override: --pe-version).
+   if [ -z "${PE_VERSION}" ]; then
+      if [ -d /opt/cray/pe/modulefiles/PrgEnv-amd ]; then
+         PE_VERSION=$(ls -1 /opt/cray/pe/modulefiles/PrgEnv-amd 2>/dev/null \
+                      | grep -E '^[0-9]+\.' | sort -V | tail -n1)
+      fi
+      if [ -z "${PE_VERSION}" ] && command -v module >/dev/null 2>&1; then
+         PE_VERSION=$(module -t avail PrgEnv-amd 2>&1 \
+                      | grep -oE 'PrgEnv-amd/[0-9][^ ]*' \
+                      | sed 's#PrgEnv-amd/##' | sort -V | tail -n1)
+      fi
+   fi
+   if [ -z "${PE_VERSION}" ]; then
+      echo "WARNING: could not auto-detect a stock PrgEnv-amd version; skipping"
+      echo "         the PrgEnv-amd-new ecosystem. Re-run with --pe-version VER."
+   else
+      echo "  PrgEnv-amd version to wrap: ${PE_VERSION}"
+      # IMPORTANT: the AFAR ecosystem is keyed on the AFAR RELEASE TAG
+      # (e.g. afar-23.2.1), NOT the SDK numeric -- a TheRock-AFAR drop and a
+      # TheRock-proper drop frequently report the SAME .info/version (e.g.
+      # afar-23.2.1 and therock-7.13.0 both report 7.13.0). Keying the Cray
+      # modules on the numeric would make the afar install silently clobber
+      # the therock-proper rocm-new/7.13.0 + PrgEnv-amd-new/<pe>-7.13.0
+      # (repointing them at rocm-afar-23.2.1). The tag-keyed names keep the
+      # two coexisting:
+      #   rocm-new/afar-23.2.1, amd-new/afar-23.2.1,
+      #   PrgEnv-amd-new/${PE_VERSION}-afar-23.2.1
+      _eco_key="afar-${THEROCK_AFAR_RELEASE}"
+      emit_cray_prgenv_ecosystem \
+         "${TOP_MODULE_PATH}/base" \
+         "${TOP_MODULE_PATH}/rocm-${_eco_key}" \
+         "${TOP_MODULE_PATH}/rocmplus-${_eco_key}-${ROCM_NUMERIC}" \
+         "${_eco_key}" \
+         "${INSTALL_DIR}" \
+         "${PE_VERSION}" \
+         "${LEAF_SCRIPT_NAME}" \
+         "${LEAF_SCRIPT_COMMIT:0:12}" \
+         "${LEAF_SCRIPT_DIRTY}"
+      echo "  -> expose with: module use ${TOP_MODULE_PATH}/base"
+      echo "  -> then:        module swap PrgEnv-cray PrgEnv-amd-new/${PE_VERSION}-${_eco_key}"
+      echo "  -> or (CCE+ROCm): module swap PrgEnv-cray PrgEnv-cray-new/${PE_VERSION}-${_eco_key}"
+      unset _eco_key
+   fi
+fi
+
 # ---------------- Phase 6: rocm_patches.sh on the TheRock-AFAR tree ----
 # Mirror Phase 3.6 of bare_system/run_rocm_build.sh:483-512 (the numeric
 # branch's patch-overlay step). rocm_patches.sh's dispatch table has
@@ -837,8 +1000,19 @@ if [[ "${SKIP_PATCHES}" != "1" ]]; then
       if [[ "${PATCHES_RC}" -eq 43 ]]; then
          echo "[Phase 6] rocm_patches.sh returned 43 (NOOP_RC) -- no vendored fix for afar-${THEROCK_AFAR_RELEASE}; treating as success"
       elif [[ "${PATCHES_RC}" -ne 0 ]]; then
-         echo "ERROR: rocm_patches.sh failed for afar-${THEROCK_AFAR_RELEASE} (rc=${PATCHES_RC})" >&2
-         exit "${PATCHES_RC}"
+         # The install tree + modulefiles are already promoted (Phase 4/5)
+         # and usable; rocm_patches.sh is an OPTIONAL post-install overlay.
+         # A patches failure (e.g. the login-node guard, or a transient
+         # error) must NOT delete an otherwise-good install. Retain it,
+         # drop a marker, and tell the operator how to apply patches later
+         # (typically on a compute node via sbatch).
+         echo "WARNING: rocm_patches.sh failed for afar-${THEROCK_AFAR_RELEASE} (rc=${PATCHES_RC})" >&2
+         echo "         Install + modulefiles are RETAINED; patches DEFERRED." >&2
+         ${SUDO} touch "${INSTALL_DIR}/.rocm-patches-pending" 2>/dev/null || true
+         echo "         To apply patches later (run on a compute node, e.g. via sbatch):" >&2
+         echo "           ${_patches_sh} \\" >&2
+         echo "             --rocm-version afar-${THEROCK_AFAR_RELEASE} --rocm-path ${INSTALL_DIR} \\" >&2
+         echo "             --module-path ${TOP_MODULE_PATH}/base --module-file ${MODULE_FILE}" >&2
       else
          _overlay="${TOP_INSTALL_PATH}/rocm-patches-afar-${THEROCK_AFAR_RELEASE}"
          if [[ -d "${_overlay}" ]]; then
@@ -851,6 +1025,31 @@ if [[ "${SKIP_PATCHES}" != "1" ]]; then
    fi
    unset _patches_sh
 fi
+
+# ---------------- world-readable perms (shared install locations) -----
+# When installing into a shared tree (e.g. /shareddata/{opt,modules}) make the
+# install dir + this drop's module dirs readable + traversable by others so
+# they can load the modules. make_world_readable is sourced from
+# leaf_modulefile_helpers.sh in Phase 5b.
+_world_ro=0
+case "${WORLD_READABLE}" in
+   1) _world_ro=1 ;;
+   auto)
+      if [ -n "${HOME}" ]; then
+         case "${TOP_INSTALL_PATH}" in "${HOME}"/*|"${HOME}") _world_ro=0 ;; *) _world_ro=1 ;; esac
+      else
+         _world_ro=1
+      fi ;;
+esac
+if [ "${_world_ro}" = "1" ]; then
+   make_world_readable \
+      "${INSTALL_DIR}" \
+      "${TOP_MODULE_PATH}/base" \
+      "${TOP_MODULE_PATH}/rocm-afar-${THEROCK_AFAR_RELEASE}" \
+      "${TOP_MODULE_PATH}/rocmplus-afar-${THEROCK_AFAR_RELEASE}-${ROCM_NUMERIC}" \
+      "${MODULE_FILE}"
+fi
+unset _world_ro
 
 echo ""
 echo "============================================================"

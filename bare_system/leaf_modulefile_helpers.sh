@@ -321,20 +321,31 @@ EOF
 
 # ----------------------------------------------------------------------------
 # emit_cray_prgenv_ecosystem -- write the Cray-style classic Tcl modules that
-# expose a TheRock install the way stock Cray PrgEnv exposes the system ROCm,
-# so it can be loaded with `module swap PrgEnv-cray PrgEnv-amd-new/<pe>-<rocm>`.
+# expose a ROCm install the way stock Cray PrgEnv exposes the system ROCm, so
+# it can be loaded with `module load PrgEnv-amd-new/<pe>-<rocm>` (or the new
+# PrgEnv-cray-new/<pe>-<rocm>) after `module use <base_dir>`.
 #
-# Five modulefiles are written under ${cray_dir} (a tree the operator exposes
-# with `module use`, e.g. $HOME/modulefiles/cray):
+# Two trees are written:
 #
+# Under <base_dir> (the entry-point tree the operator exposes with
+# `module use`, e.g. /shareddata/modules/base):
+#   PrgEnv-amd-new/<pe>-<rocm>       PrgEnv-amd <pe> equivalent: loads stock
+#                                    PrgEnv-amd/<pe> + the local amd-new/rocm-new.
+#   PrgEnv-cray-new/<pe>-<rocm>      PrgEnv-cray <pe> + the local ROCm toolkit
+#                                    (rocm-new only; keeps the Cray CCE
+#                                    compilers, just makes ROCm/HIP available).
+# Both PrgEnv modules self-prepend MODULEPATH with <rocm_pkg_dir> (so amd-new/
+# rocm-new resolve) and <rocmplus_dir> (downstream packages), mirroring the
+# base rocm modulefile.
+#
+# Under <rocm_pkg_dir> (the per-version toolkit tree, same dir as the
+# per-package modules, e.g. /shareddata/modules/rocm-afar-23.2.1):
 #   rocm-new/<rocm>                  ROCm toolkit (mirrors stock rocm/<sys>);
 #                                    wires PKG_CONFIG_PATH at the in-tree
 #                                    lib/pkgconfig so the .pc from emit_rocm_pc
 #                                    is found by the craype wrappers.
 #   amd-new/<rocm>                   AMD LLVM compiler (mirrors stock amd/<sys>);
 #                                    pulls in the matching rocm-new.
-#   PrgEnv-amd-new/<pe>-<rocm>       PrgEnv-amd <pe> equivalent that loads the
-#                                    stock PrgEnv-amd/<pe> then the -new modules.
 #   amd/<rocm>, rocm/<rocm>          thin wrappers so bare `module load amd` /
 #                                    `module load rocm` (incl. the one stock
 #                                    PrgEnv-amd issues internally) resolve to
@@ -345,27 +356,37 @@ EOF
 # CRAY_AMD_COMPILER_PREFIX.
 #
 # Args (positional):
-#   $1 cray_dir       module tree root, e.g. ${TOP_MODULE_PATH}/cray
-#   $2 rocm_numeric   .info/version-derived numeric, e.g. 7.13.0
-#   $3 install_dir    SDK install root, e.g. /nfsapps/opt/rocm-therock-7.13.0
-#   $4 pe_version     stock PrgEnv-amd version to wrap, e.g. 8.7.0
-#   $5 leaf_name      basename of the caller (for provenance comment)
-#   $6 leaf_commit    short git sha of the caller (12 chars or "unknown")
-#   $7 leaf_dirty     "clean" / "dirty" / "unknown"
+#   $1 base_dir       entry-point module tree (PrgEnv-* go here), e.g.
+#                     ${TOP_MODULE_PATH}/base
+#   $2 rocm_pkg_dir   per-version toolkit tree (rocm-new/amd-new/amd/rocm go
+#                     here; same dir as the per-package modules), e.g.
+#                     ${TOP_MODULE_PATH}/rocm-afar-23.2.1
+#   $3 rocmplus_dir   downstream rocmplus tree (only added to MODULEPATH by the
+#                     PrgEnv modules; may not exist yet), e.g.
+#                     ${TOP_MODULE_PATH}/rocmplus-afar-23.2.1-7.13.0
+#   $4 rocm_tag       version tag used in the modulefile basenames, e.g.
+#                     afar-23.2.1 (afar), 7.12.0 (therock), 7.2.3 (numeric)
+#   $5 install_dir    SDK install root, e.g. /shareddata/opt/rocm-afar-23.2.1
+#   $6 pe_version     stock PrgEnv version to wrap, e.g. 8.7.0
+#   $7 leaf_name      basename of the caller (for provenance comment)
+#   $8 leaf_commit    short git sha of the caller (12 chars or "unknown")
+#   $9 leaf_dirty     "clean" / "dirty" / "unknown"
 # ----------------------------------------------------------------------------
 emit_cray_prgenv_ecosystem() {
-   local _cray_dir="$1"
-   local _rocm="$2"
-   local _install="$3"
-   local _pe="$4"
-   local _leaf_name="$5"
-   local _leaf_commit="$6"
-   local _leaf_dirty="$7"
+   local _base_dir="$1"
+   local _pkg_dir="$2"
+   local _plus_dir="$3"
+   local _rocm="$4"
+   local _install="$5"
+   local _pe="$6"
+   local _leaf_name="$7"
+   local _leaf_commit="$8"
+   local _leaf_dirty="$9"
 
-   if [[ -z "${_cray_dir}" || -z "${_rocm}" || -z "${_install}" || \
-         -z "${_pe}"       || -z "${_leaf_name}" || -z "${_leaf_commit}" || \
-         -z "${_leaf_dirty}" ]]; then
-      echo "ERROR: emit_cray_prgenv_ecosystem: all 7 args are required" >&2
+   if [[ -z "${_base_dir}" || -z "${_pkg_dir}" || -z "${_plus_dir}" || \
+         -z "${_rocm}"     || -z "${_install}" || -z "${_pe}"       || \
+         -z "${_leaf_name}" || -z "${_leaf_commit}" || -z "${_leaf_dirty}" ]]; then
+      echo "ERROR: emit_cray_prgenv_ecosystem: all 9 args are required" >&2
       return 2
    fi
 
@@ -373,15 +394,24 @@ emit_cray_prgenv_ecosystem() {
    _chown_root() { [ -z "${_sudo}" ] && return 0; ${_sudo} chown "$@"; }
    local _prov="${_leaf_name}@${_leaf_commit} (${_leaf_dirty})"
 
-   echo "[cray prgenv ecosystem] target dir: ${_cray_dir}"
+   # Basenames for the PrgEnv modules' MODULEPATH self-wiring. The PrgEnv files
+   # live at <base_dir>/PrgEnv-*-new/<pe>-<rocm>, so three `dirname`s up from a
+   # loaded file is the module root (TOP_MODULE_PATH); joining the basenames
+   # keeps the tree relocatable (matches the base rocm modulefile pattern).
+   local _pkg_base;  _pkg_base="$(basename "${_pkg_dir}")"
+   local _plus_base; _plus_base="$(basename "${_plus_dir}")"
+
+   echo "[cray prgenv ecosystem] base dir : ${_base_dir}  (PrgEnv-amd-new, PrgEnv-cray-new)"
+   echo "[cray prgenv ecosystem] pkg  dir : ${_pkg_dir}  (rocm-new, amd-new, amd, rocm)"
+   echo "[cray prgenv ecosystem] plus dir : ${_plus_dir}  (MODULEPATH only)"
    echo "[cray prgenv ecosystem] rocm=${_rocm}  pe=${_pe}  (sudo='${_sudo}')"
 
-   ${_sudo} mkdir -p "${_cray_dir}/rocm-new" "${_cray_dir}/amd-new" \
-                     "${_cray_dir}/PrgEnv-amd-new" "${_cray_dir}/amd" \
-                     "${_cray_dir}/rocm"
+   ${_sudo} mkdir -p "${_pkg_dir}/rocm-new" "${_pkg_dir}/amd-new" \
+                     "${_pkg_dir}/amd" "${_pkg_dir}/rocm" \
+                     "${_base_dir}/PrgEnv-amd-new" "${_base_dir}/PrgEnv-cray-new"
 
    # ---------------- rocm-new/<rocm> ---------------------------------------
-   local _f="${_cray_dir}/rocm-new/${_rocm}"
+   local _f="${_pkg_dir}/rocm-new/${_rocm}"
    ${_sudo} tee "${_f}" >/dev/null <<EOF
 #%Module
 #
@@ -464,7 +494,7 @@ EOF
    _chown_root root:root "${_f}"; ${_sudo} chmod 644 "${_f}"; echo "  + ${_f}"
 
    # ---------------- amd-new/<rocm> ----------------------------------------
-   _f="${_cray_dir}/amd-new/${_rocm}"
+   _f="${_pkg_dir}/amd-new/${_rocm}"
    ${_sudo} tee "${_f}" >/dev/null <<EOF
 #%Module
 #
@@ -515,8 +545,8 @@ if {[module-info mode remove] || [module-info mode switch1]} {
 EOF
    _chown_root root:root "${_f}"; ${_sudo} chmod 644 "${_f}"; echo "  + ${_f}"
 
-   # ---------------- PrgEnv-amd-new/<pe>-<rocm> ----------------------------
-   _f="${_cray_dir}/PrgEnv-amd-new/${_pe}-${_rocm}"
+   # ---------------- PrgEnv-amd-new/<pe>-<rocm> (in base_dir) --------------
+   _f="${_base_dir}/PrgEnv-amd-new/${_pe}-${_rocm}"
    ${_sudo} tee "${_f}" >/dev/null <<EOF
 #%Module
 #
@@ -525,10 +555,10 @@ EOF
 # A "PrgEnv-amd/${_pe} equivalent" that brings up the standard Cray AMD
 # programming environment (PE_ENV=AMD, the craype cc/CC/ftn wrappers,
 # cray-mpich, cray-libsci, ...) and then specializes the compiler + ROCm to
-# the local TheRock ${_rocm} install:
+# the local ${_rocm} install:
 #
-#     amd  -> amd-new/${_rocm}     (AMD LLVM compiler from TheRock ${_rocm})
-#     rocm -> rocm-new/${_rocm}    (ROCm toolkit from TheRock ${_rocm})
+#     amd  -> amd-new/${_rocm}     (AMD LLVM compiler from ${_rocm})
+#     rocm -> rocm-new/${_rocm}    (ROCm toolkit from ${_rocm})
 #
 # It loads the stock PrgEnv-amd/${_pe} (so all the Cray PE wiring is inherited
 # verbatim) and then swaps in the two -new modules.
@@ -537,20 +567,31 @@ EOF
 # compilers (driven via PE_ENV=AMD + CRAY_AMD_COMPILER_PREFIX).
 #
 # Use it like any Cray PrgEnv, by swapping out the active one:
-#     module use <this tree>
+#     module use ${_base_dir}
 #     module swap PrgEnv-cray PrgEnv-amd-new/${_pe}-${_rocm}
 
-module-whatis "PrgEnv-amd ${_pe} specialized to local TheRock amd-new/${_rocm} + rocm-new/${_rocm}."
+module-whatis "PrgEnv-amd ${_pe} specialized to local amd-new/${_rocm} + rocm-new/${_rocm}."
 
 # Mutually exclusive with the other programming environments. We intentionally
 # do NOT conflict PrgEnv-amd, because we load it internally to inherit its PE
 # wiring.
 conflict PrgEnv-amd-new
+conflict PrgEnv-cray-new
 conflict PrgEnv-cray
 conflict PrgEnv-aocc
 conflict PrgEnv-gnu
 conflict PrgEnv-intel
 conflict PrgEnv-nvidia
+
+# MODULEPATH self-wiring: expose the per-version toolkit tree (so amd-new/
+# rocm-new resolve) and the downstream rocmplus tree. Relative to the module
+# root (three dirnames up from this file == the dir holding ${_pkg_base}/),
+# so the whole tree stays relocatable. Unconditional (mirrors the base rocm
+# modulefile); the module system reverses the prepend on unload.
+set _self    [file normalize \${ModulesCurrentModulefile}]
+set _modroot [file dirname [file dirname [file dirname \$_self]]]
+prepend-path MODULEPATH \$_modroot/${_pkg_base}
+prepend-path MODULEPATH \$_modroot/${_plus_base}
 
 # During \`module swap A PrgEnv-amd-new\`, this file is evaluated in mode
 # "switch2" (not "load"); during \`module swap PrgEnv-amd-new B\` it is "switch1"
@@ -560,8 +601,9 @@ set _do_remove [expr {[module-info mode remove] || [module-info mode switch1]}]
 
 if {\$_do_load} {
     # Stock AMD PrgEnv: PE_ENV=AMD + craype wrappers + cray-mpich/libsci. Its
-    # internal \`module load amd\` resolves (via the amd/${_rocm} wrapper in this
-    # tree) to amd-new/${_rocm}, so the compiler it brings in is the local one.
+    # internal \`module load amd\` resolves (via the amd/${_rocm} wrapper in the
+    # tree just added to MODULEPATH) to amd-new/${_rocm}, so the compiler it
+    # brings in is the local one.
     if {![is-loaded PrgEnv-amd]} {
         module load PrgEnv-amd/${_pe}
     }
@@ -588,8 +630,78 @@ if {\$_do_remove} {
 EOF
    _chown_root root:root "${_f}"; ${_sudo} chmod 644 "${_f}"; echo "  + ${_f}"
 
+   # ---------------- PrgEnv-cray-new/<pe>-<rocm> (in base_dir) ------------
+   # Like stock PrgEnv-cray/<pe> (the Cray CCE compilers cc/CC/ftn stay the
+   # compilers) but with the local ROCm ${_rocm} toolkit made available via
+   # rocm-new/${_rocm} -- i.e. the SAME ROCm files PrgEnv-amd-new pulls in
+   # through amd-new, minus the AMD LLVM compiler swap. Use PrgEnv-amd-new if
+   # you want the AMD compiler instead of CCE.
+   _f="${_base_dir}/PrgEnv-cray-new/${_pe}-${_rocm}"
+   ${_sudo} tee "${_f}" >/dev/null <<EOF
+#%Module
+#
+# PrgEnv-cray-new/${_pe}-${_rocm}  -- Built by: ${_prov}
+#
+# A "PrgEnv-cray/${_pe} equivalent" that brings up the standard Cray
+# programming environment with the CCE compilers (PE_ENV=CRAY, cc/CC/ftn ->
+# craycc/crayCC/crayftn, cray-mpich, cray-libsci, ...) and then adds the local
+# ROCm ${_rocm} toolkit:
+#
+#     rocm -> rocm-new/${_rocm}    (ROCm toolkit from ${_rocm})
+#
+# It loads the stock PrgEnv-cray/${_pe} (so all the Cray PE wiring is inherited
+# verbatim) and then loads rocm-new/${_rocm}. The CCE compilers are left in
+# place -- this is the Cray-compiler-plus-ROCm environment. (For the AMD LLVM
+# compiler use PrgEnv-amd-new/${_pe}-${_rocm}.)
+#
+# Use it like any Cray PrgEnv, by swapping out the active one:
+#     module use ${_base_dir}
+#     module swap PrgEnv-cray PrgEnv-cray-new/${_pe}-${_rocm}
+
+module-whatis "PrgEnv-cray ${_pe} + local ROCm rocm-new/${_rocm} toolkit (CCE compilers)."
+
+# Mutually exclusive with the other programming environments. We intentionally
+# do NOT conflict PrgEnv-cray, because we load it internally to inherit its PE
+# wiring.
+conflict PrgEnv-cray-new
+conflict PrgEnv-amd
+conflict PrgEnv-amd-new
+conflict PrgEnv-aocc
+conflict PrgEnv-gnu
+conflict PrgEnv-intel
+conflict PrgEnv-nvidia
+
+# MODULEPATH self-wiring (relative -> relocatable), same as PrgEnv-amd-new.
+set _self    [file normalize \${ModulesCurrentModulefile}]
+set _modroot [file dirname [file dirname [file dirname \$_self]]]
+prepend-path MODULEPATH \$_modroot/${_pkg_base}
+prepend-path MODULEPATH \$_modroot/${_plus_base}
+
+# swap2/load and swap1/remove handled the same, mirroring stock PrgEnv-cray.
+set _do_load   [expr {[module-info mode load]   || [module-info mode switch2]}]
+set _do_remove [expr {[module-info mode remove] || [module-info mode switch1]}]
+
+if {\$_do_load} {
+    if {![is-loaded PrgEnv-cray]} {
+        module load PrgEnv-cray/${_pe}
+    }
+    # Add the local ROCm toolkit (rocm-new). Swap out any stock rocm; else load.
+    if {[is-loaded rocm]} {
+        module swap rocm rocm-new/${_rocm}
+    } elseif {![is-loaded rocm-new/${_rocm}]} {
+        module load rocm-new/${_rocm}
+    }
+}
+
+if {\$_do_remove} {
+    if {[is-loaded rocm-new/${_rocm}]} { module unload rocm-new/${_rocm} }
+    if {[is-loaded PrgEnv-cray]}       { module unload PrgEnv-cray/${_pe} }
+}
+EOF
+   _chown_root root:root "${_f}"; ${_sudo} chmod 644 "${_f}"; echo "  + ${_f}"
+
    # ---------------- amd/<rocm> (thin wrapper) -----------------------------
-   _f="${_cray_dir}/amd/${_rocm}"
+   _f="${_pkg_dir}/amd/${_rocm}"
    ${_sudo} tee "${_f}" >/dev/null <<EOF
 #%Module
 #
@@ -607,7 +719,7 @@ EOF
    _chown_root root:root "${_f}"; ${_sudo} chmod 644 "${_f}"; echo "  + ${_f}"
 
    # ---------------- rocm/<rocm> (thin wrapper) ----------------------------
-   _f="${_cray_dir}/rocm/${_rocm}"
+   _f="${_pkg_dir}/rocm/${_rocm}"
    ${_sudo} tee "${_f}" >/dev/null <<EOF
 #%Module
 #
@@ -622,4 +734,22 @@ module-whatis "Alias for rocm-new/${_rocm} (local TheRock ROCm ${_rocm} toolkit)
 module load rocm-new/${_rocm}
 EOF
    _chown_root root:root "${_f}"; ${_sudo} chmod 644 "${_f}"; echo "  + ${_f}"
+}
+
+# ----------------------------------------------------------------------------
+# make_world_readable -- make an install/module tree readable (and dirs
+# traversable) by group + others. Used when installing into a shared location
+# such as /shareddata/{opt,modules} so other users can load the modules and
+# read the install. Adds o+rX/g+rX only (never write); honors ${SUDO}.
+#
+# Args: one or more paths (files or dirs). Missing paths are skipped quietly.
+# ----------------------------------------------------------------------------
+make_world_readable() {
+   local _sudo="${SUDO-sudo}"
+   local _p
+   for _p in "$@"; do
+      [ -e "${_p}" ] || continue
+      echo "[world-readable] chmod -R g+rX,o+rX ${_p}"
+      ${_sudo} chmod -R g+rX,o+rX "${_p}" 2>/dev/null || true
+   done
 }
