@@ -933,6 +933,11 @@ if [ "${CRAY_SYSTEM}" = "1" ]; then
       #   rocm-new/afar-23.2.1, amd-new/afar-23.2.1,
       #   PrgEnv-amd-new/${PE_VERSION}-afar-23.2.1
       _eco_key="afar-${THEROCK_AFAR_RELEASE}"
+      # Pass ROCM_NUMERIC (10th arg) so the generated Cray modules advertise a
+      # numeric CRAY_AMD_COMPILER_VERSION and rocm-<numeric>.pc product. The tag
+      # (_eco_key, e.g. afar-23.3.0) still keys the module basenames; without the
+      # numeric the craype cc/CC/ftn wrappers cannot find cray-mpich/cray-libsci
+      # or resolve the rocm product. (emit_rocm_pc above already uses ROCM_NUMERIC.)
       emit_cray_prgenv_ecosystem \
          "${TOP_MODULE_PATH}/base" \
          "${TOP_MODULE_PATH}/rocm-${_eco_key}" \
@@ -942,7 +947,8 @@ if [ "${CRAY_SYSTEM}" = "1" ]; then
          "${PE_VERSION}" \
          "${LEAF_SCRIPT_NAME}" \
          "${LEAF_SCRIPT_COMMIT:0:12}" \
-         "${LEAF_SCRIPT_DIRTY}"
+         "${LEAF_SCRIPT_DIRTY}" \
+         "${ROCM_NUMERIC}"
       echo "  -> expose with: module use ${TOP_MODULE_PATH}/base"
       echo "  -> then:        module swap PrgEnv-cray PrgEnv-amd-new/${PE_VERSION}-${_eco_key}"
       echo "  -> or (CCE+ROCm): module swap PrgEnv-cray PrgEnv-cray-new/${PE_VERSION}-${_eco_key}"

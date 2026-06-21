@@ -371,6 +371,20 @@ EOF
 #   $7 leaf_name      basename of the caller (for provenance comment)
 #   $8 leaf_commit    short git sha of the caller (12 chars or "unknown")
 #   $9 leaf_dirty     "clean" / "dirty" / "unknown"
+#  $10 rocm_numeric   OPTIONAL .info/version-derived numeric, e.g. 7.14.0.
+#                     Defaults to ${rocm_tag}. This is decoupled from rocm_tag
+#                     ($4) on purpose: AFAR drops are keyed on a non-numeric tag
+#                     (afar-23.3.0) for the module basenames, but the Cray
+#                     craype cc/CC/ftn wrappers need a NUMERIC version both to
+#                     (a) select the compatible cray-mpich/cray-libsci
+#                     gencompiler tree (CRAY_AMD_COMPILER_VERSION; only amd/7.0
+#                     ships, so the major must be 7) and to (b) resolve the
+#                     rocm-<numeric>.pc product emitted by emit_rocm_pc. Passing
+#                     the tag here (the old behavior) made the wrappers abort
+#                     with "Unable to find cray-mpich libraries compatible with
+#                     amd/<tag>" and leave virtual:world's rocm product
+#                     unresolved. For numeric/therock drops tag==numeric, so the
+#                     default keeps them unchanged.
 # ----------------------------------------------------------------------------
 emit_cray_prgenv_ecosystem() {
    local _base_dir="$1"
@@ -382,11 +396,12 @@ emit_cray_prgenv_ecosystem() {
    local _leaf_name="$7"
    local _leaf_commit="$8"
    local _leaf_dirty="$9"
+   local _rocm_numeric="${10:-$4}"
 
    if [[ -z "${_base_dir}" || -z "${_pkg_dir}" || -z "${_plus_dir}" || \
          -z "${_rocm}"     || -z "${_install}" || -z "${_pe}"       || \
          -z "${_leaf_name}" || -z "${_leaf_commit}" || -z "${_leaf_dirty}" ]]; then
-      echo "ERROR: emit_cray_prgenv_ecosystem: all 9 args are required" >&2
+      echo "ERROR: emit_cray_prgenv_ecosystem: args 1-9 are required" >&2
       return 2
    fi
 
@@ -438,14 +453,19 @@ set MOD_LEVEL         ${_rocm}
 set AMD_CURPATH       ${_install}
 # Stock Cray rocm modules point PKG_CONFIG at /usr/lib64/pkgconfig, but that
 # tree is root-only, diverges between login and compute node images, and has no
-# rocm-${_rocm}.pc. We ship rocm-${_rocm}.pc inside the install tree
-# (lib/pkgconfig, via emit_rocm_pc) and point PKG_CONFIG_PATH there so the
-# craype cc/CC/ftn wrappers can resolve the \`rocm-${_rocm}\` product.
+# rocm-${_rocm_numeric}.pc. We ship rocm-${_rocm_numeric}.pc inside the install
+# tree (lib/pkgconfig, via emit_rocm_pc) and point PKG_CONFIG_PATH there so the
+# craype cc/CC/ftn wrappers can resolve the \`rocm-${_rocm_numeric}\` product.
+# NOTE: the pkg-config product is keyed on the NUMERIC version (matching the
+# rocm-<numeric>.pc emit_rocm_pc writes), NOT the module tag (\$MOD_LEVEL): for
+# AFAR drops MOD_LEVEL is a non-numeric tag (e.g. afar-23.3.0) and a
+# rocm-<tag>.pc is never emitted, so registering rocm-\$MOD_LEVEL here would
+# leave virtual:world's rocm product unresolvable.
 set PKG_CONFIG_PREFIX \$AMD_CURPATH/lib
 
 # CPE variables
 set CPE_PRODUCT_NAME      CRAY_ROCM
-set CPE_PKGCONFIG_LIB     rocm-\$MOD_LEVEL
+set CPE_PKGCONFIG_LIB     rocm-${_rocm_numeric}
 set CPE_PKGCONFIG_PATH    \$PKG_CONFIG_PREFIX/pkgconfig
 
 # AMD paths used below
@@ -522,7 +542,14 @@ prepend-path CMAKE_PREFIX_PATH   \$ROCM_NEW
 setenv ROCM_COMPILER_PATH        \$ROCM_NEW/llvm
 setenv ROCM_COMPILER_VERSION     ${_rocm}
 setenv CRAY_AMD_COMPILER_PREFIX  \$ROCM_NEW
-setenv CRAY_AMD_COMPILER_VERSION ${_rocm}
+# CRAY_AMD_COMPILER_VERSION must be the NUMERIC version, not the module tag: the
+# craype cc/CC/ftn wrappers use it to pick the compatible cray-mpich/cray-libsci
+# gencompiler tree (only amd/7.0 ships, so the major must be 7). A non-numeric
+# tag (e.g. afar-23.3.0) matches nothing and the wrapper aborts with "Unable to
+# find cray-mpich libraries compatible with amd/<tag>". The actual compiler is
+# still located via CRAY_AMD_COMPILER_PREFIX, so advertising the SDK numeric
+# here is purely for Cray library selection. (tag==numeric for therock drops.)
+setenv CRAY_AMD_COMPILER_VERSION ${_rocm_numeric}
 # Cray-native: make the ftn/cc/CC wrappers drive the new LLVM amdflang/amdclang
 # (unset would fall back to flang-classic and emit an 'Unrecognized' warning).
 setenv AMD_COMPILER_TYPE         DEFAULT
