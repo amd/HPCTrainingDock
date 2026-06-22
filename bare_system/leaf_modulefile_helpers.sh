@@ -646,9 +646,36 @@ if {\$_do_load} {
     } elseif {![is-loaded rocm-new/${_rocm}]} {
         module load rocm-new/${_rocm}
     }
+    # amdflang (amdflang-new) cannot read cray-mpich's classic-Flang
+    # "V34" mpi.mod, so this AMD-compiler env loads the from-source MPICH
+    # wrappers (built with FC=amdflang) that ship an amdflang-format
+    # mpi.mod. The wrapper lives under <this rocmplus tree>/mpich-wrappers
+    # (added to MODULEPATH above). Its version token differs across
+    # regular/therock/afar trees (numeric ROCm version, not the PrgEnv
+    # tag), so we discover whatever single build is present rather than
+    # hardcode a name -- and we probe the file first, because the Cray PE
+    # Environment Modules 3.2.11 does NOT let 'catch' swallow a
+    # missing-module error. No-op when none was built (non-Cray, etc.).
+    set _mw_dir \$_modroot/${_plus_base}/mpich-wrappers
+    if {[file isdirectory \$_mw_dir]} {
+        foreach _mw [lsort [glob -nocomplain -tails -directory \$_mw_dir *]] {
+            if {[string match ".*" \$_mw]} { continue }
+            if {![is-loaded mpich-wrappers/\$_mw]} { module load mpich-wrappers/\$_mw }
+            break
+        }
+    }
 }
 
 if {\$_do_remove} {
+    # Unload any auto-loaded mpich-wrappers by its exact loaded name
+    # (scanned from LOADEDMODULES): a bare 'module unload mpich-wrappers'
+    # does not resolve a versioned module in switch1 mode under Cray PE
+    # Environment Modules 3.2.11.
+    if {[info exists ::env(LOADEDMODULES)]} {
+        foreach _lm [split \$::env(LOADEDMODULES) ":"] {
+            if {[string match "mpich-wrappers/*" \$_lm]} { module unload \$_lm }
+        }
+    }
     if {[is-loaded rocm-new/${_rocm}]} { module unload rocm-new/${_rocm} }
     if {[is-loaded amd-new/${_rocm}]}  { module unload amd-new/${_rocm} }
     if {[is-loaded amd/${_rocm}]}      { module unload amd/${_rocm} }
