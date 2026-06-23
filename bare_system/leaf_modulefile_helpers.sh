@@ -409,12 +409,35 @@ emit_cray_prgenv_ecosystem() {
    _chown_root() { [ -z "${_sudo}" ] && return 0; ${_sudo} chown "$@"; }
    local _prov="${_leaf_name}@${_leaf_commit} (${_leaf_dirty})"
 
+   # MPI family the generated PrgEnv-amd-new layers on top of the Cray PE.
+   # "mpich" (default): the AMD-compiler env loads the from-source MPICH
+   # wrappers (amdflang cannot read cray-mpich's classic-Flang mpi.mod), so the
+   # PrgEnv-amd-new modulefile gets the mpich-wrappers load/unload block.
+   # "openmpi" (or any non-mpich value): the env is OpenMPI-based, which already
+   # ships an amdflang-compatible mpi.mod, so we OMIT the mpich-wrappers block
+   # entirely (and the build step is skipped, see build_and_emit_mpich_wrappers).
+   local _mpi_family; _mpi_family="$(echo "${MPI_FAMILY:-mpich}" | tr '[:upper:]' '[:lower:]')"
+
    # Basenames for the PrgEnv modules' MODULEPATH self-wiring. The PrgEnv files
    # live at <base_dir>/PrgEnv-*-new/<pe>-<rocm>, so three `dirname`s up from a
    # loaded file is the module root (TOP_MODULE_PATH); joining the basenames
    # keeps the tree relocatable (matches the base rocm modulefile pattern).
    local _pkg_base;  _pkg_base="$(basename "${_pkg_dir}")"
    local _plus_base; _plus_base="$(basename "${_plus_dir}")"
+
+   # amd-wrapper unload lines for the PrgEnv-amd-new remove path. Stock
+   # PrgEnv-amd resolves its compiler via `module load amd` (bare, default) on a
+   # clean load, but via a *versioned* `module load amd/<CADV>` once
+   # CRAY_AMD_COMPILER_VERSION is already in the environment (e.g. during a
+   # PrgEnv-amd-new -> PrgEnv-amd-new swap). When the module tag differs from the
+   # numeric CADV (AFAR drops: tag afar-23.2.1, CADV 7.13.0) we ship BOTH an
+   # amd/<tag> and an amd/<numeric> wrapper (below), so the remove path must be
+   # able to unload whichever one stock PrgEnv-amd loaded.
+   local _amd_unload="    if {[is-loaded amd/${_rocm}]}      { module unload amd/${_rocm} }"
+   if [ "${_rocm_numeric}" != "${_rocm}" ]; then
+      _amd_unload="${_amd_unload}
+    if {[is-loaded amd/${_rocm_numeric}]} { module unload amd/${_rocm_numeric} }"
+   fi
 
    echo "[cray prgenv ecosystem] base dir : ${_base_dir}  (PrgEnv-amd-new, PrgEnv-cray-new)"
    echo "[cray prgenv ecosystem] pkg  dir : ${_pkg_dir}  (rocm-new, amd-new, amd, rocm)"
@@ -572,6 +595,54 @@ if {[module-info mode remove] || [module-info mode switch1]} {
 EOF
    _chown_root root:root "${_f}"; ${_sudo} chmod 644 "${_f}"; echo "  + ${_f}"
 
+   # mpich-wrappers load/unload Tcl injected into PrgEnv-amd-new below. Present
+   # only for the MPICH family; empty (omitted) for OpenMPI-based PrgEnvs, which
+   # do not need the from-source amdflang MPICH wrappers. $(cat <<...) strips the
+   # trailing newline, so each fragment occupies its own line in the heredoc
+   # (an empty fragment just leaves a harmless blank line in the Tcl).
+   local _mw_remove="" _mw_load=""
+   case "${_mpi_family}" in
+      mpich|cray-mpich|"")
+         _mw_remove="$(cat <<'TCL'
+    # Unload any auto-loaded mpich-wrappers by its exact loaded name
+    # (scanned from LOADEDMODULES): a bare 'module unload mpich-wrappers'
+    # does not resolve a versioned module in switch1 mode under Cray PE
+    # Environment Modules 3.2.11.
+    if {[info exists ::env(LOADEDMODULES)]} {
+        foreach _lm [split $::env(LOADEDMODULES) ":"] {
+            if {[string match "mpich-wrappers/*" $_lm]} { module unload $_lm }
+        }
+    }
+TCL
+)"
+         _mw_load="$(cat <<TCL
+    # amdflang (amdflang-new) cannot read cray-mpich's classic-Flang
+    # "V34" mpi.mod, so this AMD-compiler env loads the from-source MPICH
+    # wrappers (built with FC=amdflang) that ship an amdflang-format
+    # mpi.mod. The wrapper lives under <this rocmplus tree>/mpich-wrappers
+    # (added to MODULEPATH above). Its version token differs across
+    # regular/therock/afar trees (numeric ROCm version, not the PrgEnv
+    # tag), so we discover whatever single build is present rather than
+    # hardcode a name -- and we probe the file first, because the Cray PE
+    # Environment Modules 3.2.11 does NOT let 'catch' swallow a
+    # missing-module error. No-op when none was built (non-Cray, OpenMPI,
+    # matching-Fortran, etc.).
+    set _mw_dir \$_modroot/${_plus_base}/mpich-wrappers
+    if {[file isdirectory \$_mw_dir]} {
+        foreach _mw [lsort [glob -nocomplain -tails -directory \$_mw_dir *]] {
+            if {[string match ".*" \$_mw]} { continue }
+            if {![is-loaded mpich-wrappers/\$_mw]} { module load mpich-wrappers/\$_mw }
+            break
+        }
+    }
+TCL
+)"
+         ;;
+      *)
+         echo "[cray prgenv ecosystem] MPI_FAMILY='${_mpi_family}' -> PrgEnv-amd-new omits the mpich-wrappers block"
+         ;;
+   esac
+
    # ---------------- PrgEnv-amd-new/<pe>-<rocm> (in base_dir) --------------
    _f="${_base_dir}/PrgEnv-amd-new/${_pe}-${_rocm}"
    ${_sudo} tee "${_f}" >/dev/null <<EOF
@@ -610,21 +681,39 @@ conflict PrgEnv-gnu
 conflict PrgEnv-intel
 conflict PrgEnv-nvidia
 
-# MODULEPATH self-wiring: expose the per-version toolkit tree (so amd-new/
-# rocm-new resolve) and the downstream rocmplus tree. Relative to the module
-# root (three dirnames up from this file == the dir holding ${_pkg_base}/),
-# so the whole tree stays relocatable. Unconditional (mirrors the base rocm
-# modulefile); the module system reverses the prepend on unload.
 set _self    [file normalize \${ModulesCurrentModulefile}]
 set _modroot [file dirname [file dirname [file dirname \$_self]]]
-prepend-path MODULEPATH \$_modroot/${_pkg_base}
-prepend-path MODULEPATH \$_modroot/${_plus_base}
 
 # During \`module swap A PrgEnv-amd-new\`, this file is evaluated in mode
 # "switch2" (not "load"); during \`module swap PrgEnv-amd-new B\` it is "switch1"
 # (not "remove"). Treat both pairs the same -- this mirrors stock PrgEnv-amd.
 set _do_load   [expr {[module-info mode load]   || [module-info mode switch2]}]
 set _do_remove [expr {[module-info mode remove] || [module-info mode switch1]}]
+
+# REMOVE/switch1 path runs BEFORE the MODULEPATH prepend below. On unload the
+# prepend-path lines auto-invert to removals that execute at their textual
+# position, so keeping the unloads above them means the per-version tree is
+# still on MODULEPATH while we unload the amd/amd-new/rocm-new modules that live
+# in it. (If the tree were dropped first, these unloads fail with ERROR:105
+# "Unable to locate a modulefile" and leave the old toolchain dangling in
+# LOADEDMODULES -- which also cascades into the incoming PrgEnv-amd 'module load
+# amd' on a PrgEnv-amd-new -> PrgEnv-amd-new swap.)
+if {\$_do_remove} {
+${_mw_remove}
+    if {[is-loaded rocm-new/${_rocm}]} { module unload rocm-new/${_rocm} }
+    if {[is-loaded amd-new/${_rocm}]}  { module unload amd-new/${_rocm} }
+${_amd_unload}
+    if {[is-loaded PrgEnv-amd]}        { module unload PrgEnv-amd/${_pe} }
+}
+
+# MODULEPATH self-wiring: expose the per-version toolkit tree (so amd-new/
+# rocm-new resolve) and the downstream rocmplus tree. Relative to the module
+# root (three dirnames up from this file == the dir holding ${_pkg_base}/),
+# so the whole tree stays relocatable. Unconditional (mirrors the base rocm
+# modulefile): on load it adds the tree before the load block below; on unload
+# it auto-inverts to a removal that runs after the remove block above.
+prepend-path MODULEPATH \$_modroot/${_pkg_base}
+prepend-path MODULEPATH \$_modroot/${_plus_base}
 
 if {\$_do_load} {
     # Stock AMD PrgEnv: PE_ENV=AMD + craype wrappers + cray-mpich/libsci. Its
@@ -646,40 +735,7 @@ if {\$_do_load} {
     } elseif {![is-loaded rocm-new/${_rocm}]} {
         module load rocm-new/${_rocm}
     }
-    # amdflang (amdflang-new) cannot read cray-mpich's classic-Flang
-    # "V34" mpi.mod, so this AMD-compiler env loads the from-source MPICH
-    # wrappers (built with FC=amdflang) that ship an amdflang-format
-    # mpi.mod. The wrapper lives under <this rocmplus tree>/mpich-wrappers
-    # (added to MODULEPATH above). Its version token differs across
-    # regular/therock/afar trees (numeric ROCm version, not the PrgEnv
-    # tag), so we discover whatever single build is present rather than
-    # hardcode a name -- and we probe the file first, because the Cray PE
-    # Environment Modules 3.2.11 does NOT let 'catch' swallow a
-    # missing-module error. No-op when none was built (non-Cray, etc.).
-    set _mw_dir \$_modroot/${_plus_base}/mpich-wrappers
-    if {[file isdirectory \$_mw_dir]} {
-        foreach _mw [lsort [glob -nocomplain -tails -directory \$_mw_dir *]] {
-            if {[string match ".*" \$_mw]} { continue }
-            if {![is-loaded mpich-wrappers/\$_mw]} { module load mpich-wrappers/\$_mw }
-            break
-        }
-    }
-}
-
-if {\$_do_remove} {
-    # Unload any auto-loaded mpich-wrappers by its exact loaded name
-    # (scanned from LOADEDMODULES): a bare 'module unload mpich-wrappers'
-    # does not resolve a versioned module in switch1 mode under Cray PE
-    # Environment Modules 3.2.11.
-    if {[info exists ::env(LOADEDMODULES)]} {
-        foreach _lm [split \$::env(LOADEDMODULES) ":"] {
-            if {[string match "mpich-wrappers/*" \$_lm]} { module unload \$_lm }
-        }
-    }
-    if {[is-loaded rocm-new/${_rocm}]} { module unload rocm-new/${_rocm} }
-    if {[is-loaded amd-new/${_rocm}]}  { module unload amd-new/${_rocm} }
-    if {[is-loaded amd/${_rocm}]}      { module unload amd/${_rocm} }
-    if {[is-loaded PrgEnv-amd]}        { module unload PrgEnv-amd/${_pe} }
+${_mw_load}
 }
 EOF
    _chown_root root:root "${_f}"; ${_sudo} chmod 644 "${_f}"; echo "  + ${_f}"
@@ -725,15 +781,26 @@ conflict PrgEnv-gnu
 conflict PrgEnv-intel
 conflict PrgEnv-nvidia
 
-# MODULEPATH self-wiring (relative -> relocatable), same as PrgEnv-amd-new.
 set _self    [file normalize \${ModulesCurrentModulefile}]
 set _modroot [file dirname [file dirname [file dirname \$_self]]]
-prepend-path MODULEPATH \$_modroot/${_pkg_base}
-prepend-path MODULEPATH \$_modroot/${_plus_base}
 
 # swap2/load and swap1/remove handled the same, mirroring stock PrgEnv-cray.
 set _do_load   [expr {[module-info mode load]   || [module-info mode switch2]}]
 set _do_remove [expr {[module-info mode remove] || [module-info mode switch1]}]
+
+# REMOVE/switch1 runs BEFORE the MODULEPATH prepend below so the per-version
+# tree is still on MODULEPATH while we unload rocm-new (which lives in it). On
+# unload the prepend-path lines auto-invert to removals at their textual
+# position -- i.e. after this block -- so the unload resolves cleanly instead
+# of failing with ERROR:105 and leaving rocm-new dangling in LOADEDMODULES.
+if {\$_do_remove} {
+    if {[is-loaded rocm-new/${_rocm}]} { module unload rocm-new/${_rocm} }
+    if {[is-loaded PrgEnv-cray]}       { module unload PrgEnv-cray/${_pe} }
+}
+
+# MODULEPATH self-wiring (relative -> relocatable), same as PrgEnv-amd-new.
+prepend-path MODULEPATH \$_modroot/${_pkg_base}
+prepend-path MODULEPATH \$_modroot/${_plus_base}
 
 if {\$_do_load} {
     if {![is-loaded PrgEnv-cray]} {
@@ -745,11 +812,6 @@ if {\$_do_load} {
     } elseif {![is-loaded rocm-new/${_rocm}]} {
         module load rocm-new/${_rocm}
     }
-}
-
-if {\$_do_remove} {
-    if {[is-loaded rocm-new/${_rocm}]} { module unload rocm-new/${_rocm} }
-    if {[is-loaded PrgEnv-cray]}       { module unload PrgEnv-cray/${_pe} }
 }
 EOF
    _chown_root root:root "${_f}"; ${_sudo} chmod 644 "${_f}"; echo "  + ${_f}"
@@ -771,6 +833,33 @@ module-whatis "Alias for amd-new/${_rocm} (local TheRock AMD LLVM compiler)."
 module load amd-new/${_rocm}
 EOF
    _chown_root root:root "${_f}"; ${_sudo} chmod 644 "${_f}"; echo "  + ${_f}"
+
+   # ---------------- amd/<numeric> (thin wrapper, AFAR only) ---------------
+   # When the module tag differs from the numeric CADV (AFAR drops: tag
+   # afar-23.2.1, CRAY_AMD_COMPILER_VERSION 7.13.0), stock PrgEnv-amd issues a
+   # *versioned* `module load amd/<numeric>` whenever CRAY_AMD_COMPILER_VERSION
+   # is already set in the environment (e.g. on a PrgEnv-amd-new -> PrgEnv-amd-new
+   # swap). Ship an amd/<numeric> wrapper under that name so the versioned load
+   # resolves -- mirroring how the numeric trees name their wrapper to match
+   # their CADV. Both wrappers resolve to the same amd-new module.
+   if [ "${_rocm_numeric}" != "${_rocm}" ]; then
+      _f="${_pkg_dir}/amd/${_rocm_numeric}"
+      ${_sudo} tee "${_f}" >/dev/null <<EOF
+#%Module
+#
+# amd/${_rocm_numeric}  -- Built by: ${_prov}
+#
+# Numeric-CADV alias for amd-new/${_rocm}. Stock PrgEnv-amd/${_pe}, once
+# CRAY_AMD_COMPILER_VERSION (=${_rocm_numeric}) is set in the environment,
+# issues a versioned \`module load amd/${_rocm_numeric}\` instead of the bare
+# \`module load amd\`; this wrapper must exist under that name so the load
+# resolves. The sibling amd/${_rocm} wrapper resolves to the same module.
+#
+module-whatis "Alias for amd-new/${_rocm} (local TheRock AMD LLVM compiler)."
+module load amd-new/${_rocm}
+EOF
+      _chown_root root:root "${_f}"; ${_sudo} chmod 644 "${_f}"; echo "  + ${_f}"
+   fi
 
    # ---------------- rocm/<rocm> (thin wrapper) ----------------------------
    _f="${_pkg_dir}/rocm/${_rocm}"
@@ -806,4 +895,275 @@ make_world_readable() {
       echo "[world-readable] chmod -R g+rX,o+rX ${_p}"
       ${_sudo} chmod -R g+rX,o+rX "${_p}" 2>/dev/null || true
    done
+}
+
+# ----------------------------------------------------------------------------
+# build_and_emit_mpich_wrappers -- build a from-source MPICH (ch4:ofi over
+# libfabric) with the AMD LLVM compiler (amdclang/amdclang++/amdflang) taken
+# from a local ROCm install, and emit its modulefile into the rocmplus tree so
+# PrgEnv-amd-new/<pe>-<rocm> can auto-load it.
+#
+# Why this exists: amdflang (amdflang-new) cannot read cray-mpich's
+# classic-Flang "V34" mpi.mod, so PrgEnv-amd-new layers this from-source build
+# (compiled WITH amdflang) on top of the Cray PE to supply an amdflang-format
+# mpi.mod plus matching mpicc/mpicxx/mpif90 wrappers. The PrgEnv-amd-new
+# modulefile probes <plus_dir>/mpich-wrappers and loads whatever single build is
+# present (its version token is the numeric ROCm version, not the PrgEnv tag),
+# so the module name written here must live in that tree.
+#
+# The build uses the AMD compiler drivers + libfabric by ABSOLUTE PATH (no
+# `module load`), so it is safe to call from the non-interactive install scripts
+# and does NOT need cray-mpich loaded (this IS the replacement MPI).
+#
+# Positional args:
+#   $1 plus_dir        rocmplus module tree dir; modulefile is written to
+#                      <plus_dir>/mpich-wrappers/<token>
+#   $2 token           module version token (use the numeric ROCm version)
+#   $3 amd_install     local ROCm/AMD-LLVM install root (has bin/amdclang,
+#                      bin/amdclang++, bin/amdflang -- or llvm/bin/*)
+#   $4 install_prefix  where to install the built MPICH (e.g. <amd_install>/mpich-wrappers)
+#   $5 leaf_name       basename of the caller (provenance comment)
+#   $6 leaf_commit     short git sha of the caller
+#   $7 leaf_dirty      "clean" / "dirty" / "unknown"
+#
+# The wrappers are ONLY needed when BOTH hold: (a) the env uses MPICH (not
+# OpenMPI -- an OpenMPI PrgEnv already ships an amdflang-compatible mpi.mod) and
+# (b) the local amdflang differs from the Cray-supplied amdflang (same version
+# => cray-mpich's mpi.mod is already readable). This function skips the build in
+# either exception (see MPI_FAMILY / FORTRAN_MATCHES_CRAY below).
+#
+# Env knobs (all optional):
+#   BUILD_MPICH_WRAPPERS  1=build+emit (default); 0=skip entirely (no-op return)
+#   MPI_FAMILY            mpich (default) builds; openmpi (or any non-mpich
+#                         value) skips -- OpenMPI-based PrgEnvs need no wrapper.
+#   FORTRAN_MATCHES_CRAY  auto (default) = compare the local amdflang version to
+#                         the Cray-supplied amdflang and skip iff equal; 1=force
+#                         skip (treat as matching); 0=force build (skip the
+#                         version probe). On an inconclusive probe we BUILD.
+#   MPICH_VERSION         MPICH source version to fetch+build (default 4.3.0)
+#   LIBFABRIC_PATH        --with-libfabric prefix; default: highest
+#                         /opt/cray/libfabric/* (else error-skip)
+#   REPLACE_EXISTING      1=rebuild even if install_prefix/bin/mpicc already exists
+#
+# This function is non-fatal by design: any "cannot build here" condition
+# (missing compiler/libfabric/wget, or a failed build) logs a WARNING and
+# returns 0, because PrgEnv-amd-new probes for the wrapper's presence and simply
+# skips it when absent. Callers run under `set -e`, so we never let a build
+# failure abort the surrounding ROCm install.
+# ----------------------------------------------------------------------------
+
+# _mw_flang_version PATH -- echo a comparable MAJOR.MINOR from `PATH --version`
+# (the flang/clang version that governs .mod-format compatibility). Empty if the
+# binary is missing or the output cannot be parsed.
+_mw_flang_version() {
+   local _p="$1"
+   [ -n "${_p}" ] && [ -x "${_p}" ] || return 0
+   "${_p}" --version 2>&1 \
+      | grep -oiE 'version[[:space:]]+[0-9]+\.[0-9]+' \
+      | head -n1 | grep -oE '[0-9]+\.[0-9]+'
+}
+
+# _mw_cray_amdflang -- echo the path to the Cray-supplied amdflang (the stock
+# `amd` compiler module's), or empty if it cannot be located. Tries the env var
+# the stock amd module exports, then parses `module show amd`.
+_mw_cray_amdflang() {
+   if [ -n "${CRAY_AMD_COMPILER_PREFIX:-}" ] && [ -x "${CRAY_AMD_COMPILER_PREFIX}/bin/amdflang" ]; then
+      echo "${CRAY_AMD_COMPILER_PREFIX}/bin/amdflang"; return 0
+   fi
+   local _prefix=""
+   if command -v module >/dev/null 2>&1; then
+      _prefix="$(module show amd 2>&1 \
+                 | sed -n 's#.*CRAY_AMD_COMPILER_PREFIX[[:space:]][[:space:]]*\([^[:space:]]*\).*#\1#p' \
+                 | head -n1)"
+   fi
+   if [ -n "${_prefix}" ] && [ -x "${_prefix}/bin/amdflang" ]; then
+      echo "${_prefix}/bin/amdflang"; return 0
+   fi
+   return 0
+}
+
+build_and_emit_mpich_wrappers() {
+   local _plus_dir="$1"
+   local _token="$2"
+   local _amd_install="$3"
+   local _install_prefix="$4"
+   local _leaf_name="$5"
+   local _leaf_commit="$6"
+   local _leaf_dirty="$7"
+
+   if [[ -z "${_plus_dir}" || -z "${_token}" || -z "${_amd_install}" || -z "${_install_prefix}" ]]; then
+      echo "ERROR: build_and_emit_mpich_wrappers: args 1-4 are required" >&2
+      return 2
+   fi
+
+   if [ "${BUILD_MPICH_WRAPPERS:-1}" = "0" ]; then
+      echo "[mpich-wrappers] BUILD_MPICH_WRAPPERS=0 -> skipping build + modulefile"
+      return 0
+   fi
+
+   # Exception 1: OpenMPI-based PrgEnv (MPI_FAMILY != mpich) needs no wrapper --
+   # OpenMPI already ships an amdflang-compatible mpi.mod.
+   local _mpi_family; _mpi_family="$(echo "${MPI_FAMILY:-mpich}" | tr '[:upper:]' '[:lower:]')"
+   case "${_mpi_family}" in
+      mpich|cray-mpich|"") : ;;
+      *)
+         echo "[mpich-wrappers] MPI_FAMILY='${_mpi_family}' (not mpich) -> no wrapper needed, skipping."
+         return 0 ;;
+   esac
+
+   local _sudo="${SUDO-sudo}"
+   _chown_root() { [ -z "${_sudo}" ] && return 0; ${_sudo} chown "$@"; }
+   local _prov="${_leaf_name:-unknown}@${_leaf_commit:-unknown} (${_leaf_dirty:-unknown})"
+   local _mpich_ver="${MPICH_VERSION:-4.3.0}"
+   local _modfile="${_plus_dir}/mpich-wrappers/${_token}"
+
+   # Locate the AMD LLVM compiler drivers (prefer <root>/bin, fall back to
+   # <root>/llvm/bin -- some trees ship amdflang only under llvm/bin).
+   local _cc="" _cxx="" _fc="" _d
+   for _d in "${_amd_install}/bin" "${_amd_install}/llvm/bin"; do
+      [ -z "${_cc}"  ] && [ -x "${_d}/amdclang"   ] && _cc="${_d}/amdclang"
+      [ -z "${_cxx}" ] && [ -x "${_d}/amdclang++" ] && _cxx="${_d}/amdclang++"
+      [ -z "${_fc}"  ] && [ -x "${_d}/amdflang"   ] && _fc="${_d}/amdflang"
+   done
+   if [[ -z "${_cc}" || -z "${_cxx}" || -z "${_fc}" ]]; then
+      echo "WARNING: [mpich-wrappers] amdclang/amdclang++/amdflang not all found under" >&2
+      echo "         ${_amd_install}/{bin,llvm/bin}; skipping wrapper build." >&2
+      return 0
+   fi
+
+   # Exception 2: the local amdflang matches the Cray-supplied amdflang version
+   # -> cray-mpich's mpi.mod is already readable, so no wrapper is needed. Only
+   # skip on a POSITIVE match (or an explicit FORTRAN_MATCHES_CRAY=1); an
+   # inconclusive probe falls through to build (the safe default).
+   case "${FORTRAN_MATCHES_CRAY:-auto}" in
+      1)
+         echo "[mpich-wrappers] FORTRAN_MATCHES_CRAY=1 -> Fortran matches Cray, skipping."
+         return 0 ;;
+      0)
+         echo "[mpich-wrappers] FORTRAN_MATCHES_CRAY=0 -> forcing build (skip version probe)." ;;
+      *)
+         local _loc_ver _cray_fc _cray_ver
+         _loc_ver="$(_mw_flang_version "${_fc}")"
+         _cray_fc="$(_mw_cray_amdflang)"
+         _cray_ver="$(_mw_flang_version "${_cray_fc}")"
+         if [[ -n "${_loc_ver}" && -n "${_cray_ver}" && "${_loc_ver}" = "${_cray_ver}" ]]; then
+            echo "[mpich-wrappers] local amdflang ${_loc_ver} == Cray-supplied amdflang ${_cray_ver}"
+            echo "                (${_cray_fc}): Fortran matches the Cray system -> skipping."
+            return 0
+         fi
+         echo "[mpich-wrappers] Fortran version probe: local='${_loc_ver:-?}' cray='${_cray_ver:-?}'" \
+              "-> building (differ or undeterminable)." ;;
+   esac
+
+   # Locate libfabric for --with-libfabric (ch4:ofi).
+   local _libfab="${LIBFABRIC_PATH:-}"
+   if [ -z "${_libfab}" ]; then
+      _libfab="$(ls -1d /opt/cray/libfabric/*/ 2>/dev/null | sort -V | tail -n1)"
+      _libfab="${_libfab%/}"
+   fi
+   if [[ -z "${_libfab}" || ! -d "${_libfab}" ]]; then
+      echo "WARNING: [mpich-wrappers] no libfabric found (set LIBFABRIC_PATH);" >&2
+      echo "         skipping wrapper build." >&2
+      return 0
+   fi
+
+   # Skip if already built AND the modulefile is present (idempotent re-runs).
+   if [[ -x "${_install_prefix}/bin/mpicc" && -f "${_modfile}" && "${REPLACE_EXISTING:-0}" != "1" ]]; then
+      echo "[mpich-wrappers] ${_install_prefix}/bin/mpicc + ${_modfile} already present;"
+      echo "                skipping (pass REPLACE_EXISTING=1 to rebuild)."
+      return 0
+   fi
+
+   if ! command -v wget >/dev/null 2>&1; then
+      echo "WARNING: [mpich-wrappers] wget not found; skipping wrapper build." >&2
+      return 0
+   fi
+
+   echo "=================================================="
+   echo " [mpich-wrappers] building MPICH ${_mpich_ver} with AMD LLVM"
+   echo "   CC         = ${_cc}"
+   echo "   CXX        = ${_cxx}"
+   echo "   FC         = ${_fc}"
+   echo "   libfabric  = ${_libfab}"
+   echo "   install to = ${_install_prefix}"
+   echo "   modulefile = ${_modfile}"
+   echo "=================================================="
+
+   ${_sudo} mkdir -p "${_install_prefix}"
+
+   local _work; _work="$(mktemp -d)"
+   local _jobs; _jobs="$(nproc 2>/dev/null || echo 4)"
+   local _rc=0
+   if (
+         set -e
+         cd "${_work}"
+         wget -q "https://www.mpich.org/static/downloads/${_mpich_ver}/mpich-${_mpich_ver}.tar.gz"
+         tar -xzf "mpich-${_mpich_ver}.tar.gz"
+         cd "mpich-${_mpich_ver}"
+         CC="${_cc}" CXX="${_cxx}" FC="${_fc}" F77="${_fc}" \
+            ./configure \
+               --prefix="${_install_prefix}" \
+               --enable-fortran=all \
+               --enable-cxx \
+               --with-device=ch4:ofi \
+               --with-libfabric="${_libfab}" \
+               > log.configure.txt 2>&1
+         # libtool emits an empty wl= for the amdclang driver; restore -Wl, so
+         # runtime library paths are passed through to the linker (mirrors the
+         # comm/scripts/mpich_wrappers_setup.sh fixup).
+         sed -i 's#wl=""#wl="-Wl,"#g' libtool
+         make V=1 -j "${_jobs}" > log.make.txt 2>&1
+         ${_sudo} make V=1 install > log.install.txt 2>&1
+      ); then
+      _rc=0
+   else
+      _rc=$?
+   fi
+
+   if [ "${_rc}" -ne 0 ]; then
+      echo "WARNING: [mpich-wrappers] MPICH build failed (rc=${_rc})." >&2
+      echo "         Logs kept under ${_work}/mpich-${_mpich_ver}/log.*.txt" >&2
+      echo "         PrgEnv-amd-new will simply skip the absent wrapper." >&2
+      return 0
+   fi
+   rm -rf "${_work}"
+
+   # --------------- mpich-wrappers/<token> modulefile ---------------------
+   # Minimal on purpose: PrgEnv-amd-new already brought up the AMD compiler,
+   # rocm-new, and the Cray fabric env (cray-mpich/PMI). This module only puts
+   # the from-source MPICH bin/lib/include ahead of cray-mpich so its
+   # amdflang-format mpi.mod + mpicc/mpif90 win. It deliberately does NOT reload
+   # PrgEnv-gnu/rocm/cray-mpich (that would clobber the PrgEnv-amd-new env).
+   ${_sudo} mkdir -p "$(dirname "${_modfile}")"
+   ${_sudo} tee "${_modfile}" >/dev/null <<EOF
+#%Module1.0
+#
+# mpich-wrappers/${_token}  -- Built by: ${_prov}
+#
+# From-source MPICH ${_mpich_ver} (ch4:ofi over libfabric) compiled with the AMD
+# LLVM compiler (amdclang/amdclang++/amdflang) from the local ROCm install at
+# ${_amd_install}. Auto-loaded by PrgEnv-amd-new/<pe>-${_token}: amdflang cannot
+# read cray-mpich's classic-Flang mpi.mod, so this build supplies an
+# amdflang-format mpi.mod and matching wrappers. It only PREPENDS the wrapper
+# bin/lib/include; it does NOT reload PrgEnv-gnu/rocm/cray-mpich, because
+# PrgEnv-amd-new has already established the compiler, ROCm and Cray fabric env.
+
+conflict mpich-wrappers
+
+module-whatis "From-source MPICH ${_mpich_ver} (AMD LLVM amdflang) for PrgEnv-amd-new."
+
+## Base directory
+set base ${_install_prefix}
+
+setenv MPICH_WRAPPERS_DIR \$base
+
+## Paths
+prepend-path PATH               \$base/bin
+prepend-path LD_LIBRARY_PATH    \$base/lib
+prepend-path C_INCLUDE_PATH     \$base/include
+prepend-path CPLUS_INCLUDE_PATH \$base/include
+if {[file isdirectory \$base/lib/pkgconfig]} { prepend-path PKG_CONFIG_PATH \$base/lib/pkgconfig }
+EOF
+   _chown_root root:root "${_modfile}"; ${_sudo} chmod 644 "${_modfile}"
+   echo "  + ${_modfile}"
 }

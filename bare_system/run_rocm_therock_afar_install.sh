@@ -142,6 +142,13 @@ PATCHES_LOG=""
 # CRAY_SYSTEM: "" = auto-detect a Cray PE host, 1 = force classic Tcl
 # modulefiles instead of Lmod .lua. Mirrors rocm/scripts/rocm_setup.sh.
 : ${CRAY_SYSTEM:=""}
+# BUILD_MPICH_WRAPPERS: 1 = build+emit the from-source AMD-LLVM MPICH wrappers
+# PrgEnv-amd-new auto-loads (amdflang cannot read cray-mpich's mpi.mod); 0 =
+# skip. Cray-only (no-op off-Cray). Override with --build-mpich-wrappers.
+: ${BUILD_MPICH_WRAPPERS:="1"}
+# MPI_FAMILY: mpich (default) builds+loads the wrappers; openmpi skips them
+# (OpenMPI ships an amdflang-compatible mpi.mod). Override with --mpi-family.
+: ${MPI_FAMILY:="mpich"}
 SUDO="sudo"
 
 # chown to root only when running with sudo (a plain user can't, and doesn't
@@ -189,6 +196,12 @@ Usage: $0 [opts]
   --pe-version VER              stock PrgEnv-amd version the generated
                                 PrgEnv-amd-new/<pe>-<rocm> wraps (Cray only).
                                 Default: auto-detect the highest PrgEnv-amd.
+  --build-mpich-wrappers 0|1    build+emit the from-source AMD-LLVM MPICH
+                                wrappers PrgEnv-amd-new auto-loads (Cray only;
+                                default ${BUILD_MPICH_WRAPPERS})
+  --mpi-family mpich|openmpi    MPI family the PrgEnv-amd-new uses; openmpi skips
+                                the mpich wrappers (build + load block).
+                                Default ${MPI_FAMILY}
   --skip-patches 0|1            skip Phase 6 (rocm_patches.sh on the TheRock-AFAR
                                 tree; mirrors run_rocm_build.sh's --skip-patches).
                                 Default ${SKIP_PATCHES} (run patches).
@@ -217,6 +230,8 @@ while [[ $# -gt 0 ]]; do
       "--keep-failed-installs") shift; KEEP_FAILED_INSTALLS=${1}; reset-last ;;
       "--skip-patches")         shift; SKIP_PATCHES=${1};         reset-last ;;
       "--patches-log")          shift; PATCHES_LOG=${1};          reset-last ;;
+      "--build-mpich-wrappers") shift; BUILD_MPICH_WRAPPERS=${1}; reset-last ;;
+      "--mpi-family")           shift; MPI_FAMILY=${1};          reset-last ;;
       "--no-sudo")              shift; NO_SUDO=${1};              reset-last ;;
       "--cray-modules")         CRAY_SYSTEM=1;                    reset-last ;;
       "--local-tarball")        shift; LOCAL_TARBALL_INPUT=${1};  reset-last ;;
@@ -949,6 +964,17 @@ if [ "${CRAY_SYSTEM}" = "1" ]; then
          "${LEAF_SCRIPT_COMMIT:0:12}" \
          "${LEAF_SCRIPT_DIRTY}" \
          "${ROCM_NUMERIC}"
+      # Build + emit the from-source AMD-LLVM MPICH wrappers that
+      # PrgEnv-amd-new/<pe>-${_eco_key} auto-loads (amdflang cannot read
+      # cray-mpich's mpi.mod). Non-fatal: skips cleanly if it cannot build.
+      build_and_emit_mpich_wrappers \
+         "${TOP_MODULE_PATH}/rocmplus-${_eco_key}-${ROCM_NUMERIC}" \
+         "${ROCM_NUMERIC}" \
+         "${INSTALL_DIR}" \
+         "${INSTALL_DIR}/mpich-wrappers" \
+         "${LEAF_SCRIPT_NAME}" \
+         "${LEAF_SCRIPT_COMMIT:0:12}" \
+         "${LEAF_SCRIPT_DIRTY}"
       echo "  -> expose with: module use ${TOP_MODULE_PATH}/base"
       echo "  -> then:        module swap PrgEnv-cray PrgEnv-amd-new/${PE_VERSION}-${_eco_key}"
       echo "  -> or (CCE+ROCm): module swap PrgEnv-cray PrgEnv-cray-new/${PE_VERSION}-${_eco_key}"
