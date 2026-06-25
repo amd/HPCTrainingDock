@@ -147,12 +147,41 @@ if [ "${BUILD_HIPIFLY}" = "0" ]; then
    exit ${NOOP_RC}
 fi
 
+# ── Early sudo decision (see mpi4py_setup.sh) ───────────────────────
+# Determine whether privilege escalation is needed BEFORE the --replace
+# block and EXIT trap (both rm install/module paths via ${SUDO}). When the
+# operator owns a writable install tree (e.g. a user-writable
+# /shareddata/opt) no sudo is needed -- and forcing it would hit a password
+# prompt that fails on a node where the user has no sudo. Probe the nearest
+# EXISTING ancestor of HIPIFLY_PATH (the leaf dir does not exist yet). The
+# build branch re-affirms this below.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   SUDO=""
+else
+   _probe="${HIPIFLY_PATH}"
+   while [ ! -e "${_probe}" ]; do _probe="$(dirname "${_probe}")"; done
+   # Real write test (mktemp), NOT `[ -w ]`: on NFS `-w` is a LYING probe --
+   # it reported "writable" on the compute node for a root:root 0755 tree
+   # where actual writes / rm fail (the exact failure mode netcdf_setup.sh
+   # warns about). Mirrors the hdf5/cupy/rocshmem mktemp probe.
+   _wtest=$(mktemp --tmpdir="${_probe}" .hipifly-write-probe.XXXXXX 2>/dev/null || true)
+   if [ -n "${_wtest}" ] && [ -f "${_wtest}" ]; then
+      rm -f "${_wtest}"
+      SUDO=""
+      echo "install path ancestor ${_probe} is writable (probe succeeded); not using sudo"
+   else
+      echo "install path ancestor ${_probe} not user-writable (probe failed); using sudo"
+   fi
+   unset _wtest
+fi
+
 if [ "${REPLACE}" = "1" ]; then
    echo "[hipifly --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${HIPIFLY_PATH}"
-   echo "  modulefile:  ${MODULE_PATH}/dev.lua"
+   echo "  modulefile:  ${MODULE_PATH}/dev{,.lua}"
    ${SUDO} rm -rf "${HIPIFLY_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/dev.lua"
+   # Remove both flavors (Lmod .lua and Tcl no-extension).
+   ${SUDO} rm -f  "${MODULE_PATH}/dev.lua" "${MODULE_PATH}/dev"
 fi
 
 # ── Existence guard: skip if already installed (see hypre_setup.sh) ──
@@ -170,11 +199,15 @@ fi
 # `trap '... rm HIPIFLY_BUILD_DIR ...' EXIT`.
 _hipifly_on_exit() {
    local rc=$?
-   [ -n "${HIPIFLY_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${HIPIFLY_BUILD_DIR}"
+   # ${SUDO} verbatim (NOT ${SUDO:-sudo}): once the early-probe decides the
+   # tree is operator-writable it sets SUDO="" , and these cleanups must
+   # then run WITHOUT sudo (else an empty value resurrects a failing
+   # password prompt on every exit). SUDO is always set (default "sudo").
+   [ -n "${HIPIFLY_BUILD_DIR:-}" ] && ${SUDO} rm -rf "${HIPIFLY_BUILD_DIR}"
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[hipifly fail-cleanup] rc=${rc}: removing partial install + modulefile"
-      ${SUDO:-sudo} rm -rf "${HIPIFLY_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/dev.lua"
+      ${SUDO} rm -rf "${HIPIFLY_PATH}"
+      ${SUDO} rm -f  "${MODULE_PATH}/dev.lua" "${MODULE_PATH}/dev"
    elif [ ${rc} -ne 0 ]; then
       echo "[hipifly fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -199,19 +232,9 @@ if [ "${HIPIFLY_MODULE}" = "0" ]; then
 
 else
 
-      # don't use sudo if user has write access to hipifly path
-      if [ -d "$HIPIFLY_PATH" ]; then
-         # don't use sudo if user has write access to hipifly path
-         if [ -w ${HIPIFLY_PATH} ]; then
-            SUDO=""
-         else
-            echo "WARNING: using a hipifly path that requires sudo"
-         fi
-      else
-         # if install path does not exist yet, the check on write access will fail
-         echo "WARNING: using sudo, make sure you have sudo privileges"
-      fi
-
+      # SUDO was already decided by the early-probe block above (writable
+      # ancestor -> ""). Honor it instead of re-probing the not-yet-created
+      # leaf dir (which always forced sudo).
       ${SUDO} mkdir -p ${HIPIFLY_PATH}
       # Per-job throwaway scratch dir under /tmp (or $TMPDIR if Slurm
       # set one). Replaces a wget into ${PWD}/hipifly.h which is the
@@ -228,9 +251,25 @@ else
       ${SUDO} cp ./hipifly.h ${HIPIFLY_PATH}
       # HIPIFLY_BUILD_DIR (under /tmp) is removed by the EXIT trap.
 
-      # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
-      # see netcdf_setup.sh for the lying-probe failure mode this replaces).
-      PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+      # Modulefile-write sudo: probe the nearest existing ancestor of
+      # MODULE_PATH for writability (mirrors the install-path early-probe).
+      # When the operator owns a writable module tree (e.g. /shareddata/
+      # modules) no sudo is used; otherwise fall back to sudo.
+      if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+         PKG_SUDO_MOD=""
+      else
+         _mprobe="${MODULE_PATH}"
+         while [ ! -e "${_mprobe}" ]; do _mprobe="$(dirname "${_mprobe}")"; done
+         # Real write test (mktemp), NOT `[ -w ]` (NFS lying-probe; see above).
+         _mwtest=$(mktemp --tmpdir="${_mprobe}" .hipifly-mod-probe.XXXXXX 2>/dev/null || true)
+         if [ -n "${_mwtest}" ] && [ -f "${_mwtest}" ]; then
+            rm -f "${_mwtest}"
+            PKG_SUDO_MOD=""
+         else
+            PKG_SUDO_MOD="sudo"
+         fi
+         unset _mprobe _mwtest
+      fi
       ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    # Derive the rocm modulefile token to (re-)load. Three sources, in
@@ -288,13 +327,73 @@ else
    fi
    unset _leaf_dir
 
-   # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/dev.lua
+   # ── Modulefile flavor: Lua (Lmod) vs Tcl (classic Environment Modules) ─
+   # Lmod consumes <name>.lua; classic Tcl `environment-modules` consumes an
+   # extensionless Tcl file. Detect Lmod via its env markers; default to Tcl
+   # when Lmod is absent (this site runs Tcl Environment Modules 3.2.11).
+   if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+      _MODFILE="${MODULE_PATH}/dev.lua"
+      _MODFLAVOR="lua"
+   else
+      _MODFILE="${MODULE_PATH}/dev"
+      _MODFLAVOR="tcl"
+   fi
+
+   # A consumer satisfies the ROCm dependency with either the local TheRock
+   # real module (rocm-new/<ver>) or its alias (rocm/<ver>): PrgEnv-amd-new
+   # loads rocm-new directly, while a bare `module load rocm/<ver>` pulls it
+   # in under the alias name. Tcl `prereq` with several names is satisfied if
+   # ANY is loaded; Lmod's equivalent is prereq_any(). Non-rocm module names
+   # are emitted unchanged.
+   # AAC7 gate: the rocm-new/<ver> alias is only meaningful on a TheRock /
+   # PrgEnv-amd-new site (AAC7), where rocm-new is a real modulefile. On a
+   # stock site (e.g. AAC6) only rocm/<ver> exists, so widening the prereq
+   # to rocm-new would reference a phantom module name -- gate it on whether
+   # a rocm-new modulefile is actually discoverable on MODULEPATH. When it is
+   # not, emit the original plain prereq("rocm/<ver>").
+   rocm_new_available() {
+      local _d _OIFS="${IFS}"; IFS=":"
+      for _d in ${MODULEPATH:-}; do
+         if [ -d "${_d}/rocm-new" ]; then IFS="${_OIFS}"; return 0; fi
+      done
+      IFS="${_OIFS}"; return 1
+   }
+   _RPV="${ROCM_MODULE_NAME##*/}"
+   case "${ROCM_MODULE_NAME}" in
+      rocm/*|rocm-new/*)
+         if rocm_new_available; then
+            ROCM_PREREQ_TCL="rocm-new/${_RPV} rocm/${_RPV}"
+            ROCM_PREREQ_LUA="prereq_any(\"rocm-new/${_RPV}\", \"rocm/${_RPV}\")"
+         else
+            ROCM_PREREQ_TCL="rocm/${_RPV}"
+            ROCM_PREREQ_LUA="prereq(\"rocm/${_RPV}\")"
+         fi
+         ;;
+      *)
+         ROCM_PREREQ_TCL="${ROCM_MODULE_NAME}"
+         ROCM_PREREQ_LUA="prereq(\"${ROCM_MODULE_NAME}\")"
+         ;;
+   esac
+   unset _RPV
+
+   # The - option suppresses leading tabs in the heredoc body.
+   if [ "${_MODFLAVOR}" = "lua" ]; then
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
 	whatis(" Hipifly header file ")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
-	prereq("${ROCM_MODULE_NAME}")
+	${ROCM_PREREQ_LUA}
 	setenv("HIPIFLY_PATH","${HIPIFLY_PATH}")
 EOF
+   else
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
+	#%Module1.0
+	module-whatis " Hipifly header file "
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+	prereq ${ROCM_PREREQ_TCL}
+	setenv HIPIFLY_PATH ${HIPIFLY_PATH}
+EOF
+   fi
+   unset _MODFILE _MODFLAVOR ROCM_PREREQ_TCL ROCM_PREREQ_LUA
 
 fi
 

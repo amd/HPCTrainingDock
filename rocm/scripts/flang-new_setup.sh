@@ -20,7 +20,12 @@ fi
 MODULE_PATH=/etc/lmod/modules/ROCm/amdflang-new
 BUILD_FLANGNEW=0
 ROCM_VERSION=6.2.0
-UNTAR_DIR=/opt/rocmplus-${ROCM_VERSION}
+# amdflang-new (the AFAR Fortran drop) is a compiler that belongs BESIDE
+# the SDK it targets, so it installs under the rocm-<version> SDK tree,
+# NOT rocmplus-<version> (the tcl modulefile base below already encodes
+# this: rocm-<version>/rocm-afar-<release>). The AFAR dir lands at
+# ${UNTAR_DIR}/rocm-afar-<release>.
+UNTAR_DIR=/opt/rocm-${ROCM_VERSION}
 UNTAR_DIR_INPUT=""
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_SHORT=$DISTRO
@@ -149,7 +154,8 @@ if [ "${UNTAR_DIR_INPUT}" != "" ]; then
    UNTAR_DIR=${UNTAR_DIR_INPUT}
 else
    # override path in case ROCM_VERSION has been supplied as input
-   UNTAR_DIR=/opt/rocmplus-${ROCM_VERSION}
+   # (under rocm-<version>, NOT rocmplus-<version> -- see top of file)
+   UNTAR_DIR=/opt/rocm-${ROCM_VERSION}
 fi
 
 AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
@@ -164,6 +170,28 @@ ARCHIVE_DIR="rocm-afar-${FLANG_RELEASE_NUMBER}"
 NOOP_RC=43
 if [ "${BUILD_FLANGNEW}" = "0" ]; then
    echo "[flang-new BUILD_FLANGNEW=0] operator opt-out; skipping (no extract, no cache restore)."
+   exit ${NOOP_RC}
+fi
+
+# ── ROCm >= 7 short-circuit: amdflang ships in-SDK ───────────────────
+# flang-new installs the standalone AFAR Fortran drop (amdflang-new),
+# which existed to provide an amdflang compiler BEFORE ROCm bundled one.
+# ROCm 7.x ships amdflang directly in the SDK (and PrgEnv-amd-new wires
+# amd-new/<ver> for it), so the external drop is redundant -- installing
+# it just lays down a second, divergent Fortran toolchain that can shadow
+# the in-SDK one in downstream module loads. Skip with NOOP_RC=43
+# (reported SKIPPED by main_setup.sh, NOT a failure) whenever the major
+# ROCm version is >= 7, EVEN IF an operator passed --build-flang-new 1 or
+# --packages flang-new (this guard is intentionally version-driven, like
+# the cray-mpich self-skip in openmpi_setup.sh / mvapich_setup.sh). Set
+# FLANGNEW_IGNORE_ROCM7=1 to force the install on a 7.x tree anyway.
+ROCM_MAJOR="${ROCM_VERSION%%.*}"
+if [ "${FLANGNEW_IGNORE_ROCM7:-0}" != "1" ] \
+   && [[ "${ROCM_MAJOR}" =~ ^[0-9]+$ ]] && [ "${ROCM_MAJOR}" -ge 7 ]; then
+   echo "[flang-new] ROCm ${ROCM_VERSION} (major ${ROCM_MAJOR} >= 7) ships amdflang"
+   echo "            in-SDK; the standalone AFAR Fortran drop (amdflang-new) is"
+   echo "            redundant. Skipping. Set FLANGNEW_IGNORE_ROCM7=1 to install"
+   echo "            it anyway."
    exit ${NOOP_RC}
 fi
 

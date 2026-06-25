@@ -46,7 +46,10 @@ preflight_modules() {
 # Variables controlling setup process
 AMDGPU_GFXMODEL_INPUT=""
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/kokkos
-BUILD_KOKKOS=0
+# Master "do this script's work at all" gate. Default 1 so kokkos is built
+# by default (parity with the other extras leaf scripts); set to 0 to
+# short-circuit early with NOOP_RC.
+BUILD_KOKKOS=1
 ROCM_VERSION=6.2.0
 # Kokkos AMD GPU arch flags. Defaults are OFF; turned ON per-arch below
 # from semicolon-separated AMDGPU_GFXMODEL. This cluster's gfx942 nodes
@@ -85,7 +88,7 @@ usage()
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL_INPUT ] default is autodetected "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --kokkos-version [ KOKKOS_VERSION ] default $KOKKOS_VERSION (used as git branch/tag)"
-   echo "  --build-kokkos [ BUILD_KOKKOS ], set to 1 to build Kokkos, default is 0"
+   echo "  --build-kokkos [ BUILD_KOKKOS ], set to 0 to skip Kokkos, default is $BUILD_KOKKOS"
    echo "  --replace [ 0|1 ] remove prior install + modulefile before building, default $REPLACE"
    echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
    echo "  --help: print this usage information"
@@ -196,6 +199,41 @@ if [ "${BUILD_KOKKOS}" = "0" ]; then
    exit ${NOOP_RC}
 fi
 
+# ── Sudo decisions (computed EARLY, before afar-skip/--replace) ───────
+# The afar-skip + --replace blocks below rm with ${SUDO}, and the module
+# write later uses its own sudo. The leaf default is SUDO=sudo, which on a
+# cluster with no passwordless sudo and a user-owned install/module tree
+# (this Cray) makes those blocks die on a password prompt. Probe the
+# nearest existing ancestor of the install dir AND the module dir for
+# user-writability and drop sudo when we own them. Mirrors the
+# magma/petsc/rocshmem writability probes. EUID 0 never needs sudo.
+_probe_writable() {  # $1 = path; echoes "" if writable else "sudo"
+   local p="$1"
+   if [ "${EUID:-$(id -u)}" -eq 0 ]; then echo ""; return; fi
+   while [ ! -e "${p}" ]; do p="$(dirname "${p}")"; done
+   local t
+   t=$(mktemp --tmpdir="${p}" .kokkos-probe.XXXXXX 2>/dev/null || true)
+   if [ -n "${t}" ] && [ -f "${t}" ]; then rm -f "${t}"; echo ""; else echo "sudo"; fi
+}
+if [ -n "${SUDO}" ]; then   # not already cleared (e.g. Singularity)
+   SUDO="$(_probe_writable "${KOKKOS_PATH}")"
+   if [ -z "${SUDO}" ]; then
+      echo "kokkos: install tree ancestor of ${KOKKOS_PATH} is user-writable; not using sudo for install"
+   else
+      echo "kokkos: install tree ancestor of ${KOKKOS_PATH} not user-writable; using sudo for install"
+   fi
+fi
+MOD_SUDO="$(_probe_writable "${MODULE_PATH}")"
+# Modulefile flavor: Lmod consumes <ver>.lua; classic Tcl Environment
+# Modules consumes an extensionless Tcl file. Detect Lmod via its env
+# markers; default to Tcl (this Cray runs Tcl Environment Modules) so the
+# module is actually loadable. Mirrors hdf5/netcdf/fftw/magma.
+if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+   MODFLAVOR="lua"; MODEXT=".lua"
+else
+   MODFLAVOR="tcl"; MODEXT=""
+fi
+
 # ── afar SDK incompatibility detection ───────────────────────────────
 # AMD's pre-release "AFAR" ROCm drops (rocm-afar-22.x, rocm-afar-7.0.5)
 # are runtime-only / partial SDKs. Verified empirically on this cluster
@@ -231,9 +269,9 @@ if [[ "${ROCM_PATH:-}" == *afar* ]]; then
          echo "[kokkos afar-skip] removing stale from-source install: ${KOKKOS_PATH}"
          ${SUDO} rm -rf "${KOKKOS_PATH}"
       fi
-      if [ -f "${MODULE_PATH}/${KOKKOS_VERSION}.lua" ]; then
-         echo "[kokkos afar-skip] removing stale modulefile: ${MODULE_PATH}/${KOKKOS_VERSION}.lua"
-         ${SUDO} rm -f "${MODULE_PATH}/${KOKKOS_VERSION}.lua"
+      if [ -f "${MODULE_PATH}/${KOKKOS_VERSION}.lua" ] || [ -f "${MODULE_PATH}/${KOKKOS_VERSION}" ]; then
+         echo "[kokkos afar-skip] removing stale modulefile: ${MODULE_PATH}/${KOKKOS_VERSION}{.lua,} (both flavors)"
+         ${SUDO} rm -f "${MODULE_PATH}/${KOKKOS_VERSION}.lua" "${MODULE_PATH}/${KOKKOS_VERSION}"
       fi
       # ── Drop a SKIPPED marker so the inventory tool can distinguish ──
       # "skipped on this SDK" from "absent / failed". See
@@ -263,9 +301,9 @@ fi
 if [ "${REPLACE}" = "1" ]; then
    echo "[kokkos --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${KOKKOS_PATH}"
-   echo "  modulefile:  ${MODULE_PATH}/${KOKKOS_VERSION}.lua"
+   echo "  modulefile:  ${MODULE_PATH}/${KOKKOS_VERSION}{.lua,} (both flavors)"
    ${SUDO} rm -rf "${KOKKOS_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/${KOKKOS_VERSION}.lua"
+   ${SUDO} rm -f  "${MODULE_PATH}/${KOKKOS_VERSION}.lua" "${MODULE_PATH}/${KOKKOS_VERSION}"
 fi
 
 # ── Existence guard: skip if already installed (see hypre_setup.sh) ──
@@ -282,8 +320,8 @@ _kokkos_on_exit() {
    local rc=$?
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[kokkos fail-cleanup] rc=${rc}: removing partial install + modulefile"
-      ${SUDO:-sudo} rm -rf "${KOKKOS_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${KOKKOS_VERSION}.lua"
+      ${SUDO} rm -rf "${KOKKOS_PATH}"
+      ${SUDO} rm -f  "${MODULE_PATH}/${KOKKOS_VERSION}.lua" "${MODULE_PATH}/${KOKKOS_VERSION}"
    elif [ ${rc} -ne 0 ]; then
       echo "[kokkos fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -323,14 +361,25 @@ else
    #      basename == module name) but wrong for therock-afar.
    #   3. rocm/${ROCM_VERSION}: standalone-invocation fallback when
    #      neither LOADEDMODULES nor ROCM_PATH is populated.
+   # Two-pass over LOADEDMODULES: prefer a rocm/* matching the requested
+   # ROCM_VERSION before falling back to the first rocm/*. A Cray
+   # PrgEnv-amd-new shell can have several rocm/* loaded at once; taking
+   # the first match would key the build + modulefile on the wrong SDK.
    ROCM_MODULE_NAME=""
    if [[ -n "${LOADEDMODULES:-}" ]]; then
       _OLD_IFS="${IFS}"; IFS=":"
       for _m in ${LOADEDMODULES}; do
          case "${_m}" in
-            rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+            rocm/${ROCM_VERSION}) ROCM_MODULE_NAME="${_m}"; break ;;
          esac
       done
+      if [[ -z "${ROCM_MODULE_NAME}" ]]; then
+         for _m in ${LOADEDMODULES}; do
+            case "${_m}" in
+               rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+            esac
+         done
+      fi
       IFS="${_OLD_IFS}"; unset _OLD_IFS _m
    fi
    if [[ -z "${ROCM_MODULE_NAME}" ]]; then
@@ -366,19 +415,8 @@ else
       echo "============================"
       echo ""
 
-      # don't use sudo if user has write access to install path
-      if [ -d "$KOKKOS_PATH" ]; then
-         # don't use sudo if user has write access to install path
-         if [ -w ${KOKKOS_PATH} ]; then
-            SUDO=""
-         else
-            echo "WARNING: using an install path that requires sudo"
-         fi
-      else
-         # if install path does not exist yet, the check on write access will fail
-         echo "WARNING: using sudo, make sure you have sudo privileges"
-      fi
-
+      # (Install-path SUDO was probed early, before the afar-skip/--replace
+      # blocks, via _probe_writable; it governs the install dir + make install.)
       ${SUDO} mkdir -p ${KOKKOS_PATH}
 
       # Parse semicolon-separated AMDGPU_GFXMODEL. main_setup.sh passes
@@ -406,7 +444,10 @@ else
       # cheaply. Mirrors the scorep S6.C / openmpi S7.B pattern. EXIT
       # trap covers cleanup even on `set -e` aborts.
       KOKKOS_BUILD_ROOT=$(mktemp -d -t kokkos-build.XXXXXX)
-      trap '[ -n "${KOKKOS_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${KOKKOS_BUILD_ROOT}"' EXIT
+      # Plain rm (never sudo): KOKKOS_BUILD_ROOT is a user-owned /tmp dir,
+      # and ${SUDO:-sudo} would re-default empty->sudo and prompt for a
+      # password at end-of-run on a user-writable, no-passwordless-sudo Cray.
+      trap '[ -n "${KOKKOS_BUILD_ROOT:-}" ] && rm -rf "${KOKKOS_BUILD_ROOT}"' EXIT
       cd "${KOKKOS_BUILD_ROOT}"
 
       git clone --branch ${KOKKOS_VERSION} https://github.com/kokkos/kokkos
@@ -551,12 +592,21 @@ else
 
    fi
 
-   # Create a module file for kokkos
-   #
-   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
-   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
-   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
-   ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
+   # Create a module file for kokkos. Uses MOD_SUDO + MODFLAVOR/MODEXT
+   # computed early (writability-probe sudo; Lua for Lmod, Tcl otherwise).
+   ${MOD_SUDO} mkdir -p ${MODULE_PATH}
+
+   # Detect the real libdir. Kokkos honors CMAKE_INSTALL_LIBDIR, which is
+   # 'lib64' on RHEL-family (this Cray) and 'lib' on Debian/Ubuntu. Both
+   # the shared libs (libkokkoscore.so ...) and the CMake package
+   # (KokkosConfig.cmake) land there. Hardcoding /lib produced a broken
+   # module on RHEL9: LD_LIBRARY_PATH and Kokkos_DIR pointed at a
+   # non-existent dir, so runtime dlopen and downstream find_package(Kokkos)
+   # both failed. Probe for the actual dir (covers the cached-tar branch too).
+   KOKKOS_LIBDIR="lib"
+   if ls "${KOKKOS_PATH}"/lib64/libkokkoscore.* >/dev/null 2>&1; then
+      KOKKOS_LIBDIR="lib64"
+   fi
 
    # Provenance: capture this leaf script's git state for the modulefile
    # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
@@ -584,17 +634,33 @@ else
    # The - option suppresses tabs.
    # LD_LIBRARY_PATH is now required because we build BUILD_SHARED_LIBS=ON
    # (libkokkoscore.so etc).  Harmless on a static-only install (LD_LIBRARY_PATH
-   # is not consulted for .a archives).
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${KOKKOS_VERSION}.lua
-        whatis("Kokkos version ${KOKKOS_VERSION} - Performance Portability Language")
-        whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
+   # is not consulted for .a archives). Written in the detected flavor (Lua
+   # for Lmod, Tcl otherwise) so it actually loads on this Tcl-modules Cray.
+   if [ "${MODFLAVOR}" = "lua" ]; then
+      cat <<-EOF | ${MOD_SUDO} tee ${MODULE_PATH}/${KOKKOS_VERSION}${MODEXT}
+	whatis("Kokkos version ${KOKKOS_VERSION} - Performance Portability Language")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
-        prereq("${ROCM_MODULE_NAME}")
-        prepend_path("PATH","${KOKKOS_PATH}")
-        prepend_path("LD_LIBRARY_PATH","${KOKKOS_PATH}/lib")
-        setenv("Kokkos_ROOT","${KOKKOS_PATH}")
-        setenv("Kokkos_DIR","${KOKKOS_PATH}/lib/cmake/Kokkos")
-        setenv("HSA_XNACK","1")
-EOF
+	prereq("${ROCM_MODULE_NAME}")
+	prepend_path("PATH","${KOKKOS_PATH}")
+	prepend_path("LD_LIBRARY_PATH","${KOKKOS_PATH}/${KOKKOS_LIBDIR}")
+	setenv("Kokkos_ROOT","${KOKKOS_PATH}")
+	setenv("Kokkos_DIR","${KOKKOS_PATH}/${KOKKOS_LIBDIR}/cmake/Kokkos")
+	setenv("HSA_XNACK","1")
+	EOF
+   else
+      cat <<-EOF | ${MOD_SUDO} tee ${MODULE_PATH}/${KOKKOS_VERSION}${MODEXT}
+	#%Module1.0
+	module-whatis "Kokkos version ${KOKKOS_VERSION} - Performance Portability Language"
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+
+	prereq ${ROCM_MODULE_NAME}
+	prepend-path PATH "${KOKKOS_PATH}"
+	prepend-path LD_LIBRARY_PATH "${KOKKOS_PATH}/${KOKKOS_LIBDIR}"
+	setenv Kokkos_ROOT "${KOKKOS_PATH}"
+	setenv Kokkos_DIR "${KOKKOS_PATH}/${KOKKOS_LIBDIR}/cmake/Kokkos"
+	setenv HSA_XNACK "1"
+	EOF
+   fi
 
 fi
