@@ -504,6 +504,31 @@ if [ "${BUILD_OPENMPI}" = "0" ]; then
    exit ${NOOP_RC}
 fi
 
+# ── Cray MPICH short-circuit ─────────────────────────────────────────
+# On a Cray PE system the supported, GPU-aware MPI is cray-mpich (exported
+# via $CRAY_MPICH_VERSION / $MPICH_DIR by the cray-mpich module, and present
+# under /opt/cray/pe/mpich). The from-source GPU-aware OpenMPI this script
+# builds is redundant there, and the rest of the stack is deliberately wired
+# to cray-mpich on Cray systems (mpi4py_setup.sh builds against $MPICH_DIR;
+# main_setup.sh builds the amdflang mpich-wrappers instead). Building OpenMPI
+# anyway just burns ~30+ min and produces a second, unused MPI that can
+# shadow cray-mpich in downstream module loads. So skip with NOOP_RC=43
+# (no-op, reported SKIPPED by main_setup.sh -- NOT a failure). Set
+# OPENMPI_IGNORE_CRAY_MPICH=1 to force the source build anyway.
+if [ "${OPENMPI_IGNORE_CRAY_MPICH:-0}" != "1" ] && \
+   { [ -n "${CRAY_MPICH_VERSION:-}" ] \
+     || { [ -n "${MPICH_DIR:-}" ] && [ -d "${MPICH_DIR}" ]; } \
+     || [ -d /opt/cray/pe/mpich ]; }; then
+   _cray_mpich_marker="${CRAY_MPICH_VERSION:+CRAY_MPICH_VERSION=${CRAY_MPICH_VERSION}}"
+   [ -z "${_cray_mpich_marker}" ] && _cray_mpich_marker="${MPICH_DIR:+MPICH_DIR=${MPICH_DIR}}"
+   [ -z "${_cray_mpich_marker}" ] && _cray_mpich_marker="/opt/cray/pe/mpich present"
+   echo "[openmpi] Cray MPICH detected (${_cray_mpich_marker}); skipping the"
+   echo "          from-source GPU-aware OpenMPI build. cray-mpich is the"
+   echo "          supported MPI on Cray PE systems; downstream packages are"
+   echo "          wired to it. Set OPENMPI_IGNORE_CRAY_MPICH=1 to override."
+   exit ${NOOP_RC}
+fi
+
 if [ "${REPLACE}" == "1" ]; then
    REPLACE_XPMEM=1
    REPLACE_UCX=1
