@@ -2,6 +2,16 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-06-25
+
+- ROCm versions:
+    - afar-23.3.0-7.14.0
+- Modules:
+    - rocm/afar-23.3.0-7.14.0
+- Down/drained nodes:
+    - ppac-pl1-s25-40:down
+
+[Full snapshot](archive/AAC6_system_status_2026-06-25.md)
 ## 2026-06-24
 
 - Down/drained nodes:
