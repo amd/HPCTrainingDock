@@ -320,12 +320,42 @@ if [ "${BUILD_CUPY}" = "0" ]; then
    exit ${NOOP_RC}
 fi
 
+# ── Early sudo decision (see mpi4py_setup.sh) ───────────────────────
+# Determine whether privilege escalation is needed BEFORE the --replace
+# block and EXIT trap (both rm install/module paths via ${SUDO}). When the
+# operator owns a writable install tree (e.g. a user-writable
+# /shareddata/opt) no sudo is needed -- and forcing it would hit a
+# password prompt that fails on a node where the user has no sudo. Probe
+# the nearest EXISTING ancestor of CUPY_PATH (the leaf dir itself does not
+# exist yet). The build branch re-affirms this below.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   SUDO=""
+else
+   _probe="${CUPY_PATH}"
+   while [ ! -e "${_probe}" ]; do _probe="$(dirname "${_probe}")"; done
+   # Real write test (mktemp), NOT `[ -w ]`: on NFS `-w` is a LYING probe --
+   # it reported "writable" on the compute node for a root:root 0755 tree
+   # where actual writes / rm fail (the exact failure mode netcdf_setup.sh
+   # warns about). Mirrors the rocshmem PKG_SUDO_MOD mktemp probe.
+   _wtest=$(mktemp --tmpdir="${_probe}" .cupy-write-probe.XXXXXX 2>/dev/null || true)
+   if [ -n "${_wtest}" ] && [ -f "${_wtest}" ]; then
+      rm -f "${_wtest}"
+      SUDO=""
+      echo "install path ancestor ${_probe} is writable (probe succeeded); not using sudo"
+   else
+      echo "install path ancestor ${_probe} not user-writable (probe failed); using sudo"
+   fi
+   unset _wtest
+fi
+
 if [ "${REPLACE}" = "1" ]; then
    echo "[cupy --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${CUPY_PATH}"
-   echo "  modulefile:  ${MODULE_PATH}/${CUPY_VERSION}.lua"
+   echo "  modulefile:  ${MODULE_PATH}/${CUPY_VERSION}{,.lua}"
    ${SUDO} rm -rf "${CUPY_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/${CUPY_VERSION}.lua"
+   # Remove both flavors (Lmod .lua and Tcl no-extension); only one is ever
+   # written per site, but cover both so a flavor switch doesn't orphan one.
+   ${SUDO} rm -f  "${MODULE_PATH}/${CUPY_VERSION}.lua" "${MODULE_PATH}/${CUPY_VERSION}"
 fi
 
 # ── Existence guard: skip if already installed (see hypre_setup.sh) ──
@@ -344,11 +374,15 @@ fi
 # that used to live next to the mktemp call.
 _cupy_on_exit() {
    local rc=$?
-   [ -n "${CUPY_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${CUPY_BUILD_ROOT}"
+   # ${SUDO} verbatim (NOT ${SUDO:-sudo}): once the build decides the tree
+   # is operator-writable it sets SUDO="" , and these cleanups must then run
+   # WITHOUT sudo (else an empty value resurrects a failing password prompt
+   # on every exit). SUDO is always set (default "sudo" at top of script).
+   [ -n "${CUPY_BUILD_ROOT:-}" ] && ${SUDO} rm -rf "${CUPY_BUILD_ROOT}"
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[cupy fail-cleanup] rc=${rc}: removing partial install + modulefile"
-      ${SUDO:-sudo} rm -rf "${CUPY_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${CUPY_VERSION}.lua"
+      ${SUDO} rm -rf "${CUPY_PATH}"
+      ${SUDO} rm -f  "${MODULE_PATH}/${CUPY_VERSION}.lua" "${MODULE_PATH}/${CUPY_VERSION}"
    elif [ ${rc} -ne 0 ]; then
       echo "[cupy fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -424,7 +458,7 @@ else
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   if [ -f ${CACHE_FILES}/cupy-v${CUPY_VERSION}.tgz ]; then
+   if [ -f "${CACHE_FILES}/cupy-v${CUPY_VERSION}.tgz" ]; then
       echo ""
       echo "============================"
       echo " Installing Cached CuPy"
@@ -479,20 +513,11 @@ else
          PATH="${PATH}:~/.local/bin"
       fi
 
-      if [ -d "$CUPY_PATH" ]; then
-         # don't use sudo if user has write access to install path
-         if [ -w ${CUPY_PATH} ]; then
-            SUDO=""
-         else
-            echo "WARNING: using an install path that requires sudo"
-         fi
-      else
-         # if install path does not exist yet, the check on write access will fail
-         echo "WARNING: using sudo, make sure you have sudo privileges"
-      fi
-
+      # SUDO was already decided by the early-probe block above (writable
+      # ancestor -> ""). Honor it instead of re-probing the not-yet-created
+      # leaf dir (which always forced sudo).
       ${SUDO} mkdir -p $CUPY_PATH
-      if [[ "${USER}" != "root" ]]; then
+      if [ -n "${SUDO}" ] && [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod a+w $CUPY_PATH
       fi
       uv pip install -v --target=$CUPY_PATH pytest mock xarray[complete] build numpy-allocator --no-cache
@@ -568,7 +593,7 @@ else
          ${SUDO} find $CUPY_PATH -type d -execdir chown root:root "{}" +
       fi
 
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} chmod go-w $CUPY_PATH
       fi
 
@@ -788,10 +813,53 @@ __CUPY_9742_CHECK_PYEOF__
 
    # Create a module file for cupy
    #
-   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
-   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
-   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   # Modulefile-write sudo: probe the nearest existing ancestor of
+   # MODULE_PATH for writability (mirrors the install-path early-probe).
+   # When the operator owns a writable module tree (e.g. /shareddata/modules)
+   # no sudo is used; otherwise fall back to sudo. Avoids a doomed password
+   # prompt on nodes where the user has no sudo.
+   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+      PKG_SUDO_MOD=""
+   else
+      _mprobe="${MODULE_PATH}"
+      while [ ! -e "${_mprobe}" ]; do _mprobe="$(dirname "${_mprobe}")"; done
+      # Real write test (mktemp), NOT `[ -w ]` -- NFS -w lies (see above).
+      _mtest=$(mktemp --tmpdir="${_mprobe}" .cupy-mod-probe.XXXXXX 2>/dev/null || true)
+      if [ -n "${_mtest}" ] && [ -f "${_mtest}" ]; then
+         rm -f "${_mtest}"
+         PKG_SUDO_MOD=""
+      else
+         PKG_SUDO_MOD="sudo"
+      fi
+      unset _mprobe _mtest
+   fi
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
+
+   # ── Modulefile flavor: Lua (Lmod) vs Tcl (classic Environment Modules) ─
+   # Lmod consumes <name>.lua; classic Tcl `environment-modules` consumes an
+   # extensionless Tcl file. Detect Lmod via its env markers; default to Tcl
+   # when Lmod is absent (this site runs Tcl Environment Modules 3.2.11).
+   if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+      _MODFILE="${MODULE_PATH}/${INSTALLED_CUPY_VERSION}.lua"
+      _MODFLAVOR="lua"
+   else
+      _MODFILE="${MODULE_PATH}/${INSTALLED_CUPY_VERSION}"
+      _MODFLAVOR="tcl"
+   fi
+
+   # ── gcc include dir for CPATH (portable across distros) ──────────────
+   # cupy JIT-compiles HIP kernels at runtime via hipcc/comgr, which pulls
+   # libstdc++ headers (carray.cuh -> <cstddef> -> <stddef.h>); stddef.h
+   # lives in gcc's *internal* include dir, which differs per distro
+   # (Ubuntu: /usr/lib/gcc/x86_64-linux-gnu/<v>/include; RHEL:
+   # /usr/lib/gcc/x86_64-redhat-linux/<v>/include). `gcc -print-file-name=
+   # include` returns the right one on both. Hardcoding the Ubuntu path
+   # made every runtime kernel compile fail on RHEL with "'stddef.h' file
+   # not found". Fall back to the legacy Ubuntu literal if gcc is absent.
+   GCC_CPATH="$(gcc -print-file-name=include 2>/dev/null)"
+   if [ -z "${GCC_CPATH}" ] || [ ! -e "${GCC_CPATH}/stddef.h" ]; then
+      GCC_CPATH="/usr/lib/gcc/x86_64-linux-gnu/12/include"
+   fi
 
    # Provenance: capture this leaf script's git state for the modulefile
    # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
@@ -816,15 +884,66 @@ __CUPY_9742_CHECK_PYEOF__
    fi
    unset _leaf_dir
 
-   # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${INSTALLED_CUPY_VERSION}.lua
+   # A consumer satisfies the ROCm dependency with either the local TheRock
+   # real module (rocm-new/<ver>) or its alias (rocm/<ver>): PrgEnv-amd-new
+   # loads rocm-new directly, while a bare `module load rocm/<ver>` pulls it
+   # in under the alias name. Tcl `prereq` with several names is satisfied if
+   # ANY is loaded; Lmod's equivalent is prereq_any(). Non-rocm module names
+   # are emitted unchanged.
+   # AAC7 gate: the rocm-new/<ver> alias is only meaningful on a TheRock /
+   # PrgEnv-amd-new site (AAC7), where rocm-new is a real modulefile. On a
+   # stock site (e.g. AAC6) only rocm/<ver> exists, so widening the prereq
+   # to rocm-new would reference a phantom module name -- gate it on whether
+   # a rocm-new modulefile is actually discoverable on MODULEPATH. When it is
+   # not, emit the original plain prereq("rocm/<ver>").
+   rocm_new_available() {
+      local _d _OIFS="${IFS}"; IFS=":"
+      for _d in ${MODULEPATH:-}; do
+         if [ -d "${_d}/rocm-new" ]; then IFS="${_OIFS}"; return 0; fi
+      done
+      IFS="${_OIFS}"; return 1
+   }
+   _RPV="${ROCM_MODULE_NAME##*/}"
+   case "${ROCM_MODULE_NAME}" in
+      rocm/*|rocm-new/*)
+         if rocm_new_available; then
+            ROCM_PREREQ_TCL="rocm-new/${_RPV} rocm/${_RPV}"
+            ROCM_PREREQ_LUA="prereq_any(\"rocm-new/${_RPV}\", \"rocm/${_RPV}\")"
+         else
+            ROCM_PREREQ_TCL="rocm/${_RPV}"
+            ROCM_PREREQ_LUA="prereq(\"rocm/${_RPV}\")"
+         fi
+         ;;
+      *)
+         ROCM_PREREQ_TCL="${ROCM_MODULE_NAME}"
+         ROCM_PREREQ_LUA="prereq(\"${ROCM_MODULE_NAME}\")"
+         ;;
+   esac
+   unset _RPV
+
+   # The - option suppresses leading tabs in the heredoc body.
+   if [ "${_MODFLAVOR}" = "lua" ]; then
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
 	whatis("CuPy with ROCm support (installed package: ${INSTALLED_CUPY_VERSION})")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
-	prereq("${ROCM_MODULE_NAME}")
+	${ROCM_PREREQ_LUA}
 	prepend_path("PYTHONPATH","$CUPY_PATH")
-	prepend_path("CPATH","/usr/lib/gcc/x86_64-linux-gnu/12/include")
-        setenv("ROCM_HOME","$SAVED_ROCM_HOME")
+	prepend_path("CPATH","${GCC_CPATH}")
+	setenv("ROCM_HOME","$SAVED_ROCM_HOME")
 EOF
+   else
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
+	#%Module1.0
+	module-whatis "CuPy with ROCm support (installed package: ${INSTALLED_CUPY_VERSION})"
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+
+	prereq ${ROCM_PREREQ_TCL}
+	prepend-path PYTHONPATH $CUPY_PATH
+	prepend-path CPATH ${GCC_CPATH}
+	setenv ROCM_HOME $SAVED_ROCM_HOME
+EOF
+   fi
+   unset _MODFILE _MODFLAVOR ROCM_PREREQ_TCL ROCM_PREREQ_LUA
 
 fi

@@ -139,6 +139,52 @@ else
    INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/mvapich
 fi
 
+# ── Cray MPICH short-circuit ─────────────────────────────────────────
+# On a Cray PE system the supported, GPU-aware MPI is cray-mpich (exported
+# via $CRAY_MPICH_VERSION / $MPICH_DIR by the cray-mpich module, and present
+# under /opt/cray/pe/mpich). The GPU-aware MVAPICH-Plus installed here is
+# redundant there, and the rest of the stack is deliberately wired to
+# cray-mpich on Cray systems (mpi4py_setup.sh builds against $MPICH_DIR;
+# main_setup.sh builds the amdflang mpich-wrappers; openmpi_setup.sh
+# self-skips the same way). Installing MVAPICH anyway just produces a
+# second, unused MPI that can shadow cray-mpich in downstream module
+# loads. So skip with rc=43 (NOOP_RC; reported SKIPPED by main_setup.sh,
+# NOT a failure). Placed before the --replace block and EXIT trap so no
+# cleanup side effects fire. Set MVAPICH_IGNORE_CRAY_MPICH=1 to override.
+NOOP_RC=43
+if [ "${MVAPICH_IGNORE_CRAY_MPICH:-0}" != "1" ] && \
+   { [ -n "${CRAY_MPICH_VERSION:-}" ] \
+     || { [ -n "${MPICH_DIR:-}" ] && [ -d "${MPICH_DIR}" ]; } \
+     || [ -d /opt/cray/pe/mpich ]; }; then
+   _cray_mpich_marker="${CRAY_MPICH_VERSION:+CRAY_MPICH_VERSION=${CRAY_MPICH_VERSION}}"
+   [ -z "${_cray_mpich_marker}" ] && _cray_mpich_marker="${MPICH_DIR:+MPICH_DIR=${MPICH_DIR}}"
+   [ -z "${_cray_mpich_marker}" ] && _cray_mpich_marker="/opt/cray/pe/mpich present"
+   echo "[mvapich] Cray MPICH detected (${_cray_mpich_marker}); skipping the"
+   echo "          GPU-aware MVAPICH install. cray-mpich is the supported MPI"
+   echo "          on Cray PE systems; downstream packages are wired to it."
+   echo "          Set MVAPICH_IGNORE_CRAY_MPICH=1 to override."
+   exit ${NOOP_RC}
+fi
+
+# ── Unsupported-distro short-circuit (clean NOOP, before the EXIT trap) ─
+# The GPU-aware MVAPICH-Plus install is only wired up for RHEL-family
+# distros (the .rpm + `rpm --prefix` path far below). On Ubuntu (e.g. the
+# 22.04 AAC6 architecture) and openSUSE it is "not working yet", so skip
+# with NOOP_RC=43 (reported SKIPPED by main_setup.sh, NOT a failure).
+# Placed HERE -- before the --replace block and EXIT trap -- so a
+# deliberate, expected skip does not trip the fail-cleanup path (which
+# would otherwise print a misleading "[mvapich fail-cleanup]" line and run
+# a needless sudo rm). The legacy per-distro `exit 43` branches in the
+# install switch below are now unreachable on these distros but left in
+# place as defensive no-ops.
+if [ "${RHEL_COMPATIBLE}" != "1" ]; then
+   echo "[mvapich] DISTRO '${DISTRO}' is not RHEL-compatible; the GPU-aware"
+   echo "          MVAPICH-Plus install is only supported on RHEL-family"
+   echo "          (rpm-based) distros and is not working yet on this"
+   echo "          architecture. Skipping (NOOP)."
+   exit ${NOOP_RC}
+fi
+
 # ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
 # The mvapich modulefile is currently written as MODULE_PATH/mvapich.lua
 # (no version in the name). If a versioned modulefile scheme is added

@@ -178,12 +178,41 @@ if [ "${BUILD_HIP_PYTHON}" = "0" ]; then
    exit ${NOOP_RC}
 fi
 
+# ── Early sudo decision (see mpi4py_setup.sh) ───────────────────────
+# Determine whether privilege escalation is needed BEFORE the --replace
+# block and EXIT trap (both rm install/module paths via ${SUDO}). When the
+# operator owns a writable install tree (e.g. a user-writable
+# /shareddata/opt) no sudo is needed -- and forcing it would hit a password
+# prompt that fails on a node where the user has no sudo. Probe the nearest
+# EXISTING ancestor of HIP_PYTHON_PATH (the leaf dir does not exist yet).
+# The build branch re-affirms this below.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   SUDO=""
+else
+   _probe="${HIP_PYTHON_PATH}"
+   while [ ! -e "${_probe}" ]; do _probe="$(dirname "${_probe}")"; done
+   # Real write test (mktemp), NOT `[ -w ]`: on NFS `-w` is a LYING probe --
+   # it reported "writable" on the compute node for a root:root 0755 tree
+   # where actual writes / rm fail (the exact failure mode netcdf_setup.sh
+   # warns about). Mirrors the rocshmem PKG_SUDO_MOD mktemp probe.
+   _wtest=$(mktemp --tmpdir="${_probe}" .hip-python-write-probe.XXXXXX 2>/dev/null || true)
+   if [ -n "${_wtest}" ] && [ -f "${_wtest}" ]; then
+      rm -f "${_wtest}"
+      SUDO=""
+      echo "install path ancestor ${_probe} is writable (probe succeeded); not using sudo"
+   else
+      echo "install path ancestor ${_probe} not user-writable (probe failed); using sudo"
+   fi
+   unset _wtest
+fi
+
 if [ "${REPLACE}" = "1" ]; then
    echo "[hip-python --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${HIP_PYTHON_PATH}"
-   echo "  modulefile:  ${MODULE_PATH}/${ROCM_VERSION}.lua"
+   echo "  modulefile:  ${MODULE_PATH}/${ROCM_VERSION}{,.lua}"
    ${SUDO} rm -rf "${HIP_PYTHON_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/${ROCM_VERSION}.lua"
+   # Remove both flavors (Lmod .lua and Tcl no-extension).
+   ${SUDO} rm -f  "${MODULE_PATH}/${ROCM_VERSION}.lua" "${MODULE_PATH}/${ROCM_VERSION}"
 fi
 
 # ── Existence guard: skip if already installed (see hypre_setup.sh) ──
@@ -201,11 +230,15 @@ fi
 # `trap '... rm HIP_PYTHON_BUILD_DIR ...' EXIT` later in the script.
 _hip_python_on_exit() {
    local rc=$?
-   [ -n "${HIP_PYTHON_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${HIP_PYTHON_BUILD_DIR}"
+   # ${SUDO} verbatim (NOT ${SUDO:-sudo}): once the build decides the tree is
+   # operator-writable it sets SUDO="" , and these cleanups must then run
+   # WITHOUT sudo (else an empty value resurrects a failing password prompt
+   # on every exit). SUDO is always set (default "sudo" at top of script).
+   [ -n "${HIP_PYTHON_BUILD_DIR:-}" ] && ${SUDO} rm -rf "${HIP_PYTHON_BUILD_DIR}"
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[hip-python fail-cleanup] rc=${rc}: removing partial install + modulefile"
-      ${SUDO:-sudo} rm -rf "${HIP_PYTHON_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${ROCM_VERSION}.lua"
+      ${SUDO} rm -rf "${HIP_PYTHON_PATH}"
+      ${SUDO} rm -f  "${MODULE_PATH}/${ROCM_VERSION}.lua" "${MODULE_PATH}/${ROCM_VERSION}"
    elif [ ${rc} -ne 0 ]; then
       echo "[hip-python fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -279,7 +312,7 @@ else
       fi
    fi
 
-   if [ -f ${CACHE_FILES}/hip-python.tgz ]; then
+   if [ -f "${CACHE_FILES}/hip-python.tgz" ]; then
       echo ""
       echo "============================"
       echo " Installing Cached HIP-Python"
@@ -444,20 +477,11 @@ PY
       export HIPCC=${ROCM_HOME}/bin/hipcc
       export HCC_AMDGPU_ARCH=${AMDGPU_GFXMODEL}
 
-      if [ -d "$HIP_PYTHON_PATH" ]; then
-         # don't use sudo if user has write access to install path
-         if [ -w ${HIP_PYTHON_PATH} ]; then
-            SUDO=""
-         else
-            echo "WARNING: using an install path that requires sudo"
-         fi
-      else
-         # if install path does not exist yet, the check on write access will fail
-         echo "WARNING: using sudo, make sure you have sudo privileges"
-      fi
-
+      # SUDO was already decided by the early-probe block above (writable
+      # ancestor -> ""). Honor it instead of re-probing the not-yet-created
+      # leaf dir (which always forced sudo).
       ${SUDO} mkdir -p $HIP_PYTHON_PATH
-      if [[ "${USER}" != "root" ]]; then
+      if [ -n "${SUDO}" ] && [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod a+w $HIP_PYTHON_PATH
       fi
       python3 -m venv hip-python-build
@@ -469,7 +493,51 @@ PY
       python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python -i https://test.pypi.org/simple "hip-python==${HIP_PYTHON_PIP_SPEC}" --force-reinstall --no-cache
       python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python -i https://test.pypi.org/simple "hip-python-as-cuda==${HIP_PYTHON_PIP_SPEC}" --force-reinstall --no-cache
       python3 -m pip config set global.extra-index-url https://test.pypi.org/simple
-      python3 -m pip install --target=$HIP_PYTHON_PATH/numba-hip "numba-hip[rocm-${NUMBA_HIP_EXTRA_SUFFIX}] @ git+https://github.com/ROCm/numba-hip.git" --force-reinstall --no-cache
+      # numba-hip + numba namespace collision (two-pass install) ─────────
+      # numba-hip overlays the `numba` namespace (it ships numba/hip/...)
+      # while its dependency numba 0.60.0 ships numba/core, numba/np, ...
+      # into the SAME --target dir. A single resolved pip install lets one
+      # clobber the other (whichever pip writes "second" wins, the other's
+      # files are dropped) -- so you end up with EITHER numba/core XOR
+      # numba/hip, never both. Symptoms seen in the wild:
+      #   - no --upgrade: numba/hip lands, numba/core is SKIPPED
+      #     ("Target directory numba already exists") -> `from numba import
+      #     hip` dies with "No module named 'numba.core'".
+      #   - with --upgrade in one pass: numba/core lands but numba/hip is
+      #     gone -> "No module named 'numba.hip'".
+      # Fix: two passes. Pass 1 resolves + installs all deps (lands stock
+      # numba => numba/core, llvmlite, numpy, rocm-llvm-python, ...).
+      # Pass 2 re-lays ONLY numba-hip's own files (numba/hip) with
+      # --no-deps --upgrade so it overlays the existing numba/ dir without
+      # re-pulling/clobbering stock numba. Result: numba/core + numba/hip
+      # coexist and `from numba import hip` works.
+      # ── numba-hip install: venv-merge-then-copy (NOT pip --target) ─────
+      # numba-hip overlays the `numba` namespace: it ships numba/hip/...,
+      # while its dependency numba (0.60.0) ships numba/core, numba/np, ...
+      # Both must live in the SAME numba/ dir for `from numba import hip`
+      # to work (numba/hip/hipdrv does `from numba.core import config`).
+      # pip's --target mode CANNOT merge two distributions into one shared
+      # top-level dir -- any --target install/--upgrade/--force-reinstall
+      # of a package owning part of numba/ wipes the WHOLE numba/ dir, so
+      # you always end up with numba/core XOR numba/hip, never both
+      # (verified empirically on this stack; this is the pre-existing bug
+      # that left numba.hip / numba.core unimportable). A real
+      # site-packages merges them correctly. So install numba-hip + deps
+      # into the BUILD VENV (no --target) and copy the merged tree into the
+      # install dir.
+      python3 -m pip install "numba-hip[rocm-${NUMBA_HIP_EXTRA_SUFFIX}] @ git+https://github.com/ROCm/numba-hip.git" --force-reinstall --no-cache
+      _VENV_SITE="$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+      ${SUDO} mkdir -p "$HIP_PYTHON_PATH/numba-hip"
+      # Copy everything pip produced EXCEPT the venv's own packaging
+      # tooling. cp -a preserves the merged numba/ (core + hip together)
+      # plus numba's runtime deps (llvmlite, numpy, rocm-llvm-python, ...).
+      ( cd "${_VENV_SITE}" && for _e in *; do
+           case "${_e}" in
+              pip|pip-*|setuptools|setuptools-*|pkg_resources|wheel|wheel-*|_distutils_hack|distutils-precedence.pth|__pycache__) continue ;;
+           esac
+           ${SUDO} cp -a "${_e}" "$HIP_PYTHON_PATH/numba-hip/"
+        done )
+      unset _VENV_SITE
       deactivate
       # hip-python-build venv lives under HIP_PYTHON_BUILD_DIR
       # (under /tmp) and is removed by the EXIT trap above.
@@ -497,17 +565,45 @@ PY
          ${SUDO} find $HIP_PYTHON_PATH -type d -execdir chown root:root "{}" +
       fi
 
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} chmod go-w $HIP_PYTHON_PATH
       fi
    fi
 
    # Create a module file for hip-python
    #
-   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
-   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
-   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   # Modulefile-write sudo: probe the nearest existing ancestor of
+   # MODULE_PATH for writability (mirrors the install-path early-probe).
+   # When the operator owns a writable module tree (e.g. /shareddata/modules)
+   # no sudo is used; otherwise fall back to sudo.
+   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+      PKG_SUDO_MOD=""
+   else
+      _mprobe="${MODULE_PATH}"
+      while [ ! -e "${_mprobe}" ]; do _mprobe="$(dirname "${_mprobe}")"; done
+      # Real write test (mktemp), NOT `[ -w ]` -- NFS -w lies (see above).
+      _mtest=$(mktemp --tmpdir="${_mprobe}" .hip-python-mod-probe.XXXXXX 2>/dev/null || true)
+      if [ -n "${_mtest}" ] && [ -f "${_mtest}" ]; then
+         rm -f "${_mtest}"
+         PKG_SUDO_MOD=""
+      else
+         PKG_SUDO_MOD="sudo"
+      fi
+      unset _mprobe _mtest
+   fi
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
+
+   # ── Modulefile flavor: Lua (Lmod) vs Tcl (classic Environment Modules) ─
+   # Lmod consumes <name>.lua; classic Tcl `environment-modules` consumes an
+   # extensionless Tcl file. Detect Lmod via its env markers; default to Tcl
+   # when Lmod is absent (this site runs Tcl Environment Modules 3.2.11).
+   if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+      _MODFILE="${MODULE_PATH}/${ROCM_VERSION}.lua"
+      _MODFLAVOR="lua"
+   else
+      _MODFILE="${MODULE_PATH}/${ROCM_VERSION}"
+      _MODFLAVOR="tcl"
+   fi
 
    # Provenance: capture this leaf script's git state for the modulefile
    # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
@@ -536,17 +632,68 @@ PY
    # therock builds where the spec ends up not matching ROCM_VERSION.
    _HIP_PYTHON_PROVENANCE="hip-python wheel ${HIP_PYTHON_PIP_SPEC:-(unknown)} (numba-hip extras: rocm-${NUMBA_HIP_EXTRA_SUFFIX:-?})"
 
-   # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
-        whatis("HIP-Python with ROCm support")
-        whatis(" ${_HIP_PYTHON_PROVENANCE} ")
-        whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
+   # A consumer satisfies the ROCm dependency with either the local TheRock
+   # real module (rocm-new/<ver>) or its alias (rocm/<ver>): PrgEnv-amd-new
+   # loads rocm-new directly, while a bare `module load rocm/<ver>` pulls it
+   # in under the alias name. Tcl `prereq` with several names is satisfied if
+   # ANY is loaded; Lmod's equivalent is prereq_any(). Non-rocm module names
+   # are emitted unchanged.
+   # AAC7 gate: the rocm-new/<ver> alias is only meaningful on a TheRock /
+   # PrgEnv-amd-new site (AAC7), where rocm-new is a real modulefile. On a
+   # stock site (e.g. AAC6) only rocm/<ver> exists, so widening the prereq
+   # to rocm-new would reference a phantom module name -- gate it on whether
+   # a rocm-new modulefile is actually discoverable on MODULEPATH. When it is
+   # not, emit the original plain prereq("rocm/<ver>").
+   rocm_new_available() {
+      local _d _OIFS="${IFS}"; IFS=":"
+      for _d in ${MODULEPATH:-}; do
+         if [ -d "${_d}/rocm-new" ]; then IFS="${_OIFS}"; return 0; fi
+      done
+      IFS="${_OIFS}"; return 1
+   }
+   _RPV="${ROCM_MODULE_NAME##*/}"
+   case "${ROCM_MODULE_NAME}" in
+      rocm/*|rocm-new/*)
+         if rocm_new_available; then
+            ROCM_PREREQ_TCL="rocm-new/${_RPV} rocm/${_RPV}"
+            ROCM_PREREQ_LUA="prereq_any(\"rocm-new/${_RPV}\", \"rocm/${_RPV}\")"
+         else
+            ROCM_PREREQ_TCL="rocm/${_RPV}"
+            ROCM_PREREQ_LUA="prereq(\"rocm/${_RPV}\")"
+         fi
+         ;;
+      *)
+         ROCM_PREREQ_TCL="${ROCM_MODULE_NAME}"
+         ROCM_PREREQ_LUA="prereq(\"${ROCM_MODULE_NAME}\")"
+         ;;
+   esac
+   unset _RPV
 
-        prereq("${ROCM_MODULE_NAME}")
-        prepend_path("PYTHONPATH","$HIP_PYTHON_PATH/hip-python")
-        prepend_path("PYTHONPATH","$HIP_PYTHON_PATH/numba-hip")
+   # The - option suppresses leading tabs in the heredoc body.
+   if [ "${_MODFLAVOR}" = "lua" ]; then
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
+	whatis("HIP-Python with ROCm support")
+	whatis(" ${_HIP_PYTHON_PROVENANCE} ")
+	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
+
+	${ROCM_PREREQ_LUA}
+	prepend_path("PYTHONPATH","$HIP_PYTHON_PATH/hip-python")
+	prepend_path("PYTHONPATH","$HIP_PYTHON_PATH/numba-hip")
 	setenv("NUMBA_HIP_USE_DEVICE_LIB_CACHE","0")
 EOF
-   unset _HIP_PYTHON_PROVENANCE
+   else
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
+	#%Module1.0
+	module-whatis "HIP-Python with ROCm support"
+	module-whatis " ${_HIP_PYTHON_PROVENANCE} "
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+
+	prereq ${ROCM_PREREQ_TCL}
+	prepend-path PYTHONPATH $HIP_PYTHON_PATH/hip-python
+	prepend-path PYTHONPATH $HIP_PYTHON_PATH/numba-hip
+	setenv NUMBA_HIP_USE_DEVICE_LIB_CACHE 0
+EOF
+   fi
+   unset _MODFILE _MODFLAVOR _HIP_PYTHON_PROVENANCE ROCM_PREREQ_TCL ROCM_PREREQ_LUA
 
 fi
