@@ -264,6 +264,34 @@ if [ "${BUILD_MAGMA}" = "0" ]; then
    exit ${NOOP_RC}
 fi
 
+# ── Install-path sudo (computed EARLY, before afar-skip/--replace) ────
+# These blocks rm -rf the install dir + modulefiles with ${SUDO}. The
+# leaf default is SUDO=sudo, which on a cluster with no passwordless sudo
+# and a user-owned install tree (this Cray) makes --replace / afar-skip
+# die on a password prompt before the build even starts. Probe the
+# nearest existing ancestor of the install BASE for user-writability and
+# drop sudo when we own it. Mirrors the petsc/rocshmem writability probe.
+# The same SUDO then governs the openblas + magma install dirs + chowns
+# in the build branch below. EUID 0 never needs sudo.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   SUDO=""
+elif [ -z "${SUDO}" ]; then
+   :  # already cleared (e.g. Singularity)
+else
+   _iprobe="${INSTALL_PATH_BASE}"
+   while [ ! -e "${_iprobe}" ]; do _iprobe="$(dirname "${_iprobe}")"; done
+   _itest=$(mktemp --tmpdir="${_iprobe}" .magma-inst-probe.XXXXXX 2>/dev/null || true)
+   if [ -n "${_itest}" ] && [ -f "${_itest}" ]; then
+      rm -f "${_itest}"
+      SUDO=""
+      echo "magma: install ancestor ${_iprobe} is user-writable (probe succeeded); not using sudo for install"
+   else
+      SUDO="sudo"
+      echo "magma: install ancestor ${_iprobe} not user-writable (probe failed); using sudo for install"
+   fi
+   unset _iprobe _itest
+fi
+
 # ── afar SDK incompatibility detection ───────────────────────────────
 # AMD's pre-release "AFAR" ROCm drops (rocm-afar-22.x, rocm-afar-7.0.5)
 # are runtime-only / partial SDKs. Verified empirically on this cluster
@@ -337,9 +365,9 @@ fi
 if [ "${REPLACE_MAGMA}" = "1" ]; then
    echo "[magma --replace-magma 1] removing prior magma install + modulefile if present"
    echo "  install dir: ${MAGMA_PATH}"
-   echo "  modulefile:  ${MAGMA_MODULE_DIR}/${MAGMA_VERSION}.lua"
+   echo "  modulefile:  ${MAGMA_MODULE_DIR}/${MAGMA_VERSION}{.lua,} (both flavors)"
    ${SUDO} rm -rf "${MAGMA_PATH}"
-   ${SUDO} rm -f  "${MAGMA_MODULE_DIR}/${MAGMA_VERSION}.lua"
+   ${SUDO} rm -f  "${MAGMA_MODULE_DIR}/${MAGMA_VERSION}.lua" "${MAGMA_MODULE_DIR}/${MAGMA_VERSION}"
 fi
 if [ "${REPLACE_OPENBLAS}" = "1" ]; then
    # Best-effort: removes any openblas install that previously lived in
@@ -348,9 +376,9 @@ if [ "${REPLACE_OPENBLAS}" = "1" ]; then
    # is fine (no module pointing at it).
    echo "[magma --replace-openblas 1] removing prior built-from-source openblas install + modulefile if present"
    echo "  install dir: ${_MAGMA_OPENBLAS_INSTALL_DIR}"
-   echo "  modulefile:  ${_MAGMA_OPENBLAS_MODULE_DIR}/${OPENBLAS_VERSION}.lua"
+   echo "  modulefile:  ${_MAGMA_OPENBLAS_MODULE_DIR}/${OPENBLAS_VERSION}{.lua,} (both flavors)"
    ${SUDO} rm -rf "${_MAGMA_OPENBLAS_INSTALL_DIR}"
-   ${SUDO} rm -f  "${_MAGMA_OPENBLAS_MODULE_DIR}/${OPENBLAS_VERSION}.lua"
+   ${SUDO} rm -f  "${_MAGMA_OPENBLAS_MODULE_DIR}/${OPENBLAS_VERSION}.lua" "${_MAGMA_OPENBLAS_MODULE_DIR}/${OPENBLAS_VERSION}"
 fi
 
 # ── Existence guard (see hypre_setup.sh) ─────────────────────────────
@@ -381,17 +409,19 @@ fi
 # PKG_CLEAN_*[magma]/[openblas].
 _magma_on_exit() {
    local rc=$?
-   # Build-dir cleanup (MAGMA_BUILD_ROOT is set later under the build
-   # branches, may still be empty if this script no-op'd).
-   [ -n "${MAGMA_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${MAGMA_BUILD_ROOT}"
+   # Build-dir cleanup. MAGMA_BUILD_ROOT is a per-job mktemp dir owned by
+   # the build user, so plain rm (never sudo) always works -- and avoids a
+   # spurious sudo password prompt at end-of-run when SUDO was probed empty
+   # (a user-writable install tree on a no-passwordless-sudo Cray).
+   [ -n "${MAGMA_BUILD_ROOT:-}" ] && rm -rf "${MAGMA_BUILD_ROOT}"
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[magma fail-cleanup] rc=${rc}: removing partial magma install + modulefile"
-      ${SUDO:-sudo} rm -rf "${MAGMA_PATH}"
-      ${SUDO:-sudo} rm -f  "${MAGMA_MODULE_DIR}/${MAGMA_VERSION}.lua"
+      ${SUDO} rm -rf "${MAGMA_PATH}"
+      ${SUDO} rm -f  "${MAGMA_MODULE_DIR}/${MAGMA_VERSION}.lua" "${MAGMA_MODULE_DIR}/${MAGMA_VERSION}"
       if [ "${_OPENBLAS_BUILT}" = "1" ]; then
          echo "[magma fail-cleanup] also removing partial openblas install + modulefile (this run built it)"
-         ${SUDO:-sudo} rm -rf "${_MAGMA_OPENBLAS_INSTALL_DIR}"
-         ${SUDO:-sudo} rm -f  "${_MAGMA_OPENBLAS_MODULE_DIR}/${OPENBLAS_VERSION}.lua"
+         ${SUDO} rm -rf "${_MAGMA_OPENBLAS_INSTALL_DIR}"
+         ${SUDO} rm -f  "${_MAGMA_OPENBLAS_MODULE_DIR}/${OPENBLAS_VERSION}.lua" "${_MAGMA_OPENBLAS_MODULE_DIR}/${OPENBLAS_VERSION}"
       fi
    elif [ ${rc} -ne 0 ]; then
       echo "[magma fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
@@ -436,14 +466,26 @@ else
    #      basename == module name) but wrong for therock-afar.
    #   3. rocm/${ROCM_VERSION}: standalone-invocation fallback when
    #      neither LOADEDMODULES nor ROCM_PATH is populated.
+   # Two-pass over LOADEDMODULES: prefer a rocm/* matching the requested
+   # ROCM_VERSION before falling back to the first rocm/*. A Cray
+   # PrgEnv-amd-new shell can have several rocm/* loaded at once (e.g.
+   # rocm/7.0.3 AND rocm/7.2.3 alongside the PrgEnv's rocm-new/7.2.3);
+   # taking the first match would key the build + modulefile on the wrong SDK.
    ROCM_MODULE_NAME=""
    if [[ -n "${LOADEDMODULES:-}" ]]; then
       _OLD_IFS="${IFS}"; IFS=":"
       for _m in ${LOADEDMODULES}; do
          case "${_m}" in
-            rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+            rocm/${ROCM_VERSION}) ROCM_MODULE_NAME="${_m}"; break ;;
          esac
       done
+      if [[ -z "${ROCM_MODULE_NAME}" ]]; then
+         for _m in ${LOADEDMODULES}; do
+            case "${_m}" in
+               rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+            esac
+         done
+      fi
       IFS="${_OLD_IFS}"; unset _OLD_IFS _m
    fi
    if [[ -z "${ROCM_MODULE_NAME}" ]]; then
@@ -479,19 +521,62 @@ else
    fi
    unset _leaf_dir
 
-   # don't use sudo if user has write access to install path
-   if [ -d "$MAGMA_PATH" ]; then
-      if [ -w ${MAGMA_PATH} ]; then
-         SUDO=""
-      else
-         echo "WARNING: using an install path that requires sudo"
+   # (Install-path SUDO was probed early, before the afar-skip/--replace
+   # blocks; it governs the openblas + magma install dirs and chowns.)
+
+   REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" )
+   preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
+
+   # amdclang compiler module (hierarchical; only visible after rocm).
+   # Some ROCm packagings ship LLVM/clang as a SEPARATE module instead of
+   # bundling it under ${ROCM_PATH}/lib/llvm, in which case hipcc cannot
+   # find clang++/amdclang++ until amdclang is loaded. On a Cray
+   # PrgEnv-amd-new there is no amdclang module (rocm provides hipcc's
+   # toolchain directly), so probe + load it only when present rather than
+   # hard-requiring it (which would wrongly SKIP magma here). Mirrors
+   # rocshmem_setup.sh.
+   if module --redirect -t avail amdclang 2>/dev/null | grep -qi '^amdclang'; then
+      echo "preflight: amdclang module present -> loading it for the hipcc toolchain"
+      if ! module load amdclang 2>&1; then
+         echo "ERROR: amdclang module is available but failed to load." >&2
+         exit ${MISSING_PREREQ_RC}
       fi
    else
-      echo "WARNING: using sudo, make sure you have sudo privileges"
+      echo "preflight: no amdclang module visible; assuming rocm provides hipcc's clang toolchain"
    fi
 
-   REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "amdclang" )
-   preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
+   # ── Modulefile flavor + module-write sudo (shared by openblas+magma) ──
+   # Flavor: Lmod consumes <ver>.lua; classic Tcl Environment Modules
+   # consumes an extensionless Tcl file. Detect Lmod via its env markers;
+   # default to Tcl when Lmod is absent (this Cray runs Tcl Environment
+   # Modules). Without this the .lua files are invisible to a Tcl `module`
+   # and `module load magma/...` fails. Mirrors hdf5/netcdf/fftw/petsc.
+   if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+      MODFLAVOR="lua"; MODEXT=".lua"
+   else
+      MODFLAVOR="tcl"; MODEXT=""
+   fi
+   # MOD_SUDO: probe the module tree for user-writability so a user-owned
+   # module tree (a Cray $HOME deployment or a standalone run) needs no
+   # sudo, and forcing it would hit a password prompt that fails where the
+   # user has no sudo. Mirrors petsc/netcdf_setup.sh. Used for BOTH the
+   # openblas and magma modulefile writes below.
+   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+      MOD_SUDO=""
+   else
+      _mprobe="${MODULE_PATH_BASE}"
+      while [ ! -e "${_mprobe}" ]; do _mprobe="$(dirname "${_mprobe}")"; done
+      _mtest=$(mktemp --tmpdir="${_mprobe}" .magma-mod-probe.XXXXXX 2>/dev/null || true)
+      if [ -n "${_mtest}" ] && [ -f "${_mtest}" ]; then
+         rm -f "${_mtest}"
+         MOD_SUDO=""
+         echo "magma: module tree ancestor ${_mprobe} is user-writable (probe succeeded); not using sudo for modulefile writes"
+      else
+         MOD_SUDO="sudo"
+         echo "magma: module tree ancestor ${_mprobe} not user-writable (probe failed); using sudo for modulefile writes"
+      fi
+      unset _mprobe _mtest
+   fi
 
    ## OpenBLAS resolution.
    ##
@@ -657,22 +742,24 @@ else
          ${SUDO} find ${OPENBLAS_PATH} -type d -execdir chown root:root "{}" +
       fi
 
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} chmod go-w ${OPENBLAS_PATH}
       fi
 
       # Create a standalone openblas modulefile. Lives at the symmetric
       # MODULE_PATH_BASE/openblas dir so users can `module load openblas`
-      # directly, and so the magma module (below) can `load("openblas")`
-      # to get OPENBLAS_PATH / LD_LIBRARY_PATH from a single source of
-      # truth instead of duplicating the env block. We set OPENBLAS_PATH
-      # plus the three common aliases (HOME, ROOT, DIR) so downstream
-      # CMake consumers (PyTorch's BLAS=OpenBLAS path, future ginkgo,
+      # directly, and so the magma module (below) can load it to get
+      # OPENBLAS_PATH / LD_LIBRARY_PATH from a single source of truth
+      # instead of duplicating the env block. We set OPENBLAS_PATH plus
+      # the three common aliases (HOME, ROOT, DIR) so downstream CMake
+      # consumers (PyTorch's BLAS=OpenBLAS path, future ginkgo,
       # spack-installed packages) all find it under whatever convention
-      # they use.
+      # they use. Written in the detected flavor (Lua for Lmod, Tcl
+      # otherwise) so it actually loads on this Tcl-modules Cray.
       OPENBLAS_MODULE_DIR="${MODULE_PATH_BASE}/openblas"
-      ${SUDO} mkdir -p "${OPENBLAS_MODULE_DIR}"
-      cat <<-EOF | ${SUDO} tee "${OPENBLAS_MODULE_DIR}/${OPENBLAS_VERSION}.lua"
+      ${MOD_SUDO} mkdir -p "${OPENBLAS_MODULE_DIR}"
+      if [ "${MODFLAVOR}" = "lua" ]; then
+         cat <<-EOF | ${MOD_SUDO} tee "${OPENBLAS_MODULE_DIR}/${OPENBLAS_VERSION}${MODEXT}"
 	whatis("OpenBLAS ${OPENBLAS_VERSION} (built from source as a magma dependency)")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	setenv("OPENBLAS_PATH","${OPENBLAS_PATH}")
@@ -684,6 +771,21 @@ else
 	prepend_path("CPATH","${OPENBLAS_PATH}/include")
 	prepend_path("PKG_CONFIG_PATH","${OPENBLAS_PATH}/lib/pkgconfig")
 	EOF
+      else
+         cat <<-EOF | ${MOD_SUDO} tee "${OPENBLAS_MODULE_DIR}/${OPENBLAS_VERSION}${MODEXT}"
+	#%Module1.0
+	module-whatis "OpenBLAS ${OPENBLAS_VERSION} (built from source as a magma dependency)"
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+	setenv OPENBLAS_PATH "${OPENBLAS_PATH}"
+	setenv OPENBLAS_HOME "${OPENBLAS_PATH}"
+	setenv OPENBLAS_ROOT "${OPENBLAS_PATH}"
+	setenv OPENBLAS_DIR "${OPENBLAS_PATH}"
+	prepend-path LD_LIBRARY_PATH "${OPENBLAS_PATH}/lib"
+	prepend-path LIBRARY_PATH "${OPENBLAS_PATH}/lib"
+	prepend-path CPATH "${OPENBLAS_PATH}/include"
+	prepend-path PKG_CONFIG_PATH "${OPENBLAS_PATH}/lib/pkgconfig"
+	EOF
+      fi
    fi
 
    if [ -n "${OPENBLAS_PATH}" ]; then
@@ -725,12 +827,41 @@ else
    make generate
    mkdir build && cd build
 
+   # C compiler: force GNU gcc. On a Cray PE the default `cc` is the
+   # craype wrapper (clang under the hood); magma's CMake runs
+   # FortranCInterface to detect Fortran name mangling and write
+   # include/magma_mangling_cmake.h (which defines MAGMA_GLOBAL). That
+   # detection links a C object against a gfortran object; with the Cray
+   # `cc` wrapper the link test fails, magma_mangling_cmake.h comes out
+   # empty, and every magma .cpp then hits the #error "One of ADD_,
+   # NOCHANGE, or UPCASE must be defined". Using gcc (matching the
+   # All-GNU gfortran already used for the Fortran half) makes the
+   # FortranCInterface probe succeed. HIP device .cpp still go through
+   # hipcc (CMAKE_CXX_COMPILER).
+   GCC_BIN="$(command -v gcc || echo gcc)"
+   # GPU arch: magma 2.10.0's own VALID_GFXS list stops at gfx1033 and its
+   # add_compile_options(${GPU_ARCH_FLAGS}) line is commented out, so the
+   # -DGPU_TARGET path is effectively dead for selecting the offload arch.
+   # The real knob is ROCm's hip-config.cmake GPU_TARGETS (plural): when it
+   # is unset, hip-config runs amdgpu-arch to autodetect, which FAILS at
+   # build time (no GPU visible during the cmake configure step on a
+   # login/build node), so NO --offload-arch is emitted and hipcc silently
+   # falls back to its built-in default (gfx906). The result is a
+   # libmagma.so that cannot run on the target GPU (e.g. gfx942/MI300A).
+   # Passing -DGPU_TARGETS makes hip-config attach
+   # --offload-arch=${AMDGPU_GFXMODEL} to hip::device, which propagates to
+   # the magma target. We keep -DGPU_TARGET too (magma echoes it / uses it
+   # in codegen messages).
    cmake \
       -DCMAKE_INSTALL_PREFIX=${MAGMA_PATH} \
       -DCMAKE_BUILD_TYPE=Release \
       -DMAGMA_ENABLE_HIP=ON \
-      -DGPU_TARGET=${AMDGPU_GFXMODEL} \
+      -DGPU_TARGET="${AMDGPU_GFXMODEL}" \
+      -DGPU_TARGETS="${AMDGPU_GFXMODEL}" \
+      -DAMDGPU_TARGETS="${AMDGPU_GFXMODEL}" \
+      -DCMAKE_HIP_ARCHITECTURES="${AMDGPU_GFXMODEL}" \
       -DBUILD_SHARED_LIBS=ON \
+      -DCMAKE_C_COMPILER="${GCC_BIN}" \
       -DCMAKE_CXX_COMPILER=${ROCM_PATH}/bin/hipcc \
       -DCMAKE_Fortran_COMPILER=gfortran \
       -DBLA_VENDOR=OpenBLAS \
@@ -749,16 +880,14 @@ else
       ${SUDO} find ${MAGMA_PATH} -type d -execdir chown root:root "{}" +
    fi
 
-   if [[ "${USER}" != "root" ]]; then
+   if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
       ${SUDO} chmod go-w ${MAGMA_PATH}
    fi
 
-   # Create a module file for magma
-   #
-   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
-   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
-   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
-   ${PKG_SUDO_MOD} mkdir -p ${MAGMA_MODULE_DIR}
+   # Create a module file for magma. Uses MOD_SUDO + MODFLAVOR/MODEXT
+   # computed once after preflight (writability-probe sudo; Lua for Lmod,
+   # Tcl otherwise).
+   ${MOD_SUDO} mkdir -p ${MAGMA_MODULE_DIR}
 
    # The - option suppresses tabs
    #
@@ -796,7 +925,9 @@ else
    # Loading magma is a library dependency; it should not silently
    # rewrite the user's compiler choice. The two prepend_path lines
    # below give libomp.so to ldopen at runtime without touching CC/CXX/FC.
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MAGMA_MODULE_DIR}/${MAGMA_VERSION}.lua
+   MAGMA_MODULEFILE="${MAGMA_MODULE_DIR}/${MAGMA_VERSION}${MODEXT}"
+   if [ "${MODFLAVOR}" = "lua" ]; then
+      cat <<-EOF | ${MOD_SUDO} tee ${MAGMA_MODULEFILE}
 	whatis("Magma version ${MAGMA_VERSION} for AMD hardware")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
@@ -813,21 +944,50 @@ else
 	setenv("MAGMA_DIR","${MAGMA_PATH}")
 	prepend_path("LD_LIBRARY_PATH","${MAGMA_PATH}/lib")
 EOF
+   else
+      cat <<-EOF | ${MOD_SUDO} tee ${MAGMA_MODULEFILE}
+	#%Module1.0
+	module-whatis "Magma version ${MAGMA_VERSION} for AMD hardware"
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+
+	prereq ${ROCM_MODULE_NAME}
+	# Expose libomp.so (LLVM OpenMP) directly, NOT via 'module load amdclang',
+	# which would also export CC/CXX/FC and poison downstream consumers.
+	# See magma_setup.sh comment block above this heredoc for full rationale.
+	prepend-path LD_LIBRARY_PATH "${ROCM_PATH}/llvm/lib"
+	prepend-path LD_RUN_PATH "${ROCM_PATH}/llvm/lib"
+	setenv MAGMA_PATH "${MAGMA_PATH}"
+	setenv MAGMA_HOME "${MAGMA_PATH}"
+	setenv MAGMA_ROOT "${MAGMA_PATH}"
+	setenv MAGMA_DIR "${MAGMA_PATH}"
+	prepend-path LD_LIBRARY_PATH "${MAGMA_PATH}/lib"
+EOF
+   fi
 
    # OpenBLAS env: when we built it (OPENBLAS_BUILD=1) a standalone
-   # openblas modulefile already exists, so just `load("openblas")`
-   # for a single source of truth. When we reused a system or
-   # operator-supplied OpenBLAS, no module exists, so inline the
-   # OPENBLAS_PATH/LD_LIBRARY_PATH exports directly in the magma
-   # module to keep downstream consumers (pytorch's BLAS=OpenBLAS
-   # path, etc.) working.
+   # openblas modulefile already exists, so just load it for a single
+   # source of truth. When we reused a system or operator-supplied
+   # OpenBLAS, no module exists, so inline the OPENBLAS_PATH/LD_LIBRARY_PATH
+   # exports directly in the magma module to keep downstream consumers
+   # (pytorch's BLAS=OpenBLAS path, etc.) working.
    if [ "${OPENBLAS_BUILD}" = "1" ]; then
-      echo 'load("openblas")' | ${PKG_SUDO_MOD} tee -a ${MAGMA_MODULE_DIR}/${MAGMA_VERSION}.lua
+      if [ "${MODFLAVOR}" = "lua" ]; then
+         echo "load(\"openblas/${OPENBLAS_VERSION}\")" | ${MOD_SUDO} tee -a ${MAGMA_MODULEFILE}
+      else
+         echo "if { ![ is-loaded openblas/${OPENBLAS_VERSION} ] } { module load openblas/${OPENBLAS_VERSION} }" | ${MOD_SUDO} tee -a ${MAGMA_MODULEFILE}
+      fi
    elif [ -n "${OPENBLAS_PATH}" ]; then
-      cat <<-EOF | ${PKG_SUDO_MOD} tee -a ${MAGMA_MODULE_DIR}/${MAGMA_VERSION}.lua
+      if [ "${MODFLAVOR}" = "lua" ]; then
+         cat <<-EOF | ${MOD_SUDO} tee -a ${MAGMA_MODULEFILE}
 	setenv("OPENBLAS_PATH","${OPENBLAS_PATH}")
 	prepend_path("LD_LIBRARY_PATH","${OPENBLAS_PATH}/lib")
 EOF
+      else
+         cat <<-EOF | ${MOD_SUDO} tee -a ${MAGMA_MODULEFILE}
+	setenv OPENBLAS_PATH "${OPENBLAS_PATH}"
+	prepend-path LD_LIBRARY_PATH "${OPENBLAS_PATH}/lib"
+EOF
+      fi
    fi
 
 fi

@@ -130,7 +130,13 @@ KEEP_FAILED_INSTALLS=0
 # Autodetect defaults
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
-DISTRO_CODENAME=`cat /etc/os-release | grep '^VERSION_CODENAME' | sed -e 's/VERSION_CODENAME=//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
+# VERSION_CODENAME is a Debian/Ubuntu field and is ABSENT on RHEL-family
+# /etc/os-release. Under `set -eo pipefail` the grep no-match (rc=1)
+# propagates through the pipeline and aborts the whole script before any
+# output -- the silent-exit-1 failure mode seen on RHEL 9.6 Cray nodes.
+# Tolerate the missing field with `|| true` (DISTRO_CODENAME stays empty,
+# which is fine -- it is only used for opensuse messaging below).
+DISTRO_CODENAME=`{ cat /etc/os-release | grep '^VERSION_CODENAME' || true; } | sed -e 's/VERSION_CODENAME=//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
 RHEL_COMPATIBLE=0
 if [[ "${DISTRO}" = "red hat enterprise linux" || "${DISTRO}" = "rocky linux" || "${DISTRO}" == "almalinux" ]]; then
@@ -355,6 +361,43 @@ if [ "${BUILD_NETCDF}" = "0" ]; then
    exit ${NOOP_RC}
 fi
 
+# ── Early sudo decision (port of hdf5_setup.sh early-probe) ──────────
+# Decide whether privilege escalation is needed BEFORE the --replace block
+# and EXIT trap (both rm install dirs / modulefiles via ${SUDO}). The
+# from-source branch re-affirms this later with a real touch-probe, but that
+# is too late for --replace / fail-cleanup. On a Cray the rocmplus tree under
+# /shareddata is user-writable and the compute nodes have NO passwordless
+# sudo -- so a default SUDO="sudo" made `--replace 1` (and the EXIT-trap
+# fail-cleanup) abort with "sudo: a password is required", and partial
+# mkdir'd install dirs were then left behind (causing a later false
+# "already installed" skip). Probe the nearest EXISTING ancestor of
+# NETCDF_INSTALL_BASE; if writable, clear SUDO.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   SUDO=""
+elif [ -z "${SUDO}" ]; then
+   :  # already cleared (e.g. inside a Singularity container)
+else
+   _probe="${NETCDF_INSTALL_BASE}"
+   while [ ! -e "${_probe}" ]; do _probe="$(dirname "${_probe}")"; done
+   # Real touch probe (mktemp), NOT `[ -w ]`: on /nfsapps (NFSv4 + ACLs)
+   # `[ -w root-owned-755-dir ]` returned TRUE on a compute node for a
+   # non-root user while real writes still hit EACCES (slurm 12810) -- the
+   # same lying-probe failure mode the from-source re-probe + the
+   # modulefile-write PKG_SUDO_MOD pattern below already avoid. A wrong
+   # early SUDO="" here would make --replace's rm/mkdir and the EXIT-trap
+   # fail-cleanup die on the root-owned /nfsapps tree. Mirrors
+   # hdf5/cupy/magma_setup.sh.
+   _wtest=$(mktemp --tmpdir="${_probe}" .netcdf-early-probe.XXXXXX 2>/dev/null || true)
+   if [ -n "${_wtest}" ] && [ -f "${_wtest}" ]; then
+      rm -f "${_wtest}"
+      SUDO=""
+      echo "netcdf: install base ancestor ${_probe} is user-writable (probe succeeded); not using sudo for install/replace/cleanup"
+   else
+      echo "netcdf: install base ancestor ${_probe} not user-writable (probe failed); using sudo for install/replace/cleanup"
+   fi
+   unset _probe _wtest
+fi
+
 # ── --replace: remove prior installs + modulefiles BEFORE building ────
 # --replace 1 acts as a convenience alias that flips all three
 # component knobs on. Individual --replace-netcdf-{c,f}/--replace-pnetcdf
@@ -367,16 +410,18 @@ fi
 if [ "${REPLACE_NETCDF_C}" = "1" ]; then
    echo "[netcdf --replace-netcdf-c 1] removing prior netcdf-c install + modulefile if present"
    echo "  install dir: ${NETCDF_C_PATH}"
-   echo "  modulefile:  ${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua"
+   echo "  modulefile:  ${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}{,.lua}"
    ${SUDO} rm -rf "${NETCDF_C_PATH}"
-   ${SUDO} rm -f  "${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua"
+   # Remove both flavors (Lmod .lua and Tcl no-extension).
+   ${SUDO} rm -f  "${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua" "${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}"
 fi
 if [ "${REPLACE_NETCDF_F}" = "1" ]; then
    echo "[netcdf --replace-netcdf-f 1] removing prior netcdf-fortran install + modulefile if present"
    echo "  install dir: ${NETCDF_F_PATH}"
-   echo "  modulefile:  ${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua"
+   echo "  modulefile:  ${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}{,.lua}"
    ${SUDO} rm -rf "${NETCDF_F_PATH}"
-   ${SUDO} rm -f  "${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua"
+   # Remove both flavors (Lmod .lua and Tcl no-extension).
+   ${SUDO} rm -f  "${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua" "${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}"
 fi
 if [ "${REPLACE_PNETCDF}" = "1" ]; then
    echo "[netcdf --replace-pnetcdf 1] removing prior pnetcdf install"
@@ -431,17 +476,21 @@ _netcdf_on_exit() {
       # Otherwise a single-component build (e.g. only pnetcdf-v1.14.1 on
       # top of an existing netcdf-c-v4.10.0) would wipe the working
       # sibling component on PnetCDF build failure.
+      # Remove both modulefile flavors (Lmod .lua and Tcl no-extension).
+      # ${SUDO} verbatim (NOT ${SUDO:-sudo}): the early-probe may set SUDO=""
+      # for an operator-writable tree, and cleanup must then run WITHOUT sudo
+      # (compute nodes have no passwordless sudo). Mirrors hdf5_setup.sh.
       if [ "${_pre_existed_netcdf_c:-0}" != "1" ]; then
-         ${SUDO:-sudo} rm -rf "${NETCDF_C_PATH}"
-         ${SUDO:-sudo} rm -f  "${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua"
+         ${SUDO} rm -rf "${NETCDF_C_PATH}"
+         ${SUDO} rm -f  "${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua" "${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}"
       fi
       if [ "${_pre_existed_netcdf_f:-0}" != "1" ]; then
-         ${SUDO:-sudo} rm -rf "${NETCDF_F_PATH}"
-         ${SUDO:-sudo} rm -f  "${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua"
+         ${SUDO} rm -rf "${NETCDF_F_PATH}"
+         ${SUDO} rm -f  "${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua" "${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}"
       fi
       if [ "${_pre_existed_pnetcdf:-0}" != "1" ]; then
-         ${SUDO:-sudo} rm -rf "${PNETCDF_PATH}"
-         ${SUDO:-sudo} rm -f  "${PNETCDF_MODULE_PATH}/${PNETCDF_VERSION}.lua"
+         ${SUDO} rm -rf "${PNETCDF_PATH}"
+         ${SUDO} rm -f  "${PNETCDF_MODULE_PATH}/${PNETCDF_VERSION}.lua" "${PNETCDF_MODULE_PATH}/${PNETCDF_VERSION}"
       fi
    elif [ ${rc} -ne 0 ]; then
       echo "[netcdf fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
@@ -487,7 +536,7 @@ else
    NETCDF_C_TGZ=${CACHE_FILES}/netcdf-c-v${NETCDF_C_VERSION}.tgz
    NETCDF_F_TGZ=${CACHE_FILES}/netcdf-fortran-v${NETCDF_F_VERSION}.tgz
    PNETCDF_TGZ=${CACHE_FILES}/pnetcdf.tgz
-   if [ -f ${NETCDF_C_TGZ} ] && [ -f ${NETCDF_F_TGZ} ]; then
+   if [ -f "${NETCDF_C_TGZ}" ] && [ -f "${NETCDF_F_TGZ}" ]; then
       echo ""
       echo "============================"
       echo " Installing Cached NETCDF"
@@ -507,7 +556,7 @@ else
       tar -xzf ${NETCDF_C_TGZ}
       tar -xzf ${NETCDF_F_TGZ}
       chown -R root:root ${NETCDF_C_PATH} ${NETCDF_F_PATH}
-      if [ -f ${PNETCDF_TGZ} ]; then
+      if [ -f "${PNETCDF_TGZ}" ]; then
          tar -xzf ${PNETCDF_TGZ}
          chown -R root:root ${PNETCDF_PATH}
       fi
@@ -555,16 +604,31 @@ else
       # guards skipped libcurl whenever the install path was
       # admin-writable, which would silently produce a netcdf without
       # curl support. See openmpi_setup.sh / audit_2026_05_01.md Issue 2.
-      PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
-      if [ "${DISTRO}" = "ubuntu" ]; then
-         echo "...installing libcurl..."
-         ${PKG_SUDO} apt-get update
-         ${PKG_SUDO} apt-get install -y libcurl4-gnutls-dev
-      elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
-         echo "...installing libcurl..."
-         ${PKG_SUDO} yum install -y libcurl-devel
-      elif [ "${DISTRO}" = "opensuse" ]; then
-	 echo "opensuse is not tested yet, not installing libcurl"
+      #
+      # Presence guard: skip the package-manager install entirely when the
+      # curl development header is already present. On a Cray (RHEL 9.x)
+      # libcurl-devel ships in the base image, and the compute nodes have NO
+      # passwordless sudo -- so the unconditional `sudo yum install` aborted
+      # the whole netcdf build with "sudo: a password is required" (and the
+      # EXIT trap then nuked the partial install). Checking for curl.h first
+      # makes the install a no-op where it's already satisfied and avoids the
+      # needless privilege escalation. Only when the header is missing do we
+      # attempt the install (and even then, a sudo failure is non-fatal: the
+      # subsequent netcdf-c cmake DAP probe will report the real diagnostic).
+      if [ -f /usr/include/curl/curl.h ] || [ -f /usr/include/x86_64-linux-gnu/curl/curl.h ]; then
+         echo "netcdf: libcurl development header already present; skipping libcurl install."
+      else
+         PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+         if [ "${DISTRO}" = "ubuntu" ]; then
+            echo "...installing libcurl..."
+            ${PKG_SUDO} apt-get update || echo "netcdf: WARNING: apt-get update failed (continuing; curl may already be available)"
+            ${PKG_SUDO} apt-get install -y libcurl4-gnutls-dev || echo "netcdf: WARNING: libcurl install failed (continuing; netcdf-c DAP probe will report if curl is truly missing)"
+         elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
+            echo "...installing libcurl..."
+            ${PKG_SUDO} yum install -y libcurl-devel || echo "netcdf: WARNING: libcurl install failed (continuing; netcdf-c DAP probe will report if curl is truly missing)"
+         elif [ "${DISTRO}" = "opensuse" ]; then
+            echo "opensuse is not tested yet, not installing libcurl"
+         fi
       fi
 
       ${SUDO} mkdir -p ${NETCDF_C_PATH}
@@ -634,6 +698,47 @@ else
       else
          echo "netcdf: no NETCDF_C_TO_HDF5 entry for ${NETCDF_C_VERSION}; loading bare '${HDF5_MODULE}' (Lmod default)"
       fi
+      # ── MPI module auto-correct on a Cray PE (mirror hdf5_setup.sh) ──
+      # The leaf default MPI_MODULE is "openmpi", but a Cray system ships
+      # cray-mpich (no openmpi module) -- preflight would fail. If cray-mpich
+      # is active and the caller did not override the MPI, switch to it so the
+      # prereq load and the parallel build use the PrgEnv's own MPI.
+      if [ "${MPI_MODULE}" = "openmpi" ] \
+           && { [ -n "${CRAY_MPICH_VERSION:-}" ] || [ -n "${MPICH_DIR:-}" ]; }; then
+         MPI_MODULE="cray-mpich"
+         echo "netcdf: Cray MPICH detected; MPI_MODULE -> cray-mpich"
+      fi
+
+      # ── mpich-wrappers resolution (new-flang mpi.mod on a Cray) ──────
+      # cray-mpich's amd/rocm-compiler mpi.mod is CLASSIC-Flang V34, which the
+      # new LLVM Flang (amdflang / ftn on ROCm 7.x) cannot read -- a
+      # parallel-Fortran `use mpi` build (netcdf-fortran, PnetCDF) fails. The
+      # mpich-wrappers leaf builds a standalone MPICH with FC=amdflang
+      # (NEW-flang mpi.mod, MPICH-ABI compatible with cray-mpich). When the
+      # caller asks for it (main_setup threads --mpi-module mpich-wrappers),
+      # resolve the bare name to the concrete version-matched modulefile token
+      # by scanning MODULEPATH. Fall back to cray-mpich if none is found.
+      if [ "${MPI_MODULE}" = "mpich-wrappers" ]; then
+         _mw_tok=""
+         _OLD_IFS="${IFS}"; IFS=":"
+         for _d in ${MODULEPATH:-}; do
+            for _cand in "mpich-wrappers/${ROCM_VERSION}" "mpich-wrappers"; do
+               if [ -e "${_d}/${_cand}" ] || [ -e "${_d}/${_cand}.lua" ]; then
+                  _mw_tok="${_cand}"; break 2
+               fi
+            done
+         done
+         IFS="${_OLD_IFS}"; unset _OLD_IFS _d _cand
+         if [ -n "${_mw_tok}" ]; then
+            MPI_MODULE="${_mw_tok}"
+            echo "netcdf: using mpich-wrappers module '${_mw_tok}' (new-flang mpi.mod)"
+         else
+            echo "netcdf: WARNING: --mpi-module mpich-wrappers requested but no mpich-wrappers modulefile found on MODULEPATH; falling back to cray-mpich"
+            MPI_MODULE="cray-mpich"
+         fi
+         unset _mw_tok
+      fi
+
       REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${MPI_MODULE}" "${HDF5_MODULE_NAME}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
       if [[ `which h5dump | wc -l` -eq 0 ]]; then
@@ -656,6 +761,76 @@ else
       fi
       if [ "${F_COMPILER_INPUT}" != "" ]; then
          F_COMPILER=${F_COMPILER_INPUT}
+      fi
+
+      # ── Cray PE: pin flang-new for the ftn/cc/CC wrappers ────────────
+      # On a Cray, F_COMPILER resolves to the craype `ftn` wrapper (see
+      # hdf5_setup.sh compiler-selection block). Which Fortran compiler
+      # that wrapper actually drives is governed by AMD_COMPILER_TYPE:
+      # the PrgEnv-amd-new/8.7.0-<ver> stack (amd-new modulefile) sets
+      # AMD_COMPILER_TYPE=DEFAULT so ftn/cc/CC drive the NEW LLVM
+      # amdflang/amdclang; when it is UNSET the wrappers silently fall
+      # back to flang-CLASSIC (and emit an 'Unrecognized' warning).
+      #
+      # This script loads only rocm/MPI/hdf5 -- it never loads the
+      # amd-new compiler module -- so if the build is not already inside
+      # a PrgEnv-amd-new context, ftn drops to flang-classic. The classic
+      # runtime is linked DYNAMICALLY (NEEDED libflang.so), whereas
+      # flang-new links its runtime statically. The resulting
+      # netcdf-fortran (and any example built later with `nf-config
+      # --fc`) then needs libflang.so at run time -- which the
+      # amdflang-new / PrgEnv-amd-new runtime path does not expose, so it
+      # fails with "libflang.so: cannot open shared object file"
+      # (Netcdf_Fortran_Check_Pres_Temp_4D_RD regression, aac7-rocm-7.2.3).
+      #
+      # Pin AMD_COMPILER_TYPE=DEFAULT when the craype wrappers are in play
+      # so the netcdf-c / netcdf-fortran / PnetCDF builds use flang-new,
+      # consistent with PrgEnv-amd-new. Respect an operator-set value.
+      # No-op off a Cray PE (the var is only read by the craype AMD
+      # wrappers; OpenMPI's mpifort/amdflang ignore it).
+      if { [ -n "${CRAYPE_VERSION:-}" ] || [ -n "${CRAY_MPICH_VERSION:-}" ] \
+             || [ -n "${MPICH_DIR:-}" ] || [ "${MPI_MODULE}" = "cray-mpich" ] \
+             || [ "${MPI_MODULE#mpich-wrappers}" != "${MPI_MODULE}" ]; } \
+           && command -v ftn >/dev/null 2>&1; then
+         export AMD_COMPILER_TYPE="${AMD_COMPILER_TYPE:-DEFAULT}"
+         echo "netcdf: Cray PE detected; AMD_COMPILER_TYPE=${AMD_COMPILER_TYPE} (ftn/cc/CC -> flang-new, matches PrgEnv-amd-new)"
+      fi
+
+      # ── Drop the cray-libsci / cray-mpich link when mpich-wrappers is
+      #    the MPI (so the new-flang build keeps NO libflang.so runtime) ──
+      #
+      # The mpich-wrappers leaf builds a STANDALONE MPICH with FC=amdflang
+      # (flang-new): its libmpi.so.12 / libmpifort.so.12 link the flang
+      # runtime STATICALLY and need NO libflang.so. HDF5-Fortran and
+      # PnetCDF (autotools, driven by `mpifort -show`) link those clean
+      # mpich-wrappers libs and come out clean.
+      #
+      # netcdf-fortran is the lone exception: its CMake FindMPI runs a
+      # *verbose* link probe and over-captures the craype-injected
+      # classic-flang Cray PE libs that PrgEnv-amd-new still has loaded --
+      #   -L/opt/cray/pe/libsci/.../AMD/... -lsci_amd_mpi -lsci_amd
+      #   -L/opt/cray/pe/mpich/.../amd/...  -lmpi_amd
+      # baking libsci_amd*.so.6 / libmpi_amd.so.12 / libmpifort_amd.so.12
+      # into libnetcdff.so as DT_NEEDED. Those AMD libs are built with
+      # flang-CLASSIC, so each pulls libflang.so -- reintroducing exactly
+      # the runtime dep mpich-wrappers exists to avoid
+      # (Netcdf_Fortran_Check_Pres_Temp_4D_RD, aac7-rocm-7.2.3:
+      #  "libflang.so: cannot open shared object file"). netcdf-fortran
+      # needs neither BLAS/LAPACK (cray-libsci) nor cray-mpich -- the
+      # whole point of the mpich-wrappers MPI is to REPLACE cray-mpich.
+      #
+      # Unloading both before the cmake builds makes FindMPI resolve to
+      # the mpich-wrappers libmpi.so.12 / libmpifort.so.12 only, so
+      # libnetcdff.so links clean (verified: no libsci_amd / _amd / 
+      # libflang.so). Guarded on mpich-wrappers: when the operator
+      # explicitly asked for cray-mpich we leave its stack intact.
+      if [ "${MPI_MODULE#mpich-wrappers}" != "${MPI_MODULE}" ]; then
+         for _craylib in cray-libsci cray-mpich; do
+            if module -t list 2>&1 | grep -q "^${_craylib}"; then
+               module unload "${_craylib}" 2>/dev/null \
+                  && echo "netcdf: unloaded ${_craylib} (classic-flang Cray PE lib; mpich-wrappers replaces it, avoids libflang.so)"
+            fi
+         done
       fi
 
       # OpenMPI wrapper-compiler fallback for ROCm 6.3.x trees.
@@ -737,8 +912,44 @@ else
          PNETCDF_TARBALL="pnetcdf-${PNETCDF_VERSION}.tar.gz"
          PNETCDF_URL="https://parallel-netcdf.github.io/Release/${PNETCDF_TARBALL}"
          PNETCDF_SRCDIR=""
-         echo "PnetCDF: downloading release tarball ${PNETCDF_URL}"
-         if wget -q "${PNETCDF_URL}" -O "${PNETCDF_TARBALL}"; then
+
+         # ── Operator escape-hatch: pre-staged official tarball ──────────
+         # The official PnetCDF tarball (with a PRE-GENERATED `configure`)
+         # lives ONLY on parallel-netcdf.github.io. On clusters whose
+         # COMPUTE nodes can reach github.com but NOT github.io (the latter
+         # is a GitHub Pages host -- e.g. this Cray's compute nodes go
+         # through a proxy that allows github.com and blocks github.io), the
+         # wget below fails and the git-clone fallback then needs Autoconf
+         # 2.70+ / libtool 2.5.4+ for autoreconf (RHEL 9 ships autoconf
+         # 2.69 -> "Autoconf version 2.70 or higher is required"). To build
+         # there, an operator can stage the official tarball once from a
+         # host that DOES reach github.io and point this var at it:
+         #   export NETCDF_PNETCDF_TARBALL=/shareddata/src/pnetcdf-1.14.1.tar.gz
+         # When set and readable, it is used verbatim (no network), so the
+         # pre-generated configure is preserved and autoreconf is skipped.
+         if [ -n "${NETCDF_PNETCDF_TARBALL:-}" ] && [ -f "${NETCDF_PNETCDF_TARBALL}" ]; then
+            echo "PnetCDF: using operator-staged tarball ${NETCDF_PNETCDF_TARBALL} (no network)"
+            cp "${NETCDF_PNETCDF_TARBALL}" "${PNETCDF_TARBALL}"
+            tar -xzf "${PNETCDF_TARBALL}"
+            rm -f "${PNETCDF_TARBALL}"
+            for _cand in "pnetcdf-${PNETCDF_VERSION}" "parallel-netcdf-${PNETCDF_VERSION}"; do
+               if [ -d "${_cand}" ]; then
+                  PNETCDF_SRCDIR="${_cand}"
+                  break
+               fi
+            done
+            unset _cand
+            if [ -z "${PNETCDF_SRCDIR}" ]; then
+               echo "ERROR: staged ${NETCDF_PNETCDF_TARBALL} extracted but neither pnetcdf-${PNETCDF_VERSION}/ nor parallel-netcdf-${PNETCDF_VERSION}/ exist." >&2
+               ls -1 >&2
+               exit 1
+            fi
+            echo "PnetCDF: extracted staged tarball into ${PNETCDF_SRCDIR}/"
+         fi
+
+         if [ -n "${PNETCDF_SRCDIR}" ]; then
+            : # already populated from the operator-staged tarball above
+         elif echo "PnetCDF: downloading release tarball ${PNETCDF_URL}" && wget -q "${PNETCDF_URL}" -O "${PNETCDF_TARBALL}"; then
             # Extract first, then locate the top-level dir on disk.
             # Earlier draft used `tar -tzf | head -n1` to probe the
             # name before extraction, but `head` closes the pipe
@@ -911,16 +1122,87 @@ else
             echo "PnetCDF: embedding rpath for amdflang-classic runtime at ${ROCM_PATH}/lib/llvm/lib"
          fi
 
-         if [ -n "${PNETCDF_FORTRAN_LIBS}" ]; then
-            echo "PnetCDF: linking amdflang Fortran runtime: ${PNETCDF_FORTRAN_LIBS}"
-            ./configure --prefix=${PNETCDF_PATH} MPICC=`which mpicc` MPIF90=`which mpifort` \
-                        "${PNETCDF_FORTRAN_PIC_FLAGS[@]}" \
-                        "${PNETCDF_AMDFLANG_RPATH_FLAGS[@]}" \
-                        LIBS="${PNETCDF_FORTRAN_LIBS}"
-         else
+         # ---------------------------------------------------------------------
+         # C++ runtime (-lstdc++) for the Cray MPI path.
+         #
+         # On a Cray, mpicc (mpich-wrappers, or cray-mpich's cc) links the GPU
+         # transport layer libmpi_gtl_hsa, which is C++ -- so libpnetcdf.so
+         # picks up NEEDED C++ runtime symbols (std::ios_base_library_init(),
+         # __cxa_call_terminate, ...). mpicc drives a C link that does NOT pull
+         # in libstdc++, so those symbols are left UNDEFINED in libpnetcdf.so
+         # and the very next utility link (ncmpigen, a C program) aborts:
+         #   libpnetcdf.so: undefined reference to `std::ios_base_library_init()'
+         #   libpnetcdf.so: undefined reference to `__cxa_call_terminate'
+         # (verified on rocm-7.2.3 / mpich-wrappers, RHEL 9 gcc-toolset-14 ld).
+         # Append -lstdc++ to LIBS so libpnetcdf.so links the C++ runtime and
+         # downstream consumers resolve the transitive symbols. Scoped to the
+         # Cray MPI (cray-mpich / mpich-wrappers, or CRAY_MPICH_VERSION /
+         # MPICH_DIR present); a no-op on OpenMPI/MVAPICH where the MPI does
+         # not drag in C++.
+         PNETCDF_CXX_LIBS=""
+         if [ "${MPI_MODULE}" = "cray-mpich" ] \
+              || [ "${MPI_MODULE#mpich-wrappers}" != "${MPI_MODULE}" ] \
+              || [ -n "${CRAY_MPICH_VERSION:-}" ] || [ -n "${MPICH_DIR:-}" ]; then
+            PNETCDF_CXX_LIBS="-lstdc++"
+            echo "PnetCDF: Cray MPI -> appending -lstdc++ (libpnetcdf.so needs the C++ runtime pulled in by the GPU GTL)"
+            # gcc-toolset C++ ABI-compat archive.
+            #
+            # The ROCm flang runtime archive (libflang_rt.runtime.a, built by
+            # AMD clang/22) and the cray-mpich GPU GTL reference newer
+            # libstdc++ symbols (e.g. std::ios_base_library_init(),
+            # _ZSt21ios_base_library_initv -- introduced in GCC 13). RHEL 9's
+            # *runtime* libstdc++.so.6 is GCC 11 (so.6.0.29) and does NOT
+            # export them; gcc-toolset-13/14 ship those newer symbols in a
+            # STATIC libstdc++_nonshared.a instead. g++ from the toolset adds
+            # this archive automatically, but here libtool drives the final
+            # libpnetcdf.so / ncmpigen link with the C compiler (amdclang),
+            # so a bare -lstdc++ resolves to GCC 11/12 libstdc++ and leaves
+            # std::ios_base_library_init() UNDEFINED -- the ncmpigen link
+            # failure on rocm-7.2.3. Discover the newest gcc-toolset
+            # libstdc++_nonshared.a that actually defines the symbol and
+            # append it (after -lstdc++) so the C-driver link resolves it.
+            _ns_archive=""
+            for _d in $(ls -d /opt/rh/gcc-toolset-*/root/usr/lib/gcc/x86_64-redhat-linux/* 2>/dev/null | sort -Vr); do
+               _cand="${_d}/libstdc++_nonshared.a"
+               # NOTE: grep -c (not grep -q) on purpose. Under `set -eo
+               # pipefail`, grep -q closes the pipe on first match -> nm gets
+               # SIGPIPE (non-zero) -> the pipeline (and the enclosing &&)
+               # evaluates false, so the archive was silently never selected.
+               # grep -c reads the whole stream (no early close, no SIGPIPE).
+               [ -f "${_cand}" ] || continue
+               _ns_cnt=$(nm -C "${_cand}" 2>/dev/null | grep -c "ios_base_library_init" || true)
+               if [ "${_ns_cnt:-0}" -gt 0 ]; then
+                  _ns_archive="${_cand}"; break
+               fi
+            done
+            unset _ns_cnt
+            if [ -n "${_ns_archive}" ]; then
+               PNETCDF_CXX_LIBS="-lstdc++ ${_ns_archive}"
+               echo "PnetCDF: adding gcc-toolset C++ compat archive ${_ns_archive} (provides std::ios_base_library_init for the ROCm flang runtime)"
+            fi
+            unset _ns_archive _cand _d
+         fi
+
+         # Combine the Fortran-runtime archive(s) and the C++ runtime into a
+         # single LIBS string (either may be empty).
+         PNETCDF_LIBS_COMBINED="${PNETCDF_FORTRAN_LIBS}"
+         if [ -n "${PNETCDF_CXX_LIBS}" ]; then
+            PNETCDF_LIBS_COMBINED="${PNETCDF_LIBS_COMBINED:+${PNETCDF_LIBS_COMBINED} }${PNETCDF_CXX_LIBS}"
+         fi
+
+         if [ -z "${PNETCDF_FORTRAN_LIBS}" ]; then
             echo "WARNING: could not locate amdflang Fortran runtime under ROCM_PATH=${ROCM_PATH:-<unset>};"
             echo "         libpnetcdf.so may have unresolved Fortran::runtime::* / _FortranA* symbols"
             echo "         and the subsequent netcdf-c utility link will fail."
+         else
+            echo "PnetCDF: linking amdflang Fortran runtime: ${PNETCDF_FORTRAN_LIBS}"
+         fi
+         if [ -n "${PNETCDF_LIBS_COMBINED}" ]; then
+            ./configure --prefix=${PNETCDF_PATH} MPICC=`which mpicc` MPIF90=`which mpifort` \
+                        "${PNETCDF_FORTRAN_PIC_FLAGS[@]}" \
+                        "${PNETCDF_AMDFLANG_RPATH_FLAGS[@]}" \
+                        LIBS="${PNETCDF_LIBS_COMBINED}"
+         else
             ./configure --prefix=${PNETCDF_PATH} MPICC=`which mpicc` MPIF90=`which mpifort` \
                         "${PNETCDF_FORTRAN_PIC_FLAGS[@]}" \
                         "${PNETCDF_AMDFLANG_RPATH_FLAGS[@]}"
@@ -960,7 +1242,16 @@ else
          fi
          mkdir build && cd build
 
+         # -DCMAKE_INSTALL_LIBDIR=lib: pin the library subdir to lib/ (not
+         # lib64/). CMake's GNUInstallDirs picks lib64/ on RHEL-family
+         # distros but lib/ on Debian/Ubuntu. The rest of this script (the
+         # post-build sanity gate, the modulefile prepend_path lines, and the
+         # netcdf-fortran build's discovery of libnetcdf) all assume lib/, so
+         # an unpinned RHEL build landed libnetcdf.so in lib64/ and tripped
+         # "expected netcdf-c library not found: .../lib/libnetcdf.so". Pinning
+         # to lib keeps the layout identical across distros.
          cmake -DCMAKE_INSTALL_PREFIX=${NETCDF_C_PATH} \
+   	       -DCMAKE_INSTALL_LIBDIR=lib \
    	       -DNETCDF_ENABLE_HDF5=ON -DNETCDF_ENABLE_DAP=ON \
    	       -DNETCDF_BUILD_UTILITIES=ON -DNETCDF_ENABLE_CDF5=ON \
    	       -DNETCDF_ENABLE_TESTS=OFF -DNETCDF_ENABLE_PARALLEL_TESTS=OFF \
@@ -1007,6 +1298,7 @@ else
 
          mkdir build && cd build
          cmake -DCMAKE_INSTALL_PREFIX=${NETCDF_F_PATH} \
+   	       -DCMAKE_INSTALL_LIBDIR=lib \
    	       -DENABLE_TESTS=OFF -DBUILD_EXAMPLES=OFF \
    	       -DCMAKE_Fortran_COMPILER=$F_COMPILER ..
 
@@ -1086,17 +1378,37 @@ else
    fi
    unset _lib
 
-   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit).
-   # The previous "if [ -d ] / if [ ! -w ] / else / SUDO=sudo / else
-   # / SUDO=sudo / echo / fi" block was a known-broken probe: in 8063
-   # the netcdf-c module dir was owned root:root mode 755, [ ! -w ]
-   # at probe time evaluated FALSE (printed "user has write access
-   # to netcdf-c module path"), then `tee` returned EACCES, and the
-   # whole script exited rc=1 -- failing AFTER a successful library
-   # build, the worst possible failure mode. Replaced with the same
-   # PKG_SUDO computation used at install-time elsewhere in this
-   # script (line 435): one source of truth, no probes that lie.
-   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   # Modulefile-write sudo decision.
+   #
+   # History: an early version used `[ ! -w ]` which LIED on a root:root
+   # mode-755 NFS module dir (job 8063): the test said writable, then `tee`
+   # hit EACCES and the script died rc=1 AFTER a successful build. That was
+   # replaced by an unconditional `sudo` for non-root -- which is the
+   # opposite failure on a Cray, where the module tree under /shareddata is
+   # USER-writable but the compute nodes have NO passwordless sudo, so the
+   # forced `sudo tee` died with "sudo: a password is required" (again AFTER
+   # a successful build). Use a REAL touch-probe (mktemp) of the nearest
+   # existing ancestor of the module dir -- the same reliable technique this
+   # script already uses for the install path (it actually writes a file, so
+   # it cannot lie the way `[ -w ]` does on NFS/ACL trees). Probe the
+   # netcdf-c module dir as representative; all three component module dirs
+   # are siblings under the same tree with the same permissions.
+   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+      PKG_SUDO_MOD=""
+   else
+      _mprobe="${NETCDF_C_MODULE_PATH}"
+      while [ ! -e "${_mprobe}" ]; do _mprobe="$(dirname "${_mprobe}")"; done
+      _mtest=$(mktemp --tmpdir="${_mprobe}" .netcdf-mod-probe.XXXXXX 2>/dev/null || true)
+      if [ -n "${_mtest}" ] && [ -f "${_mtest}" ]; then
+         rm -f "${_mtest}"
+         PKG_SUDO_MOD=""
+         echo "netcdf: module tree ancestor ${_mprobe} is user-writable (probe succeeded); not using sudo for modulefile writes"
+      else
+         PKG_SUDO_MOD="sudo"
+         echo "netcdf: module tree ancestor ${_mprobe} not user-writable (probe failed); using sudo for modulefile writes"
+      fi
+      unset _mprobe _mtest
+   fi
 
    # Provenance: capture this leaf script's git state for the modulefile
    # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
@@ -1121,6 +1433,22 @@ else
    fi
    unset _leaf_dir
 
+   # ── Modulefile flavor: Lua (Lmod) vs Tcl (classic Environment Modules) ─
+   # Lmod consumes <name>.lua; classic Tcl `environment-modules` consumes an
+   # extensionless Tcl file. Detect Lmod via its env markers; default to Tcl
+   # when Lmod is absent (this site runs Tcl Environment Modules 3.2.11 on the
+   # Cray). Mirrors extras/scripts/hdf5_setup.sh. _MODEXT is appended to each
+   # component's modulefile path; the per-component heredocs below branch on
+   # _MODFLAVOR to emit Lua or Tcl syntax.
+   if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+      _MODFLAVOR="lua"
+      _MODEXT=".lua"
+   else
+      _MODFLAVOR="tcl"
+      _MODEXT=""
+   fi
+   echo "netcdf: modulefile flavor = ${_MODFLAVOR} (ext='${_MODEXT}')"
+
    # ── pnetcdf modulefile (new, 2026-05-20) ─────────────────────────
    # Emit a first-class pnetcdf/${PNETCDF_VERSION} modulefile when this
    # run actually built PnetCDF. The netcdf-c modulefile heredoc below
@@ -1131,7 +1459,8 @@ else
    if [ "${ENABLE_PNETCDF}" = "ON" ] && [ "${_pre_existed_pnetcdf}" != "1" ]; then
       ${PKG_SUDO_MOD} mkdir -p ${PNETCDF_MODULE_PATH}
       # The - option suppresses tabs
-      cat <<-EOF | ${PKG_SUDO_MOD} tee ${PNETCDF_MODULE_PATH}/${PNETCDF_VERSION}.lua
+      if [ "${_MODFLAVOR}" = "lua" ]; then
+         cat <<-EOF | ${PKG_SUDO_MOD} tee ${PNETCDF_MODULE_PATH}/${PNETCDF_VERSION}${_MODEXT}
 	whatis("Parallel-NetCDF Library")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
@@ -1144,6 +1473,22 @@ else
 	setenv("PNETCDF_ROOT", base)
 	setenv("PNETCDF_PATH", base)
 EOF
+      else
+         cat <<-EOF | ${PKG_SUDO_MOD} tee ${PNETCDF_MODULE_PATH}/${PNETCDF_VERSION}${_MODEXT}
+	#%Module1.0
+	module-whatis "Parallel-NetCDF Library"
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+
+	set base "${PNETCDF_PATH}"
+	prepend-path LD_LIBRARY_PATH \$base/lib
+	prepend-path C_INCLUDE_PATH \$base/include
+	prepend-path CPLUS_INCLUDE_PATH \$base/include
+	prepend-path PATH \$base/bin
+	prepend-path PATH \$base
+	setenv PNETCDF_ROOT \$base
+	setenv PNETCDF_PATH \$base
+EOF
+      fi
    fi
 
    # ── netcdf-c modulefile ──────────────────────────────────────────
@@ -1175,30 +1520,39 @@ EOF
          # be the leaf dir itself, not a parent).
          HDF5_BUILT_AGAINST="${HDF5_BUILT_AGAINST%%/*}"
       fi
+      # Resolve the hdf5 + pnetcdf dependency module tokens (version-pinned
+      # where possible), then render them in the active modulefile syntax
+      # (Lua load("x") vs Tcl `module load x`).
+      _hdf5_dep="${HDF5_MODULE}"
       if [ -n "${HDF5_BUILT_AGAINST}" ]; then
-         NETCDF_C_HDF5_LOAD="load(\"${HDF5_MODULE}/${HDF5_BUILT_AGAINST}\")"
-         echo "netcdf-c modulefile: pinning hdf5 dependency to ${HDF5_MODULE}/${HDF5_BUILT_AGAINST}"
+         _hdf5_dep="${HDF5_MODULE}/${HDF5_BUILT_AGAINST}"
+         echo "netcdf-c modulefile: pinning hdf5 dependency to ${_hdf5_dep}"
       else
-         NETCDF_C_HDF5_LOAD="load(\"${HDF5_MODULE}\")"
-         echo "WARNING: could not extract HDF5 version from HDF5_ROOT='${HDF5_ROOT:-<unset>}'; falling back to unpinned load(\"${HDF5_MODULE}\")" >&2
+         echo "WARNING: could not extract HDF5 version from HDF5_ROOT='${HDF5_ROOT:-<unset>}'; falling back to unpinned hdf5 load" >&2
       fi
-
-      # PnetCDF load line: when this run links netcdf-c against a
-      # PnetCDF build, pin the version via load("pnetcdf/${PNETCDF_VERSION}")
-      # so the netcdf-c modulefile pulls in the matching pnetcdf module
-      # automatically. The pnetcdf module (emitted above) handles its
-      # own PATH/LD_LIBRARY_PATH/etc. -- no need to duplicate them here.
-      # ENABLE_PNETCDF=OFF builds (no parallel HDF5) leave this line
-      # empty so the netcdf-c modulefile doesn't try to load a pnetcdf
-      # module that doesn't exist.
-      NETCDF_C_PNETCDF_LOAD=""
+      # PnetCDF load line: when this run links netcdf-c against a PnetCDF
+      # build, pin the version so the netcdf-c modulefile pulls in the
+      # matching pnetcdf module automatically. ENABLE_PNETCDF=OFF builds
+      # leave it empty (no pnetcdf module to load).
+      _pnetcdf_dep=""
       if [ "${ENABLE_PNETCDF}" = "ON" ]; then
-         NETCDF_C_PNETCDF_LOAD="load(\"pnetcdf/${PNETCDF_VERSION}\")"
-         echo "netcdf-c modulefile: pinning pnetcdf dependency to pnetcdf/${PNETCDF_VERSION}"
+         _pnetcdf_dep="pnetcdf/${PNETCDF_VERSION}"
+         echo "netcdf-c modulefile: pinning pnetcdf dependency to ${_pnetcdf_dep}"
       fi
+      if [ "${_MODFLAVOR}" = "lua" ]; then
+         NETCDF_C_HDF5_LOAD="load(\"${_hdf5_dep}\")"
+         NETCDF_C_PNETCDF_LOAD=""
+         [ -n "${_pnetcdf_dep}" ] && NETCDF_C_PNETCDF_LOAD="load(\"${_pnetcdf_dep}\")"
+      else
+         NETCDF_C_HDF5_LOAD="module load ${_hdf5_dep}"
+         NETCDF_C_PNETCDF_LOAD=""
+         [ -n "${_pnetcdf_dep}" ] && NETCDF_C_PNETCDF_LOAD="module load ${_pnetcdf_dep}"
+      fi
+      unset _hdf5_dep _pnetcdf_dep
 
       # The - option suppresses tabs
-      cat <<-EOF | ${PKG_SUDO_MOD} tee ${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua
+      if [ "${_MODFLAVOR}" = "lua" ]; then
+         cat <<-EOF | ${PKG_SUDO_MOD} tee ${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}${_MODEXT}
 	whatis("Netcdf-c Library")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
@@ -1208,10 +1562,31 @@ EOF
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPATH", pathJoin(base, "include"))
+	prepend_path("FPATH", pathJoin(base, "include"))
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("PATH", base)
 	setenv("NETCDF_C_ROOT", base)
 EOF
+      else
+         cat <<-EOF | ${PKG_SUDO_MOD} tee ${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}${_MODEXT}
+	#%Module1.0
+	module-whatis "Netcdf-c Library"
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+
+	${NETCDF_C_HDF5_LOAD}
+	${NETCDF_C_PNETCDF_LOAD}
+	set base "${NETCDF_C_PATH}"
+	prepend-path LD_LIBRARY_PATH \$base/lib
+	prepend-path C_INCLUDE_PATH \$base/include
+	prepend-path CPLUS_INCLUDE_PATH \$base/include
+	prepend-path CPATH \$base/include
+	prepend-path FPATH \$base/include
+	prepend-path PATH \$base/bin
+	prepend-path PATH \$base
+	setenv NETCDF_C_ROOT \$base
+EOF
+      fi
    fi
 
    # ── netcdf-fortran modulefile ────────────────────────────────────
@@ -1237,7 +1612,8 @@ EOF
       # ldd traces showing exactly this hazard hitting
       # netcdf-fortran/4.6.2 on the live tree.
       # The - option suppresses tabs
-      cat <<-EOF | ${PKG_SUDO_MOD} tee ${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua
+      if [ "${_MODFLAVOR}" = "lua" ]; then
+         cat <<-EOF | ${PKG_SUDO_MOD} tee ${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}${_MODEXT}
 	whatis("Netcdf-fortran Library")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
@@ -1246,10 +1622,30 @@ EOF
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPATH", pathJoin(base, "include"))
+	prepend_path("FPATH", pathJoin(base, "include"))
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("PATH", base)
 	setenv("NETCDF_F_ROOT", base)
 EOF
+      else
+         cat <<-EOF | ${PKG_SUDO_MOD} tee ${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}${_MODEXT}
+	#%Module1.0
+	module-whatis "Netcdf-fortran Library"
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+
+	module load netcdf-c/${NETCDF_C_VERSION}
+	set base "${NETCDF_F_PATH}"
+	prepend-path LD_LIBRARY_PATH \$base/lib
+	prepend-path C_INCLUDE_PATH \$base/include
+	prepend-path CPLUS_INCLUDE_PATH \$base/include
+	prepend-path CPATH \$base/include
+	prepend-path FPATH \$base/include
+	prepend-path PATH \$base/bin
+	prepend-path PATH \$base
+	setenv NETCDF_F_ROOT \$base
+EOF
+      fi
    fi
 
 fi

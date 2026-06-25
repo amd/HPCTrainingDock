@@ -226,12 +226,41 @@ if [ "${BUILD_HDF5}" = "0" ]; then
    exit ${NOOP_RC}
 fi
 
+# ── Early sudo decision (see mpi4py_setup.sh) ───────────────────────
+# Determine whether privilege escalation is needed BEFORE the --replace
+# block and EXIT trap (both rm install/module paths via ${SUDO}). When the
+# operator owns a writable install tree (e.g. a user-writable
+# /shareddata/opt) no sudo is needed -- and forcing it would hit a password
+# prompt that fails on a node where the user has no sudo. Probe the nearest
+# EXISTING ancestor of HDF5_PATH (the leaf dir does not exist yet). The
+# build branch re-affirms this below.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   SUDO=""
+else
+   _probe="${HDF5_PATH}"
+   while [ ! -e "${_probe}" ]; do _probe="$(dirname "${_probe}")"; done
+   # Real write test (mktemp), NOT `[ -w ]`: on NFS `-w` is a LYING probe --
+   # it reported "writable" on the compute node for a root:root 0755 tree
+   # where actual writes / rm fail (the exact failure mode netcdf_setup.sh
+   # warns about). Mirrors the cupy/rocshmem mktemp probe.
+   _wtest=$(mktemp --tmpdir="${_probe}" .hdf5-write-probe.XXXXXX 2>/dev/null || true)
+   if [ -n "${_wtest}" ] && [ -f "${_wtest}" ]; then
+      rm -f "${_wtest}"
+      SUDO=""
+      echo "install path ancestor ${_probe} is writable (probe succeeded); not using sudo"
+   else
+      echo "install path ancestor ${_probe} not user-writable (probe failed); using sudo"
+   fi
+   unset _wtest
+fi
+
 if [ "${REPLACE}" = "1" ]; then
    echo "[hdf5 --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${HDF5_PATH}"
-   echo "  modulefile:  ${MODULE_PATH}/${HDF5_VERSION}.lua"
+   echo "  modulefile:  ${MODULE_PATH}/${HDF5_VERSION}{,.lua}"
    ${SUDO} rm -rf "${HDF5_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/${HDF5_VERSION}.lua"
+   # Remove both flavors (Lmod .lua and Tcl no-extension).
+   ${SUDO} rm -f  "${MODULE_PATH}/${HDF5_VERSION}.lua" "${MODULE_PATH}/${HDF5_VERSION}"
 fi
 
 # ── Existence guard: skip if already installed (see hypre_setup.sh) ──
@@ -246,10 +275,17 @@ fi
 
 _hdf5_on_exit() {
    local rc=$?
+   # ${SUDO} verbatim (NOT ${SUDO:-sudo}): the early-probe may set SUDO=""
+   # for an operator-writable tree, and cleanup must then run WITHOUT sudo.
+   # Build-dir cleanup is folded in here (HDF5_BUILD_DIR set under the
+   # source-build branch) so a single EXIT trap does both jobs -- the prior
+   # separate `trap '... rm HDF5_BUILD_DIR' EXIT` OVERWROTE this handler,
+   # disabling fail-cleanup during source builds.
+   [ -n "${HDF5_BUILD_DIR:-}" ] && ${SUDO} rm -rf "${HDF5_BUILD_DIR}"
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[hdf5 fail-cleanup] rc=${rc}: removing partial install + modulefile"
-      ${SUDO:-sudo} rm -rf "${HDF5_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${HDF5_VERSION}.lua"
+      ${SUDO} rm -rf "${HDF5_PATH}"
+      ${SUDO} rm -f  "${MODULE_PATH}/${HDF5_VERSION}.lua" "${MODULE_PATH}/${HDF5_VERSION}"
    elif [ ${rc} -ne 0 ]; then
       echo "[hdf5 fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -341,22 +377,12 @@ else
       #source /etc/profile.d/lmod.sh
       #source /etc/profile.d/z00_lmod.sh
 
-      # don't use sudo if user has write access to install path
-      if [ -d "$HDF5_PATH" ]; then
-         # don't use sudo if user has write access to install path
-         if [ -w ${HDF5_PATH} ]; then
-            SUDO=""
-         else
-            echo "WARNING: using an install path that requires sudo"
-         fi
-      else
-         # if install path does not exist yet, the check on write access will fail
-         echo "WARNING: using sudo, make sure you have sudo privileges"
-      fi
-
+      # SUDO was already decided by the early-probe block above (writable
+      # ancestor -> ""). Honor it instead of re-probing the not-yet-created
+      # leaf dir (which always forced sudo).
       ${SUDO} mkdir -p ${HDF5_PATH}
       ${SUDO} mkdir -p ${HDF5_PATH}/zlib
-      if [[ "${USER}" != "root" ]]; then
+      if [ -n "${SUDO}" ] && [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod -R a+w ${HDF5_PATH}
       fi
 
@@ -368,8 +394,10 @@ else
       # cleanup even on build failure (we have set -e). Audit basis:
       # 7950 hdf5 took ~11m50s with build under
       # /home/admin/repos/HPCTrainingDock/hdf5/...
+      # NOTE: build-dir cleanup is consolidated into _hdf5_on_exit (set as
+      # the EXIT trap above) so it also runs fail-cleanup; do NOT install a
+      # second EXIT trap here (that would overwrite _hdf5_on_exit).
       HDF5_BUILD_DIR=$(mktemp -d -t hdf5-build.XXXXXX)
-      trap '[ -n "${HDF5_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${HDF5_BUILD_DIR}"' EXIT
       cd "${HDF5_BUILD_DIR}"
 
       # --depth=1 to skip ~10 years of history we don't need; the
@@ -421,11 +449,108 @@ else
       #${SUDO} ./configure --prefix=${HDF5_PATH}/libaec
       #${SUDO} make install
 
+      # ── MPI module auto-correct on a Cray PE ─────────────────────────
+      # The leaf default MPI_MODULE is "openmpi", but a Cray system ships
+      # cray-mpich (no openmpi module exists) -- preflight would fail. If
+      # cray-mpich is active and the caller did not override the MPI, switch
+      # to cray-mpich so the prereq load and the parallel build use the
+      # PrgEnv's own MPI. (main_setup.sh also threads --mpi-module cray-mpich
+      # when MPICH_DIR is set; this makes the leaf correct standalone too.)
+      if [ "${MPI_MODULE}" = "openmpi" ] \
+           && { [ -n "${CRAY_MPICH_VERSION:-}" ] || [ -n "${MPICH_DIR:-}" ]; }; then
+         MPI_MODULE="cray-mpich"
+         echo "HDF5: Cray MPICH detected; MPI_MODULE -> cray-mpich"
+      fi
+
+      # ── mpich-wrappers resolution (new-flang mpi.mod on a Cray) ──────
+      # cray-mpich's amd/rocm-compiler mpi.mod is CLASSIC-Flang V34, which
+      # the new LLVM Flang (amdflang / ftn on ROCm 7.x) cannot read -- a
+      # parallel-Fortran `use mpi` build with cc/CC/ftn fails. The
+      # mpich-wrappers leaf builds a standalone MPICH with FC=amdflang
+      # (NEW-flang mpi.mod, MPICH-ABI compatible with cray-mpich). When the
+      # caller asks for it (main_setup threads --mpi-module mpich-wrappers
+      # once that leaf is built), resolve the bare name to the concrete,
+      # version-matched modulefile token by scanning MODULEPATH
+      # (mpich-wrappers/${ROCM_VERSION} first, then a bare mpich-wrappers).
+      # If none is found, fall back to cray-mpich so the build still works
+      # (C/C++ parallel; the Fortran-MPI probe below downgrades as needed).
+      if [ "${MPI_MODULE}" = "mpich-wrappers" ]; then
+         _mw_tok=""
+         _OLD_IFS="${IFS}"; IFS=":"
+         for _d in ${MODULEPATH:-}; do
+            for _cand in "mpich-wrappers/${ROCM_VERSION}" "mpich-wrappers"; do
+               if [ -e "${_d}/${_cand}" ] || [ -e "${_d}/${_cand}.lua" ]; then
+                  _mw_tok="${_cand}"; break 2
+               fi
+            done
+         done
+         IFS="${_OLD_IFS}"; unset _OLD_IFS _d _cand
+         if [ -n "${_mw_tok}" ]; then
+            MPI_MODULE="${_mw_tok}"
+            echo "HDF5: using mpich-wrappers module '${_mw_tok}' (new-flang mpi.mod)"
+         else
+            echo "HDF5: WARNING: --mpi-module mpich-wrappers requested but no mpich-wrappers modulefile found on MODULEPATH; falling back to cray-mpich"
+            MPI_MODULE="cray-mpich"
+         fi
+         unset _mw_tok
+      fi
+
       # default build is serial hdf5
       ENABLE_PARALLEL="OFF"
       REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${MPI_MODULE}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
-      if [[ `which mpicc | wc -l` -eq 1 ]]; then
+
+      # ── Compiler / MPI wrapper selection ─────────────────────────────
+      # The Fortran story is the whole reason a local HDF5 may be needed:
+      # an hdf5.mod is only readable by the SAME Fortran compiler + .mod
+      # format that produced it. On ROCm 7.x the AMD Fortran compiler
+      # (amdflang / Cray `ftn` under PrgEnv-amd) is the NEW LLVM Flang
+      # (emits `!mod$ v1` .mod), whereas cray-hdf5's `amd/<v>` variant ships
+      # CLASSIC-Flang `V34` .mod files that new flang rejects ("File has
+      # invalid checksum"). So we must build with a Fortran compiler whose
+      # .mod format matches what users actually compile with, AND link the
+      # SAME MPI as the rest of the PrgEnv stack.
+      #
+      # Preference order:
+      #   1. mpich-wrappers mpicc/mpicxx/mpifort -- standalone MPICH built
+      #      with FC=amdflang (new-flang mpi.mod, MPICH-ABI compatible with
+      #      cray-mpich). This is the ONLY parallel-Fortran path that works
+      #      on a Cray with the new LLVM Flang, because cray-mpich's own
+      #      amd/rocm-compiler mpi.mod is classic-Flang V34 (unreadable by
+      #      new flang). The mpich-wrappers module front-loads its bin so
+      #      mpicc/mpifort resolve to it; mpifort drives amdflang.
+      #   2. Cray PE wrappers cc/CC/ftn  -- when cray-mpich is active and no
+      #      mpich-wrappers exist. C/C++ parallel works; Fortran `use mpi`
+      #      works only when ftn is classic Flang or crayftn (PrgEnv-cray).
+      #   3. MPI wrappers mpicc/mpicxx/mpifort -- OpenMPI / MVAPICH path.
+      #      (rocmplus OpenMPI is configured against amdflang, which on
+      #      ROCm 7.x is the new flang too, so .mod is consistent.)
+      #   4. serial (no MPI wrapper found).
+      if [ "${MPI_MODULE#mpich-wrappers}" != "${MPI_MODULE}" ] \
+           && command -v mpicc   >/dev/null 2>&1 \
+           && command -v mpifort >/dev/null 2>&1; then
+         # mpich-wrappers: MPICH built with amdflang -> new-flang mpi.mod
+         # (preflight loaded the module above, front-loading its bin/lib/
+         # include). C/C++ use the wrapper's gcc/g++ backends; Fortran uses
+         # amdflang, matching what users compile with on ROCm 7.x.
+         ENABLE_PARALLEL="ON"
+         C_COMPILER=$(command -v mpicc)
+         CXX_COMPILER=$(command -v mpicxx)
+         F_COMPILER=$(command -v mpifort)
+         echo "HDF5: mpich-wrappers MPI -> mpicc/mpicxx/mpifort (new-flang mpi.mod)."
+         echo "HDF5: Fortran wrapper mpifort -> $(${F_COMPILER} --version 2>/dev/null | head -1)"
+      elif { [ "${MPI_MODULE}" = "cray-mpich" ] || [ -n "${CRAY_MPICH_VERSION:-}" ] || [ -n "${MPICH_DIR:-}" ]; } \
+           && command -v ftn >/dev/null 2>&1 \
+           && command -v cc  >/dev/null 2>&1 \
+           && command -v CC  >/dev/null 2>&1; then
+         # Cray PE: use the craype wrappers (cray-mpich + PrgEnv compilers).
+         ENABLE_PARALLEL="ON"
+         C_COMPILER=$(command -v cc)
+         CXX_COMPILER=$(command -v CC)
+         F_COMPILER=$(command -v ftn)
+         echo "HDF5: Cray PE detected -> cc/CC/ftn wrappers (cray-mpich)."
+         echo "HDF5: Fortran wrapper ftn -> $(${F_COMPILER} --version 2>/dev/null | head -1)"
+      elif [[ `which mpicc | wc -l` -eq 1 ]]; then
 	 # if mpicc is found in the path, build hdf5 parallel
          ENABLE_PARALLEL="ON"
 	 C_COMPILER=`which mpicc`
@@ -474,6 +599,33 @@ else
       fi
       if [ "${F_COMPILER_INPUT}" != "" ]; then
          F_COMPILER=${F_COMPILER_INPUT}
+      fi
+
+      # ── Cray PE: pin flang-new for the ftn/cc/CC wrappers ────────────
+      # On a Cray, F_COMPILER resolves to the craype `ftn` wrapper (see the
+      # compiler-selection block above). Which Fortran compiler that wrapper
+      # actually drives is governed by AMD_COMPILER_TYPE: the amd-new
+      # modulefile (loaded by PrgEnv-amd-new/8.7.0-<ver>) sets
+      # AMD_COMPILER_TYPE=DEFAULT so ftn/cc/CC drive the NEW LLVM
+      # amdflang/amdclang; when it is UNSET the wrappers fall back to
+      # flang-CLASSIC (and emit an 'Unrecognized' warning).
+      #
+      # The rocmplus install path loads only `rocm/<v>` (see
+      # bare_system/run_rocmplus_install.sbatch) -- NOT PrgEnv-amd-new --
+      # so AMD_COMPILER_TYPE is not set and ftn silently drops to
+      # flang-classic. classic links its runtime dynamically (NEEDED
+      # libflang.so), whereas flang-new links it statically; the resulting
+      # hdf5.mod is also classic 'V34' which new-flang consumers
+      # (netcdf-fortran) cannot read. Pin it here so hdf5 builds with
+      # flang-new, consistent with PrgEnv-amd-new and with the
+      # netcdf_setup.sh companion pin. Respect an operator-set value.
+      # No-op off a Cray PE (only the craype AMD wrappers read it).
+      if { [ -n "${CRAYPE_VERSION:-}" ] || [ -n "${CRAY_MPICH_VERSION:-}" ] \
+             || [ -n "${MPICH_DIR:-}" ] || [ "${MPI_MODULE}" = "cray-mpich" ] \
+             || [ "${MPI_MODULE#mpich-wrappers}" != "${MPI_MODULE}" ]; } \
+           && command -v ftn >/dev/null 2>&1; then
+         export AMD_COMPILER_TYPE="${AMD_COMPILER_TYPE:-DEFAULT}"
+         echo "HDF5: Cray PE detected; AMD_COMPILER_TYPE=${AMD_COMPILER_TYPE} (ftn/cc/CC -> flang-new, matches PrgEnv-amd-new)"
       fi
 
       cd ..
@@ -600,7 +752,7 @@ else
          ${SUDO} find ${HDF5_PATH} -type d -execdir chown root:root "{}" +
       fi
 
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} chmod go-w ${HDF5_PATH}
       fi
 
@@ -608,9 +760,25 @@ else
 
    # Create a module file for hdf5
    #
-   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
-   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
-   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   # Modulefile-write sudo: probe the nearest existing ancestor of
+   # MODULE_PATH for writability (mirrors the install-path early-probe).
+   # When the operator owns a writable module tree (e.g. /shareddata/
+   # modules) no sudo is used; otherwise fall back to sudo.
+   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+      PKG_SUDO_MOD=""
+   else
+      _mprobe="${MODULE_PATH}"
+      while [ ! -e "${_mprobe}" ]; do _mprobe="$(dirname "${_mprobe}")"; done
+      # Real write test (mktemp), NOT `[ -w ]` -- NFS -w lies (see above).
+      _mtest=$(mktemp --tmpdir="${_mprobe}" .hdf5-mod-probe.XXXXXX 2>/dev/null || true)
+      if [ -n "${_mtest}" ] && [ -f "${_mtest}" ]; then
+         rm -f "${_mtest}"
+         PKG_SUDO_MOD=""
+      else
+         PKG_SUDO_MOD="sudo"
+      fi
+      unset _mprobe _mtest
+   fi
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    # Provenance: capture this leaf script's git state for the modulefile
@@ -636,13 +804,73 @@ else
    fi
    unset _leaf_dir
 
-   # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${HDF5_VERSION}.lua
+   # ── Modulefile flavor: Lua (Lmod) vs Tcl (classic Environment Modules) ─
+   # Lmod consumes <name>.lua; classic Tcl `environment-modules` consumes an
+   # extensionless Tcl file. Detect Lmod via its env markers; default to Tcl
+   # when Lmod is absent (this site runs Tcl Environment Modules 3.2.11).
+   if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+      _MODFILE="${MODULE_PATH}/${HDF5_VERSION}.lua"
+      _MODFLAVOR="lua"
+   else
+      _MODFILE="${MODULE_PATH}/${HDF5_VERSION}"
+      _MODFLAVOR="tcl"
+   fi
+
+   # For a parallel build, the HDF5 libs link a specific MPI; require that
+   # MPI module so a consumer cannot load a mismatched (or no) MPI. Only
+   # emitted when parallel and an MPI module name is known.
+   _EMIT_MPI_PREREQ=0
+   if [ "${ENABLE_PARALLEL}" = "ON" ] && [ -n "${MPI_MODULE}" ]; then
+      _EMIT_MPI_PREREQ=1
+   fi
+
+   _HDF5_MOD_BASE="${HDF5_PATH}/HDF_Group/HDF5/${HDF5_VERSION}"
+
+   # A consumer satisfies the ROCm dependency with either the local TheRock
+   # real module (rocm-new/<ver>) or its alias (rocm/<ver>): PrgEnv-amd-new
+   # loads rocm-new directly, while a bare `module load rocm/<ver>` pulls it
+   # in under the alias name. Tcl `prereq` with several names is satisfied if
+   # ANY is loaded; Lmod's equivalent is prereq_any(). Non-rocm module names
+   # are emitted unchanged.
+   # AAC7 gate: the rocm-new/<ver> alias is only meaningful on a TheRock /
+   # PrgEnv-amd-new site (AAC7), where rocm-new is a real modulefile. On a
+   # stock site (e.g. AAC6) only rocm/<ver> exists, so widening the prereq
+   # to rocm-new would reference a phantom module name -- gate it on whether
+   # a rocm-new modulefile is actually discoverable on MODULEPATH. When it is
+   # not, emit the original plain prereq("rocm/<ver>").
+   rocm_new_available() {
+      local _d _OIFS="${IFS}"; IFS=":"
+      for _d in ${MODULEPATH:-}; do
+         if [ -d "${_d}/rocm-new" ]; then IFS="${_OIFS}"; return 0; fi
+      done
+      IFS="${_OIFS}"; return 1
+   }
+   _RPV="${ROCM_MODULE_NAME##*/}"
+   case "${ROCM_MODULE_NAME}" in
+      rocm/*|rocm-new/*)
+         if rocm_new_available; then
+            ROCM_PREREQ_TCL="rocm-new/${_RPV} rocm/${_RPV}"
+            ROCM_PREREQ_LUA="prereq_any(\"rocm-new/${_RPV}\", \"rocm/${_RPV}\")"
+         else
+            ROCM_PREREQ_TCL="rocm/${_RPV}"
+            ROCM_PREREQ_LUA="prereq(\"rocm/${_RPV}\")"
+         fi
+         ;;
+      *)
+         ROCM_PREREQ_TCL="${ROCM_MODULE_NAME}"
+         ROCM_PREREQ_LUA="prereq(\"${ROCM_MODULE_NAME}\")"
+         ;;
+   esac
+   unset _RPV
+
+   # The - option suppresses leading tabs in the heredoc body.
+   if [ "${_MODFLAVOR}" = "lua" ]; then
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
 	whatis("HDF5 Data Model")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
-	prereq("${ROCM_MODULE_NAME}")
-	local base = "${HDF5_PATH}/HDF_Group/HDF5/${HDF5_VERSION}"
+	${ROCM_PREREQ_LUA}
+	local base = "${_HDF5_MOD_BASE}"
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
@@ -656,6 +884,35 @@ else
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("PATH", base)
 EOF
+      if [ "${_EMIT_MPI_PREREQ}" = "1" ]; then
+         echo "prereq(\"${MPI_MODULE}\")" | ${PKG_SUDO_MOD} tee -a "${_MODFILE}" >/dev/null
+      fi
+   else
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
+	#%Module1.0
+	module-whatis "HDF5 Data Model"
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+
+	prereq ${ROCM_PREREQ_TCL}
+	set base "${_HDF5_MOD_BASE}"
+	prepend-path LD_LIBRARY_PATH \$base/lib
+	prepend-path C_INCLUDE_PATH \$base/include
+	prepend-path CPLUS_INCLUDE_PATH \$base/include
+	setenv HDF5_PATH \$base
+	setenv HDF5_ROOT \$base
+	setenv HDF5_C_COMPILER "${C_COMPILER}"
+	setenv HDF5_F_COMPILER "${F_COMPILER}"
+	setenv HDF5_CXX_COMPILER "${CXX_COMPILER}"
+	setenv HDF5_ENABLE_PARALLEL "${ENABLE_PARALLEL}"
+	setenv HDF5_MPI_MODULE "${MPI_MODULE}"
+	prepend-path PATH \$base/bin
+	prepend-path PATH \$base
+EOF
+      if [ "${_EMIT_MPI_PREREQ}" = "1" ]; then
+         echo "prereq ${MPI_MODULE}" | ${PKG_SUDO_MOD} tee -a "${_MODFILE}" >/dev/null
+      fi
+   fi
+   unset _MODFILE _MODFLAVOR _EMIT_MPI_PREREQ _HDF5_MOD_BASE ROCM_PREREQ_TCL ROCM_PREREQ_LUA
 
 fi
 
