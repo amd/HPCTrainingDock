@@ -199,12 +199,19 @@ if [ "${BUILD_MDB}" = "0" ]; then
    exit ${NOOP_RC}
 fi
 
+# Two modulefile flavors: Lmod consumes <ver>.lua, classic Tcl Environment
+# Modules consumes an extensionless Tcl file. Track both so --replace and
+# the fail-cleanup trap remove whichever was written previously (and so a
+# Tcl site -- e.g. this Cray -- gets a loadable modulefile; see the
+# flavor-detection block at modulefile creation below).
+MODULEFILE_LUA="${MODULE_PATH}/${MDB_VERSION}.lua"
+MODULEFILE_TCL="${MODULE_PATH}/${MDB_VERSION}"
 if [ "${REPLACE}" = "1" ]; then
    echo "[mdb --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${MDB_PATH}"
-   echo "  modulefile:  ${MODULE_PATH}/${MDB_VERSION}.lua"
+   echo "  modulefile:  ${MODULEFILE_LUA} (+ Tcl flavor)"
    ${SUDO} rm -rf "${MDB_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/${MDB_VERSION}.lua"
+   ${SUDO} rm -f  "${MODULEFILE_LUA}" "${MODULEFILE_TCL}"
 fi
 
 # ── Existence guard: skip if already installed (see hypre_setup.sh) ──
@@ -226,7 +233,7 @@ _mdb_on_exit() {
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[mdb fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO:-sudo} rm -rf "${MDB_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${MDB_VERSION}.lua"
+      ${SUDO:-sudo} rm -f  "${MODULEFILE_LUA}" "${MODULEFILE_TCL}"
    elif [ ${rc} -ne 0 ]; then
       echo "[mdb fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -251,14 +258,26 @@ trap _mdb_on_exit EXIT
 #      basename == module name) but wrong for therock-afar.
 #   3. rocm/${ROCM_VERSION}: standalone-invocation fallback when
 #      neither LOADEDMODULES nor ROCM_PATH is populated.
+# Two-pass over LOADEDMODULES: prefer a rocm/* matching the requested
+# ROCM_VERSION before falling back to the first rocm/*. A Cray
+# PrgEnv-amd-new shell can have several rocm/* loaded at once (e.g.
+# rocm/7.0.3 AND rocm/7.2.3 alongside the PrgEnv's rocm-new/7.2.3);
+# taking the first match would key the build + modulefile on the wrong SDK.
 ROCM_MODULE_NAME=""
 if [[ -n "${LOADEDMODULES:-}" ]]; then
    _OLD_IFS="${IFS}"; IFS=":"
    for _m in ${LOADEDMODULES}; do
       case "${_m}" in
-         rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+         rocm/${ROCM_VERSION}) ROCM_MODULE_NAME="${_m}"; break ;;
       esac
    done
+   if [[ -z "${ROCM_MODULE_NAME}" ]]; then
+      for _m in ${LOADEDMODULES}; do
+         case "${_m}" in
+            rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+         esac
+      done
+   fi
    IFS="${_OLD_IFS}"; unset _OLD_IFS _m
 fi
 if [[ -z "${ROCM_MODULE_NAME}" ]]; then
@@ -303,7 +322,7 @@ else
 
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   if [ -f ${CACHE_FILES}/mdb-v${MDB_VERSION}.tgz ]; then
+   if [ -f "${CACHE_FILES}/mdb-v${MDB_VERSION}.tgz" ]; then
       echo ""
       echo "============================"
       echo " Installing Cached mdb"
@@ -328,20 +347,31 @@ else
       echo "============================"
       echo ""
 
-      if [ -d "$MDB_PATH" ]; then
-         # don't use sudo if user has write access to install path
-         if [ -w ${MDB_PATH} ]; then
-            SUDO=""
-         else
-            echo "WARNING: using an install path that requires sudo"
-         fi
+      # Install-path sudo: probe the nearest existing ancestor of MDB_PATH
+      # for user-writability. The old `[ -w $MDB_PATH ]` test only fired
+      # when the leaf dir already existed; for a fresh install it left
+      # SUDO=sudo even on a user-owned tree, which fails on a cluster with
+      # no passwordless sudo (this Cray). Walk up to the first existing dir
+      # and probe it. Mirrors the petsc/rocshmem writability probe.
+      if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+         SUDO=""
       else
-         # if install path does not exist yet, the check on write access will fail
-         echo "WARNING: using sudo, make sure you have sudo privileges"
+         _iprobe="${MDB_PATH}"
+         while [ ! -e "${_iprobe}" ]; do _iprobe="$(dirname "${_iprobe}")"; done
+         _itest=$(mktemp --tmpdir="${_iprobe}" .mdb-inst-probe.XXXXXX 2>/dev/null || true)
+         if [ -n "${_itest}" ] && [ -f "${_itest}" ]; then
+            rm -f "${_itest}"
+            SUDO=""
+            echo "mdb: install ancestor ${_iprobe} is user-writable (probe succeeded); not using sudo for install"
+         else
+            SUDO="sudo"
+            echo "mdb: install ancestor ${_iprobe} not user-writable (probe failed); using sudo for install"
+         fi
+         unset _iprobe _itest
       fi
 
       ${SUDO} mkdir -p $MDB_PATH
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} chmod a+w $MDB_PATH
       fi
 
@@ -359,13 +389,39 @@ else
       fi
       cd mdb
 
-      # Build the wheel inside a per-job venv (cleaner than touching
-      # the host python3) and install into ${MDB_PATH} via pip
-      # --target so the install is self-contained and doesn't depend
-      # on the venv surviving past end-of-build. /usr/bin/env python3
-      # below will resolve to whichever python the consumer has on
-      # PATH at `module load mdb` time.
-      python3 -m venv "${MDB_BUILD_ROOT}/mdb_build"
+      # ── Pick a Python >= 3.10 (mdb requires it) ──────────────────────
+      # mdb's pyproject pins requires-python >= 3.10. On RHEL9 the default
+      # `python3` is 3.9, so a naive `python3 -m venv` install dies with
+      # "requires a different Python: 3.9.x not in '>=3.10'". Prefer the
+      # plain `python3` when it is already >= 3.10; otherwise fall back to
+      # the newest python3.1x on PATH (RHEL9 ships /usr/bin/python3.11; a
+      # Cray PE also offers cray-python). If none is found, mark the build
+      # uninstallable (NOOP_RC) rather than failing the whole sweep.
+      _py_ok() { "$1" -c "import sys; sys.exit(0 if sys.version_info[:2] >= (3,10) else 1)" >/dev/null 2>&1; }
+      PYTHON_BIN=""
+      if command -v python3 >/dev/null 2>&1 && _py_ok python3; then
+         PYTHON_BIN="$(command -v python3)"
+      else
+         for _c in python3.13 python3.12 python3.11 python3.10; do
+            if command -v "${_c}" >/dev/null 2>&1 && _py_ok "${_c}"; then
+               PYTHON_BIN="$(command -v "${_c}")"; break
+            fi
+         done
+      fi
+      if [ -z "${PYTHON_BIN}" ]; then
+         echo "[mdb] no Python >= 3.10 found on PATH (mdb requires >=3.10); marking uninstallable."
+         echo "      load a newer python (e.g. 'module load cray-python') and re-run."
+         exit ${NOOP_RC}
+      fi
+      echo "mdb: using ${PYTHON_BIN} ($(${PYTHON_BIN} --version 2>&1)) for the build venv"
+
+      # Build inside a per-job venv (cleaner than touching the host python)
+      # and install into ${MDB_PATH} via pip --target so the install is
+      # self-contained and doesn't depend on the venv surviving past
+      # end-of-build. The console-script shebang is rewritten below to
+      # ${PYTHON_BIN} so `mdb` runs under a >=3.10 interpreter regardless
+      # of the consumer's default python3.
+      "${PYTHON_BIN}" -m venv "${MDB_BUILD_ROOT}/mdb_build"
       # shellcheck disable=SC1091
       source "${MDB_BUILD_ROOT}/mdb_build/bin/activate"
       python3 -m pip install --upgrade pip
@@ -381,14 +437,16 @@ else
       # disappears with the EXIT trap at end-of-job, so any
       # PATH-resolved `mdb` afterwards would fail with "bad
       # interpreter". Same root cause + same fix as
-      # pytorch_setup.sh / cupy_setup.sh: rewrite to /usr/bin/env
-      # python3, which works because the mdb modulefile prepends
-      # ${MDB_PATH} onto PYTHONPATH so the mdb package is
-      # importable under the system python3 once `module load mdb`
-      # is in effect.
+      # pytorch_setup.sh / cupy_setup.sh, but we pin the shebang to the
+      # ABSOLUTE ${PYTHON_BIN} chosen above (a >=3.10 interpreter) rather
+      # than /usr/bin/env python3: on RHEL9 the consumer's default python3
+      # is 3.9, under which the mdb package (requires >=3.10) won't even
+      # import. ${PYTHON_BIN} is a stable system/Cray interpreter path, so
+      # `mdb` works after `module load mdb` regardless of the default
+      # python3 (the modulefile still prepends ${MDB_PATH} onto PYTHONPATH).
       if [ -d "${MDB_PATH}/bin" ]; then
          ${SUDO} find ${MDB_PATH}/bin -maxdepth 1 -type f \
-            -exec sed -i '1s|^#!.*python3.*$|#!/usr/bin/env python3|' {} + 2>/dev/null || true
+            -exec sed -i '1s|^#!.*python3.*$|#!'"${PYTHON_BIN}"'|' {} + 2>/dev/null || true
       fi
 
       if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
@@ -396,7 +454,7 @@ else
          ${SUDO} find $MDB_PATH -type d -execdir chown root:root "{}" +
       fi
 
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} chmod go-w $MDB_PATH
       fi
 
@@ -407,9 +465,26 @@ else
 
    # Create a module file for mdb
    #
-   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
-   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
-   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   # Modulefile-write sudo: probe the module tree for user-writability so a
+   # user-owned module tree (a Cray $HOME deployment or a standalone run)
+   # needs no sudo, and forcing it would hit a password prompt that fails
+   # where the user has no sudo. Mirrors petsc/netcdf_setup.sh.
+   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+      PKG_SUDO_MOD=""
+   else
+      _mprobe="${MODULE_PATH}"
+      while [ ! -e "${_mprobe}" ]; do _mprobe="$(dirname "${_mprobe}")"; done
+      _mtest=$(mktemp --tmpdir="${_mprobe}" .mdb-mod-probe.XXXXXX 2>/dev/null || true)
+      if [ -n "${_mtest}" ] && [ -f "${_mtest}" ]; then
+         rm -f "${_mtest}"
+         PKG_SUDO_MOD=""
+         echo "mdb: module tree ancestor ${_mprobe} is user-writable (probe succeeded); not using sudo for modulefile writes"
+      else
+         PKG_SUDO_MOD="sudo"
+         echo "mdb: module tree ancestor ${_mprobe} not user-writable (probe failed); using sudo for modulefile writes"
+      fi
+      unset _mprobe _mtest
+   fi
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    # Provenance: capture this leaf script's git state for the modulefile
@@ -435,8 +510,21 @@ else
    fi
    unset _leaf_dir
 
-   # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${MDB_VERSION}.lua
+   # ── Modulefile flavor: Lua (Lmod) vs Tcl (classic Environment Modules) ─
+   # Lmod consumes <ver>.lua; classic Tcl `environment-modules` consumes an
+   # extensionless Tcl file. Detect Lmod via its env markers; default to Tcl
+   # when Lmod is absent (this Cray runs Tcl Environment Modules). Without
+   # this the .lua file is invisible to a Tcl `module` and `module load
+   # mdb/...` fails. Mirrors hdf5/netcdf/fftw/petsc/rocshmem.
+   if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+      MODULEFILE="${MODULEFILE_LUA}"; MODFLAVOR="lua"
+   else
+      MODULEFILE="${MODULEFILE_TCL}"; MODFLAVOR="tcl"
+   fi
+
+   # The - option suppresses leading tabs.
+   if [ "${MODFLAVOR}" = "lua" ]; then
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULEFILE}
 	whatis("mdb: an MPI-aware frontend for serial debuggers (gdb / lldb / rocgdb)")
 	whatis("Upstream: https://github.com/TomMelt/mdb")
 	whatis("Version:  ${MDB_VERSION}")
@@ -447,5 +535,19 @@ else
 	prepend_path("PATH","${MDB_PATH}/bin")
 	setenv("MDB_HOME","${MDB_PATH}")
 EOF
+   else
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULEFILE}
+	#%Module1.0
+	module-whatis "mdb: an MPI-aware frontend for serial debuggers (gdb / lldb / rocgdb)"
+	module-whatis "Upstream: https://github.com/TomMelt/mdb"
+	module-whatis "Version:  ${MDB_VERSION}"
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+
+	prereq ${ROCM_MODULE_NAME}
+	prepend-path PYTHONPATH "${MDB_PATH}"
+	prepend-path PATH "${MDB_PATH}/bin"
+	setenv MDB_HOME "${MDB_PATH}"
+EOF
+   fi
 
 fi

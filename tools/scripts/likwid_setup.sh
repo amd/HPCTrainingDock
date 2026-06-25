@@ -207,12 +207,19 @@ fi
 # Symmetric with --replace-existing 1 in main_setup.sh; safe if
 # nothing is there to remove. Other versions' installs are not
 # touched (multi-version coexistence; install dir is version-suffixed).
+# Two modulefile flavors: Lmod consumes <ver>.lua, classic Tcl Environment
+# Modules consumes an extensionless Tcl file. Track both so --replace and
+# the fail-cleanup trap remove whichever was written previously (and so a
+# Tcl site -- e.g. this Cray -- gets a loadable modulefile; see the
+# flavor-detection block at modulefile creation below).
+MODULEFILE_LUA="${MODULE_PATH}/${LIKWID_VERSION}.lua"
+MODULEFILE_TCL="${MODULE_PATH}/${LIKWID_VERSION}"
 if [ "${REPLACE}" = "1" ]; then
    echo "[likwid --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${LIKWID_PATH}"
-   echo "  modulefile:  ${MODULE_PATH}/${LIKWID_VERSION}.lua"
+   echo "  modulefile:  ${MODULEFILE_LUA} (+ Tcl flavor)"
    ${SUDO} rm -rf "${LIKWID_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/${LIKWID_VERSION}.lua"
+   ${SUDO} rm -f  "${MODULEFILE_LUA}" "${MODULEFILE_TCL}"
 fi
 
 # ── Existence guard: skip if this version is already installed ───────
@@ -241,7 +248,7 @@ _likwid_on_exit() {
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[likwid fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO:-sudo} rm -rf "${LIKWID_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${LIKWID_VERSION}.lua"
+      ${SUDO:-sudo} rm -f  "${MODULEFILE_LUA}" "${MODULEFILE_TCL}"
    elif [ ${rc} -ne 0 ]; then
       echo "[likwid fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -270,7 +277,7 @@ CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGP
 
 # Build / cache-restore branch (BUILD_LIKWID=0 short-circuit handled above).
 if true; then
-   if [ -f ${CACHE_FILES}/likwid.tgz ]; then
+   if [ -f "${CACHE_FILES}/likwid.tgz" ]; then
       echo ""
       echo "============================"
       echo " Installing Cached LIKWID"
@@ -291,7 +298,17 @@ if true; then
       echo "============================"
       echo ""
 
-      source /etc/profile.d/lmod.sh
+      # Ensure the `module` function is available in this build branch.
+      # Source whichever modules init exists -- Lmod (/etc/profile.d/lmod.sh)
+      # OR classic Tcl Environment Modules (/usr/share/Modules/init/bash) --
+      # but only if `module` isn't already defined. A hardcoded
+      # `source /etc/profile.d/lmod.sh` aborts under `set -e` on a Tcl-only
+      # Cray where that file does not exist.
+      if ! type module >/dev/null 2>&1; then
+         [ -r /etc/profile.d/lmod.sh ]              && . /etc/profile.d/lmod.sh
+         [ -r /usr/share/lmod/lmod/init/bash ]      && . /usr/share/lmod/lmod/init/bash
+         [ -r /usr/share/Modules/init/bash ]        && . /usr/share/Modules/init/bash
+      fi
       # Derive the rocm modulefile token to (re-)load. Three sources, in
       # decreasing order of authority:
       #   1. LMOD's LOADEDMODULES: the literal modulefile name currently
@@ -304,14 +321,27 @@ if true; then
       #      basename == module name) but wrong for therock-afar.
       #   3. rocm/${ROCM_VERSION}: standalone-invocation fallback when
       #      neither LOADEDMODULES nor ROCM_PATH is populated.
+      # Two-pass over LOADEDMODULES: prefer a rocm/* matching the requested
+      # ROCM_VERSION before falling back to the first rocm/*. A Cray
+      # PrgEnv-amd-new shell can have several rocm/* loaded at once (e.g.
+      # rocm/7.0.3 AND rocm/7.2.3 alongside the PrgEnv's rocm-new/7.2.3);
+      # taking the first match would key the build + modulefile on the
+      # wrong SDK.
       ROCM_MODULE_NAME=""
       if [[ -n "${LOADEDMODULES:-}" ]]; then
          _OLD_IFS="${IFS}"; IFS=":"
          for _m in ${LOADEDMODULES}; do
             case "${_m}" in
-               rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+               rocm/${ROCM_VERSION}) ROCM_MODULE_NAME="${_m}"; break ;;
             esac
          done
+         if [[ -z "${ROCM_MODULE_NAME}" ]]; then
+            for _m in ${LOADEDMODULES}; do
+               case "${_m}" in
+                  rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+               esac
+            done
+         fi
          IFS="${_OLD_IFS}"; unset _OLD_IFS _m
       fi
       if [[ -z "${ROCM_MODULE_NAME}" ]]; then
@@ -325,17 +355,28 @@ if true; then
       fi
       module load ${ROCM_MODULE_NAME}
 
-      # don't use sudo if user has write access to install path
-      if [ -d "$LIKWID_PATH" ]; then
-         if [ -w ${LIKWID_PATH} ]; then
-            SUDO=""
-            echo "WARNING: not using sudo since user has write access to install path"
-         else
-            echo "WARNING: using install paths that require sudo"
-         fi
+      # Install-path sudo: probe the nearest existing ancestor of
+      # LIKWID_PATH for user-writability. The old `[ -w $LIKWID_PATH ]`
+      # test only fired when the leaf dir already existed; for a fresh
+      # install it left SUDO=sudo even on a user-owned tree, which fails on
+      # a cluster with no passwordless sudo (this Cray). Walk up to the
+      # first existing dir and probe it instead. Mirrors the petsc/rocshmem
+      # writability probe. EUID==0 needs no sudo regardless.
+      if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+         SUDO=""
       else
-         # if install path does not exist yet
-         echo "WARNING: using sudo, make sure you have sudo privileges"
+         _iprobe="${LIKWID_PATH}"
+         while [ ! -e "${_iprobe}" ]; do _iprobe="$(dirname "${_iprobe}")"; done
+         _itest=$(mktemp --tmpdir="${_iprobe}" .likwid-inst-probe.XXXXXX 2>/dev/null || true)
+         if [ -n "${_itest}" ] && [ -f "${_itest}" ]; then
+            rm -f "${_itest}"
+            SUDO=""
+            echo "likwid: install ancestor ${_iprobe} is user-writable (probe succeeded); not using sudo for install"
+         else
+            SUDO="sudo"
+            echo "likwid: install ancestor ${_iprobe} not user-writable (probe failed); using sudo for install"
+         fi
+         unset _iprobe _itest
       fi
 
       ${SUDO} mkdir -p ${LIKWID_PATH}
@@ -362,17 +403,35 @@ if true; then
              -e '/^PREFIX/s!/usr/local!'"${LIKWID_PATH}"'!' \
              config.mk
 
+      # Access mode: likwid's default `accessdaemon` builds a setuid-root
+      # helper (likwid-accessD) and `make install` chowns it to root +
+      # chmod 4755 -- which requires root. On a user-writable, non-root
+      # install (this Cray has no passwordless sudo and a user-owned tree)
+      # that `install -o root` step fails. When we cannot install setuid
+      # (not EUID 0 and no working sudo), switch to perf_event access mode
+      # and disable the daemon/freq setuid tools so `make install`
+      # succeeds; likwid-perfctr then reads counters via the Linux
+      # perf_event interface. Root installs keep the accessdaemon default.
+      if [ "${EUID:-$(id -u)}" -ne 0 ] && [ -z "${SUDO}" ]; then
+         echo "likwid: non-root user-writable install -> ACCESSMODE=perf_event, BUILDDAEMON/BUILDFREQ=false (no setuid daemon)"
+         sed -i -e '/^ACCESSMODE/s/accessdaemon/perf_event/' \
+                -e '/^BUILDDAEMON/s/true/false/' \
+                -e '/^BUILDFREQ/s/true/false/' \
+                config.mk
+      fi
+
       export ROCM_HOME=${ROCM_PATH}
       make -j
       ${SUDO} make install
 
       # trap handles cleanup of ${LIKWID_BUILD_ROOT}
 
-      if [[ "${USER}" != "root" ]]; then
+      # Normalize ownership to root only when we installed with elevation
+      # (SUDO non-empty). On a user-owned tree the files are already
+      # correctly owned and a non-sudo `chown root:root` would fail.
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find ${LIKWID_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${LIKWID_PATH} -type d -execdir chown root:root "{}" +
-      fi
-      if [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod go-w ${LIKWID_PATH}
       fi
 
@@ -382,9 +441,26 @@ if true; then
 
    # Create a module file for likwid
    #
-   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
-   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
-   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   # Modulefile-write sudo: probe the module tree for user-writability so a
+   # user-owned module tree (a Cray $HOME deployment or a standalone run)
+   # needs no sudo, and forcing it would hit a password prompt that fails
+   # where the user has no sudo. Mirrors petsc/netcdf_setup.sh.
+   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+      PKG_SUDO_MOD=""
+   else
+      _mprobe="${MODULE_PATH}"
+      while [ ! -e "${_mprobe}" ]; do _mprobe="$(dirname "${_mprobe}")"; done
+      _mtest=$(mktemp --tmpdir="${_mprobe}" .likwid-mod-probe.XXXXXX 2>/dev/null || true)
+      if [ -n "${_mtest}" ] && [ -f "${_mtest}" ]; then
+         rm -f "${_mtest}"
+         PKG_SUDO_MOD=""
+         echo "likwid: module tree ancestor ${_mprobe} is user-writable (probe succeeded); not using sudo for modulefile writes"
+      else
+         PKG_SUDO_MOD="sudo"
+         echo "likwid: module tree ancestor ${_mprobe} not user-writable (probe failed); using sudo for modulefile writes"
+      fi
+      unset _mprobe _mtest
+   fi
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    # Provenance: capture this leaf script's git state for the modulefile
@@ -410,8 +486,21 @@ if true; then
    fi
    unset _leaf_dir
 
-   # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${LIKWID_VERSION}.lua
+   # ── Modulefile flavor: Lua (Lmod) vs Tcl (classic Environment Modules) ─
+   # Lmod consumes <ver>.lua; classic Tcl `environment-modules` consumes an
+   # extensionless Tcl file. Detect Lmod via its env markers; default to Tcl
+   # when Lmod is absent (this Cray runs Tcl Environment Modules). Without
+   # this the .lua file is invisible to a Tcl `module` and `module load
+   # likwid/...` fails. Mirrors hdf5/netcdf/fftw/petsc/rocshmem.
+   if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+      MODULEFILE="${MODULEFILE_LUA}"; MODFLAVOR="lua"
+   else
+      MODULEFILE="${MODULEFILE_TCL}"; MODFLAVOR="tcl"
+   fi
+
+   # The - option suppresses leading tabs.
+   if [ "${MODFLAVOR}" = "lua" ]; then
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULEFILE}
 	whatis("LIKWID - Lightweight performance tools")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
@@ -421,5 +510,18 @@ if true; then
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 EOF
+   else
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULEFILE}
+	#%Module1.0
+	module-whatis "LIKWID - Lightweight performance tools"
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+
+	set base "${LIKWID_PATH}"
+
+	prereq ${ROCM_MODULE_NAME}
+	prepend-path PATH \$base/bin
+	prepend-path LD_LIBRARY_PATH \$base/lib
+EOF
+   fi
 
 fi

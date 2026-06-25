@@ -294,12 +294,25 @@ fi
 #   3. rocm/${ROCM_VERSION}: standalone-invocation fallback.
 ROCM_MODULE_NAME=""
 if [[ -n "${LOADEDMODULES:-}" ]]; then
+   # Two-pass: prefer a rocm/* whose version matches the REQUESTED
+   # ROCM_VERSION. A Cray PrgEnv-amd-new shell can have several rocm/*
+   # loaded at once (e.g. rocm/7.0.3 AND rocm/7.2.3 alongside the
+   # PrgEnv's rocm-new/7.2.3); taking the first match would wrongly key
+   # the build + modulefile on the wrong SDK. Fall back to the first
+   # rocm/* if none matches the version exactly.
    _OLD_IFS="${IFS}"; IFS=":"
    for _m in ${LOADEDMODULES}; do
       case "${_m}" in
-         rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+         rocm/${ROCM_VERSION}) ROCM_MODULE_NAME="${_m}"; break ;;
       esac
    done
+   if [[ -z "${ROCM_MODULE_NAME}" ]]; then
+      for _m in ${LOADEDMODULES}; do
+         case "${_m}" in
+            rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+         esac
+      done
+   fi
    IFS="${_OLD_IFS}"; unset _OLD_IFS _m
 fi
 if [[ -z "${ROCM_MODULE_NAME}" ]]; then
@@ -386,13 +399,19 @@ echo "============================"
 echo ""
 
 # ── --replace: remove prior install + modulefile BEFORE building ─────
-MODULEFILE="${MODULE_PATH}/${ROCSHMEM_VERSION}-${BACKEND_CONFIG}.lua"
+# Two flavors: Lmod consumes <name>.lua, classic Tcl Environment Modules
+# consumes an extensionless Tcl file. Track both names so --replace and
+# the fail-cleanup trap remove whichever was written previously (and so a
+# Tcl site, which this Cray is, gets a loadable modulefile -- see the
+# flavor-detection block at modulefile creation below).
+MODULEFILE_LUA="${MODULE_PATH}/${ROCSHMEM_VERSION}-${BACKEND_CONFIG}.lua"
+MODULEFILE_TCL="${MODULE_PATH}/${ROCSHMEM_VERSION}-${BACKEND_CONFIG}"
 if [ "${REPLACE}" = "1" ]; then
    echo "[rocshmem --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${ROCSHMEM_PATH}"
-   echo "  modulefile:  ${MODULEFILE}"
+   echo "  modulefile:  ${MODULEFILE_LUA} (+ Tcl flavor)"
    ${SUDO} rm -rf "${ROCSHMEM_PATH}"
-   ${SUDO} rm -f  "${MODULEFILE}"
+   ${SUDO} rm -f  "${MODULEFILE_LUA}" "${MODULEFILE_TCL}"
 fi
 
 # ── Existence guard: skip if this version+backend is already installed ─
@@ -428,13 +447,70 @@ _rocshmem_on_exit() {
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[rocshmem fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO:-sudo} rm -rf "${ROCSHMEM_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULEFILE}"
+      ${SUDO:-sudo} rm -f  "${MODULEFILE_LUA}" "${MODULEFILE_TCL}"
    elif [ ${rc} -ne 0 ]; then
       echo "[rocshmem fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
    return ${rc}
 }
 trap _rocshmem_on_exit EXIT
+
+# ── AAC7 / Cray PE gate ──────────────────────────────────────────────
+# Every MPI tweak in this section is AAC7-ONLY: it exists so the RO
+# backend builds against the Cray PrgEnv MPI (cray-mpich / mpich-wrappers)
+# rather than the openmpi this repo builds elsewhere. A non-Cray site
+# (e.g. AAC6) has no cray-mpich module, so these must stay gated off --
+# otherwise they would mis-route the build away from the working openmpi
+# path. on_cray() is the SINGLE AAC7 gate. It is a function (not a cached
+# variable) on purpose: CRAY_MPICH_VERSION / MPICH_DIR may only appear
+# after a cray-mpich / PrgEnv module is loaded mid-script, so the gate
+# must re-read the environment at each call site.
+on_cray() { [ -n "${CRAY_MPICH_VERSION:-}" ] || [ -n "${MPICH_DIR:-}" ]; }
+
+# ── MPI module auto-correct on a Cray PE (see hdf5/netcdf/fftw/petsc) ─
+# The RO backend needs an MPI for cmake's find_package(MPI). The leaf
+# default MPI_MODULE is "openmpi", but a Cray system ships cray-mpich (no
+# openmpi module exists) -- preflight would SKIP the whole build. If
+# cray-mpich is active and the caller did not override the MPI, switch to
+# cray-mpich so the RO build uses the PrgEnv's own MPI. main_setup.sh also
+# threads --mpi-module mpich-wrappers / cray-mpich; this makes the leaf
+# correct standalone too.
+if [ "${BACKEND_USES_RO}" == "1" ]; then
+   if [ "${MPI_MODULE}" = "openmpi" ] && on_cray; then
+      MPI_MODULE="cray-mpich"
+      echo "rocshmem: Cray MPICH detected; MPI_MODULE -> cray-mpich"
+   fi
+
+   # ── mpich-wrappers resolution (PrgEnv MPI on a Cray) ──────────────
+   # cray-mpich drives the build through cc/CC/ftn wrappers and does not
+   # put mpicc/mpicxx on PATH, so cmake's find_package(MPI) cannot locate
+   # it. The from-source mpich-wrappers leaf ships mpicc/mpicxx/mpif90
+   # (MPICH-ABI compatible with cray-mpich, built with the new LLVM Flang)
+   # -- exactly what find_package(MPI) wants. When the caller asks for it
+   # (main_setup threads --mpi-module mpich-wrappers), resolve the bare
+   # name to the concrete, version-matched modulefile token by scanning
+   # MODULEPATH. If none is found, fall back to cray-mpich.
+   if [ "${MPI_MODULE}" = "mpich-wrappers" ]; then
+      _mw_tok=""
+      _OLD_IFS="${IFS}"; IFS=":"
+      for _d in ${MODULEPATH:-}; do
+         for _cand in "mpich-wrappers/${ROCM_VERSION}" "mpich-wrappers"; do
+            if [ -e "${_d}/${_cand}" ] || [ -e "${_d}/${_cand}.lua" ]; then
+               _mw_tok="${_cand}"; break 2
+            fi
+         done
+      done
+      IFS="${_OLD_IFS}"; unset _OLD_IFS _d _cand
+      if [ -n "${_mw_tok}" ]; then
+         MPI_MODULE="${_mw_tok}"
+         echo "rocshmem: using mpich-wrappers module '${_mw_tok}' (PrgEnv MPI; ships mpicc/mpicxx for find_package(MPI))"
+      else
+         echo "rocshmem: WARNING: --mpi-module mpich-wrappers requested but no mpich-wrappers modulefile found on MODULEPATH; falling back to cray-mpich"
+         MPI_MODULE="cray-mpich"
+      fi
+      unset _mw_tok
+   fi
+fi
 
 # ── Preflight + load required modules ────────────────────────────────
 # Always need rocm; the RO backend additionally needs an MPI module so
@@ -446,6 +522,26 @@ if [ "${BACKEND_USES_RO}" == "1" ]; then
    REQUIRED_MODULES+=( "${MPI_MODULE}" )
 fi
 preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
+
+# ── MPI hint for cmake's find_package(MPI) ───────────────────────────
+# The PrgEnv MPI modules don't export the variables find_package(MPI)
+# keys on. mpich-wrappers puts mpicc/mpicxx on PATH (sufficient on its
+# own) and exports MPICH_WRAPPERS_DIR; cray-mpich exports only MPICH_DIR
+# (no mpicxx on PATH). Set MPI_HOME so cmake can locate the MPI even when
+# the wrappers aren't on PATH (harmless when they are). Prefer
+# mpich-wrappers' root (has bin/mpicxx + include + lib).
+# AAC7-only (gated on on_cray): MPI_HOME is derived from the Cray PrgEnv
+# MPI roots. On a non-Cray site neither var is set and openmpi already
+# exports what find_package(MPI) needs, so this stays a no-op there.
+if [ "${BACKEND_USES_RO}" == "1" ] && on_cray && [ -z "${MPI_HOME:-}" ]; then
+   if [ -n "${MPICH_WRAPPERS_DIR:-}" ]; then
+      export MPI_HOME="${MPICH_WRAPPERS_DIR}"
+      echo "rocshmem: MPI_HOME set from MPICH_WRAPPERS_DIR -> ${MPI_HOME}"
+   elif [ -n "${MPICH_DIR:-}" ]; then
+      export MPI_HOME="${MPICH_DIR}"
+      echo "rocshmem: MPI_HOME set from MPICH_DIR (cray-mpich) -> ${MPI_HOME}"
+   fi
+fi
 
 # ── amdclang compiler module (hierarchical, loaded after rocm) ────────
 # Some ROCm packagings ship LLVM/clang as a SEPARATE module rather than
@@ -615,6 +711,17 @@ else
       TESTS_ON=OFF
    fi
 
+   # CMAKE_PREFIX_PATH: ROCm first, plus the PrgEnv MPI root (MPI_HOME, set
+   # above from mpich-wrappers / cray-mpich) so find_package(MPI) resolves
+   # the PrgEnv MPI even when its wrappers aren't on PATH. MPI_ARGS passes
+   # MPI_HOME as a cmake hint too (belt-and-suspenders for the RO backend).
+   CMAKE_PREFIX="${ROCM_PATH}"
+   MPI_ARGS=()
+   if [ "${BACKEND_USES_RO}" == "1" ] && [ -n "${MPI_HOME:-}" ]; then
+      CMAKE_PREFIX="${ROCM_PATH};${MPI_HOME}"
+      MPI_ARGS=( -DMPI_HOME="${MPI_HOME}" )
+   fi
+
    cmake \
       -B build \
       -DCMAKE_INSTALL_PREFIX="${ROCSHMEM_PATH}" \
@@ -623,13 +730,14 @@ else
       -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
       -DCMAKE_CXX_COMPILER="${ROCM_PATH}/bin/hipcc" \
       -DROCM_PATH="${ROCM_PATH}" \
-      -DCMAKE_PREFIX_PATH="${ROCM_PATH}" \
+      -DCMAKE_PREFIX_PATH="${CMAKE_PREFIX}" \
       -DGPU_TARGETS="${AMDGPU_GFXMODEL}" \
       -DPROFILE=OFF \
       -DBUILD_FUNCTIONAL_TESTS=${TESTS_ON} \
       -DBUILD_UNIT_TESTS=${TESTS_ON} \
       -DBUILD_PYTHON_TESTS=${TESTS_ON} \
       -DBUILD_EXAMPLES=${TESTS_ON} \
+      "${MPI_ARGS[@]}" \
       "${BACKEND_ARGS[@]}" \
       "${SRC_DIR}"
 
@@ -671,8 +779,26 @@ module unload "${ROCM_MODULE_NAME}" || true
 # ── Create a module file for rocSHMEM ────────────────────────────────
 if [[ "${DRY_RUN}" == "0" ]]; then
 
-   # Modulefile-write sudo: canonical PKG_SUDO pattern.
-   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   # Modulefile-write sudo: probe the module tree for user-writability so a
+   # user-owned module tree (e.g. a Cray $HOME deployment or a standalone
+   # run) needs no sudo, and forcing it would hit a password prompt that
+   # fails where the user has no sudo. Mirrors petsc/netcdf_setup.sh.
+   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+      PKG_SUDO_MOD=""
+   else
+      _mprobe="${MODULE_PATH}"
+      while [ ! -e "${_mprobe}" ]; do _mprobe="$(dirname "${_mprobe}")"; done
+      _mtest=$(mktemp --tmpdir="${_mprobe}" .rocshmem-mod-probe.XXXXXX 2>/dev/null || true)
+      if [ -n "${_mtest}" ] && [ -f "${_mtest}" ]; then
+         rm -f "${_mtest}"
+         PKG_SUDO_MOD=""
+         echo "rocshmem: module tree ancestor ${_mprobe} is user-writable (probe succeeded); not using sudo for modulefile writes"
+      else
+         PKG_SUDO_MOD="sudo"
+         echo "rocshmem: module tree ancestor ${_mprobe} not user-writable (probe failed); using sudo for modulefile writes"
+      fi
+      unset _mprobe _mtest
+   fi
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    # Provenance: capture this leaf script's git state for the modulefile
@@ -696,10 +822,25 @@ if [[ "${DRY_RUN}" == "0" ]]; then
    fi
    unset _leaf_dir
 
-   # The - option suppresses tabs. For the RO backend we also `load`
+   # ── Modulefile flavor: Lua (Lmod) vs Tcl (classic Environment Modules) ─
+   # Lmod consumes <name>.lua; classic Tcl `environment-modules` consumes an
+   # extensionless Tcl file. Detect Lmod via its env markers; default to Tcl
+   # when Lmod is absent (this Cray runs Tcl Environment Modules). Without
+   # this, the .lua file is invisible to a Tcl `module` and `module load
+   # rocshmem/...` fails. Mirrors hdf5/netcdf/fftw/petsc.
+   if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+      MODULEFILE="${MODULEFILE_LUA}"
+      MODFLAVOR="lua"
+   else
+      MODULEFILE="${MODULEFILE_TCL}"
+      MODFLAVOR="tcl"
+   fi
+
+   # The - option suppresses leading tabs. For the RO backend we also load
    # the MPI module so the host-side reverse-offload runtime is on the
    # library/launch path at runtime.
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULEFILE}
+   if [ "${MODFLAVOR}" = "lua" ]; then
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULEFILE}
 	whatis("Name: rocSHMEM")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("Version: rocshmem-${ROCSHMEM_VERSION}-${BACKEND_CONFIG}")
@@ -718,9 +859,35 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prereq("${ROCM_MODULE_NAME}")
 EOF
+   else
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULEFILE}
+	#%Module1.0
+	module-whatis "Name: rocSHMEM"
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+	module-whatis "Version: rocshmem-${ROCSHMEM_VERSION}-${BACKEND_CONFIG}"
+	module-whatis "Backend: ${BACKEND_CONFIG}"
+	module-whatis "Description: ROCm OpenSHMEM (rocSHMEM) GPU-centric intra-kernel networking library"
+	module-whatis "URL: https://github.com/ROCm/rocm-systems"
+	
+	set base "${ROCSHMEM_PATH}"
+	
+	setenv ROCSHMEM_PATH \$base
+	prepend-path LD_LIBRARY_PATH \$base/lib
+	prepend-path LD_LIBRARY_PATH \$base/lib64
+	prepend-path C_INCLUDE_PATH \$base/include
+	prepend-path CPLUS_INCLUDE_PATH \$base/include
+	prepend-path CPATH \$base/include
+	prepend-path PATH \$base/bin
+	prereq ${ROCM_MODULE_NAME}
+EOF
+   fi
 
    if [ "${BACKEND_USES_RO}" == "1" ]; then
-      echo "	load(\"${MPI_MODULE}\")" | ${PKG_SUDO_MOD} tee -a ${MODULEFILE}
+      if [ "${MODFLAVOR}" = "lua" ]; then
+         echo "	load(\"${MPI_MODULE}\")" | ${PKG_SUDO_MOD} tee -a ${MODULEFILE}
+      else
+         echo "if { ![ is-loaded ${MPI_MODULE} ] } { module load ${MPI_MODULE} }" | ${PKG_SUDO_MOD} tee -a ${MODULEFILE}
+      fi
    fi
 
 fi
