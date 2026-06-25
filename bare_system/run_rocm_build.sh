@@ -583,6 +583,46 @@ if [[ "${SKIP_EXTRACT}" != "1" && "${SKIP_PATCHES}" != "1" ]]; then
    fi
 fi
 
+# ---------------- Phase 3.7: mpich-wrappers (Cray hosts only) --------
+# Build the from-source AMD-LLVM MPICH wrappers INTO the rocm-<ver> SDK tree
+# so PrgEnv-amd-new (emitted later by the craywrap/therock installers) has
+# them at creation. Cray-only: cray-mpich ships a classic-Flang "V34" mpi.mod
+# that amdflang-new cannot read, so the AMD compiler needs an amdflang-format
+# mpi.mod. The build needs a Cray host's libfabric (and the just-extracted
+# amdclang/amdflang), so it runs host-side here, AFTER extract, NOT inside the
+# docker SDK build. Skipped cleanly off-Cray and when extract was skipped.
+# Non-fatal: PrgEnv-amd-new probes for the wrapper and skips it when absent.
+_is_cray_host=0
+if [ -d /opt/cray/pe ] || [ -f /etc/cray-release ] || [ -n "${CRAYPE_VERSION:-}" ]; then
+   _is_cray_host=1
+fi
+if [[ "${SKIP_EXTRACT}" != "1" && "${_is_cray_host}" = "1" \
+      && -d "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}" ]]; then
+   echo "============================================================"
+   echo "  Phase 3.7: mpich-wrappers -> ${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}/mpich-wrappers"
+   echo "============================================================"
+   MPICH_WRAP_RC=0
+   set +e
+   rocm/scripts/mpich_wrappers_setup.sh \
+         --build-mpich-wrappers    1 \
+         --rocm-version            "${ROCM_VERSION}" \
+         --amd-install             "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}" \
+         --install-path-no-version "${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}/mpich-wrappers" \
+         --module-path             "${TOP_MODULE_PATH}/rocmplus-${ROCM_VERSION}/mpich-wrappers" \
+         $([ "${REPLACE_EXISTING}" == "1" ] && echo "--replace 1")
+   MPICH_WRAP_RC=$?
+   set -e
+   if [[ "${MPICH_WRAP_RC}" -eq 43 ]]; then
+      echo "[Phase 3.7] mpich-wrappers returned 43 (NOOP_RC) -- already present or opt-out; treating as success"
+   elif [[ "${MPICH_WRAP_RC}" -ne 0 ]]; then
+      echo "WARNING: [Phase 3.7] mpich-wrappers build failed (rc=${MPICH_WRAP_RC});" >&2
+      echo "         PrgEnv-amd-new will simply skip the absent wrapper." >&2
+   else
+      echo "[Phase 3.7] mpich-wrappers installed for ROCm ${ROCM_VERSION}"
+   fi
+fi
+unset _is_cray_host
+
 echo "============================================================"
 echo "  Done: ROCm ${ROCM_VERSION}"
 echo "============================================================"

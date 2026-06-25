@@ -110,14 +110,14 @@ SITE_CLI=0
 # whitelist so each block becomes uniformly gated.
 : ${BUILD_OPENMPI:="1"}
 : ${BUILD_MVAPICH:="1"}
-# BUILD_MPICH_WRAPPERS: Cray-only. The mpich-wrappers build a standalone
-# MPICH with FC=amdflang so PrgEnv-amd-new/* consumers get an
-# amdflang-format mpi.mod (cray-mpich ships only classic-Flang "V34"
-# .mod files, which amdflang-new cannot read). Default on only when this
-# looks like a Cray system: CRAY_MPICH_VERSION is set by the cray-mpich
-# module (loaded by every PrgEnv), with /opt/cray/pe/mpich presence as a
-# fallback for runs that have not loaded a PrgEnv. Off everywhere else.
-: ${BUILD_MPICH_WRAPPERS:="$( { [ -n "${CRAY_MPICH_VERSION:-}" ] || [ -d /opt/cray/pe/mpich ]; } && echo 1 || echo 0)"}
+# NOTE: the Cray mpich-wrappers (a standalone MPICH built with FC=amdflang so
+# PrgEnv-amd-new/* consumers get an amdflang-format mpi.mod) are no longer
+# built in this rocmplus phase. They are now provisioned WITH the rocm-<ver>
+# SDK tree by the run_rocm_build*/craywrap/therock scripts (see
+# rocm/scripts/mpich_wrappers_setup.sh), so PrgEnv-amd-new has them at
+# creation. The consumer blocks below (hdf5/netcdf/fftw/petsc/hypre/tau/
+# rocshmem) still PROBE for the resulting module under
+# rocmplus-<ver>/mpich-wrappers/<ver> and use it when present.
 : ${BUILD_ROCSHMEM:="1"}
 : ${BUILD_ROCPROF_SYS:="1"}
 : ${BUILD_ROCPROF_COMPUTE:="1"}
@@ -771,7 +771,6 @@ fi
 declare -A PKG_FLAG=(
    [flang-new]=BUILD_FLANGNEW
    [openmpi]=BUILD_OPENMPI
-   [mpich-wrappers]=BUILD_MPICH_WRAPPERS
    [mpi4py]=BUILD_MPI4PY
    [mvapich]=BUILD_MVAPICH
    [rocshmem]=BUILD_ROCSHMEM
@@ -815,7 +814,6 @@ declare -A PKG_FLAG=(
 #                in the loaded ROCm module, not an independent dimension).
 declare -A PKG_VER_FLAG=(
    [openmpi]="--openmpi-version"
-   [mpich-wrappers]="--mpich-version"
    [mpi4py]="--mpi4py-version"
    [rocshmem]="--rocshmem-version"
    [hpctoolkit]="--hpctoolkit-version"
@@ -1795,19 +1793,12 @@ run_and_log_versioned rocshmem comm/scripts/rocshmem_setup.sh ${COMMON_OPTIONS} 
 run_and_log_versioned mpi4py comm/scripts/mpi4py_setup.sh ${COMMON_OPTIONS} --build-mpi4py ${BUILD_MPI4PY} ${REPLACE_OPTS} \
    $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${ROCMPLUS} --module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/mpi4py")
 
-# Cray-only MPICH wrappers: a standalone MPICH built with FC=amdflang so
-# PrgEnv-amd-new/* consumers get an amdflang-format mpi.mod (cray-mpich
-# ships only classic-Flang "V34" .mod files). Gated on
-# BUILD_MPICH_WRAPPERS, which defaults on only on Cray systems (see the
-# flag default near the top of this file); the run_and_log call itself
-# threads --build-mpich-wrappers so the leaf records SKIPPED(no-op) when
-# the flag is 0. The block is additionally guarded so it is omitted
-# entirely on non-Cray systems where mpich-wrappers is meaningless.
-if [ -n "${CRAY_MPICH_VERSION:-}" ] || [ -d /opt/cray/pe/mpich ]; then
-   run_and_log_versioned mpich-wrappers comm/scripts/mpich_wrappers_setup.sh ${COMMON_OPTIONS} \
-      --build-mpich-wrappers ${BUILD_MPICH_WRAPPERS} ${REPLACE_OPTS} \
-      $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/mpich-wrappers)
-fi
+# NOTE: the Cray-only mpich-wrappers (standalone MPICH built with FC=amdflang
+# so PrgEnv-amd-new/* consumers get an amdflang-format mpi.mod) are no longer
+# built here. They are provisioned WITH the rocm-<ver> SDK tree by the
+# run_rocm_build*/craywrap/therock scripts (rocm/scripts/mpich_wrappers_setup.sh),
+# so PrgEnv-amd-new has them at creation. The consumer blocks below still PROBE
+# for the resulting module under rocmplus-<ver>/mpich-wrappers/<ver>.
 
 if [[ "${BUILD_MVAPICH}" == "1" ]] && [[ ! -d ${ROCMPLUS}/mvapich ]]; then
    run_and_log mvapich comm/scripts/mvapich_setup.sh ${COMMON_OPTIONS} ${REPLACE_OPTS} \

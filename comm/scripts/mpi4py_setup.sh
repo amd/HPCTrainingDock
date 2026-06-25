@@ -189,6 +189,51 @@ else
    MPI4PY_PATH=/opt/rocmplus-${ROCM_VERSION}/mpi4py-v${MPI4PY_VERSION}
 fi
 
+# ── AAC7 (HPE/Cray) gate for sudo-avoidance ──────────────────────────
+# On an HPE/Cray PE system (AAC7) the install / module trees are typically
+# operator-writable (e.g. /shareddata/opt, /shareddata/modules) and the
+# build user often has no sudo there, so sudo must be AVOIDED. On AAC6
+# (non-Cray) the /shared/apps + /nfsapps trees are root-owned and sudo IS
+# required -- and the bash `[ -w ]` test is UNRELIABLE on this NFS client:
+# it reported a root-owned dir as writable on a compute node, SUDO was
+# dropped, and the --replace `rm -rf` then failed with EACCES from the
+# server (slurm 12810, 2026-06-25). So the no-sudo path is restricted to
+# root OR a genuinely-writable tree on a Cray system, decided with a REAL
+# create/remove probe (mirrors openmpi_setup.sh:pick_sudo_for) rather than
+# `[ -w ]`. On non-Cray non-root this preserves origin/main's behavior of
+# unconditional sudo.
+_is_cray_system() {
+   [ -n "${CRAY_MPICH_VERSION:-}" ] \
+   || { [ -n "${MPICH_DIR:-}" ] && [ -d "${MPICH_DIR}" ]; } \
+   || [ -d /opt/cray/pe/mpich ]
+}
+# _tree_really_writable <path>: real write probe on the nearest EXISTING
+# ancestor of <path> (the leaf dir may not exist yet). Returns 0 iff an
+# atomic create+remove succeeds -- the same NFS code path the subsequent
+# install ops exercise, so it cannot be fooled by a stale client mode cache.
+_tree_really_writable() {
+   local p="${1}"
+   while [ ! -e "${p}" ]; do p="$(dirname "${p}")"; done
+   local probe="${p}/.mpi4py_writeprobe.$$.${RANDOM}"
+   if ( umask 077 && : > "${probe}" ) 2>/dev/null; then
+      rm -f "${probe}" 2>/dev/null
+      return 0
+   fi
+   return 1
+}
+
+# ── Early sudo decision ──────────────────────────────────────────────
+# Determine whether privilege escalation is needed BEFORE the --replace
+# block and the EXIT trap run, both of which rm install/module paths via
+# ${SUDO}. See the AAC7 gate above for why the no-sudo path is Cray-gated
+# and uses a real probe. The build branch re-affirms this decision later.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   SUDO=""
+elif _is_cray_system && _tree_really_writable "${MPI4PY_PATH}"; then
+   SUDO=""
+   echo "install tree for ${MPI4PY_PATH} is operator-writable on a Cray system; not using sudo"
+fi
+
 # ── BUILD_MPI4PY=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
 NOOP_RC=43
 if [ "${BUILD_MPI4PY}" = "0" ]; then
@@ -202,9 +247,11 @@ fi
 if [ "${REPLACE}" = "1" ]; then
    echo "[mpi4py --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${MPI4PY_PATH}"
-   echo "  modulefile:  ${MODULE_PATH}/${MPI4PY_VERSION}.lua"
+   echo "  modulefile:  ${MODULE_PATH}/${MPI4PY_VERSION}{,.lua}"
    ${SUDO} rm -rf "${MPI4PY_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/${MPI4PY_VERSION}.lua"
+   # Remove both flavors (Lmod .lua and Tcl no-extension); only one is ever
+   # written per site, but cover both so a flavor switch doesn't orphan one.
+   ${SUDO} rm -f  "${MODULE_PATH}/${MPI4PY_VERSION}.lua" "${MODULE_PATH}/${MPI4PY_VERSION}"
 fi
 
 # ── Existence guard: skip if this version is already installed ───────
@@ -236,11 +283,18 @@ fi
 # this package.
 _mpi4py_on_exit() {
    local rc=$?
-   [ -n "${MPI4PY_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${MPI4PY_BUILD_DIR}"
+   # Use ${SUDO} verbatim (NOT ${SUDO:-sudo}): once the build has decided
+   # the operator owns a writable tree it sets SUDO="" , and these cleanups
+   # (the /tmp build dir always; the install/modulefile on failure) must
+   # then run WITHOUT sudo. ${SUDO:-sudo} would resurrect sudo on the
+   # empty value and re-trigger a password prompt on every exit. SUDO is
+   # always set (default "sudo" at the top of this script), so a bare
+   # ${SUDO} is safe even on an early-exit before the writability probe.
+   [ -n "${MPI4PY_BUILD_DIR:-}" ] && ${SUDO} rm -rf "${MPI4PY_BUILD_DIR}"
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[mpi4py fail-cleanup] rc=${rc}: removing partial install + modulefile"
-      ${SUDO:-sudo} rm -rf "${MPI4PY_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${MPI4PY_VERSION}.lua"
+      ${SUDO} rm -rf "${MPI4PY_PATH}"
+      ${SUDO} rm -f  "${MODULE_PATH}/${MPI4PY_VERSION}.lua" "${MODULE_PATH}/${MPI4PY_VERSION}"
    elif [ ${rc} -ne 0 ]; then
       echo "[mpi4py fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -271,7 +325,7 @@ if [ "${BUILD_MPI4PY}" = "0" ]; then
 else
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-   if [ -f ${CACHE_FILES}/mpi4py-v${MPI4PY_VERSION}.tgz ]; then
+   if [ -f "${CACHE_FILES}/mpi4py-v${MPI4PY_VERSION}.tgz" ]; then
       echo ""
       echo "============================"
       echo " Installing Cached MPI4PY"
@@ -334,20 +388,22 @@ else
       REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${MPI_MODULE}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
-      if [ -d "$MPI4PY_PATH" ]; then
-         # don't use sudo if user has write access to install path
-         if [ -w ${MPI4PY_PATH} ]; then
-            SUDO=""
-         else
-            echo "WARNING: using an install path that requires sudo"
-         fi
+      # Re-affirm the sudo decision (see the AAC7 gate near the top): no
+      # sudo only when root, or on a Cray with a genuinely operator-writable
+      # tree (real create/remove probe). On non-Cray non-root keep sudo --
+      # origin/main behavior -- since the AAC6 NFS trees are root-owned and
+      # `[ -w ]` lies on this client.
+      if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+         SUDO=""
+      elif _is_cray_system && _tree_really_writable "${MPI4PY_PATH}"; then
+         SUDO=""
+         echo "install tree for ${MPI4PY_PATH} is operator-writable on a Cray system; not using sudo"
       else
-         # if install path does not exist yet, the check on write access will fail
-         echo "WARNING: using sudo, make sure you have sudo privileges"
+         echo "using sudo for install path ${MPI4PY_PATH} (requires privileges)"
       fi
 
       ${SUDO} mkdir -p ${MPI4PY_PATH}
-      if [[ "${USER}" != "root" ]]; then
+      if [ -n "${SUDO}" ] && [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod a+w ${MPI4PY_PATH}
       fi
 
@@ -387,7 +443,12 @@ else
 
       deactivate
 
-      if [[ "${USER}" != "root" ]]; then
+      # Tighten ownership to root only when we have the privilege to do so
+      # (running as root, or sudo is in use). In the user-owned-tree /
+      # no-sudo case, leave the files owned by the building operator -- who
+      # owns the whole install tree anyway -- since `chown root:root` would
+      # fail for a non-root user and abort the build under `set -e`.
+      if [ "${USER}" != "root" ] && [ -n "${SUDO}" ]; then
          ${SUDO} find ${MPI4PY_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${MPI4PY_PATH} -type d -execdir chown root:root "{}" +
 
@@ -406,7 +467,18 @@ else
    #
    # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
    # see netcdf_setup.sh for the lying-probe failure mode this replaces).
-   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   # Prefer no sudo when the module tree is operator-writable on a Cray
+   # (user-owned module path, e.g. /shareddata/modules), decided with a real
+   # create/remove probe (see the AAC7 gate near the top). On non-Cray
+   # non-root fall back to sudo -- origin/main behavior -- since the AAC6
+   # module trees are root-owned and `[ -w ]` lies on this NFS client.
+   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+      PKG_SUDO_MOD=""
+   elif _is_cray_system && _tree_really_writable "${MODULE_PATH}"; then
+      PKG_SUDO_MOD=""
+   else
+      PKG_SUDO_MOD="sudo"
+   fi
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    # Provenance: capture this leaf script's git state for the modulefile
@@ -432,14 +504,35 @@ else
    fi
    unset _leaf_dir
 
-   # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${MPI4PY_VERSION}.lua
+   # Emit the modulefile in the flavor the site's module tool understands.
+   # Lmod reads Lua (.lua); classic Tcl "Environment Modules" (the Cray PE
+   # default here, e.g. 3.2.11) reads Tcl and does NOT parse .lua at all
+   # (it just reports ERROR:105 "Unable to locate a modulefile"). Detect
+   # Lmod via its env markers ($LMOD_CMD / $LMOD_VERSION); otherwise write
+   # a Tcl modulefile with NO .lua extension. The two bodies are
+   # semantically identical (whatis + PYTHONPATH prepend + load the MPI
+   # module).
+   if [ -n "${LMOD_CMD:-}" ] || [ -n "${LMOD_VERSION:-}" ]; then
+      MODULE_FILE="${MODULE_PATH}/${MPI4PY_VERSION}.lua"
+      # The - option suppresses tabs
+      cat <<-EOF | ${PKG_SUDO_MOD} tee "${MODULE_FILE}"
 	whatis(" MPI4PY - provides Python bindings for MPI")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	
 	prepend_path("PYTHONPATH", "${MPI4PY_PATH}")
 	load("${MPI_MODULE}")
 EOF
+   else
+      MODULE_FILE="${MODULE_PATH}/${MPI4PY_VERSION}"
+      cat <<-EOF | ${PKG_SUDO_MOD} tee "${MODULE_FILE}"
+	#%Module
+	module-whatis " MPI4PY - provides Python bindings for MPI"
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+	
+	prepend-path PYTHONPATH ${MPI4PY_PATH}
+	if { ![is-loaded ${MPI_MODULE}] } { module load ${MPI_MODULE} }
+EOF
+   fi
 
 fi
 

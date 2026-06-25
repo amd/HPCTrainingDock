@@ -915,6 +915,12 @@ make_world_readable() {
 # `module load`), so it is safe to call from the non-interactive install scripts
 # and does NOT need cray-mpich loaded (this IS the replacement MPI).
 #
+# This function now keeps only the Cray/PrgEnv-amd-new build POLICY (when to
+# build, MPI family, compiler/libfabric discovery + the install/module
+# locations PrgEnv-amd-new probes) and delegates the actual download / build /
+# install / modulefile emission to the single source of truth
+# rocm/scripts/mpich_wrappers_setup.sh (--amd-install mode).
+#
 # Positional args:
 #   $1 plus_dir        rocmplus module tree dir; modulefile is written to
 #                      <plus_dir>/mpich-wrappers/<token>
@@ -1074,96 +1080,51 @@ build_and_emit_mpich_wrappers() {
       return 0
    fi
 
-   if ! command -v wget >/dev/null 2>&1; then
-      echo "WARNING: [mpich-wrappers] wget not found; skipping wrapper build." >&2
+   # --------------- delegate the build to the relocated leaf --------------
+   # The actual MPICH build + modulefile emission lives in the single source
+   # of truth rocm/scripts/mpich_wrappers_setup.sh (--amd-install mode:
+   # module-free, amdclang/amdclang++/amdflang from the rocm install). This
+   # function keeps only the Cray/PrgEnv-amd-new policy (when to build, MPI
+   # family, libfabric/compiler discovery) and the on-disk locations the
+   # PrgEnv-amd-new modulefile probes:
+   #   install -> ${_install_prefix}      (under the rocm-<ver> SDK tree)
+   #   module  -> ${_plus_dir}/mpich-wrappers/${_token}
+   # Failure is non-fatal: PrgEnv-amd-new probes for the wrapper and simply
+   # skips it when absent.
+   local _leaf_script
+   _leaf_script="$(cd "$(dirname "${BASH_SOURCE[0]}")/../rocm/scripts" 2>/dev/null && pwd -P)/mpich_wrappers_setup.sh"
+   if [ ! -x "${_leaf_script}" ]; then
+      echo "WARNING: [mpich-wrappers] leaf script not found/executable at ${_leaf_script};" >&2
+      echo "         skipping wrapper build." >&2
       return 0
    fi
 
    echo "=================================================="
-   echo " [mpich-wrappers] building MPICH ${_mpich_ver} with AMD LLVM"
-   echo "   CC         = ${_cc}"
-   echo "   CXX        = ${_cxx}"
-   echo "   FC         = ${_fc}"
-   echo "   libfabric  = ${_libfab}"
-   echo "   install to = ${_install_prefix}"
-   echo "   modulefile = ${_modfile}"
+   echo " [mpich-wrappers] delegating to ${_leaf_script}"
+   echo "   amd-install = ${_amd_install}"
+   echo "   libfabric   = ${_libfab}"
+   echo "   install to  = ${_install_prefix}"
+   echo "   modulefile  = ${_modfile}"
    echo "=================================================="
 
-   ${_sudo} mkdir -p "${_install_prefix}"
+   local -a _leaf_args=(
+      --build-mpich-wrappers 1
+      --rocm-version            "${_token}"
+      --amd-install             "${_amd_install}"
+      --install-path-no-version "${_install_prefix}"
+      --module-path             "$(dirname "${_modfile}")"
+      --mpich-version           "${_mpich_ver}"
+      --libfabric-path          "${_libfab}"
+   )
+   [ "${REPLACE_EXISTING:-0}" = "1" ] && _leaf_args+=( --replace 1 )
 
-   local _work; _work="$(mktemp -d)"
-   local _jobs; _jobs="$(nproc 2>/dev/null || echo 4)"
    local _rc=0
-   if (
-         set -e
-         cd "${_work}"
-         wget -q "https://www.mpich.org/static/downloads/${_mpich_ver}/mpich-${_mpich_ver}.tar.gz"
-         tar -xzf "mpich-${_mpich_ver}.tar.gz"
-         cd "mpich-${_mpich_ver}"
-         CC="${_cc}" CXX="${_cxx}" FC="${_fc}" F77="${_fc}" \
-            ./configure \
-               --prefix="${_install_prefix}" \
-               --enable-fortran=all \
-               --enable-cxx \
-               --with-device=ch4:ofi \
-               --with-libfabric="${_libfab}" \
-               > log.configure.txt 2>&1
-         # libtool emits an empty wl= for the amdclang driver; restore -Wl, so
-         # runtime library paths are passed through to the linker (mirrors the
-         # comm/scripts/mpich_wrappers_setup.sh fixup).
-         sed -i 's#wl=""#wl="-Wl,"#g' libtool
-         make V=1 -j "${_jobs}" > log.make.txt 2>&1
-         ${_sudo} make V=1 install > log.install.txt 2>&1
-      ); then
-      _rc=0
-   else
-      _rc=$?
-   fi
-
-   if [ "${_rc}" -ne 0 ]; then
-      echo "WARNING: [mpich-wrappers] MPICH build failed (rc=${_rc})." >&2
-      echo "         Logs kept under ${_work}/mpich-${_mpich_ver}/log.*.txt" >&2
+   "${_leaf_script}" "${_leaf_args[@]}" || _rc=$?
+   # 0 = built; 43 = NOOP_RC (already present / opt-out) -> both success.
+   if [ "${_rc}" -ne 0 ] && [ "${_rc}" -ne 43 ]; then
+      echo "WARNING: [mpich-wrappers] leaf build failed (rc=${_rc});" >&2
       echo "         PrgEnv-amd-new will simply skip the absent wrapper." >&2
       return 0
    fi
-   rm -rf "${_work}"
-
-   # --------------- mpich-wrappers/<token> modulefile ---------------------
-   # Minimal on purpose: PrgEnv-amd-new already brought up the AMD compiler,
-   # rocm-new, and the Cray fabric env (cray-mpich/PMI). This module only puts
-   # the from-source MPICH bin/lib/include ahead of cray-mpich so its
-   # amdflang-format mpi.mod + mpicc/mpif90 win. It deliberately does NOT reload
-   # PrgEnv-gnu/rocm/cray-mpich (that would clobber the PrgEnv-amd-new env).
-   ${_sudo} mkdir -p "$(dirname "${_modfile}")"
-   ${_sudo} tee "${_modfile}" >/dev/null <<EOF
-#%Module1.0
-#
-# mpich-wrappers/${_token}  -- Built by: ${_prov}
-#
-# From-source MPICH ${_mpich_ver} (ch4:ofi over libfabric) compiled with the AMD
-# LLVM compiler (amdclang/amdclang++/amdflang) from the local ROCm install at
-# ${_amd_install}. Auto-loaded by PrgEnv-amd-new/<pe>-${_token}: amdflang cannot
-# read cray-mpich's classic-Flang mpi.mod, so this build supplies an
-# amdflang-format mpi.mod and matching wrappers. It only PREPENDS the wrapper
-# bin/lib/include; it does NOT reload PrgEnv-gnu/rocm/cray-mpich, because
-# PrgEnv-amd-new has already established the compiler, ROCm and Cray fabric env.
-
-conflict mpich-wrappers
-
-module-whatis "From-source MPICH ${_mpich_ver} (AMD LLVM amdflang) for PrgEnv-amd-new."
-
-## Base directory
-set base ${_install_prefix}
-
-setenv MPICH_WRAPPERS_DIR \$base
-
-## Paths
-prepend-path PATH               \$base/bin
-prepend-path LD_LIBRARY_PATH    \$base/lib
-prepend-path C_INCLUDE_PATH     \$base/include
-prepend-path CPLUS_INCLUDE_PATH \$base/include
-if {[file isdirectory \$base/lib/pkgconfig]} { prepend-path PKG_CONFIG_PATH \$base/lib/pkgconfig }
-EOF
-   _chown_root root:root "${_modfile}"; ${_sudo} chmod 644 "${_modfile}"
    echo "  + ${_modfile}"
 }

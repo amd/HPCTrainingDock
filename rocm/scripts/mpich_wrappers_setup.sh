@@ -18,13 +18,23 @@ set -eo pipefail
 # read. So a Fortran MPI program compiled with amdflang against
 # cray-mpich's mpi.mod fails at the `use mpi` line.
 #
-# This script builds a standalone MPICH from source with FC=amdflang
-# (C/C++ with gcc/g++, which are the better-tested wrapper backends),
+# This script builds a standalone MPICH from source with FC=amdflang,
 # producing an mpi.mod in the amdflang-new .mod format. The resulting
 # install is exposed through a PrgEnv-agnostic modulefile so it can be
 # loaded on top of PrgEnv-amd-new/* (the environments that drive
 # amdflang). PrgEnv-cray-new/* keep using cray-mpich's crayftn mpi.mod
 # natively and do NOT need this.
+#
+# Two build modes:
+#   * --amd-install <rocm-dir>  (preferred; used by the run_rocm_build* /
+#     craywrap / therock SDK-provisioning callers): module-free build that
+#     points CC/CXX/FC at amdclang/amdclang++/amdflang found directly under
+#     <rocm-dir>/{bin,llvm/bin}. No `module purge/load` is performed, so it
+#     works in a bare post-extract host context where the rocm module may
+#     not be loadable. This is the on-disk path PrgEnv-amd-new consumes.
+#   * (no --amd-install): legacy interactive build that `module load`s
+#     PrgEnv-gnu + the rocm module and compiles C/C++ with gcc/g++ and
+#     Fortran with amdflang. Retained for standalone/interactive use.
 # ---------------------------------------------------------------------
 
 # Variables controlling setup process
@@ -32,14 +42,25 @@ MODULE_PATH=/etc/lmod/modules/ROCmPlus/mpich-wrappers
 BUILD_MPICH_WRAPPERS=0
 ROCM_VERSION=23.1.0
 ROCM_MODULE=""          # rocm modulefile name to (re)load for amdflang; auto-derived when empty
+# --amd-install: full path to the rocm SDK install dir (e.g.
+# /nfsapps/opt/rocm-7.2.3). When set, build module-free against
+# amdclang/amdclang++/amdflang found under <dir>/{bin,llvm/bin}; when empty,
+# fall back to the legacy `module load PrgEnv-gnu`+rocm gcc/amdflang build.
+AMD_INSTALL=""
 CRAY_MPICH_VERSION=8.1.33
 AMDGPU_GFXMODEL=gfx942
 CPU_TYPE=genoa
 MPICH_VERSION=4.3.0
-LIBFABRIC_PATH=/opt/cray/libfabric/2.2.0rc1
+# Default libfabric prefix for MPICH ch4:ofi. On this Cray the older
+# /opt/cray/libfabric/2.2.0rc1 is a header-less stub (empty include/), so
+# 2.3.1 is the correct development install. The build branch below ALSO
+# auto-detects the highest /opt/cray/libfabric/* that actually has
+# include/rdma/fabric.h + a shared lib, so this default is just the
+# expected value; a site override via --libfabric-path still wins.
+LIBFABRIC_PATH=/opt/cray/libfabric/2.3.1
 INSTALL_PATH_INPUT=""   # --install-path-no-version: full leaf dir
-ROCMPLUS_PATH_INPUT=""  # --install-path: parent dir; mpich-wrappers-v${MPICH_VERSION} appended
-INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/mpich-wrappers-v${MPICH_VERSION}
+ROCMPLUS_PATH_INPUT=""  # --install-path: parent dir; mpich-wrappers appended
+INSTALL_PATH=/opt/rocm-${ROCM_VERSION}/mpich-wrappers
 # --replace 1: rm -rf the prior install dir + its modulefile before
 # building. --keep-failed-installs 1: skip the EXIT-trap fail-cleanup so
 # a partial install is left on disk for post-mortem.
@@ -61,6 +82,7 @@ usage()
    echo "  WARNING: when specifying --install-path-no-version and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --rocm-module [ ROCM_MODULE ] rocm modulefile name for amdflang; default autodetected"
+   echo "  --amd-install [ AMD_INSTALL ] rocm SDK dir for a module-free amdclang/amdflang build; default '$AMD_INSTALL'"
    echo "  --cray-mpich-version [ CRAY_MPICH_VERSION ] default $CRAY_MPICH_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default $AMDGPU_GFXMODEL"
    echo "  --cpu-type [ CPU_TYPE ] default $CPU_TYPE"
@@ -68,7 +90,7 @@ usage()
    echo "  --libfabric-path [ LIBFABRIC_PATH ] default $LIBFABRIC_PATH"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --install-path-no-version [ INSTALL_PATH_INPUT ] full leaf dir, default $INSTALL_PATH"
-   echo "  --install-path [ ROCMPLUS_PATH_INPUT ] parent dir; if set (and --install-path-no-version is not), INSTALL_PATH = ROCMPLUS_PATH/mpich-wrappers-v\${MPICH_VERSION}"
+   echo "  --install-path [ ROCMPLUS_PATH_INPUT ] parent dir; if set (and --install-path-no-version is not), INSTALL_PATH = INSTALL_PATH_PARENT/mpich-wrappers"
    echo "  --build-mpich-wrappers [ BUILD_MPICH_WRAPPERS ], set to 1 to build, default is 0"
    echo "  --replace [ 0|1 ] remove prior install + modulefile before building, default $REPLACE"
    echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
@@ -105,6 +127,11 @@ do
       "--rocm-module")
           shift
           ROCM_MODULE=${1}
+          reset-last
+          ;;
+      "--amd-install")
+          shift
+          AMD_INSTALL=${1}
           reset-last
           ;;
       "--cray-mpich-version")
@@ -172,15 +199,16 @@ do
 done
 
 # Install-path resolution: --install-path-no-version (full leaf dir)
-# wins; else --install-path is treated as the rocmplus parent dir and
-# this script appends mpich-wrappers-v${MPICH_VERSION} so main_setup.sh
-# stays version-agnostic; else fall back to the /opt default.
+# wins; else --install-path is treated as the parent dir and this script
+# appends mpich-wrappers; else fall back to the /opt rocm-<ver> default.
+# The wrappers now live IN the rocm-<ver> SDK tree (not rocmplus-<ver>):
+# they are provisioned with the SDK so PrgEnv-amd-new has them at creation.
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH=${INSTALL_PATH_INPUT}
 elif [ "${ROCMPLUS_PATH_INPUT}" != "" ]; then
-   INSTALL_PATH=${ROCMPLUS_PATH_INPUT}/mpich-wrappers-v${MPICH_VERSION}
+   INSTALL_PATH=${ROCMPLUS_PATH_INPUT}/mpich-wrappers
 else
-   INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/mpich-wrappers-v${MPICH_VERSION}
+   INSTALL_PATH=/opt/rocm-${ROCM_VERSION}/mpich-wrappers
 fi
 
 # Module version token. mpich-wrappers is keyed on the ROCm version
@@ -228,6 +256,26 @@ if [[ -z "${ROCM_MODULE_NAME}" ]]; then
    fi
 fi
 
+# ── Early sudo decision (see hipifly_setup.sh / mpi4py_setup.sh) ─────
+# Determine whether privilege escalation is needed BEFORE the --replace
+# block and EXIT trap (both rm install/module paths via ${SUDO}). When the
+# operator owns a writable install tree (e.g. a user-writable
+# /shareddata/opt) no sudo is needed -- and forcing it would hit a password
+# prompt that fails on a node where the user has no sudo. Probe the nearest
+# EXISTING ancestor of INSTALL_PATH (the leaf dir does not exist yet). The
+# build branch re-affirms this below.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   SUDO=""
+else
+   _probe="${INSTALL_PATH}"
+   while [ ! -e "${_probe}" ]; do _probe="$(dirname "${_probe}")"; done
+   if [ -w "${_probe}" ]; then
+      SUDO=""
+      echo "install path ancestor ${_probe} is writable; not using sudo"
+   fi
+   unset _probe
+fi
+
 # ── --replace: remove prior install + modulefile BEFORE building ─────
 if [ "${REPLACE}" = "1" ]; then
    echo "[mpich-wrappers --replace 1] removing prior install + modulefile if present"
@@ -251,8 +299,11 @@ _mpich_on_exit() {
    local rc=$?
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[mpich-wrappers fail-cleanup] rc=${rc}: removing partial install + modulefile"
-      ${SUDO:-sudo} rm -rf "${INSTALL_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${MOD_TOKEN}"
+      # ${SUDO} verbatim (NOT ${SUDO:-sudo}): the early-probe may have set
+      # SUDO="" for an operator-writable tree; an empty value here must NOT
+      # resurrect a failing password prompt on exit. SUDO is always set.
+      ${SUDO} rm -rf "${INSTALL_PATH}"
+      ${SUDO} rm -f  "${MODULE_PATH}/${MOD_TOKEN}"
    elif [ ${rc} -ne 0 ]; then
       echo "[mpich-wrappers fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -308,19 +359,101 @@ else
    echo "==================================="
    echo ""
 
-   # Build toolchain: gcc/g++ for C/C++ (the better-tested MPICH wrapper
-   # backends) and amdflang for Fortran so the generated mpi.mod is in
-   # the amdflang-new .mod format that PrgEnv-amd-new consumers need.
-   # PrgEnv-gnu supplies gcc/g++; the rocm module supplies amdflang; the
-   # craype + cray-mpich + libfabric bits provide the ch4:ofi network
-   # backend wiring on the Cray.
-   module purge
-   module load PrgEnv-gnu
-   module load craype-x86-${CPU_TYPE}
-   module load craype-accel-amd-${AMDGPU_GFXMODEL}
-   module load cray-python
-   module load cray-mpich/${CRAY_MPICH_VERSION}
-   module load ${ROCM_MODULE_NAME}
+   # ── Build toolchain ──────────────────────────────────────────────
+   # The Fortran compiler is amdflang in BOTH modes so the generated
+   # mpi.mod is in the amdflang-new .mod format PrgEnv-amd-new consumers
+   # need (cray-mpich ships only classic-Flang "V34" .mod files). The two
+   # modes differ in how the compilers are located:
+   if [ -n "${AMD_INSTALL}" ]; then
+      # ── Module-free amdclang/amdflang build (SDK-provisioning path) ──
+      # Point CC/CXX/FC at the AMD LLVM drivers under the rocm SDK install
+      # (prefer <root>/bin, fall back to <root>/llvm/bin -- some trees ship
+      # amdflang only under llvm/bin). No `module purge/load`, so this runs
+      # in a bare post-extract host context where the rocm module may not be
+      # loadable. MPICH ch4:ofi is built against libfabric directly, so no
+      # cray-mpich/craype module wiring is required at build time.
+      MPICH_CC="" MPICH_CXX="" MPICH_FC="" _d=""
+      for _d in "${AMD_INSTALL}/bin" "${AMD_INSTALL}/llvm/bin"; do
+         [ -z "${MPICH_CC}"  ] && [ -x "${_d}/amdclang"   ] && MPICH_CC="${_d}/amdclang"
+         [ -z "${MPICH_CXX}" ] && [ -x "${_d}/amdclang++" ] && MPICH_CXX="${_d}/amdclang++"
+         [ -z "${MPICH_FC}"  ] && [ -x "${_d}/amdflang"   ] && MPICH_FC="${_d}/amdflang"
+      done
+      unset _d
+      if [ -z "${MPICH_CC}" ] || [ -z "${MPICH_CXX}" ] || [ -z "${MPICH_FC}" ]; then
+         echo "[mpich-wrappers] ERROR: amdclang/amdclang++/amdflang not all found under ${AMD_INSTALL}/{bin,llvm/bin}"
+         exit 1
+      fi
+      echo "[mpich-wrappers] module-free build: CC=${MPICH_CC} CXX=${MPICH_CXX} FC=${MPICH_FC}"
+   else
+      # ── Legacy module-load build (standalone/interactive use) ────────
+      # gcc/g++ for C/C++ via PrgEnv-gnu; amdflang for Fortran via the rocm
+      # module. craype + cray-mpich + libfabric provide ch4:ofi wiring.
+      # Capture the MODULEPATH entry that currently provides the rocm module
+      # BEFORE `module purge`. On this site rocm-new/<ver> lives in a
+      # PrgEnv-injected tree (e.g. /shareddata/modules/rocm-<ver>) that
+      # `module purge` drops along with PrgEnv-amd-new; without re-exposing it
+      # the `module load ${ROCM_MODULE_NAME}` below fails ("Unable to locate a
+      # modulefile"). Re-`module use` it after loading PrgEnv-gnu.
+      _ROCM_MODULEPATH_DIR=""
+      _OLD_IFS="${IFS}"; IFS=":"
+      for _d in ${MODULEPATH:-}; do
+         if [ -e "${_d}/${ROCM_MODULE_NAME}" ] || [ -e "${_d}/${ROCM_MODULE_NAME}.lua" ]; then
+            _ROCM_MODULEPATH_DIR="${_d}"; break
+         fi
+      done
+      IFS="${_OLD_IFS}"; unset _OLD_IFS _d
+
+      module purge
+      module load PrgEnv-gnu
+      module load craype-x86-${CPU_TYPE}
+      module load craype-accel-amd-${AMDGPU_GFXMODEL}
+      module load cray-python
+      # PrgEnv-gnu already pulls in a default cray-mpich; `module load` of a
+      # different version would conflict ("conflicts with the currently loaded
+      # module"). Swap to the requested version instead, and fall back to
+      # whatever PrgEnv-gnu loaded if the requested one is unavailable. The
+      # from-source MPICH build below does NOT link cray-mpich (it builds its
+      # own MPICH against libfabric), so the cray-mpich version is only
+      # environment wiring and any available one is acceptable.
+      module swap cray-mpich cray-mpich/${CRAY_MPICH_VERSION} 2>/dev/null \
+         || module load cray-mpich/${CRAY_MPICH_VERSION} 2>/dev/null \
+         || echo "[mpich-wrappers] cray-mpich/${CRAY_MPICH_VERSION} unavailable; keeping the PrgEnv default"
+      [ -n "${_ROCM_MODULEPATH_DIR}" ] && module use "${_ROCM_MODULEPATH_DIR}"
+      module load ${ROCM_MODULE_NAME}
+      unset _ROCM_MODULEPATH_DIR
+
+      MPICH_CC=$(which gcc)
+      MPICH_CXX=$(which g++)
+      MPICH_FC=$(which amdflang)
+   fi
+
+   # ── libfabric resolution ─────────────────────────────────────────
+   # MPICH ch4:ofi needs a libfabric with development headers
+   # (include/rdma/fabric.h) AND a shared lib. On this Cray the
+   # versioned dirs under /opt/cray/libfabric are partly stubs (empty
+   # include/), so the configured --libfabric-path may have no headers.
+   # If the requested LIBFABRIC_PATH lacks fabric.h, auto-pick the
+   # highest-version /opt/cray/libfabric/* that has both headers and a
+   # libfabric shared object.
+   if [ ! -f "${LIBFABRIC_PATH}/include/rdma/fabric.h" ]; then
+      echo "[mpich-wrappers] ${LIBFABRIC_PATH} has no include/rdma/fabric.h; auto-detecting libfabric"
+      _best_lf=""
+      for _lf in $(ls -d /opt/cray/libfabric/*/ 2>/dev/null | sort -V); do
+         _lf="${_lf%/}"
+         if [ -f "${_lf}/include/rdma/fabric.h" ] \
+            && ls "${_lf}"/lib*/libfabric.so* >/dev/null 2>&1; then
+            _best_lf="${_lf}"   # keep last (highest version via sort -V)
+         fi
+      done
+      if [ -n "${_best_lf}" ]; then
+         echo "[mpich-wrappers] using libfabric ${_best_lf}"
+         LIBFABRIC_PATH="${_best_lf}"
+      else
+         echo "[mpich-wrappers] ERROR: no usable libfabric (include/rdma/fabric.h + lib) under /opt/cray/libfabric"
+         exit 1
+      fi
+      unset _best_lf _lf
+   fi
 
    if [ -d "$INSTALL_PATH" ]; then
       if [ -w ${INSTALL_PATH} ]; then
@@ -345,10 +478,10 @@ else
    rm mpich-${MPICH_VERSION}.tar.gz
    cd mpich-${MPICH_VERSION}
 
-   CC=$(which gcc) \
-   CXX=$(which g++) \
-   FC=$(which amdflang) \
-   F77=$(which amdflang) \
+   CC="${MPICH_CC}" \
+   CXX="${MPICH_CXX}" \
+   FC="${MPICH_FC}" \
+   F77="${MPICH_FC}" \
    ./configure \
        --prefix=${INSTALL_PATH} \
        --enable-fortran=all \
@@ -367,7 +500,10 @@ else
    rm -rf "${WORK_DIR}"
    unset WORK_DIR
 
-   if [[ "${USER}" != "root" ]]; then
+   # Only chown to root / strip group-write when we actually hold
+   # privilege (SUDO non-empty). On an operator-writable tree the early
+   # probe set SUDO="" -- leave the files owned by the operator.
+   if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
       ${SUDO} find ${INSTALL_PATH} -type f -execdir chown root:root "{}" +
       ${SUDO} find ${INSTALL_PATH} -type d -execdir chown root:root "{}" +
       ${SUDO} chmod go-w ${INSTALL_PATH}
@@ -390,8 +526,22 @@ fi
 # holds the amdflang-format mpi.mod) so mpicc/mpif90 + `use mpi` resolve
 # to this build instead of cray-mpich.
 #
-# Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit).
-PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+# Modulefile-write sudo: probe the nearest existing ancestor of
+# MODULE_PATH for writability (mirrors the install-path early-probe).
+# When the operator owns a writable module tree (e.g. /shareddata/
+# modules) no sudo is used; otherwise fall back to sudo.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   PKG_SUDO_MOD=""
+else
+   _mprobe="${MODULE_PATH}"
+   while [ ! -e "${_mprobe}" ]; do _mprobe="$(dirname "${_mprobe}")"; done
+   if [ -w "${_mprobe}" ]; then
+      PKG_SUDO_MOD=""
+   else
+      PKG_SUDO_MOD="sudo"
+   fi
+   unset _mprobe
+fi
 ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
 # Provenance for the whatis() line below.
@@ -421,6 +571,8 @@ proc ModulesHelp { } {
     puts stderr "ROCm Version: ${ROCM_VERSION}"
 }
 
+conflict mpich-wrappers
+
 module-whatis "MPICH wrappers built with amdflang for cray-mpich (amdflang-format mpi.mod). MPICH ${MPICH_VERSION}, ROCm ${ROCM_VERSION}."
 module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
 
@@ -433,4 +585,5 @@ prepend-path PATH \$base/bin
 prepend-path LD_LIBRARY_PATH \$base/lib
 prepend-path C_INCLUDE_PATH \$base/include
 prepend-path CPLUS_INCLUDE_PATH \$base/include
+if {[file isdirectory \$base/lib/pkgconfig]} { prepend-path PKG_CONFIG_PATH \$base/lib/pkgconfig }
 EOF
