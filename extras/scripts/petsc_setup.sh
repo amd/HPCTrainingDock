@@ -236,12 +236,41 @@ if [ "${BUILD_PETSC}" = "0" ]; then
    exit ${NOOP_RC}
 fi
 
+# ── Early sudo decision (see hdf5_setup.sh / mpi4py_setup.sh) ────────
+# Determine whether privilege escalation is needed BEFORE the --replace
+# block and EXIT trap (both rm install/module paths via ${SUDO}). When the
+# operator owns a writable install tree (e.g. a user-writable
+# /shareddata/opt on a Cray) no sudo is needed -- and forcing it would hit a
+# password prompt that fails on a node where the user has no sudo. Probe the
+# nearest EXISTING ancestor of INSTALL_PATH (the leaf dir does not exist
+# yet). The build branch re-affirms this below.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   SUDO=""
+else
+   _probe="${INSTALL_PATH}"
+   while [ ! -e "${_probe}" ]; do _probe="$(dirname "${_probe}")"; done
+   # Real write test (mktemp), NOT `[ -w ]`: on NFS `-w` is a LYING probe --
+   # it reports "writable" on a root:root 0755 tree (e.g. /nfsapps) where the
+   # actual write / rm then fails (the netcdf_setup.sh lying-probe failure
+   # mode). Mirrors the hdf5/fftw/hypre/kokkos mktemp probe.
+   _wtest=$(mktemp --tmpdir="${_probe}" .petsc-write-probe.XXXXXX 2>/dev/null || true)
+   if [ -n "${_wtest}" ] && [ -f "${_wtest}" ]; then
+      rm -f "${_wtest}"
+      SUDO=""
+      echo "install path ancestor ${_probe} is writable (probe succeeded); not using sudo"
+   else
+      echo "install path ancestor ${_probe} not user-writable (probe failed); using sudo"
+   fi
+   unset _probe _wtest
+fi
+
 if [ "${REPLACE}" = "1" ]; then
    echo "[petsc --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${INSTALL_PATH}"
-   echo "  modulefile:  ${MODULE_PATH}/${PETSC_VERSION}.lua"
+   echo "  modulefile:  ${MODULE_PATH}/${PETSC_VERSION}{,.lua}"
    ${SUDO} rm -rf "${INSTALL_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/${PETSC_VERSION}.lua"
+   # Remove both flavors (Lmod .lua and Tcl no-extension).
+   ${SUDO} rm -f  "${MODULE_PATH}/${PETSC_VERSION}.lua" "${MODULE_PATH}/${PETSC_VERSION}"
 fi
 
 # ── Existence guard: skip if already installed (see hypre_setup.sh) ──
@@ -256,14 +285,34 @@ if [ -d "${INSTALL_PATH}" ]; then
    exit ${NOOP_RC}
 fi
 
+# PETSC_BUILD_DIR + spack user-scope dirs (all set under the source-build
+# branch) are cleaned here too, so this single EXIT trap does both jobs. A
+# prior separate `trap '... rm PETSC_BUILD_DIR ...' EXIT` further down
+# OVERWROTE this handler, silently disabling fail-cleanup of a partial
+# install -- folded in here to match hdf5/fftw.
+PETSC_BUILD_DIR=""
+SPACK_USER_CONFIG_PATH=""
+SPACK_USER_CACHE_PATH=""
 _petsc_on_exit() {
    local rc=$?
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[petsc fail-cleanup] rc=${rc}: removing partial install + modulefile"
-      ${SUDO:-sudo} rm -rf "${INSTALL_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${PETSC_VERSION}.lua"
+      # ${SUDO} verbatim (NOT ${SUDO:-sudo}): the early-probe may set SUDO=""
+      # for an operator-writable tree, and cleanup must then run WITHOUT sudo.
+      ${SUDO} rm -rf "${INSTALL_PATH}"
+      ${SUDO} rm -f  "${MODULE_PATH}/${PETSC_VERSION}.lua" "${MODULE_PATH}/${PETSC_VERSION}"
    elif [ ${rc} -ne 0 ]; then
       echo "[petsc fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
+   fi
+   # Scratch build dir + spack user-scope dirs (user-owned /tmp mktemp dirs)
+   # -- never need sudo (plain rm; the early-probe may set SUDO="" and
+   # ${SUDO:-sudo} would WRONGLY force a sudo password prompt on these).
+   # Preserve the build dir on failure when KEEP_FAILED_INSTALLS=1 so the
+   # external-package / slepc configure.log files survive for post-mortem.
+   if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" = "1" ]; then
+      echo "[petsc fail-cleanup] KEEP_FAILED_INSTALLS=1: leaving build dir ${PETSC_BUILD_DIR} for post-mortem"
+   else
+      rm -rf "${PETSC_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"
    fi
    return ${rc}
 }
@@ -307,12 +356,24 @@ else
    #      neither LOADEDMODULES nor ROCM_PATH is populated.
    ROCM_MODULE_NAME=""
    if [[ -n "${LOADEDMODULES:-}" ]]; then
+      # Two-pass: prefer a rocm/* whose version matches the REQUESTED
+      # ROCM_VERSION (a shell may have several rocm/* loaded, e.g. a Cray
+      # default env with both rocm/7.0.3 and rocm/7.2.3 -- picking the first
+      # match would wrongly key the build/modulefile on the wrong SDK).
+      # Fall back to the first rocm/* if none matches the version exactly.
       _OLD_IFS="${IFS}"; IFS=":"
       for _m in ${LOADEDMODULES}; do
          case "${_m}" in
-            rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+            rocm/${ROCM_VERSION}) ROCM_MODULE_NAME="${_m}"; break ;;
          esac
       done
+      if [[ -z "${ROCM_MODULE_NAME}" ]]; then
+         for _m in ${LOADEDMODULES}; do
+            case "${_m}" in
+               rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+            esac
+         done
+      fi
       IFS="${_OLD_IFS}"; unset _OLD_IFS _m
    fi
    if [[ -z "${ROCM_MODULE_NAME}" ]]; then
@@ -325,7 +386,7 @@ else
       fi
    fi
 
-   if [ -f ${CACHE_FILES}/petsc-v${PETSC_VERSION}.tgz ]; then
+   if [ -f "${CACHE_FILES}/petsc-v${PETSC_VERSION}.tgz" ]; then
       echo ""
       echo "============================"
       echo " Installing Cached PETSC v${PETSC_VERSION}"
@@ -349,6 +410,51 @@ else
       echo "============================"
       echo ""
 
+      # ── MPI module auto-correct on a Cray PE (see hdf5/netcdf/fftw) ──
+      # The leaf default MPI_MODULE is "openmpi", but a Cray system ships
+      # cray-mpich (no openmpi module exists) -- preflight would fail. If
+      # cray-mpich is active and the caller did not override the MPI, switch
+      # to cray-mpich so the prereq load and the parallel build use the
+      # PrgEnv's own MPI. (main_setup.sh also threads --mpi-module
+      # mpich-wrappers / cray-mpich when MPICH_DIR is set; this makes the
+      # leaf correct standalone too.)
+      if [ "${MPI_MODULE}" = "openmpi" ] \
+           && { [ -n "${CRAY_MPICH_VERSION:-}" ] || [ -n "${MPICH_DIR:-}" ]; }; then
+         MPI_MODULE="cray-mpich"
+         echo "PETSc: Cray MPICH detected; MPI_MODULE -> cray-mpich"
+      fi
+
+      # ── mpich-wrappers resolution (new-flang mpi.mod on a Cray) ──────
+      # cray-mpich's amd/rocm-compiler mpi.mod is CLASSIC-Flang V34, which
+      # the new LLVM Flang (amdflang / ftn on ROCm 7.x) cannot read. The
+      # mpich-wrappers leaf builds a standalone MPICH with FC=amdflang
+      # (NEW-flang mpi.mod, MPICH-ABI compatible with cray-mpich) and ships
+      # mpicc/mpicxx/mpif90 -- exactly what PETSc --with-mpi-dir wants. When
+      # the caller asks for it (main_setup threads --mpi-module
+      # mpich-wrappers), resolve the bare name to the concrete,
+      # version-matched modulefile token by scanning MODULEPATH. If none is
+      # found, fall back to cray-mpich.
+      if [ "${MPI_MODULE}" = "mpich-wrappers" ]; then
+         _mw_tok=""
+         _OLD_IFS="${IFS}"; IFS=":"
+         for _d in ${MODULEPATH:-}; do
+            for _cand in "mpich-wrappers/${ROCM_VERSION}" "mpich-wrappers"; do
+               if [ -e "${_d}/${_cand}" ] || [ -e "${_d}/${_cand}.lua" ]; then
+                  _mw_tok="${_cand}"; break 2
+               fi
+            done
+         done
+         IFS="${_OLD_IFS}"; unset _OLD_IFS _d _cand
+         if [ -n "${_mw_tok}" ]; then
+            MPI_MODULE="${_mw_tok}"
+            echo "PETSc: using mpich-wrappers module '${_mw_tok}' (new-flang mpi.mod)"
+         else
+            echo "PETSc: WARNING: --mpi-module mpich-wrappers requested but no mpich-wrappers modulefile found on MODULEPATH; falling back to cray-mpich"
+            MPI_MODULE="cray-mpich"
+         fi
+         unset _mw_tok
+      fi
+
       REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" )
       if [[ ${USE_AMDFLANG} == "1" ]]; then
          # AFAR amdflang-new wraps openmpi compilers; loaded BEFORE the
@@ -358,6 +464,25 @@ else
       fi
       REQUIRED_MODULES+=( "${MPI_MODULE}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
+
+      # ── MPI_PATH derivation (PrgEnv MPI modules don't set MPI_PATH) ──
+      # PETSc's --with-mpi-dir needs a root with bin/mpicc, bin/mpif90,
+      # include/mpi.h, lib/libmpi*. The from-source mpich-wrappers module
+      # exports MPICH_WRAPPERS_DIR (its install root, which has exactly that
+      # layout); cray-mpich exports MPICH_DIR. Neither sets MPI_PATH, so
+      # derive it here when an MPI module didn't. Prefer mpich-wrappers
+      # (new-flang mpif90) so PETSc's Fortran bindings match what users
+      # compile with on ROCm 7.x.
+      if [ -z "${MPI_PATH:-}" ]; then
+         if [ -n "${MPICH_WRAPPERS_DIR:-}" ]; then
+            MPI_PATH="${MPICH_WRAPPERS_DIR}"
+            echo "PETSc: MPI_PATH derived from MPICH_WRAPPERS_DIR -> ${MPI_PATH}"
+         elif [ -n "${MPICH_DIR:-}" ]; then
+            MPI_PATH="${MPICH_DIR}"
+            echo "PETSc: MPI_PATH derived from MPICH_DIR (cray-mpich) -> ${MPI_PATH}"
+         fi
+         export MPI_PATH
+      fi
       if [[ $MPI_PATH == "" ]]; then
          echo "MPI module $MPI_MODULE is not setting the MPI_PATH env variable, aborting..."
          exit 1
@@ -453,8 +578,10 @@ else
       # down in the spack branch), with `:-/nonexistent` guards so the
       # trap is harmless when those vars are unset (non-spack runs).
       # ---------------------------------------------------------------------
+      # PETSC_BUILD_DIR (+ the spack user-scope dirs set in the spack branch)
+      # are cleaned by the _petsc_on_exit trap installed above; a separate
+      # trap here would overwrite that handler and disable fail-cleanup.
       PETSC_BUILD_DIR=$(mktemp -d -t petsc-build.XXXXXX)
-      trap '${SUDO:-sudo} rm -rf "${PETSC_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
       cd "${PETSC_BUILD_DIR}"
 
       if [[ $USE_SPACK == 1 ]]; then
@@ -608,16 +735,93 @@ print('matdensecupmimpl.h patched: added <cuda/std/iterator> for CCCL 3.0+')
             DOWNLOAD_HDF5=0
          fi
 
+         # ── Operator escape-hatch: pre-staged external-package tarballs ──
+         # PETSc --download-<pkg>=1 fetches each external package over the
+         # network. Several (fblaslapack, metis, parmetis) are hosted ONLY on
+         # bitbucket.org, and the per-package fallback mirror is
+         # web.cels.anl.gov. On clusters whose proxy blocks BOTH (this Cray
+         # closes bitbucket.org with SSL_ERROR_ZERO_RETURN and the ANL mirror
+         # is unreachable too, on login AND compute nodes), configure dies at
+         # "Unable to download package FBLASLAPACK". When PETSC_PACKAGES_DOWNLOAD_DIR
+         # is set to a directory pre-populated (from a host with access) with
+         # the package tarballs PETSc lists, pass it as
+         # --with-packages-download-dir: configure then reads tarballs from
+         # there (no network) and, if any are missing, prints the exact URLs
+         # to stage. main_setup.sh auto-detects /shareddata/src/petsc-pkgs.
+         # NOTE: with --with-packages-download-dir, ALL --download-* packages
+         # must be present in the dir (configure will not fall back to the
+         # network for any of them).
+         PETSC_PKG_DOWNLOAD_OPT=""
+         if [ -n "${PETSC_PACKAGES_DOWNLOAD_DIR:-}" ] && [ -d "${PETSC_PACKAGES_DOWNLOAD_DIR}" ]; then
+            PETSC_PKG_DOWNLOAD_OPT="--with-packages-download-dir=${PETSC_PACKAGES_DOWNLOAD_DIR}"
+            echo "petsc: using operator-staged package dir ${PETSC_PACKAGES_DOWNLOAD_DIR} (--with-packages-download-dir; no network)"
+         fi
+
+         # ── gcc-toolset C++ runtime mismatch fix (see netcdf/PnetCDF) ───
+         # On this Cray the toolchains used to build PETSc disagree on their
+         # GCC backend: mpicc/mpicxx (mpich-wrappers) drive gcc-toolset-14's
+         # gcc/g++, but ROCm's amdclang++ (HIP/device sources) selects
+         # gcc-toolset-12. The C++ TUs compiled via mpicxx (gcc-14 headers)
+         # reference libstdc++ symbols that exist only in GCC >= 13/14
+         # (std::ios_base_library_init(), __cxa_call_terminate,
+         # std::__cxx11::...::_M_replace_cold), which gcc-toolset ships in a
+         # STATIC libstdc++_nonshared.a. libpetsc.so is linked by the C
+         # linker (mpicc = gcc-14 gcc), which adds a bare `-lstdc++` -- but
+         # PETSc's own link line lists the gcc-toolset-12 lib dir FIRST (from
+         # amdclang's auto-detected paths), so `-lstdc++` resolves to
+         # gcc-toolset-12's libstdc++ whose nonshared.a LACKS those symbols.
+         # libpetsc.so then has them UNDEFINED (shared libs allow that) and
+         # the next consumer link -- SLEPc's configure "checklink" -- fails:
+         #   libpetsc.so: undefined reference to `std::ios_base_library_init()'
+         # (verified rocm-7.2.3 / mpich-wrappers, RHEL 9). Fix: prepend the
+         # gcc-toolset dir that DOES define the symbol (the one mpicxx uses)
+         # via LDFLAGS, so `-lstdc++` resolves to that toolset's libstdc++ ld
+         # script -- which pulls in its nonshared.a -- and libpetsc.so embeds
+         # the symbols, becoming self-contained for SLEPc, Eigen, and
+         # end-user links. LDFLAGS is just a search path, so PETSc's trivial
+         # compiler/MPI sanity checks are unaffected (a bare LIBS archive or
+         # --whole-archive breaks those checks; a -L does not).
+         PETSC_LDFLAGS_OPT=""
+         _ns_dir=""
+         for _d in $(ls -d /opt/rh/gcc-toolset-*/root/usr/lib/gcc/x86_64-redhat-linux/* 2>/dev/null | sort -Vr); do
+            _cand="${_d}/libstdc++_nonshared.a"
+            # grep -c (not -q): under `set -eo pipefail` grep -q closes the
+            # pipe on first match -> nm gets SIGPIPE -> archive silently never
+            # selected. grep -c reads the whole stream (no early close).
+            [ -f "${_cand}" ] || continue
+            _ns_cnt=$(nm -C "${_cand}" 2>/dev/null | grep -c "ios_base_library_init" || true)
+            if [ "${_ns_cnt:-0}" -gt 0 ]; then
+               _ns_dir="${_d}"; break
+            fi
+         done
+         unset _ns_cnt _cand _d
+         if [ -n "${_ns_dir}" ]; then
+            PETSC_LDFLAGS_OPT="LDFLAGS=-L${_ns_dir}"
+            echo "petsc: prepending ${_ns_dir} via LDFLAGS so -lstdc++ resolves the gcc-toolset libstdc++ that defines std::ios_base_library_init (for the gcc-14/clang-12 mismatch)"
+         fi
+         unset _ns_dir
+
          # PETSC_FORTRAN_FLAG is --with-fortran-bindings=1 by default but flips to
          # --with-fortran-bindings=0 when classic-Flang is detected upstream
-         # (see classic-Flang block above).
-         ./configure --with-debugging=0 --with-x=0 COPTFLAGS="-O3 -march=native -mtune=native" \
-                     CXXOPTFLAGS="-O3 -march=native -mtune=native" FOPTFLAGS="-O3 -march=native -mtune=native" \
-                     HIPOPTFLAGS="-O3 -march=native -mtune=native" --download-fblaslapack=1 --download-hdf5=$DOWNLOAD_HDF5 --download-metis=1 \
-                     --download-parmetis=1 --with-shared-libraries=1 --download-blacs=1 --download-scalapack=1 --download-mumps=1 \
-                     --download-suitesparse=1 --with-hip-arch=$AMDGPU_GFXMODEL --with-mpi=1 --with-mpi-dir=$MPI_PATH \
-                     --prefix=$PETSC_PATH --with-hip=1 --with-hip-dir=$ROCM_PATH \
-                     ${PETSC_FORTRAN_FLAG}
+         # (see classic-Flang block above). Built as an array so args that
+         # contain spaces (COPTFLAGS, and the LDFLAGS="-L<dir>" from the
+         # gcc-toolset compat block) are passed as single tokens.
+         CONFIG_ARGS=(
+            --with-debugging=0 --with-x=0
+            COPTFLAGS="-O3 -march=native -mtune=native"
+            CXXOPTFLAGS="-O3 -march=native -mtune=native"
+            FOPTFLAGS="-O3 -march=native -mtune=native"
+            HIPOPTFLAGS="-O3 -march=native -mtune=native"
+            --download-fblaslapack=1 --download-hdf5=$DOWNLOAD_HDF5 --download-metis=1
+            --download-parmetis=1 --with-shared-libraries=1 --download-blacs=1
+            --download-scalapack=1 --download-mumps=1 --download-suitesparse=1
+            --with-hip-arch=$AMDGPU_GFXMODEL --with-mpi=1 --with-mpi-dir=$MPI_PATH
+            --prefix=$PETSC_PATH --with-hip=1 --with-hip-dir=$ROCM_PATH
+            ${PETSC_FORTRAN_FLAG}
+         )
+         [ -n "${PETSC_PKG_DOWNLOAD_OPT}" ] && CONFIG_ARGS+=( "${PETSC_PKG_DOWNLOAD_OPT}" )
+         [ -n "${PETSC_LDFLAGS_OPT}" ] && CONFIG_ARGS+=( "${PETSC_LDFLAGS_OPT}" )
+         ./configure "${CONFIG_ARGS[@]}"
 
          make PETSC_DIR=$PETSC_REPO PETSC_ARCH=arch-linux-c-opt all
          if [ $? -ne 0 ]; then
@@ -724,8 +928,13 @@ print('matdensecupmimpl.h patched: added <cuda/std/iterator> for CCCL 3.0+')
          ${SUDO} chmod go-w ${EIGEN_PATH}
       fi
 
-      module unload ${ROCM_MODULE_NAME}
-      module unload $MPI_MODULE
+      # Unload the dependent (MPI) BEFORE its dependency (rocm): the openmpi
+      # modulefile prereqs rocm/<ver>, so unloading rocm while openmpi is
+      # still loaded trips Lmod ("Cannot load module openmpi without
+      # rocm/<ver>") and aborts under set -e. `|| true` tolerates either
+      # module being already-absent (mirrors hypre_setup.sh).
+      module unload $MPI_MODULE || true
+      module unload ${ROCM_MODULE_NAME} || true
       # `module unload hdf5` may fail if we took the DOWNLOAD_HDF5=1
       # path above and never loaded it (or if the load itself silently
       # no-op'd via ||true). Tolerate either case under `set -e`.
@@ -738,9 +947,27 @@ print('matdensecupmimpl.h patched: added <cuda/std/iterator> for CCCL 3.0+')
 
    # Create a module file for petsc
    #
-   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
-   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
-   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   # Modulefile-write sudo: root needs none; otherwise touch-probe the
+   # nearest EXISTING ancestor of MODULE_PATH (a real mktemp, not a -w test
+   # that can "lie" on some NFS mounts). A user-writable /shareddata/modules
+   # tree on a Cray then needs no sudo, and forcing it would hit a password
+   # prompt that fails where the user has no sudo. Mirrors netcdf_setup.sh.
+   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+      PKG_SUDO_MOD=""
+   else
+      _mprobe="${MODULE_PATH}"
+      while [ ! -e "${_mprobe}" ]; do _mprobe="$(dirname "${_mprobe}")"; done
+      _mtest=$(mktemp --tmpdir="${_mprobe}" .petsc-mod-probe.XXXXXX 2>/dev/null || true)
+      if [ -n "${_mtest}" ] && [ -f "${_mtest}" ]; then
+         rm -f "${_mtest}"
+         PKG_SUDO_MOD=""
+         echo "petsc: module tree ancestor ${_mprobe} is user-writable (probe succeeded); not using sudo for modulefile writes"
+      else
+         PKG_SUDO_MOD="sudo"
+         echo "petsc: module tree ancestor ${_mprobe} not user-writable (probe failed); using sudo for modulefile writes"
+      fi
+      unset _mprobe _mtest
+   fi
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    ROCM_MODULE_LOAD=${ROCM_MODULE_NAME}
@@ -772,22 +999,96 @@ print('matdensecupmimpl.h patched: added <cuda/std/iterator> for CCCL 3.0+')
    fi
    unset _leaf_dir
 
-   # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/$PETSC_VERSION.lua
+   # A consumer satisfies the ROCm dependency with either the local TheRock
+   # real module (rocm-new/<ver>) or its alias (rocm/<ver>): PrgEnv-amd-new
+   # loads rocm-new directly, while a bare `module load rocm/<ver>` pulls it
+   # in under the alias name. Tcl `prereq` with several names is satisfied if
+   # ANY is loaded; Lmod's equivalent is prereq_any(). Non-rocm names (e.g.
+   # the amdflang-new module used for the amdflang build) are emitted as-is.
+   # AAC7 gate: the rocm-new/<ver> alias is only meaningful on a TheRock /
+   # PrgEnv-amd-new site (AAC7), where rocm-new is a real modulefile. On a
+   # stock site (e.g. AAC6) only rocm/<ver> exists, so widening the prereq
+   # to rocm-new would reference a phantom module name -- gate it on whether
+   # a rocm-new modulefile is actually discoverable on MODULEPATH. When it is
+   # not, emit the original plain prereq("rocm/<ver>"). Mirrors hdf5/hipifly.
+   rocm_new_available() {
+      local _d _OIFS="${IFS}"; IFS=":"
+      for _d in ${MODULEPATH:-}; do
+         if [ -d "${_d}/rocm-new" ]; then IFS="${_OIFS}"; return 0; fi
+      done
+      IFS="${_OIFS}"; return 1
+   }
+   _RPV="${ROCM_MODULE_LOAD##*/}"
+   case "${ROCM_MODULE_LOAD}" in
+      rocm/*|rocm-new/*)
+         if rocm_new_available; then
+            ROCM_PREREQ_TCL="rocm-new/${_RPV} rocm/${_RPV}"
+            ROCM_PREREQ_LUA="prereq_any(\"rocm-new/${_RPV}\", \"rocm/${_RPV}\")"
+         else
+            ROCM_PREREQ_TCL="rocm/${_RPV}"
+            ROCM_PREREQ_LUA="prereq(\"rocm/${_RPV}\")"
+         fi
+         ;;
+      *)
+         ROCM_PREREQ_TCL="${ROCM_MODULE_LOAD}"
+         ROCM_PREREQ_LUA="prereq(\"${ROCM_MODULE_LOAD}\")"
+         ;;
+   esac
+   unset _RPV
+
+   # ── Modulefile flavor: Lua (Lmod) vs Tcl (classic Environment Modules) ─
+   # Lmod consumes <name>.lua; classic Tcl `environment-modules` consumes an
+   # extensionless Tcl file. Detect Lmod via its env markers; default to Tcl
+   # when Lmod is absent (this site runs Tcl Environment Modules). Without
+   # this, the .lua file is invisible to a Tcl `module` and `module load
+   # petsc` fails on a Cray. Mirrors hdf5/netcdf/fftw.
+   if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+      _MODFILE="${MODULE_PATH}/${PETSC_VERSION}.lua"
+      _MODFLAVOR="lua"
+   else
+      _MODFILE="${MODULE_PATH}/${PETSC_VERSION}"
+      _MODFLAVOR="tcl"
+   fi
+
+   # The - option suppresses leading tabs in the heredoc body.
+   if [ "${_MODFLAVOR}" = "lua" ]; then
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
 	whatis("PETSC Version $PETSC_VERSION - solver package")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
 	local base = "${PETSC_PATH}"
 
-	prereq("$ROCM_MODULE_LOAD")
+	${ROCM_PREREQ_LUA}
 	load("$MPI_MODULE")
 	setenv("PETSC_PATH", base)
 	setenv("PETSC", base)
 	setenv("PETSC_DIR", base)
 	setenv("SLEPC_PATH", "$SLEPC_PATH")
 	setenv("SLEPC_DIR", "$SLEPC_PATH")
+	setenv("PETSC_MPI_MODULE", "$MPI_MODULE")
 	prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
 	prepend_path("LD_LIBRARY_PATH",pathJoin("${SLEPC_PATH}", "lib"))
 EOF
+   else
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
+	#%Module1.0
+	module-whatis "PETSC Version $PETSC_VERSION - solver package"
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+
+	set base "${PETSC_PATH}"
+
+	prereq ${ROCM_PREREQ_TCL}
+	if { ![ is-loaded $MPI_MODULE ] } { module load $MPI_MODULE }
+	setenv PETSC_PATH \$base
+	setenv PETSC \$base
+	setenv PETSC_DIR \$base
+	setenv SLEPC_PATH "$SLEPC_PATH"
+	setenv SLEPC_DIR "$SLEPC_PATH"
+	setenv PETSC_MPI_MODULE "$MPI_MODULE"
+	prepend-path LD_LIBRARY_PATH \$base/lib
+	prepend-path LD_LIBRARY_PATH "${SLEPC_PATH}/lib"
+EOF
+   fi
+   unset _MODFILE _MODFLAVOR ROCM_PREREQ_TCL ROCM_PREREQ_LUA
 
 fi

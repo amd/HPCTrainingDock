@@ -54,6 +54,12 @@ TAU_PATH_INPUT=""
 C_COMPILER=amdclang
 CXX_COMPILER=amdclang++
 F_COMPILER=amdflang
+# MPI module to load for TAU's -mpi support. Default "openmpi" matches the
+# Ubuntu/CI image; a Cray PrgEnv-amd-new ships no openmpi module, so
+# main_setup.sh threads --mpi-module mpich-wrappers (the PrgEnv MPI, whose
+# mpif90 wraps the new amdflang -> amdflang-format mpi.mod). Resolved to a
+# concrete modulefile token in the build branch below.
+MPI_MODULE="openmpi"
 PDT_PATH_INPUT=""
 GIT_COMMIT="fb4abfffa6683dd82a2b6ffddbfc497e6e1f5d60"
 # TAU's modulefile is currently named dev.lua (no version baked in).
@@ -84,6 +90,7 @@ usage()
    echo "  --c-compiler [ C_COMPILER ] default $C_COMPILER"
    echo "  --f-compiler [ F_COMPILER ] default $F_COMPILER"
    echo "  --cxx-compiler [ CXX_COMPILER ] default $CXX_COMPILER"
+   echo "  --mpi-module [ MPI_MODULE ] module to load for TAU -mpi support, default $MPI_MODULE"
    echo "  --pdt-install-path [ PDT_PATH_INPUT ] default $PDT_PATH"
    echo "  --git-commit [ GIT_COMMIT ] specify what commit hash you want to build from, default is $GIT_COMMIT"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
@@ -139,6 +146,11 @@ do
       "--cxx-compiler")
           shift
           CXX_COMPILER=${1}
+          reset-last
+          ;;
+      "--mpi-module")
+          shift
+          MPI_MODULE=${1}
           reset-last
           ;;
       "--help")
@@ -209,6 +221,34 @@ else
    AMDGPU_GFXMODEL=$(rocminfo 2>/dev/null | grep gfx | sed -e 's/Name://' | head -1 | sed 's/ //g' || true)
 fi
 
+# ── Install-path sudo (computed EARLY, before afar-skip/--replace) ────
+# The afar-skip and --replace blocks below rm -rf the install dirs +
+# modulefile with ${SUDO}. The leaf default is SUDO=sudo, which on a
+# cluster with no passwordless sudo and a user-owned install tree (this
+# Cray) makes --replace / afar-skip die on a password prompt before the
+# build even starts. Probe the nearest existing ancestor of the tau
+# install dir for user-writability and drop sudo when we own it. Mirrors
+# the magma/kokkos/hypre writability probe. The same SUDO then governs
+# the tau + pdt install dirs + chowns in the build branch below.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   SUDO=""
+elif [ -z "${SUDO}" ]; then
+   :  # already cleared (e.g. Singularity)
+else
+   _iprobe="$(dirname "${TAU_PATH}")"
+   while [ ! -e "${_iprobe}" ]; do _iprobe="$(dirname "${_iprobe}")"; done
+   _itest=$(mktemp --tmpdir="${_iprobe}" .tau-inst-probe.XXXXXX 2>/dev/null || true)
+   if [ -n "${_itest}" ] && [ -f "${_itest}" ]; then
+      rm -f "${_itest}"
+      SUDO=""
+      echo "tau: install ancestor ${_iprobe} is user-writable (probe succeeded); not using sudo for install"
+   else
+      SUDO="sudo"
+      echo "tau: install ancestor ${_iprobe} not user-writable (probe failed); using sudo for install"
+   fi
+   unset _iprobe _itest
+fi
+
 # ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
 # TAU modulefile is dev.lua; PDT is shared (see scorep_setup.sh).
 # ── BUILD_TAU=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
@@ -258,9 +298,9 @@ if [[ "${ROCM_PATH:-}" == *afar* ]]; then
          echo "[tau afar-skip] removing stale from-source install: ${TAU_PATH}"
          ${SUDO} rm -rf "${TAU_PATH}"
       fi
-      if [ -f "${MODULE_PATH}/dev.lua" ]; then
-         echo "[tau afar-skip] removing stale modulefile: ${MODULE_PATH}/dev.lua"
-         ${SUDO} rm -f "${MODULE_PATH}/dev.lua"
+      if [ -f "${MODULE_PATH}/dev.lua" ] || [ -f "${MODULE_PATH}/dev" ]; then
+         echo "[tau afar-skip] removing stale modulefile: ${MODULE_PATH}/dev{.lua,}"
+         ${SUDO} rm -f "${MODULE_PATH}/dev.lua" "${MODULE_PATH}/dev"
       fi
       # ── Drop a SKIPPED marker so the inventory tool can distinguish ──
       # "skipped on this SDK" from "absent / failed". See
@@ -290,9 +330,9 @@ fi
 if [ "${REPLACE}" = "1" ]; then
    echo "[tau --replace 1] removing prior tau install + modulefile if present"
    echo "  install dir: ${TAU_PATH}"
-   echo "  modulefile:  ${MODULE_PATH}/dev.lua"
+   echo "  modulefile:  ${MODULE_PATH}/dev{.lua,}"
    ${SUDO} rm -rf "${TAU_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/dev.lua"
+   ${SUDO} rm -f  "${MODULE_PATH}/dev.lua" "${MODULE_PATH}/dev"
 fi
 if [ "${REPLACE_PDT}" = "1" ]; then
    echo "[tau --replace-pdt 1] removing prior PDT install"
@@ -318,11 +358,19 @@ _tau_on_exit() {
    local rc=$?
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[tau fail-cleanup] rc=${rc}: removing partial tau install + modulefile (PDT preserved)"
-      ${SUDO:-sudo} rm -rf "${TAU_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/dev.lua"
+      # Use the probed ${SUDO} (NOT ${SUDO:-sudo}): on a user-writable install
+      # tree SUDO is intentionally empty, and forcing sudo here would prompt
+      # for a password under srun and hang/fail the cleanup.
+      ${SUDO} rm -rf "${TAU_PATH}"
+      ${SUDO} rm -f  "${MODULE_PATH}/dev.lua" "${MODULE_PATH}/dev"
    elif [ ${rc} -ne 0 ]; then
       echo "[tau fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
+   # Always clean the local /tmp scratch (build dir + spack user-scope dirs),
+   # set in the build branch below. Plain rm: these are user-owned under /tmp.
+   [ -n "${TAU_BUILD_DIR:-}" ] && rm -rf "${TAU_BUILD_DIR}"
+   [ -n "${SPACK_USER_CONFIG_PATH:-}" ] && rm -rf "${SPACK_USER_CONFIG_PATH}"
+   [ -n "${SPACK_USER_CACHE_PATH:-}" ] && rm -rf "${SPACK_USER_CACHE_PATH}"
    return ${rc}
 }
 trap _tau_on_exit EXIT
@@ -361,14 +409,26 @@ else
    #      basename == module name) but wrong for therock-afar.
    #   3. rocm/${ROCM_VERSION}: standalone-invocation fallback when
    #      neither LOADEDMODULES nor ROCM_PATH is populated.
+   # Two-pass over LOADEDMODULES: prefer a rocm/* matching the requested
+   # ROCM_VERSION before falling back to the first rocm/*. A Cray
+   # PrgEnv-amd-new shell can have several rocm/* loaded at once (e.g.
+   # rocm/7.0.3 AND rocm/7.2.3 alongside the PrgEnv's rocm-new/7.2.3);
+   # taking the first match would key the build + modulefile on the wrong SDK.
    ROCM_MODULE_NAME=""
    if [[ -n "${LOADEDMODULES:-}" ]]; then
       _OLD_IFS="${IFS}"; IFS=":"
       for _m in ${LOADEDMODULES}; do
          case "${_m}" in
-            rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+            rocm/${ROCM_VERSION}) ROCM_MODULE_NAME="${_m}"; break ;;
          esac
       done
+      if [[ -z "${ROCM_MODULE_NAME}" ]]; then
+         for _m in ${LOADEDMODULES}; do
+            case "${_m}" in
+               rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+            esac
+         done
+      fi
       IFS="${_OLD_IFS}"; unset _OLD_IFS _m
    fi
    if [[ -z "${ROCM_MODULE_NAME}" ]]; then
@@ -404,11 +464,72 @@ else
       echo "============================"
       echo ""
 
-      # rocm + openmpi are required at build time. openmpi is loaded
-      # later (line ~252) but pre-flighting it here surfaces the missing
-      # dep early rather than after a multi-minute PDT/spack download.
-      REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "openmpi" )
+      # ── MPI module auto-correct on a Cray PE (see hypre/hdf5/netcdf) ──
+      # TAU's -mpi support needs mpicc/mpif90 on PATH. The leaf default
+      # MPI_MODULE is "openmpi", but a Cray system ships cray-mpich (no
+      # openmpi module exists) -- preflight would SKIP the whole build. If
+      # cray-mpich is active and the caller did not override the MPI,
+      # switch to cray-mpich. main_setup.sh also threads --mpi-module
+      # mpich-wrappers / cray-mpich; this makes the leaf correct standalone.
+      if [ "${MPI_MODULE}" = "openmpi" ] \
+           && { [ -n "${CRAY_MPICH_VERSION:-}" ] || [ -n "${MPICH_DIR:-}" ]; }; then
+         MPI_MODULE="cray-mpich"
+         echo "tau: Cray MPICH detected; MPI_MODULE -> cray-mpich"
+      fi
+
+      # ── mpich-wrappers resolution (PrgEnv MPI + new-flang mpi.mod) ─────
+      # cray-mpich drives the build through cc/CC/ftn wrappers and does not
+      # put mpicc/mpif90 on PATH, so TAU's -mpi autodetect cannot find it.
+      # The from-source mpich-wrappers leaf ships mpicc/mpicxx/mpif90
+      # (MPICH-ABI compatible with cray-mpich, built with the new LLVM
+      # Flang amdflang -> amdflang-format mpi.mod) -- exactly what TAU's
+      # MPI Fortran wrappers need on ROCm 7.x. When the caller asks for it
+      # (main_setup threads --mpi-module mpich-wrappers), resolve the bare
+      # name to the concrete, version-matched modulefile token by scanning
+      # MODULEPATH. If none is found, fall back to cray-mpich.
+      if [ "${MPI_MODULE}" = "mpich-wrappers" ]; then
+         _mw_tok=""
+         _OLD_IFS="${IFS}"; IFS=":"
+         for _d in ${MODULEPATH:-}; do
+            for _cand in "mpich-wrappers/${ROCM_VERSION}" "mpich-wrappers"; do
+               if [ -e "${_d}/${_cand}" ] || [ -e "${_d}/${_cand}.lua" ]; then
+                  _mw_tok="${_cand}"; break 2
+               fi
+            done
+         done
+         IFS="${_OLD_IFS}"; unset _OLD_IFS _d _cand
+         if [ -n "${_mw_tok}" ]; then
+            MPI_MODULE="${_mw_tok}"
+            echo "tau: using mpich-wrappers module '${_mw_tok}' (PrgEnv MPI; ships mpicc/mpicxx/mpif90, new-flang mpi.mod)"
+         else
+            echo "tau: WARNING: --mpi-module mpich-wrappers requested but no mpich-wrappers modulefile found on MODULEPATH; falling back to cray-mpich"
+            MPI_MODULE="cray-mpich"
+         fi
+         unset _mw_tok
+      fi
+
+      # rocm + MPI are required at build time. Pre-flighting here surfaces a
+      # missing dep early rather than after a multi-minute PDT/spack download.
+      REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${MPI_MODULE}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
+
+      # ── Pin amdclang/amdflang/amdclang++ to the requested ROCm SDK ────
+      # On a Cray PrgEnv-amd-new shell several rocm/* are loaded at once and
+      # `amdclang`/`amdflang` on PATH can resolve to a DIFFERENT SDK than
+      # ROCM_PATH (observed: amdflang -> /opt/rocm-7.0.3 while
+      # ROCM_PATH=/shareddata/opt/rocm-7.2.3). TAU's -cc/-c++/-fortran take
+      # bare compiler names and would then build against a mismatched SDK.
+      # Prepend ${ROCM_PATH}/bin so the operator-requested SDK's compilers
+      # win -- in particular the new amdflang (22.0.0git, roc-7.2.3) that
+      # matches the mpich-wrappers mpi.mod. No-op when amdclang already
+      # resolves to ${ROCM_PATH}.
+      if [ -n "${ROCM_PATH:-}" ] && [ -x "${ROCM_PATH}/bin/amdflang" ]; then
+         case ":${PATH}:" in
+            *":${ROCM_PATH}/bin:"*) : ;;
+            *) export PATH="${ROCM_PATH}/bin:${PATH}" ;;
+         esac
+         echo "tau: pinned compilers to ${ROCM_PATH}/bin (amdflang -> $(amdflang --version 2>/dev/null | head -1))"
+      fi
 
      # don't use sudo if user has write access to both install paths
       if [ -d "$TAU_PATH" ]; then
@@ -455,7 +576,12 @@ else
       SPACK_USER_CONFIG_PATH=$(mktemp -d -t spack-user-config.XXXXXX)
       SPACK_USER_CACHE_PATH=$(mktemp -d -t spack-user-cache.XXXXXX)
       export SPACK_USER_CONFIG_PATH SPACK_USER_CACHE_PATH
-      trap '${SUDO:-sudo} rm -rf "${TAU_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+      # NOTE: cleanup of TAU_BUILD_DIR + these spack user-scope dirs is handled
+      # by the single _tau_on_exit EXIT trap (installed before the build
+      # branch), which also rolls back a partial install on failure. We do NOT
+      # install a second EXIT trap here (the old code did, with ${SUDO:-sudo},
+      # which both clobbered the install-rollback trap AND forced a sudo
+      # password prompt under srun on a user-writable tree).
 
       cd "${TAU_BUILD_DIR}"
       git clone --depth 1 https://github.com/spack/spack.git
@@ -539,8 +665,31 @@ else
       # provides --install, which is available in the bundled
       # /usr/local/bin/cmake (Python pip cmake) that tau's
       # plugins/llvm/Makefile invokes (job 7974/7975 log line 3215/3433).
-      if [ -f plugins/llvm/Makefile ]; then
-         sed -i "s|-DCMAKE_BUILD_TYPE=Debug && make VERBOSE=1 -j install|-DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS=-I${ROCM_PATH}/lib/llvm/include \\&\\& cmake --build . --parallel \\&\\& cmake --install .|" plugins/llvm/Makefile
+      # ── Detect the clang dev tree + LLVM CMake config for the plugin ──
+      # TAU's compiler-instrumentation plugin (plugins/llvm, enabled by the
+      # -llvm_src configure flag below) #includes <clang/Basic/SourceManager.h>
+      # and needs ${ROCM_PATH}/llvm/lib/cmake/llvm. Some ROCm 7.x SDK layouts
+      # (e.g. the /shareddata/opt/rocm-7.2.3 SDK on this Cray) ship the flang/
+      # offload headers but NOT the clang dev tree, and have no llvm CMake
+      # config dir -- so the plugin simply cannot build here. Probe both the
+      # THEROCK (lib/llvm/include) and STANDARD (llvm/include) layouts; when
+      # the clang headers + llvm cmake dir are present, build the plugin
+      # (embedding the include dir into CMAKE_CXX_FLAGS, see the long comment
+      # above); when absent, skip the plugin entirely (drop -llvm_src below)
+      # rather than failing the whole TAU build on a single optional feature.
+      TAU_LLVM_CLANG_INC=""
+      if [ -f "${ROCM_PATH}/lib/llvm/include/clang/Basic/SourceManager.h" ]; then
+         TAU_LLVM_CLANG_INC="${ROCM_PATH}/lib/llvm/include"
+      elif [ -f "${ROCM_PATH}/llvm/include/clang/Basic/SourceManager.h" ]; then
+         TAU_LLVM_CLANG_INC="${ROCM_PATH}/llvm/include"
+      fi
+      if [ -n "${TAU_LLVM_CLANG_INC}" ] && [ -d "${ROCM_PATH}/llvm/lib/cmake/llvm" ]; then
+         echo "tau: clang dev tree found (${TAU_LLVM_CLANG_INC}); LLVM instrumentation plugin will be built"
+         if [ -f plugins/llvm/Makefile ]; then
+            sed -i "s|-DCMAKE_BUILD_TYPE=Debug && make VERBOSE=1 -j install|-DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS=-I${TAU_LLVM_CLANG_INC} \\&\\& cmake --build . --parallel \\&\\& cmake --install .|" plugins/llvm/Makefile
+         fi
+      else
+         echo "tau: clang dev tree / llvm CMake config absent under ${ROCM_PATH}; skipping LLVM instrumentation plugin (dropping -llvm_src)"
       fi
 
       # install third party dependencies
@@ -559,21 +708,55 @@ else
       # / audit_2026_05_01.md Issue 2 for the original case.
       PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
 
-      # install OpenMPI if not in the system already
-      # openmpi already loaded by preflight_modules above.
-      if [[ `which mpicc | wc -l` -eq 0 ]]; then
+      # apt is Debian/Ubuntu only. On a Cray RHEL9 host there is no apt-get;
+      # MPI comes from the (mpich-wrappers/cray-mpich) module loaded by
+      # preflight and java is provided by the base image, so the apt steps
+      # below are simply skipped. Guarding (rather than calling apt blindly)
+      # avoids a `apt-get: command not found` abort under `set -e`.
+      if command -v apt-get >/dev/null 2>&1; then
+         # install OpenMPI if not in the system already
+         # (the MPI module loaded by preflight already puts mpicc on PATH)
+         if [[ `which mpicc | wc -l` -eq 0 ]]; then
+            ${PKG_SUDO} apt-get update
+            ${PKG_SUDO} apt-get install -q -y libopenmpi-dev
+         fi
+
+         # install java to use paraprof
          ${PKG_SUDO} apt-get update
-         ${PKG_SUDO} apt-get install -q -y libopenmpi-dev
+         ${PKG_SUDO} apt install -q -y default-jre
+      else
+         echo "tau: apt-get not present (non-Debian host); relying on module MPI ($(command -v mpicc || echo 'mpicc MISSING')) and system java ($(command -v java || echo 'java MISSING'))"
       fi
 
-      # install java to use paraprof
-      ${PKG_SUDO} apt-get update
-      ${PKG_SUDO} apt install -q -y default-jre
-
+      # ROCm integration flags. -llvm_src enables the optional plugins/llvm
+      # compiler-instrumentation plugin; only pass it when the clang dev tree
+      # + llvm CMake config were detected above (TAU_LLVM_CLANG_INC set),
+      # otherwise the plugin's find_package(LLVM)/clang headers are missing
+      # and the whole build would fail on this single optional feature.
       ROCM_FLAGS="-rocm=${ROCM_PATH} -hip=${ROCM_PATH} -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -rocprofiler=${ROCM_PATH}"
       result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
       if [[ "${result}" ]]; then # ROCM_VERSION >= 6.2
-         ROCM_FLAGS="-rocm=${ROCM_PATH} -hip=${ROCM_PATH} -rocmsmi=${ROCM_PATH} -rocprofsdk=${ROCM_PATH} -llvm_src=${ROCM_PATH}/llvm/lib/cmake/llvm"
+         ROCM_FLAGS="-rocm=${ROCM_PATH} -hip=${ROCM_PATH} -rocmsmi=${ROCM_PATH} -rocprofsdk=${ROCM_PATH}"
+         if [ -n "${TAU_LLVM_CLANG_INC}" ] && [ -d "${ROCM_PATH}/llvm/lib/cmake/llvm" ]; then
+            ROCM_FLAGS="${ROCM_FLAGS} -llvm_src=${ROCM_PATH}/llvm/lib/cmake/llvm"
+         fi
+      fi
+
+      # ── plugins/llvm gate for the `make -j` build pass ────────────────
+      # TAU's top-level Makefile.skel has `all: install`, so each `make -j`
+      # below ALSO descends into plugins/llvm (it's in $(SUBDIR) by default,
+      # independent of -llvm_src). On an SDK without the clang dev tree /
+      # llvm CMake config (detected above), that subdir's cmake fails with
+      # "Could not find LLVM" and aborts the whole TAU build. Setting
+      # LLVM_PLUGIN= on the make command line drops plugins/llvm from
+      # $(SUBDIR) for the build pass too, so TAU still builds (just without
+      # the optional compiler-instrumentation plugin). When the clang tree
+      # IS present, leave this empty so `make -j` builds the plugin as admin
+      # (the install pass already passes LLVM_PLUGIN= to avoid a root rebuild).
+      if [ -n "${TAU_LLVM_CLANG_INC}" ] && [ -d "${ROCM_PATH}/llvm/lib/cmake/llvm" ]; then
+         TAU_BUILD_LLVM_OPT=""
+      else
+         TAU_BUILD_LLVM_OPT="LLVM_PLUGIN="
       fi
 
       # configure with: MPI OMPT OPENMP PDT ROCM
@@ -596,81 +779,134 @@ else
       # --build and cmake --install only ever run as admin (least
       # privilege), build/ stays admin-owned across cycles, and one
       # plugin rebuild per cycle is saved.
-      make -j $(nproc)
+      make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: MPI PDT ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -pdt=${PDT_PATH} -iowrapper
 
-      make -j $(nproc)
+      make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: OMPT OPENMP PDT ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -pdt=${PDT_PATH} -iowrapper
 
-      make -j $(nproc)
+      make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: PDT ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -pdt=${PDT_PATH} -iowrapper
 
-      make -j $(nproc)
+      make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -iowrapper
 
-      make -j $(nproc)
+      make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: OMPT OPENMP ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -iowrapper
 
-      make -j $(nproc)
+      make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: MPI ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -mpi -iowrapper
 
-      make -j $(nproc)
+      make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: MPI OMPT OPENMP ROCM
       ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -iowrapper
 
-      make -j $(nproc)
+      make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
+
+      # ── Detect the TAU arch subdir (x86_64 vs craycnl) ───────────────
+      # TAU names its install subdir after the detected machine arch. On a
+      # generic x86_64 host that is "x86_64"; on a Cray (TAU detects the
+      # Cray PE -> -DTAU_CRAYCNL) it is "craycnl". Hardcoding x86_64 breaks
+      # the pthread-wrapper cleanup below and the modulefile PATH/lib on a
+      # Cray. Derive it from whichever <arch>/bin TAU actually created.
+      TAU_ARCH="$(basename "$(dirname "$(ls -d ${TAU_PATH}/*/bin 2>/dev/null | head -1)")")"
+      [ -z "${TAU_ARCH}" ] && TAU_ARCH="x86_64"
+      TAU_LIB_DIR="${TAU_PATH}/${TAU_ARCH}/lib"
+      export TAU_LIB_DIR
+      echo "tau: detected arch subdir '${TAU_ARCH}' (TAU_LIB_DIR=${TAU_LIB_DIR})"
 
       # the configure flag -no_pthread_create
       # still creates linking options for the pthread wrapper
       # that are breaking the instrumentation tests in C and C++
-      ${SUDO} rm ${TAU_PATH}/x86_64/lib/wrappers/pthread_wrapper/link_options.tau
+      ${SUDO} rm -f ${TAU_LIB_DIR}/wrappers/pthread_wrapper/link_options.tau
 
       # TAU_BUILD_DIR (under /tmp, contains tau2/ and the spack clone)
       # is removed by the EXIT trap above. No need to rm -rf tau2 or
       # spack explicitly here.
 
-      if [[ "${USER}" != "root" ]]; then
+      # chown to root only when we actually installed with elevation
+      # (SUDO non-empty). On a user-owned install tree (SUDO="") the files
+      # are already correctly owned and `chown root:root` would fail with
+      # "Operation not permitted" and abort under set -e.
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find $PDT_PATH_ORIGINAL -type f -execdir chown root:root "{}" +
          ${SUDO} find $PDT_PATH_ORIGINAL -type d -execdir chown root:root "{}" +
          ${SUDO} find $TAU_PATH -type f -execdir chown root:root "{}" +
          ${SUDO} find $TAU_PATH -type d -execdir chown root:root "{}" +
       fi
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} chmod go-w $PDT_PATH_ORIGINAL
          ${SUDO} chmod go-w $TAU_PATH
       fi
 
-      module unload ${ROCM_MODULE_NAME}
+      # Unload the dependent (MPI) BEFORE its dependency (rocm): the openmpi
+      # modulefile prereqs rocm/<ver>, so unloading rocm first while openmpi
+      # is still loaded trips Lmod ("Cannot load module openmpi without
+      # rocm/<ver>"). `|| true` already tolerates absence; ordering avoids the
+      # spurious error. Mirrors petsc_setup.sh / hypre_setup.sh.
+      module unload ${MPI_MODULE} || true
+      module unload ${ROCM_MODULE_NAME} || true
 
+   fi
+
+   # Arch-subdir fallback for the modulefile: the build branch sets TAU_ARCH
+   # + TAU_LIB_DIR after detecting x86_64 vs craycnl, but the cached-install
+   # branch above does not, so derive them here when unset (idempotent).
+   if [ -z "${TAU_ARCH:-}" ]; then
+      TAU_ARCH="$(basename "$(dirname "$(ls -d ${TAU_PATH}/*/bin 2>/dev/null | head -1)")")"
+      [ -z "${TAU_ARCH}" ] && TAU_ARCH="x86_64"
+      TAU_LIB_DIR="${TAU_PATH}/${TAU_ARCH}/lib"
    fi
 
    # Create a module file for TAU
    #
-   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
-   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
-   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
-   ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
+   # Module-tree sudo + flavor: pick Lua (.lua) for Lmod, classic Tcl
+   # (no ext) otherwise, and probe the module tree for user-writability so
+   # a user-owned modulepath (this Cray) does not trigger a sudo password
+   # prompt. Mirrors the magma/kokkos/hypre modulefile probe.
+   if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+      MODFLAVOR="lua"; MODEXT=".lua"
+   else
+      MODFLAVOR="tcl"; MODEXT=""
+   fi
+   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+      MOD_SUDO=""
+   else
+      _mprobe="${MODULE_PATH}"
+      while [ ! -e "${_mprobe}" ]; do _mprobe="$(dirname "${_mprobe}")"; done
+      _mtest=$(mktemp --tmpdir="${_mprobe}" .tau-mod-probe.XXXXXX 2>/dev/null || true)
+      if [ -n "${_mtest}" ] && [ -f "${_mtest}" ]; then
+         rm -f "${_mtest}"
+         MOD_SUDO=""
+         echo "tau: module tree ancestor ${_mprobe} is user-writable (probe succeeded); not using sudo for modulefile writes"
+      else
+         MOD_SUDO="sudo"
+         echo "tau: module tree ancestor ${_mprobe} not user-writable (probe failed); using sudo for modulefile writes"
+      fi
+      unset _mprobe _mtest
+   fi
+   ${MOD_SUDO} mkdir -p ${MODULE_PATH}
 
    # Provenance: capture this leaf script's git state for the modulefile
    # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
@@ -695,15 +931,34 @@ else
    fi
    unset _leaf_dir
 
-   # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/dev.lua
+   # The - option suppresses tabs. Dual flavor: Lua for Lmod, classic Tcl
+   # otherwise. Both prereq the rocm SDK module and load the (resolved) MPI
+   # module so TAU's MPI wrappers (tau_cc.sh -mpi, etc.) find mpicc/mpif90
+   # from the same PrgEnv MPI the library was built against.
+   TAU_MODULEFILE="${MODULE_PATH}/dev${MODEXT}"
+   if [ "${MODFLAVOR}" = "lua" ]; then
+      cat <<-EOF | ${MOD_SUDO} tee ${TAU_MODULEFILE}
 	whatis(" TAU - portable profiling and tracing toolkit ")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
 	prereq("${ROCM_MODULE_NAME}")
-	prepend_path("PATH","${TAU_PATH}/x86_64/bin")
+	load("${MPI_MODULE}")
+	prepend_path("PATH","${TAU_PATH}/${TAU_ARCH}/bin")
 	prepend_path("PATH","${PDT_PATH}/bin")
 	setenv("TAU_LIB_DIR","${TAU_LIB_DIR}")
 EOF
+   else
+      cat <<-EOF | ${MOD_SUDO} tee ${TAU_MODULEFILE}
+	#%Module1.0
+	module-whatis "TAU - portable profiling and tracing toolkit"
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+
+	prereq ${ROCM_MODULE_NAME}
+	if { ![ is-loaded ${MPI_MODULE} ] } { module load ${MPI_MODULE} }
+	prepend-path PATH "${TAU_PATH}/${TAU_ARCH}/bin"
+	prepend-path PATH "${PDT_PATH}/bin"
+	setenv TAU_LIB_DIR "${TAU_LIB_DIR}"
+EOF
+   fi
 
 fi
