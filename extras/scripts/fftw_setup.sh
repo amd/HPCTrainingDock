@@ -218,12 +218,41 @@ if [ "${BUILD_FFTW}" = "0" ]; then
    exit ${NOOP_RC}
 fi
 
+# ── Early sudo decision (see hdf5_setup.sh / mpi4py_setup.sh) ────────
+# Determine whether privilege escalation is needed BEFORE the --replace
+# block and EXIT trap (both rm install/module paths via ${SUDO}). When the
+# operator owns a writable install tree (e.g. a user-writable
+# /shareddata/opt on a Cray) no sudo is needed -- and forcing it would hit a
+# password prompt that fails on a node where the user has no sudo. Probe the
+# nearest EXISTING ancestor of FFTW_PATH (the leaf dir does not exist yet).
+# The build branch re-affirms this below.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   SUDO=""
+else
+   _probe="${FFTW_PATH}"
+   while [ ! -e "${_probe}" ]; do _probe="$(dirname "${_probe}")"; done
+   # Real write test (mktemp), NOT `[ -w ]`: on NFS `-w` is a LYING probe --
+   # it reports "writable" on a root:root 0755 tree (e.g. /nfsapps) where the
+   # actual write / rm then fails (the netcdf_setup.sh lying-probe failure
+   # mode). Mirrors the hdf5/hipifly/kokkos mktemp probe.
+   _wtest=$(mktemp --tmpdir="${_probe}" .fftw-write-probe.XXXXXX 2>/dev/null || true)
+   if [ -n "${_wtest}" ] && [ -f "${_wtest}" ]; then
+      rm -f "${_wtest}"
+      SUDO=""
+      echo "install path ancestor ${_probe} is writable (probe succeeded); not using sudo"
+   else
+      echo "install path ancestor ${_probe} not user-writable (probe failed); using sudo"
+   fi
+   unset _probe _wtest
+fi
+
 if [ "${REPLACE}" = "1" ]; then
    echo "[fftw --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${FFTW_PATH}"
-   echo "  modulefile:  ${MODULE_PATH}/${FFTW_VERSION}.lua"
+   echo "  modulefile:  ${MODULE_PATH}/${FFTW_VERSION}{,.lua}"
    ${SUDO} rm -rf "${FFTW_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/${FFTW_VERSION}.lua"
+   # Remove both flavors (Lmod .lua and Tcl no-extension).
+   ${SUDO} rm -f  "${MODULE_PATH}/${FFTW_VERSION}.lua" "${MODULE_PATH}/${FFTW_VERSION}"
 fi
 
 # ── Existence guard: skip if already installed (see hypre_setup.sh) ──
@@ -236,15 +265,25 @@ if [ -d "${FFTW_PATH}" ]; then
    exit ${NOOP_RC}
 fi
 
+# FFTW_BUILD_DIR (a /tmp scratch dir, set under the source-build branch)
+# is cleaned here too, so this single EXIT trap does both jobs. A prior
+# separate `trap '... rm FFTW_BUILD_DIR' EXIT` further down OVERWROTE this
+# handler, silently disabling fail-cleanup of a partial install -- folded
+# in here to match hdf5_setup.sh.
+FFTW_BUILD_DIR=""
 _fftw_on_exit() {
    local rc=$?
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[fftw fail-cleanup] rc=${rc}: removing partial install + modulefile"
-      ${SUDO:-sudo} rm -rf "${FFTW_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${FFTW_VERSION}.lua"
+      # ${SUDO} verbatim (NOT ${SUDO:-sudo}): the early-probe may set SUDO=""
+      # for an operator-writable tree, and cleanup must then run WITHOUT sudo.
+      ${SUDO} rm -rf "${FFTW_PATH}"
+      ${SUDO} rm -f  "${MODULE_PATH}/${FFTW_VERSION}.lua" "${MODULE_PATH}/${FFTW_VERSION}"
    elif [ ${rc} -ne 0 ]; then
       echo "[fftw fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
+   # Scratch build dir under /tmp (user-owned via mktemp) -- never needs sudo.
+   [ -n "${FFTW_BUILD_DIR:-}" ] && rm -rf "${FFTW_BUILD_DIR}"
    return ${rc}
 }
 trap _fftw_on_exit EXIT
@@ -352,18 +391,89 @@ else
          ${SUDO} chmod -R a+w ${FFTW_PATH}
       fi
 
-      # default build is without mpi
-      ENABLE_MPI=""
-      REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${MPI_MODULE}" )
-      preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
-      if [[ `which mpicc | wc -l` -eq 1 ]]; then
-	 # if mpi is found in the path, build fftw parallel
-         ENABLE_MPI="--enable-mpi"
+      # ── MPI module auto-correct on a Cray PE (see hdf5_setup.sh) ──────
+      # The leaf default MPI_MODULE is "openmpi", but a Cray system ships
+      # cray-mpich (no openmpi module exists) -- preflight would fail. If
+      # cray-mpich is active and the caller did not override the MPI, switch
+      # to cray-mpich so the prereq load and the parallel build use the
+      # PrgEnv's own MPI. (main_setup.sh also threads --mpi-module cray-mpich
+      # / mpich-wrappers when MPICH_DIR is set; this makes the leaf correct
+      # standalone too.)
+      if [ "${MPI_MODULE}" = "openmpi" ] \
+           && { [ -n "${CRAY_MPICH_VERSION:-}" ] || [ -n "${MPICH_DIR:-}" ]; }; then
+         MPI_MODULE="cray-mpich"
+         echo "FFTW: Cray MPICH detected; MPI_MODULE -> cray-mpich"
       fi
 
-      # override flags with user defined values if present
+      # ── mpich-wrappers resolution (PrgEnv MPI on a Cray) ─────────────
+      # mpich-wrappers is a standalone MPICH (MPICH-ABI compatible with
+      # cray-mpich) front-loading mpicc/mpicxx/mpifort. When the caller asks
+      # for it (main_setup threads --mpi-module mpich-wrappers), resolve the
+      # bare name to the concrete, version-matched modulefile token by
+      # scanning MODULEPATH (mpich-wrappers/${ROCM_VERSION} first, then a
+      # bare mpich-wrappers). If none is found, fall back to cray-mpich so
+      # the build still works with the Cray PE wrappers.
+      if [ "${MPI_MODULE}" = "mpich-wrappers" ]; then
+         _mw_tok=""
+         _OLD_IFS="${IFS}"; IFS=":"
+         for _d in ${MODULEPATH:-}; do
+            for _cand in "mpich-wrappers/${ROCM_VERSION}" "mpich-wrappers"; do
+               if [ -e "${_d}/${_cand}" ] || [ -e "${_d}/${_cand}.lua" ]; then
+                  _mw_tok="${_cand}"; break 2
+               fi
+            done
+         done
+         IFS="${_OLD_IFS}"; unset _OLD_IFS _d _cand
+         if [ -n "${_mw_tok}" ]; then
+            MPI_MODULE="${_mw_tok}"
+            echo "FFTW: using mpich-wrappers module '${_mw_tok}' (PrgEnv MPI)"
+         else
+            echo "FFTW: WARNING: --mpi-module mpich-wrappers requested but no mpich-wrappers modulefile found on MODULEPATH; falling back to cray-mpich"
+            MPI_MODULE="cray-mpich"
+         fi
+         unset _mw_tok
+      fi
+
+      # default build is without mpi
+      ENABLE_MPI=""
+      USE_MPICC=""
+      REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${MPI_MODULE}" )
+      preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
+
+      # ── MPI C-compiler (MPICC) selection ─────────────────────────────
+      # FFTW's --enable-mpi builds libfftw3*_mpi using MPICC. Pick the MPI C
+      # wrapper that matches the loaded MPI module so the MPI variant links
+      # the SAME MPI as the rest of the PrgEnv stack:
+      #   1. mpich-wrappers / OpenMPI / MVAPICH -> mpicc (front-loaded by the
+      #      module just preflight-loaded above).
+      #   2. cray-mpich (no mpich-wrappers) -> Cray PE `cc` wrapper.
+      # The serial (non-MPI) FFTW libs still build with the plain C_COMPILER.
+      if [ "${MPI_MODULE#mpich-wrappers}" != "${MPI_MODULE}" ] \
+           && command -v mpicc >/dev/null 2>&1; then
+         ENABLE_MPI="--enable-mpi"
+         USE_MPICC="MPICC=$(command -v mpicc)"
+         echo "FFTW: mpich-wrappers MPI -> MPICC=$(command -v mpicc)"
+      elif { [ "${MPI_MODULE}" = "cray-mpich" ] || [ -n "${CRAY_MPICH_VERSION:-}" ] || [ -n "${MPICH_DIR:-}" ]; } \
+           && command -v cc >/dev/null 2>&1; then
+         ENABLE_MPI="--enable-mpi"
+         USE_MPICC="MPICC=$(command -v cc)"
+         echo "FFTW: Cray PE detected -> MPICC=$(command -v cc) (cray-mpich)"
+      elif command -v mpicc >/dev/null 2>&1; then
+         # OpenMPI / MVAPICH path
+         ENABLE_MPI="--enable-mpi"
+         USE_MPICC="MPICC=$(command -v mpicc)"
+         echo "FFTW: MPI -> MPICC=$(command -v mpicc)"
+      else
+         echo "FFTW: no MPI C wrapper found; building serial FFTW only"
+      fi
+
+      # operator opt-out / opt-in override
       if [ "${ENABLE_MPI_INPUT}" == "1" ]; then
          ENABLE_MPI="--enable-mpi"
+      elif [ "${ENABLE_MPI_INPUT}" == "0" ]; then
+         ENABLE_MPI=""
+         USE_MPICC=""
+         echo "FFTW: --enable-mpi 0 requested; building serial FFTW only"
       fi
 
       # Build under /tmp (compute-node local disk) so the three
@@ -373,19 +483,15 @@ else
       # EXIT trap guarantees cleanup even on build failure (we have
       # set -e). Audit basis: 7950 fftw took ~7m14s with build under
       # /home/admin/repos/HPCTrainingDock/fftw-3.3.10/...
+      # FFTW_BUILD_DIR is cleaned by the _fftw_on_exit trap installed above
+      # (folding build-dir + fail-cleanup into one handler; a separate trap
+      # here would overwrite that handler and disable fail-cleanup).
       FFTW_BUILD_DIR=$(mktemp -d -t fftw-build.XXXXXX)
-      trap '[ -n "${FFTW_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${FFTW_BUILD_DIR}"' EXIT
       cd "${FFTW_BUILD_DIR}"
 
       wget -q https://www.fftw.org/fftw-${FFTW_VERSION}.tar.gz
       tar zxf fftw-${FFTW_VERSION}.tar.gz
       cd fftw-${FFTW_VERSION}
-
-      USE_MPICC=""
-      if [ "${ENABLE_MPI}" == "1" ]; then
-         USE_MPICC="MPICC=mpicc"
-	 C_COMPILER="mpicc"
-      fi	      
 
       # Use all available cores for the three precision variants. Without
       # `-j` each of these three full builds runs serially on one core,
@@ -433,9 +539,26 @@ else
 
    # Create a module file for fftw
    #
-   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
-   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
-   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   # Modulefile-write sudo: root needs none; otherwise probe the nearest
+   # EXISTING ancestor of MODULE_PATH for writability (a user-writable
+   # /shareddata/modules tree on a Cray needs no sudo, and forcing it would
+   # hit a password prompt that fails where the user has no sudo). Mirrors
+   # hdf5_setup.sh.
+   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+      PKG_SUDO_MOD=""
+   else
+      _mprobe="${MODULE_PATH}"
+      while [ ! -e "${_mprobe}" ]; do _mprobe="$(dirname "${_mprobe}")"; done
+      # Real write test (mktemp), NOT `[ -w ]` (NFS lying-probe; see above).
+      _mwtest=$(mktemp --tmpdir="${_mprobe}" .fftw-mod-probe.XXXXXX 2>/dev/null || true)
+      if [ -n "${_mwtest}" ] && [ -f "${_mwtest}" ]; then
+         rm -f "${_mwtest}"
+         PKG_SUDO_MOD=""
+      else
+         PKG_SUDO_MOD="sudo"
+      fi
+      unset _mprobe _mwtest
+   fi
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    # Provenance: capture this leaf script's git state for the modulefile
@@ -461,17 +584,66 @@ else
    fi
    unset _leaf_dir
 
-   # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${FFTW_VERSION}.lua
+   # ── Modulefile flavor: Lua (Lmod) vs Tcl (classic Environment Modules) ─
+   # Lmod consumes <name>.lua; classic Tcl `environment-modules` consumes an
+   # extensionless Tcl file. Detect Lmod via its env markers; default to Tcl
+   # when Lmod is absent (this site runs Tcl Environment Modules).
+   if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+      _MODFILE="${MODULE_PATH}/${FFTW_VERSION}.lua"
+      _MODFLAVOR="lua"
+   else
+      _MODFILE="${MODULE_PATH}/${FFTW_VERSION}"
+      _MODFLAVOR="tcl"
+   fi
+
+   # For an MPI build, libfftw3*_mpi links a specific MPI; require that MPI
+   # module so a consumer cannot load a mismatched (or no) MPI. Only emitted
+   # when MPI was enabled and an MPI module name is known.
+   _EMIT_MPI_PREREQ=0
+   if [ -n "${ENABLE_MPI}" ] && [ -n "${MPI_MODULE}" ]; then
+      _EMIT_MPI_PREREQ=1
+   fi
+
+   # The - option suppresses leading tabs in the heredoc body.
+   if [ "${_MODFLAVOR}" = "lua" ]; then
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
 	whatis("FFTW: Fastest Fourier Transform in the West")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
 	prereq("${ROCM_MODULE_NAME}")
 	local base = "${FFTW_PATH}"
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
+	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	setenv("FFTW_PATH", base)
+	setenv("FFTW_ROOT", base)
+	setenv("FFTW_MPI_MODULE", "${MPI_MODULE}")
 	prepend_path("PATH", pathJoin(base, "bin"))
 EOF
+      if [ "${_EMIT_MPI_PREREQ}" = "1" ]; then
+         echo "prereq(\"${MPI_MODULE}\")" | ${PKG_SUDO_MOD} tee -a "${_MODFILE}" >/dev/null
+      fi
+   else
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
+	#%Module1.0
+	module-whatis "FFTW: Fastest Fourier Transform in the West"
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+
+	prereq ${ROCM_MODULE_NAME}
+	set base "${FFTW_PATH}"
+	prepend-path LD_LIBRARY_PATH \$base/lib
+	prepend-path C_INCLUDE_PATH \$base/include
+	prepend-path CPLUS_INCLUDE_PATH \$base/include
+	setenv FFTW_PATH \$base
+	setenv FFTW_ROOT \$base
+	setenv FFTW_MPI_MODULE "${MPI_MODULE}"
+	prepend-path PATH \$base/bin
+EOF
+      if [ "${_EMIT_MPI_PREREQ}" = "1" ]; then
+         echo "prereq ${MPI_MODULE}" | ${PKG_SUDO_MOD} tee -a "${_MODFILE}" >/dev/null
+      fi
+   fi
+   unset _MODFILE _MODFLAVOR _EMIT_MPI_PREREQ
 
 fi
 

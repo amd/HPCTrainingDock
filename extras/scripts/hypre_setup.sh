@@ -207,6 +207,35 @@ else
    HYPRE_PATH=/opt/rocmplus-${ROCM_VERSION}/hypre-v${HYPRE_VERSION}
 fi
 
+# ── Install-path sudo (computed EARLY, before afar-skip/--replace) ────
+# The afar-skip and --replace blocks below rm -rf the install dir +
+# modulefile with ${SUDO}. The leaf default is SUDO=sudo, which on a
+# cluster with no passwordless sudo and a user-owned install tree (this
+# Cray) makes --replace / afar-skip die on a password prompt before the
+# build even starts. Probe the nearest existing ancestor of the install
+# dir for user-writability and drop sudo when we own it. Mirrors the
+# magma/kokkos/petsc/rocshmem writability probe. The same SUDO then
+# governs the build-branch install dir + chowns below. EUID 0 never
+# needs sudo.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   SUDO=""
+elif [ -z "${SUDO}" ]; then
+   :  # already cleared (e.g. Singularity)
+else
+   _iprobe="$(dirname "${HYPRE_PATH}")"
+   while [ ! -e "${_iprobe}" ]; do _iprobe="$(dirname "${_iprobe}")"; done
+   _itest=$(mktemp --tmpdir="${_iprobe}" .hypre-inst-probe.XXXXXX 2>/dev/null || true)
+   if [ -n "${_itest}" ] && [ -f "${_itest}" ]; then
+      rm -f "${_itest}"
+      SUDO=""
+      echo "hypre: install ancestor ${_iprobe} is user-writable (probe succeeded); not using sudo for install"
+   else
+      SUDO="sudo"
+      echo "hypre: install ancestor ${_iprobe} not user-writable (probe failed); using sudo for install"
+   fi
+   unset _iprobe _itest
+fi
+
 # ── BUILD_HYPRE=0 short-circuit: operator opt-out ────────────────────
 # Replaces the `if [[ "${BUILD_HYPRE}" == "1" ]]; then run_and_log
 # hypre ...; fi` wrapper that previously gated this script's entire
@@ -269,9 +298,9 @@ if [[ "${ROCM_PATH:-}" == *afar* ]]; then
          echo "[hypre afar-skip] removing stale from-source install: ${HYPRE_PATH}"
          ${SUDO} rm -rf "${HYPRE_PATH}"
       fi
-      if [ -f "${MODULE_PATH}/${HYPRE_VERSION}.lua" ]; then
-         echo "[hypre afar-skip] removing stale modulefile: ${MODULE_PATH}/${HYPRE_VERSION}.lua"
-         ${SUDO} rm -f "${MODULE_PATH}/${HYPRE_VERSION}.lua"
+      if [ -f "${MODULE_PATH}/${HYPRE_VERSION}.lua" ] || [ -f "${MODULE_PATH}/${HYPRE_VERSION}" ]; then
+         echo "[hypre afar-skip] removing stale modulefile: ${MODULE_PATH}/${HYPRE_VERSION}{.lua,}"
+         ${SUDO} rm -f "${MODULE_PATH}/${HYPRE_VERSION}.lua" "${MODULE_PATH}/${HYPRE_VERSION}"
       fi
       # ── Drop a SKIPPED marker so the inventory tool can distinguish ──
       # "skipped on this SDK" from "absent / failed". See
@@ -306,9 +335,9 @@ fi
 if [ "${REPLACE}" = "1" ]; then
    echo "[hypre --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${HYPRE_PATH}"
-   echo "  modulefile:  ${MODULE_PATH}/${HYPRE_VERSION}.lua"
+   echo "  modulefile:  ${MODULE_PATH}/${HYPRE_VERSION}{.lua,}"
    ${SUDO} rm -rf "${HYPRE_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/${HYPRE_VERSION}.lua"
+   ${SUDO} rm -f  "${MODULE_PATH}/${HYPRE_VERSION}.lua" "${MODULE_PATH}/${HYPRE_VERSION}"
 fi
 
 # ── Existence guard: skip if this version is already installed ───────
@@ -353,7 +382,7 @@ _hypre_on_exit() {
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[hypre fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO:-sudo} rm -rf "${HYPRE_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${HYPRE_VERSION}.lua"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${HYPRE_VERSION}.lua" "${MODULE_PATH}/${HYPRE_VERSION}"
    elif [ ${rc} -ne 0 ]; then
       echo "[hypre fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -415,14 +444,26 @@ else
    #      basename == module name) but wrong for therock-afar.
    #   3. rocm/${ROCM_VERSION}: standalone-invocation fallback when
    #      neither LOADEDMODULES nor ROCM_PATH is populated.
+   # Two-pass over LOADEDMODULES: prefer a rocm/* matching the requested
+   # ROCM_VERSION before falling back to the first rocm/*. A Cray
+   # PrgEnv-amd-new shell can have several rocm/* loaded at once (e.g.
+   # rocm/7.0.3 AND rocm/7.2.3 alongside the PrgEnv's rocm-new/7.2.3);
+   # taking the first match would key the build + modulefile on the wrong SDK.
    ROCM_MODULE_NAME=""
    if [[ -n "${LOADEDMODULES:-}" ]]; then
       _OLD_IFS="${IFS}"; IFS=":"
       for _m in ${LOADEDMODULES}; do
          case "${_m}" in
-            rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+            rocm/${ROCM_VERSION}) ROCM_MODULE_NAME="${_m}"; break ;;
          esac
       done
+      if [[ -z "${ROCM_MODULE_NAME}" ]]; then
+         for _m in ${LOADEDMODULES}; do
+            case "${_m}" in
+               rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+            esac
+         done
+      fi
       IFS="${_OLD_IFS}"; unset _OLD_IFS _m
    fi
    if [[ -z "${ROCM_MODULE_NAME}" ]]; then
@@ -460,20 +501,98 @@ else
       echo "============================"
       echo ""
 
+      # ── MPI module auto-correct on a Cray PE (see hdf5/netcdf/petsc) ──
+      # hypre's cmake needs an MPI for find_package(MPI) (and, with Fortran
+      # enabled below, find_package(MPI COMPONENTS Fortran) -> mpifort). The
+      # leaf default MPI_MODULE is "openmpi", but a Cray system ships
+      # cray-mpich (no openmpi module exists) -- preflight would SKIP the
+      # whole build. If cray-mpich is active and the caller did not override
+      # the MPI, switch to cray-mpich. main_setup.sh also threads
+      # --mpi-module mpich-wrappers / cray-mpich; this makes the leaf
+      # correct standalone too.
+      if [ "${MPI_MODULE}" = "openmpi" ] \
+           && { [ -n "${CRAY_MPICH_VERSION:-}" ] || [ -n "${MPICH_DIR:-}" ]; }; then
+         MPI_MODULE="cray-mpich"
+         echo "hypre: Cray MPICH detected; MPI_MODULE -> cray-mpich"
+      fi
+
+      # ── mpich-wrappers resolution (PrgEnv MPI + new-flang mpi.mod) ─────
+      # cray-mpich drives the build through cc/CC/ftn wrappers and does not
+      # put mpicc/mpicxx/mpifort on PATH, so cmake's find_package(MPI)
+      # cannot locate it. The from-source mpich-wrappers leaf ships
+      # mpicc/mpicxx/mpifort (MPICH-ABI compatible with cray-mpich, built
+      # with the new LLVM Flang amdflang -> amdflang-format mpi.mod) --
+      # exactly what hypre's Fortran drivers need on ROCm 7.x. When the
+      # caller asks for it (main_setup threads --mpi-module mpich-wrappers),
+      # resolve the bare name to the concrete, version-matched modulefile
+      # token by scanning MODULEPATH. If none is found, fall back to
+      # cray-mpich.
+      if [ "${MPI_MODULE}" = "mpich-wrappers" ]; then
+         _mw_tok=""
+         _OLD_IFS="${IFS}"; IFS=":"
+         for _d in ${MODULEPATH:-}; do
+            for _cand in "mpich-wrappers/${ROCM_VERSION}" "mpich-wrappers"; do
+               if [ -e "${_d}/${_cand}" ] || [ -e "${_d}/${_cand}.lua" ]; then
+                  _mw_tok="${_cand}"; break 2
+               fi
+            done
+         done
+         IFS="${_OLD_IFS}"; unset _OLD_IFS _d _cand
+         if [ -n "${_mw_tok}" ]; then
+            MPI_MODULE="${_mw_tok}"
+            echo "hypre: using mpich-wrappers module '${_mw_tok}' (PrgEnv MPI; ships mpicc/mpicxx/mpifort, new-flang mpi.mod)"
+         else
+            echo "hypre: WARNING: --mpi-module mpich-wrappers requested but no mpich-wrappers modulefile found on MODULEPATH; falling back to cray-mpich"
+            MPI_MODULE="cray-mpich"
+         fi
+         unset _mw_tok
+      fi
+
       REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${MPI_MODULE}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
-      # don't use sudo if user has write access to install path
-      if [ -d "$HYPRE_PATH" ]; then
-         # don't use sudo if user has write access to install path
-         if [ -w ${HYPRE_PATH} ]; then
-            SUDO=""
-         else
-            echo "WARNING: using an install path that requires sudo"
+      # ── Compiler + MPI selection for cmake ───────────────────────────
+      # On a Cray PrgEnv-amd-new the system Fortran (amdflang / Cray ftn)
+      # is the NEW LLVM Flang, whose mpi.mod format the old crayftn cannot
+      # read and vice versa. Resolve concrete compilers so the build is
+      # consistent and find_package(MPI) succeeds:
+      #   * mpich-wrappers: mpicc (gcc) / mpicxx (g++) / mpifort (amdflang),
+      #     standalone MPICH built with FC=amdflang -> new-flang mpi.mod.
+      #     This is the PrgEnv MPI + amdflang the operator asked for.
+      #   * else: leave compilers unset (cmake defaults; non-Cray openmpi
+      #     path), and let find_package(MPI) discover the wrappers on PATH.
+      # HIP device code is compiled by CMAKE_HIP_COMPILER
+      # (${ROCM_PATH}/llvm/bin/clang++, set by HYPRE's own
+      # HYPRE_SetupHIPToolkit.cmake from ROCM_PATH), independent of these
+      # host C/C++ compilers, so using mpicc/mpicxx for host is safe.
+      HYPRE_C_COMPILER=""
+      HYPRE_CXX_COMPILER=""
+      HYPRE_F_COMPILER=""
+      if [ "${MPI_MODULE#mpich-wrappers}" != "${MPI_MODULE}" ] \
+           && command -v mpicc   >/dev/null 2>&1 \
+           && command -v mpicxx  >/dev/null 2>&1 \
+           && command -v mpifort >/dev/null 2>&1; then
+         HYPRE_C_COMPILER=$(command -v mpicc)
+         HYPRE_CXX_COMPILER=$(command -v mpicxx)
+         HYPRE_F_COMPILER=$(command -v mpifort)
+         echo "hypre: mpich-wrappers MPI -> mpicc/mpicxx/mpifort (PrgEnv MPI, new-flang mpi.mod)."
+         echo "hypre: Fortran wrapper mpifort -> $(${HYPRE_F_COMPILER} --version 2>/dev/null | head -1)"
+      fi
+
+      # ── MPI hint for cmake's find_package(MPI) ───────────────────────
+      # The PrgEnv MPI modules don't export the variables find_package(MPI)
+      # keys on. mpich-wrappers exports MPICH_WRAPPERS_DIR (root has
+      # bin/mpicc + include + lib); cray-mpich exports MPICH_DIR. Set
+      # MPI_HOME so cmake can locate the MPI even when the wrappers aren't
+      # on PATH (harmless when they are).
+      if [ -z "${MPI_HOME:-}" ]; then
+         if [ -n "${MPICH_WRAPPERS_DIR:-}" ]; then
+            export MPI_HOME="${MPICH_WRAPPERS_DIR}"
+            echo "hypre: MPI_HOME set from MPICH_WRAPPERS_DIR -> ${MPI_HOME}"
+         elif [ -n "${MPICH_DIR:-}" ]; then
+            export MPI_HOME="${MPICH_DIR}"
+            echo "hypre: MPI_HOME set from MPICH_DIR (cray-mpich) -> ${MPI_HOME}"
          fi
-      else
-         # if install path does not exist yet, the check on write access will fail
-         echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
 
       ${SUDO} mkdir -p ${HYPRE_PATH}
@@ -613,9 +732,46 @@ else
 
          mkdir build && cd build
 
-	 cmake -DCMAKE_INSTALL_PREFIX=$HYPRE_PATH -DHYPRE_ENABLE_MIXEDINT=ON -DHYPRE_ENABLE_MPI=ON -DHYPRE_ENABLE_OPENMP=ON \
-                -DHYPRE_BUILD_TESTS=ON -DHYPRE_ENABLE_HIP=ON -DCMAKE_HIP_ARCHITECTURES="$AMDGPU_GFXMODEL" -DHYPRE_ENABLE_UMPIRE=OFF \
-                -DHYPRE_ENABLE_GPU_PROFILING=ON -DHYPRE_ENABLE_GPU_AWARE_MPI=ON -DBUILD_SHARED_LIBS=ON -DHYPRE_ENABLE_UNIFIED_MEMORY=ON ..
+         # Assemble cmake args. Host C/C++ compilers come from the MPI
+         # wrappers (mpicc/mpicxx) when mpich-wrappers resolved, so the
+         # build links the PrgEnv MPI consistently; HIP device code uses
+         # HYPRE's own CMAKE_HIP_COMPILER (${ROCM_PATH}/llvm/bin/clang++).
+         # ROCM_PATH is passed explicitly so HYPRE_SetupHIPToolkit.cmake
+         # finds rocblas/the HIP compiler. MPI_HOME / CMAKE_PREFIX_PATH let
+         # find_package(MPI) resolve the PrgEnv MPI when its wrappers are
+         # not the cmake compilers (cray-mpich path).
+         HYPRE_CMAKE_ARGS=(
+            -DCMAKE_INSTALL_PREFIX="$HYPRE_PATH"
+            -DHYPRE_ENABLE_MIXEDINT=ON
+            -DHYPRE_ENABLE_MPI=ON
+            -DHYPRE_ENABLE_OPENMP=ON
+            -DHYPRE_BUILD_TESTS=ON
+            -DHYPRE_ENABLE_HIP=ON
+            -DCMAKE_HIP_ARCHITECTURES="$AMDGPU_GFXMODEL"
+            -DHYPRE_ENABLE_UMPIRE=OFF
+            -DHYPRE_ENABLE_GPU_PROFILING=ON
+            -DHYPRE_ENABLE_GPU_AWARE_MPI=ON
+            -DBUILD_SHARED_LIBS=ON
+            -DHYPRE_ENABLE_UNIFIED_MEMORY=ON
+         )
+         [ -n "${ROCM_PATH:-}" ] && HYPRE_CMAKE_ARGS+=( -DROCM_PATH="${ROCM_PATH}" )
+         [ -n "${HYPRE_C_COMPILER}" ]   && HYPRE_CMAKE_ARGS+=( -DCMAKE_C_COMPILER="${HYPRE_C_COMPILER}" )
+         [ -n "${HYPRE_CXX_COMPILER}" ] && HYPRE_CMAKE_ARGS+=( -DCMAKE_CXX_COMPILER="${HYPRE_CXX_COMPILER}" )
+         # Build the Fortran drivers with the new amdflang (via mpifort)
+         # so the operator-requested compiler is actually exercised and
+         # the Fortran interface is compiled against the new-flang mpi.mod.
+         if [ -n "${HYPRE_F_COMPILER}" ]; then
+            HYPRE_CMAKE_ARGS+=(
+               -DHYPRE_ENABLE_FORTRAN=ON
+               -DCMAKE_Fortran_COMPILER="${HYPRE_F_COMPILER}"
+            )
+            echo "hypre: HYPRE_ENABLE_FORTRAN=ON with CMAKE_Fortran_COMPILER=${HYPRE_F_COMPILER} (amdflang)"
+         fi
+         if [ -n "${MPI_HOME:-}" ]; then
+            HYPRE_CMAKE_ARGS+=( -DMPI_HOME="${MPI_HOME}" -DCMAKE_PREFIX_PATH="${MPI_HOME}" )
+         fi
+
+         cmake "${HYPRE_CMAKE_ARGS[@]}" ..
 
          make -j
          ${SUDO} make install
@@ -631,17 +787,48 @@ else
          ${SUDO} chmod go-w ${HYPRE_PATH_ORIGINAL}
       fi
 
-      module unload ${ROCM_MODULE_NAME}
-      module unload ${MPI_MODULE}
+      module unload ${ROCM_MODULE_NAME} || true
+      module unload ${MPI_MODULE} || true
 
    fi
 
    # Create a module file for hypre
    #
-   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
-   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
-   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
-   ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
+   # Module-tree sudo + flavor: pick Lua (.lua) for Lmod, classic Tcl
+   # (no ext) otherwise, and probe the module tree for user-writability
+   # so a user-owned modulepath (this Cray) does not trigger a sudo
+   # password prompt. Mirrors the magma/kokkos modulefile probe.
+   if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+      MODFLAVOR="lua"; MODEXT=".lua"
+   else
+      MODFLAVOR="tcl"; MODEXT=""
+   fi
+   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+      MOD_SUDO=""
+   else
+      _mprobe="${MODULE_PATH}"
+      while [ ! -e "${_mprobe}" ]; do _mprobe="$(dirname "${_mprobe}")"; done
+      _mtest=$(mktemp --tmpdir="${_mprobe}" .hypre-mod-probe.XXXXXX 2>/dev/null || true)
+      if [ -n "${_mtest}" ] && [ -f "${_mtest}" ]; then
+         rm -f "${_mtest}"
+         MOD_SUDO=""
+         echo "hypre: module tree ancestor ${_mprobe} is user-writable (probe succeeded); not using sudo for modulefile writes"
+      else
+         MOD_SUDO="sudo"
+         echo "hypre: module tree ancestor ${_mprobe} not user-writable (probe failed); using sudo for modulefile writes"
+      fi
+      unset _mprobe _mtest
+   fi
+   ${MOD_SUDO} mkdir -p ${MODULE_PATH}
+
+   # Detect the actual libdir: RHEL9/cmake GNUInstallDirs installs shared
+   # libs to lib64, Debian/Ubuntu to lib. Point the modulefile at whichever
+   # exists so LD_LIBRARY_PATH resolves libHYPRE.so.
+   if [ -d "${HYPRE_PATH}/lib64" ]; then
+      HYPRE_LIBDIR="lib64"
+   else
+      HYPRE_LIBDIR="lib"
+   fi
 
    # Provenance: capture this leaf script's git state for the modulefile
    # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
@@ -666,8 +853,13 @@ else
    fi
    unset _leaf_dir
 
-   # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/$HYPRE_VERSION.lua
+   # The - option suppresses tabs. Dual flavor: Lua for Lmod, classic Tcl
+   # otherwise. Both prereq the rocm SDK module and load the (resolved)
+   # MPI module so downstream linking against libHYPRE picks up the same
+   # PrgEnv MPI the library was built against.
+   HYPRE_MODULEFILE="${MODULE_PATH}/${HYPRE_VERSION}${MODEXT}"
+   if [ "${MODFLAVOR}" = "lua" ]; then
+      cat <<-EOF | ${MOD_SUDO} tee ${HYPRE_MODULEFILE}
 	whatis("HYPRE - solver package")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
@@ -677,9 +869,22 @@ else
 	load("${MPI_MODULE}")
 	setenv("HYPRE_PATH", base)
 	prepend_path("PATH",pathJoin(base, "bin"))
-	prepend_path("PATH","${HYPRE_PATH}/bin")
-	prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
-	prepend_path("LD_LIBRARY_PATH","/usr/lib")
+	prepend_path("LD_LIBRARY_PATH",pathJoin(base, "${HYPRE_LIBDIR}"))
 EOF
+   else
+      cat <<-EOF | ${MOD_SUDO} tee ${HYPRE_MODULEFILE}
+	#%Module1.0
+	module-whatis "HYPRE - solver package"
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+
+	set base "${HYPRE_PATH}"
+
+	prereq ${ROCM_MODULE_NAME}
+	if { ![ is-loaded ${MPI_MODULE} ] } { module load ${MPI_MODULE} }
+	setenv HYPRE_PATH \$base
+	prepend-path PATH \$base/bin
+	prepend-path LD_LIBRARY_PATH \$base/${HYPRE_LIBDIR}
+EOF
+   fi
 
 fi
