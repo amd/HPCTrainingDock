@@ -209,6 +209,34 @@ else
    INTELLIKIT_PATH=/opt/rocmplus-${ROCM_VERSION}/intellikit-${INTELLIKIT_VERSION}
 fi
 
+# ── Sudo decision: drop sudo when the install tree is user-owned ──────
+# The leaf default is SUDO=sudo (cleared only inside a Singularity
+# container above). On a cluster with no passwordless sudo and a
+# user-owned install/module tree (this Cray's /shareddata) the ${SUDO}
+# rm/mkdir/tar/chmod blocks below die on a password prompt (job 7989:
+# "sudo: a password is required"), even though the tree is writable.
+# Probe the nearest existing ancestor of the install dir for
+# user-writability and drop sudo when we own it. Mirrors the
+# kokkos / scorep / magma / petsc / rocshmem writability probes.
+# EUID 0 (root) never needs sudo. The modulefile write has its own
+# probe (below), so this governs only the install dirs.
+_probe_writable() {  # $1 = path; echoes "" if writable else "sudo"
+   local p="$1"
+   if [ "${EUID:-$(id -u)}" -eq 0 ]; then echo ""; return; fi
+   while [ ! -e "${p}" ]; do p="$(dirname "${p}")"; done
+   local t
+   t=$(mktemp --tmpdir="${p}" .intellikit-probe.XXXXXX 2>/dev/null || true)
+   if [ -n "${t}" ] && [ -f "${t}" ]; then rm -f "${t}"; echo ""; else echo "sudo"; fi
+}
+if [ -n "${SUDO}" ]; then   # not already cleared (e.g. Singularity)
+   SUDO="$(_probe_writable "${INTELLIKIT_PATH}")"
+   if [ -z "${SUDO}" ]; then
+      echo "intellikit: install tree ancestor of ${INTELLIKIT_PATH} is user-writable; not using sudo for install"
+   else
+      echo "intellikit: install tree ancestor of ${INTELLIKIT_PATH} not user-writable; using sudo for install"
+   fi
+fi
+
 # ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
 # Modulefile name is ${INTELLIKIT_VERSION}.lua to match the
 # `tee ${MODULE_PATH}/${INTELLIKIT_VERSION}.lua` write below.
@@ -242,11 +270,11 @@ fi
 # modulefile. Replaces inline build-dir-only traps.
 _intellikit_on_exit() {
    local rc=$?
-   [ -n "${INTELLIKIT_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${INTELLIKIT_BUILD_ROOT}"
+   [ -n "${INTELLIKIT_BUILD_ROOT:-}" ] && ${SUDO} rm -rf "${INTELLIKIT_BUILD_ROOT}"
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[intellikit fail-cleanup] rc=${rc}: removing partial install + modulefile"
-      ${SUDO:-sudo} rm -rf "${INTELLIKIT_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${INTELLIKIT_VERSION}.lua"
+      ${SUDO} rm -rf "${INTELLIKIT_PATH}"
+      ${SUDO} rm -f  "${MODULE_PATH}/${INTELLIKIT_VERSION}".lua "${MODULE_PATH}/${INTELLIKIT_VERSION}"
    elif [ ${rc} -ne 0 ]; then
       echo "[intellikit fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -315,7 +343,7 @@ cd "${INTELLIKIT_BUILD_ROOT}"
 
 AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
 CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-if [ -f ${CACHE_FILES}/intellikit-${INTELLIKIT_VERSION}.tgz ]; then
+if [ -f "${CACHE_FILES}/intellikit-${INTELLIKIT_VERSION}.tgz" ]; then
    echo ""
    echo "============================"
    echo " Installing Cached IntelliKit"
@@ -328,10 +356,15 @@ if [ -f ${CACHE_FILES}/intellikit-${INTELLIKIT_VERSION}.tgz ]; then
    # ${INTELLIKIT_PATH} when extracted under /opt/rocmplus-X.
    ${SUDO} mkdir -p ${INTELLIKIT_PATH}
    cd /opt/rocmplus-${ROCM_VERSION}
-   ${SUDO} tar -xzpf ${CACHE_FILES}/intellikit-${INTELLIKIT_VERSION}.tgz
-   chown -R root:root ${INTELLIKIT_PATH}
+   ${SUDO} tar -xzpf "${CACHE_FILES}/intellikit-${INTELLIKIT_VERSION}.tgz"
+   # Only lock to root when we actually have sudo authority; on a
+   # user-owned tree (SUDO cleared by the probe) chown root:root would
+   # abort with "Operation not permitted".
+   if [ -n "${SUDO}" ]; then
+      ${SUDO} chown -R root:root ${INTELLIKIT_PATH}
+   fi
    if [ "${USER}" != "sysadmin" ]; then
-      ${SUDO} rm ${CACHE_FILES}/intellikit-${INTELLIKIT_VERSION}.tgz
+      ${SUDO} rm "${CACHE_FILES}/intellikit-${INTELLIKIT_VERSION}.tgz"
    fi
 else
    echo ""
@@ -356,7 +389,19 @@ else
          echo "WARNING: cmake not found on PATH; accordo/nexus C++ build needs it"
          echo "         (expected pip-installed cmake under /usr/local)."
       fi
-      if command -v apt-get >/dev/null 2>&1; then
+      # Installing system packages needs root. When we have no sudo
+      # authority (SUDO cleared by the writability probe on a user-owned
+      # tree) and are not root, attempting `dnf/apt install` would abort
+      # the whole build under `set -e` on a non-root permission error.
+      # In that case skip the package-manager step and rely on the headers
+      # already being present (verified on this Cray: libdwarf-devel /
+      # libzstd-devel are part of the RHEL 9 image); warn so a genuinely
+      # missing header still surfaces a clear cause at the C++ compile.
+      if [ -z "${SUDO}" ] && [ "${EUID:-$(id -u)}" -ne 0 ]; then
+         echo "intellikit: no sudo authority; skipping system-dep install."
+         echo "            Assuming libdwarf/libzstd dev headers are already present"
+         echo "            (accordo/nexus C++ build will fail later if they are not)."
+      elif command -v apt-get >/dev/null 2>&1; then
          ${SUDO} apt-get update || true
          # DEBIAN_FRONTEND=noninteractive + NEEDRESTART_MODE=a so the
          # post-install needrestart prompt can't block the build (repo
@@ -395,10 +440,73 @@ else
    # end-of-build. /usr/bin/env python3 (after the shebang rewrite below)
    # will resolve to whichever python the consumer has on PATH at
    # `module load intellikit` time, with ${INTELLIKIT_PATH} on PYTHONPATH.
-   PYTHON=python3
-   if [ "${PYTHON_VERSION}" != "" ]; then
-      PYTHON=python3.${PYTHON_VERSION}
+   # ── Resolve a python interpreter with usable dev headers ───────────
+   # accordo + its kerneldb dep compile pybind11 C++ extensions at install
+   # time, so CMake's FindPython needs the interpreter's development
+   # headers (<include>/patchlevel.h). Two failure modes seen on this Cray
+   # RHEL 9 node:
+   #   * main_setup.sh auto-detects PYTHON_VERSION=12 (an Ubuntu-24.04
+   #     assumption) but python3.12 is absent -> `python3.12 -m venv`
+   #     rc=127 "command not found" (job 7990).
+   #   * python3.11 exists but python3.11-devel does NOT, so kerneldb's
+   #     cmake aborts: "patchlevel.h cannot be read" -> accordo fails
+   #     (job 7992). Only python3.9 ships -devel (python3-devel) here.
+   # So pick, in order of preference: the requested version, else the
+   # newest python3.N, but PREFER any candidate whose dev headers are
+   # present; only if none has headers fall back to a bare interpreter
+   # (with a warning that the C++ tools may fail).
+   _has_headers() {  # $1 = interpreter; 0 if <include>/patchlevel.h exists
+      "$1" - <<'PY' >/dev/null 2>&1
+import os, sysconfig
+raise SystemExit(0 if os.path.exists(os.path.join(sysconfig.get_path("include"), "patchlevel.h")) else 1)
+PY
+   }
+   _py_ge_310() {    # $1 = interpreter; 0 if version >= 3.10 (IntelliKit floor)
+      "$1" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3, 10) else 1)' >/dev/null 2>&1
+   }
+   _want=python3
+   [ -n "${PYTHON_VERSION}" ] && _want=python3.${PYTHON_VERSION}
+   _cands="${_want} python3.13 python3.12 python3.11 python3.10 python3"
+   # IntelliKit's tools declare requires-python >=3.10 (job 7993: python3.9
+   # rejected every tool), so the floor is hard -- never drop below 3.10.
+   # Ideal interpreter is >=3.10 AND has dev headers (lets accordo/kerneldb
+   # compile their pybind11 C++ ext). On this Cray only python3.9 ships
+   # -devel, and it's too old; python3.11 is >=3.10 but header-less. So we
+   # take the best feasible: prefer >=3.10 + headers, else >=3.10 alone
+   # (accordo will fail for lack of headers, the 6 pure-python tools still
+   # install). Installing python3.11-devel would let accordo build too, but
+   # that needs root we don't have here.
+   PYTHON=""
+   for _cand in ${_cands}; do
+      if command -v "${_cand}" >/dev/null 2>&1 && _py_ge_310 "${_cand}" && _has_headers "${_cand}"; then
+         PYTHON="${_cand}"; break
+      fi
+   done
+   if [ -z "${PYTHON}" ]; then
+      for _cand in ${_cands}; do
+         if command -v "${_cand}" >/dev/null 2>&1 && _py_ge_310 "${_cand}"; then
+            PYTHON="${_cand}"
+            echo "WARNING: ${PYTHON} has no dev headers (no matching -devel package);"
+            echo "         tools needing a pybind11 C++ build (accordo) will be skipped."
+            echo "         The pure-python tools still install. Install the python dev"
+            echo "         headers for ${PYTHON} (needs root) to also get accordo."
+            break
+         fi
+      done
    fi
+   if [ -z "${PYTHON}" ]; then
+      echo "ERROR: IntelliKit requires python >= 3.10 but none was found on PATH." >&2
+      exit 1
+   fi
+   if [ "${PYTHON}" != "${_want}" ]; then
+      echo "intellikit: requested ${_want} unsuitable/absent; using ${PYTHON} ($(${PYTHON} --version 2>&1))"
+   fi
+   unset _cands _cand _want
+   # Record whether the chosen interpreter has dev headers; tools that
+   # compile a pybind11 C++ extension (see HEADER_DEP_TOOLS below) are
+   # skipped up front when these are absent rather than left to fail in
+   # CMake's FindPython ("patchlevel.h cannot be read").
+   if _has_headers "${PYTHON}"; then PY_HEADERS_OK=1; else PY_HEADERS_OK=0; fi
    ${PYTHON} -m venv "${INTELLIKIT_BUILD_ROOT}/intellikit_build"
    # shellcheck disable=SC1091
    source "${INTELLIKIT_BUILD_ROOT}/intellikit_build/bin/activate"
@@ -477,11 +585,28 @@ PYEOF
    # mismatch on a given ROCm toolchain) must NOT abort the whole install
    # -- we record per-tool PASS/FAIL, keep going, and only hard fail (so
    # the EXIT trap wipes the dir) if nothing installed at all.
+   # Tools whose install compiles a pybind11 C++ extension and therefore
+   # needs the python development headers (accordo pulls in kerneldb,
+   # whose CMake calls find_package(Python3 ... Development) -> requires
+   # <include>/patchlevel.h). When the chosen interpreter has no headers
+   # (no matching -devel package, which needs root to install) these
+   # tools cannot build, so we skip them cleanly up front instead of
+   # letting CMake fail. All other tools are pure python and unaffected.
+   HEADER_DEP_TOOLS=" accordo "
+
    INSTALL_OK=()
    INSTALL_FAILED=()
+   INSTALL_SKIPPED=()
    for tool in ${INTELLIKIT_TOOLS}; do
       echo ""
       echo "---- installing IntelliKit tool: ${tool} ----"
+      if [ "${PY_HEADERS_OK}" -eq 0 ] && [[ "${HEADER_DEP_TOOLS}" == *" ${tool} "* ]]; then
+         echo "SKIP: '${tool}' needs the python dev headers (a pybind11 C++ build);"
+         echo "      ${PYTHON} has none (install its -devel package, needs root)."
+         echo "      Skipping prerequisite-missing tool; the rest still install."
+         INSTALL_SKIPPED+=("${tool}")
+         continue
+      fi
       if [ ! -d "${INTELLIKIT_SRC}/${tool}" ]; then
          echo "WARNING: tool '${tool}' not found in checkout (${INTELLIKIT_SRC}/${tool}); skipping."
          INSTALL_FAILED+=("${tool}")
@@ -501,6 +626,7 @@ PYEOF
    echo "IntelliKit install summary:"
    echo "  installed: ${INSTALL_OK[*]:-<none>}"
    echo "  failed:    ${INSTALL_FAILED[*]:-<none>}"
+   echo "  skipped:   ${INSTALL_SKIPPED[*]:-<none>} (unmet prerequisites)"
    if [ ${#INSTALL_OK[@]} -eq 0 ]; then
       echo "ERROR: no IntelliKit tools installed successfully; failing."
       exit 1
@@ -516,14 +642,21 @@ PYEOF
    # because pip --target invokes the venv's python. The /tmp build dir
    # disappears with the EXIT trap at end-of-job, so any PATH-resolved
    # entry point afterwards would fail with "bad interpreter". Same root
-   # cause + same fix as mdb_setup.sh / pytorch_setup.sh: rewrite to
-   # /usr/bin/env python3, which works because the intellikit modulefile
-   # prepends ${INTELLIKIT_PATH} onto PYTHONPATH so the packages are
-   # importable under the system python3 once `module load intellikit`
-   # is in effect.
+   # cause as mdb_setup.sh / pytorch_setup.sh, but we pin the *versioned*
+   # interpreter (python3.11) rather than bare `python3`: IntelliKit's
+   # code uses 3.10+ syntax (e.g. `str | list[str]`), so on a node whose
+   # default python3 is older (this Cray's /usr/bin/python3 is 3.9) a
+   # `#!/usr/bin/env python3` shebang resolves to 3.9 and the tools die
+   # with "unsupported operand type(s) for |" (observed job 7994). Using
+   # the exact pythonX.Y we built against guarantees a >=3.10 interpreter
+   # at runtime, independent of the consumer's `python3` default. The
+   # modulefile still prepends ${INTELLIKIT_PATH} onto PYTHONPATH so the
+   # packages import once `module load intellikit` is in effect.
+   PYVER="$("${PYTHON}" -c 'import sys; print("python%d.%d" % sys.version_info[:2])' 2>/dev/null)"
+   [ -n "${PYVER}" ] || PYVER=python3
    if [ -d "${INTELLIKIT_PATH}/bin" ]; then
       ${SUDO} find ${INTELLIKIT_PATH}/bin -maxdepth 1 -type f \
-         -exec sed -i '1s|^#!.*python3.*$|#!/usr/bin/env python3|' {} + 2>/dev/null || true
+         -exec sed -i "1s|^#!.*python3.*\$|#!/usr/bin/env ${PYVER}|" {} + 2>/dev/null || true
    fi
 
    if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
@@ -542,10 +675,25 @@ fi
 
 # Create a module file for intellikit
 #
-# Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
-# see netcdf_setup.sh for the lying-probe failure mode this replaces).
-PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+# Modulefile-write sudo: probe the module tree for user-writability and
+# only use sudo when we do NOT own it (mirrors kokkos / scorep). An
+# unconditional EUID-based `sudo` breaks on a user-owned module tree with
+# no passwordless sudo (this Cray's /shareddata/modules). A modulefile is
+# a plain write: if mktemp in the dir succeeds the tee will too, so the
+# probe cannot "lie" here. EUID 0 (root) yields "" (no sudo).
+PKG_SUDO_MOD="$(_probe_writable "${MODULE_PATH}")"
 ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
+
+# Modulefile flavor: Lmod consumes <ver>.lua; classic Tcl Environment
+# Modules consumes an extensionless Tcl file. Emitting Lua unconditionally
+# produces a module this Cray's Tcl Environment Modules cannot see
+# ("Unable to locate a modulefile"). Detect Lmod via its env markers;
+# default to Tcl so the module is loadable here. Mirrors kokkos/scorep.
+if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+   MODFLAVOR="lua"; MODEXT=".lua"
+else
+   MODFLAVOR="tcl"; MODEXT=""
+fi
 
 # Provenance: capture this leaf script's git state for the modulefile
 # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
@@ -571,7 +719,8 @@ fi
 unset _leaf_dir
 
 # The - option suppresses tabs
-cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${INTELLIKIT_VERSION}.lua
+if [ "${MODFLAVOR}" = "lua" ]; then
+   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${INTELLIKIT_VERSION}${MODEXT}
 	local help_message = [[
 
 	IntelliKit: agent-first GPU profiling and validation tooling for AMD ROCm
@@ -593,4 +742,20 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${INTELLIKIT_VERSION}.lua
 	prepend_path("PYTHONPATH","${INTELLIKIT_PATH}")
 	prepend_path("PATH","${INTELLIKIT_PATH}/bin")
 	setenv("INTELLIKIT_HOME","${INTELLIKIT_PATH}")
-EOF
+	EOF
+else
+   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${INTELLIKIT_VERSION}${MODEXT}
+	#%Module1.0
+	module-whatis "Name: intellikit"
+	module-whatis "Upstream: https://github.com/AMDResearch/intellikit"
+	module-whatis "Version:  ${INTELLIKIT_VERSION}"
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+	module-whatis "Keywords: Profiling, Validation, GPU, MCP"
+	module-whatis "Installed tools: ${INTELLIKIT_TOOLS}"
+
+	prereq ${ROCM_MODULE_NAME}
+	prepend-path PYTHONPATH "${INTELLIKIT_PATH}"
+	prepend-path PATH "${INTELLIKIT_PATH}/bin"
+	setenv INTELLIKIT_HOME "${INTELLIKIT_PATH}"
+	EOF
+fi

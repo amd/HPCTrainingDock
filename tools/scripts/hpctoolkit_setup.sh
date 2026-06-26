@@ -67,6 +67,12 @@ HPCTOOLKIT_VERSION=2025.1.2
 # new spack-known release is needed.
 HPCVIEWER_VERSION=2026.0.0
 ROCM_VERSION=6.2.0
+# MPI module to load so meson's dependency('MPI') finds mpicc/mpicxx and
+# builds hpcprof-mpi. Default "openmpi" matches the Ubuntu/CI image; a Cray
+# PrgEnv-amd-new ships no openmpi module, so main_setup.sh threads
+# --mpi-module mpich-wrappers (the PrgEnv MPI). Resolved to a concrete
+# modulefile token in the build branch below.
+MPI_MODULE="openmpi"
 SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 # Versioned hpctoolkit + hpcviewer install dirs let multiple releases
@@ -115,6 +121,7 @@ usage()
    echo "  --hpcviewer-install-path-no-version [ HPCVIEWER_PATH_INPUT ] default $HPCVIEWER_PATH "
    echo "  --install-path [ ROCMPLUS_PATH_INPUT ] parent dir; if set, fills both component install paths from \${ROCMPLUS_PATH}/{hpctoolkit-v\${HPCTOOLKIT_VERSION},hpcviewer-v\${HPCVIEWER_VERSION}}"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
+   echo "  --mpi-module [ MPI_MODULE ] module to load so hpcprof-mpi finds MPI, default $MPI_MODULE"
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected"
    echo "  --build-hpctoolkit [ BUILD_HPCTOOLKIT ] default is 0"
    echo "  --replace [ 0|1 ] remove prior hpctoolkit + hpcviewer installs and modulefile before building, default $REPLACE"
@@ -187,6 +194,11 @@ do
           ROCM_VERSION=${1}
           reset-last
           ;;
+      "--mpi-module")
+          shift
+          MPI_MODULE=${1}
+          reset-last
+          ;;
       "--replace")
           shift
           REPLACE=${1}
@@ -244,6 +256,34 @@ fi
 # only the modulefile gets the spack-hash subdir.
 HPCVIEWER_TOP="${HPCVIEWER_PATH}"
 
+# ── Install-path sudo (computed EARLY, before --replace / EXIT trap) ──
+# The --replace block, the EXIT fail-cleanup trap, and the build branch
+# all rm -rf / mkdir the install dirs + modulefile with ${SUDO}. The leaf
+# default is SUDO=sudo, which on a cluster with no passwordless sudo and a
+# user-owned install tree (this Cray) makes --replace / fail-cleanup die on
+# a password prompt. Probe the nearest existing ancestor of the hpctoolkit
+# install dir for user-writability and drop sudo when we own it. Mirrors
+# the tau/hypre/magma writability probe; this SUDO then governs the
+# hpctoolkit + hpcviewer install dirs in every section below.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   SUDO=""
+elif [ -z "${SUDO}" ]; then
+   :  # already cleared (e.g. Singularity)
+else
+   _iprobe="$(dirname "${HPCTOOLKIT_PATH}")"
+   while [ ! -e "${_iprobe}" ]; do _iprobe="$(dirname "${_iprobe}")"; done
+   _itest=$(mktemp --tmpdir="${_iprobe}" .hpctk-inst-probe.XXXXXX 2>/dev/null || true)
+   if [ -n "${_itest}" ] && [ -f "${_itest}" ]; then
+      rm -f "${_itest}"
+      SUDO=""
+      echo "hpctoolkit: install ancestor ${_iprobe} is user-writable (probe succeeded); not using sudo for install"
+   else
+      SUDO="sudo"
+      echo "hpctoolkit: install ancestor ${_iprobe} not user-writable (probe failed); using sudo for install"
+   fi
+   unset _iprobe _itest
+fi
+
 # ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
 # ── BUILD_HPCTOOLKIT=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
 NOOP_RC=43
@@ -297,8 +337,11 @@ _hpctoolkit_on_exit() {
    local rc=$?
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[hpctoolkit fail-cleanup] rc=${rc}: removing partial hpctoolkit + hpcviewer installs + modulefile"
-      ${SUDO:-sudo} rm -rf "${HPCTOOLKIT_PATH}" "${HPCVIEWER_TOP}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${HPCTOOLKIT_VERSION}.lua"
+      # Use the probed ${SUDO} (NOT ${SUDO:-sudo}): on a user-writable install
+      # tree SUDO is intentionally empty, and forcing sudo here would prompt
+      # for a password under srun and hang/fail the cleanup.
+      ${SUDO} rm -rf "${HPCTOOLKIT_PATH}" "${HPCVIEWER_TOP}"
+      ${SUDO} rm -f  "${MODULE_PATH}/${HPCTOOLKIT_VERSION}.lua"
    elif [ ${rc} -ne 0 ]; then
       echo "[hpctoolkit fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -306,7 +349,7 @@ _hpctoolkit_on_exit() {
    # initialized later in the build path; defaulting to /nonexistent
    # makes the rm a no-op for sections that never ran (e.g. cache-
    # restore branch which sets neither).
-   ${SUDO:-sudo} rm -rf \
+   ${SUDO} rm -rf \
       "${HPCTOOLKIT_BUILD_DIR:-/nonexistent}" \
       "${HPCVIEWER_BUILD_DIR:-/nonexistent}" \
       "${SPACK_USER_CONFIG_PATH:-/nonexistent}" \
@@ -345,14 +388,26 @@ else
    #      basename == module name) but wrong for therock-afar.
    #   3. rocm/${ROCM_VERSION}: standalone-invocation fallback when
    #      neither LOADEDMODULES nor ROCM_PATH is populated.
+   # Two-pass over LOADEDMODULES: prefer a rocm/* matching the requested
+   # ROCM_VERSION before falling back to the first rocm/*. A Cray
+   # PrgEnv-amd-new shell can have several rocm/* loaded at once (e.g.
+   # rocm/7.0.3 AND rocm/7.2.3); taking the first match would key the
+   # build + modulefile on the wrong SDK.
    ROCM_MODULE_NAME=""
    if [[ -n "${LOADEDMODULES:-}" ]]; then
       _OLD_IFS="${IFS}"; IFS=":"
       for _m in ${LOADEDMODULES}; do
          case "${_m}" in
-            rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+            rocm/${ROCM_VERSION}) ROCM_MODULE_NAME="${_m}"; break ;;
          esac
       done
+      if [[ -z "${ROCM_MODULE_NAME}" ]]; then
+         for _m in ${LOADEDMODULES}; do
+            case "${_m}" in
+               rocm/*) ROCM_MODULE_NAME="${_m}"; break ;;
+            esac
+         done
+      fi
       IFS="${_OLD_IFS}"; unset _OLD_IFS _m
    fi
    if [[ -z "${ROCM_MODULE_NAME}" ]]; then
@@ -402,62 +457,81 @@ else
       echo "============================"
       echo ""
 
-      REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "openmpi" )
-      preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
-
-      # Install-time sudo: canonical PKG_SUDO pattern (job 8063
-      # follow-up audit). The previous block here ran an "is the
-      # install dir writable?" probe (`if [ -d ... ] / if [ -w ... ]
-      # ; then SUDO=""; ...`) that, in the rare case where an
-      # operator pre-created both install dirs with their own
-      # ownership, would drop SUDO -- otherwise it left the file-
-      # top default `SUDO="sudo"` (line ~52) untouched. Same lying-
-      # probe failure mode as the netcdf-c modulefile bug from job
-      # 8063: a mid-build chown by a sibling block could flip the
-      # dir's writability between the probe and the actual mkdir/
-      # chmod, leaving the script with the wrong sudo decision.
-      # Replaced with the same identity-only PKG_SUDO computation
-      # used everywhere else: "no sudo if EUID==0, sudo otherwise".
-      # Net behaviour change vs. the prior code:
-      #   * EUID==0 (root)              : SUDO=""    (was: SUDO="" if
-      #                                    BOTH dirs pre-existed AND
-      #                                    were writable, else "sudo".
-      #                                    Either way, root never
-      #                                    actually needed sudo for
-      #                                    these ops.)
-      #   * Singularity                 : SUDO=""    (unchanged --
-      #                                    set by the file-top
-      #                                    Singularity branch, which
-      #                                    runs before this point and
-      #                                    is left intact.)
-      #   * non-root, non-Singularity   : SUDO="sudo" (was: same in
-      #                                    the common case; the only
-      #                                    operator escape hatch lost
-      #                                    is the manual `chmod u+w
-      #                                    /opt/...` workflow, which
-      #                                    was undocumented and not
-      #                                    used by any caller in
-      #                                    bare_system/ or extras/.
-      #                                    To restore that behaviour,
-      #                                    run inside Singularity or
-      #                                    as root.)
-      # Skips the override inside Singularity (the file-top branch
-      # has already set SUDO="" for that case and we don't want to
-      # clobber it).
-      if [ ! -f /.singularity.d/Singularity ]; then
-         SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+      # ── MPI module auto-correct on a Cray PE (see tau/hypre/hdf5) ─────
+      # hpcprof-mpi is built when meson's dependency('MPI') finds mpicc/
+      # mpicxx. The leaf default MPI_MODULE is "openmpi", but a Cray system
+      # ships cray-mpich (no openmpi module) -- preflight would SKIP the
+      # whole build. If cray-mpich is active and the caller did not override
+      # the MPI, switch to cray-mpich. main_setup.sh also threads
+      # --mpi-module mpich-wrappers; this makes the leaf correct standalone.
+      if [ "${MPI_MODULE}" = "openmpi" ] \
+           && { [ -n "${CRAY_MPICH_VERSION:-}" ] || [ -n "${MPICH_DIR:-}" ]; }; then
+         MPI_MODULE="cray-mpich"
+         echo "hpctoolkit: Cray MPICH detected; MPI_MODULE -> cray-mpich"
       fi
 
-      # openmpi library being installed as dependency of libboost-all-dev.
-      # PKG_SUDO computed identically to SUDO above; kept under its
-      # own name as a documentation contract: PKG_SUDO is "this op
-      # ALWAYS needs root authority" (apt), SUDO is "this op needs
-      # root authority unless we're inside something special". They
-      # happen to take the same value on this code path but the
-      # callers shouldn't rely on that. See openmpi_setup.sh /
-      # audit_2026_05_01.md Issue 2.
+      # ── mpich-wrappers resolution (PrgEnv MPI; ships mpicc/mpicxx) ─────
+      # cray-mpich drives the build through cc/CC/ftn wrappers and does not
+      # put mpicc/mpicxx on PATH, so meson's dependency('MPI') cannot find
+      # it. The from-source mpich-wrappers leaf ships mpicc/mpicxx (MPICH-ABI
+      # compatible with cray-mpich) -- exactly what hpcprof-mpi needs. When
+      # the caller asks for it (main_setup threads --mpi-module mpich-
+      # wrappers), resolve the bare name to a concrete, version-matched
+      # modulefile token by scanning MODULEPATH. If none is found, fall
+      # back to cray-mpich.
+      if [ "${MPI_MODULE}" = "mpich-wrappers" ]; then
+         _mw_tok=""
+         _OLD_IFS="${IFS}"; IFS=":"
+         for _d in ${MODULEPATH:-}; do
+            for _cand in "mpich-wrappers/${ROCM_VERSION}" "mpich-wrappers"; do
+               if [ -e "${_d}/${_cand}" ] || [ -e "${_d}/${_cand}.lua" ]; then
+                  _mw_tok="${_cand}"; break 2
+               fi
+            done
+         done
+         IFS="${_OLD_IFS}"; unset _OLD_IFS _d _cand
+         if [ -n "${_mw_tok}" ]; then
+            MPI_MODULE="${_mw_tok}"
+            echo "hpctoolkit: using mpich-wrappers module '${_mw_tok}' (PrgEnv MPI; ships mpicc/mpicxx)"
+         else
+            echo "hpctoolkit: WARNING: --mpi-module mpich-wrappers requested but no mpich-wrappers modulefile found on MODULEPATH; falling back to cray-mpich"
+            MPI_MODULE="cray-mpich"
+         fi
+         unset _mw_tok
+      fi
+
+      REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${MPI_MODULE}" )
+      preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
+
+      # ── Point meson's dependency('MPI') at the PrgEnv MPI wrappers ─────
+      # meson's MPI dep honours the MPICC/MPICXX env vars (and otherwise
+      # probes mpicc/mpicxx on PATH). The mpich-wrappers module puts
+      # mpicc/mpicxx on PATH; export them explicitly so meson uses this
+      # exact MPI for hpcprof-mpi rather than any stray system mpicc.
+      if command -v mpicxx >/dev/null 2>&1; then
+         export MPICXX="$(command -v mpicxx)"
+      fi
+      if command -v mpicc >/dev/null 2>&1; then
+         export MPICC="$(command -v mpicc)"
+      fi
+      echo "hpctoolkit: MPI wrappers -> MPICC=${MPICC:-unset} MPICXX=${MPICXX:-unset}"
+
+      # ── System build dependencies ─────────────────────────────────────
+      # hpctoolkit's meson build wraps ALL deps (boost, liblzma, libunwind,
+      # tbb, elfutils, dyninst, xerces-c, yaml-cpp, ...) as subprojects, so
+      # it can build them from source when not found on the system. On
+      # Debian/Ubuntu we apt-install a few (boost/lzma/gtk) to use faster
+      # system copies + pipx for meson. On a Cray RHEL9 host there is no
+      # apt-get: system boost/lzma/gtk are already present (gtk only needed
+      # by the hpcviewer GUI at runtime) and meson/ninja are provided via
+      # pip below, so the apt step is skipped. meson needs >=1.6.0 for this
+      # hpctoolkit release.
       PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
-      ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y pipx libboost-all-dev liblzma-dev libgtk-3-dev
+      if command -v apt-get >/dev/null 2>&1; then
+         ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y pipx libboost-all-dev liblzma-dev libgtk-3-dev
+      else
+         echo "hpctoolkit: apt-get not present (non-Debian host); relying on system boost/lzma/gtk and pip-installed meson/ninja"
+      fi
 
       # Per-job throwaway build dir for the hpctoolkit clone.
       # Replaces a fixed `cd /tmp; rm -rf /tmp/hpctoolkit` pattern
@@ -479,22 +553,74 @@ else
 
       # ------------ Installing HPCToolkit
 
-      pipx install 'meson>=1.3.2'
+      # meson + ninja backend. This hpctoolkit release requires
+      # meson_version >= 1.6.0 (meson.build). On Debian/Ubuntu pipx is
+      # apt-installed above and ninja-build is on the base image; on a Cray
+      # RHEL9 host neither pipx nor ninja exist, so fall back to a pip
+      # --user install of both. Both land in $HOME/.local/bin (added to PATH).
+      if command -v pipx >/dev/null 2>&1; then
+         pipx install 'meson>=1.6.0'
+      else
+         echo "hpctoolkit: pipx absent; pip-installing meson(>=1.6.0)+ninja to ~/.local"
+         python3 -m pip install --user --upgrade 'meson>=1.6.0' ninja
+      fi
       export PATH=$HOME/.local/bin:$PATH
       git clone -b ${HPCTOOLKIT_VERSION} https://gitlab.com/hpctoolkit/hpctoolkit.git
       cd hpctoolkit
       export CMAKE_PREFIX_PATH=$ROCM_PATH:$CMAKE_PREFIX_PATH
 
+      # ── Pin a consistent plain GNU toolchain for the meson build ──────
+      # On a Cray PrgEnv-amd shell, meson auto-detects the C compiler as the
+      # Cray craype `cc` wrapper (amdclang) while C++ stays as plain
+      # /usr/bin/c++ (g++). That split is fatal at link time: the `cc`
+      # wrapper silently injects the Cray HPC libs (-lamdhip64 -lsci_amd
+      # -lsci_amd_mpi -lmpi_amd -lmpi_gtl_hsa) into every C object, but the
+      # shared libs are linked with plain g++ which has none of the Cray -L
+      # search paths, so e.g. the xerces-c subproject fails with
+      # "/usr/bin/ld: cannot find -lamdhip64". hpctoolkit is a host profiler:
+      # it does NOT need the Cray compiler wrappers -- ROCm is found via
+      # CMAKE_PREFIX_PATH=$ROCM_PATH (proper -L$ROCM_PATH/lib) and MPI via the
+      # mpich-wrappers MPICC/MPICXX exported above. Forcing CC=gcc/CXX=g++
+      # (only when the detected cc is the Cray wrapper) gives one toolchain
+      # for every (sub)project and drops the auto-injected, unfindable libs.
+      # No-op on a non-Cray host where cc is already gcc.
+      if command -v gcc >/dev/null 2>&1 && command -v g++ >/dev/null 2>&1 \
+         && command -v cc >/dev/null 2>&1 \
+         && readlink -f "$(command -v cc)" 2>/dev/null | grep -q "craype"; then
+         export CC=gcc CXX=g++
+         echo "hpctoolkit: Cray craype cc wrapper detected; pinning CC=gcc CXX=g++ for the meson build (ROCm via CMAKE_PREFIX_PATH, MPI via MPICC/MPICXX)"
+      fi
+
       # Force subproject headers to use -I instead of -isystem so they take
-      # priority over the system libunwind-dev 1.3.2 headers at /usr/include/
-      sed -i "s/include_type: 'system'/include_type: 'non-system'/g" meson.build
+      # priority over the system libunwind-dev 1.3.2 headers at /usr/include/.
+      # Debian/Ubuntu ONLY: this is a workaround for the system libunwind-dev
+      # headers that ship in the apt base image. On a Cray RHEL9 host there is
+      # no system libunwind-dev (libunwind is built as a meson subproject), so
+      # the workaround is unnecessary -- and HARMFUL: flipping libelf_dep /
+      # libdw_dep from include_type:'system' (-isystem) to 'non-system' (-I)
+      # moves the bundled Elfutils include dir (which exports '.' and 'lib/',
+      # and elfutils' lib/md5.h declares a *different* md5 API -- struct
+      # md5_ctx / md5_init_ctx) ahead of hpctoolkit's own md5 subproject on
+      # the quote-include search path, so src/common/lean/crypto-hash.c
+      # (#include "md5.h") picks up elfutils' md5.h and fails with
+      # "struct md5_context incomplete / md5_init undeclared". Guarding the
+      # sed to apt hosts keeps the Ubuntu fix while letting the Cray build use
+      # the default -isystem ordering (hpctoolkit's md5.h wins).
+      if command -v apt-get >/dev/null 2>&1; then
+         sed -i "s/include_type: 'system'/include_type: 'non-system'/g" meson.build
+      else
+         echo "hpctoolkit: non-Debian host; keeping default include_type (skip libunwind -isystem->-I workaround to avoid elfutils md5.h shadowing)"
+      fi
 
       meson setup -Drocm=enabled -Dopencl=disabled --prefix=${HPCTOOLKIT_PATH} --libdir=${HPCTOOLKIT_PATH}/lib build
       cd build
       meson compile || { echo "ERROR: meson compile failed"; exit 1; }
       meson install
 
-      if [[ "${USER}" != "root" ]]; then
+      # chown to root only when we installed with elevation (SUDO non-empty).
+      # On a user-owned tree (SUDO="") files are already correctly owned and
+      # chown root:root would fail with "Operation not permitted" under set -e.
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find ${HPCTOOLKIT_PATH} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${HPCTOOLKIT_PATH} -type d -execdir chown root:root "{}" +
       fi
@@ -574,7 +700,7 @@ else
       # before. Recursive chown + recursive go-w is the only way to
       # undo the `chmod -R a+rwX HPCVIEWER_TOP` we did above to let
       # spack write under it as a non-root user.
-      if [[ "${USER}" != "root" ]]; then
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find ${HPCVIEWER_TOP} -type f -execdir chown root:root "{}" +
          ${SUDO} find ${HPCVIEWER_TOP} -type d -execdir chown root:root "{}" +
       fi
@@ -582,20 +708,39 @@ else
          ${SUDO} chmod -R go-w ${HPCVIEWER_TOP}
       fi
 
-      module unload ${ROCM_MODULE_NAME}
+      module unload ${ROCM_MODULE_NAME} || true
+      module unload ${MPI_MODULE} || true
 
    fi
 
    # Create a module file for hpctoolkit
    #
-   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
-   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
-   # This is the 11th call site migrated off the old "if [ -d ] / if
-   # [ ! -w ] / SUDO=sudo / else / echo / fi" probe pattern; see also
-   # the install-side migration earlier in this file (search "Install-
-   # time sudo: canonical PKG_SUDO pattern").
-   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
-   ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
+   # Module-tree sudo + flavor: pick Lua (.lua) for Lmod, classic Tcl
+   # (no ext) otherwise, and probe the module tree for user-writability so
+   # a user-owned modulepath (this Cray) does not trigger a sudo password
+   # prompt. Mirrors the tau/hypre modulefile probe.
+   if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+      MODFLAVOR="lua"; MODEXT=".lua"
+   else
+      MODFLAVOR="tcl"; MODEXT=""
+   fi
+   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+      MOD_SUDO=""
+   else
+      _mprobe="${MODULE_PATH}"
+      while [ ! -e "${_mprobe}" ]; do _mprobe="$(dirname "${_mprobe}")"; done
+      _mtest=$(mktemp --tmpdir="${_mprobe}" .hpctk-mod-probe.XXXXXX 2>/dev/null || true)
+      if [ -n "${_mtest}" ] && [ -f "${_mtest}" ]; then
+         rm -f "${_mtest}"
+         MOD_SUDO=""
+         echo "hpctoolkit: module tree ancestor ${_mprobe} is user-writable (probe succeeded); not using sudo for modulefile writes"
+      else
+         MOD_SUDO="sudo"
+         echo "hpctoolkit: module tree ancestor ${_mprobe} not user-writable (probe failed); using sudo for modulefile writes"
+      fi
+      unset _mprobe _mtest
+   fi
+   ${MOD_SUDO} mkdir -p ${MODULE_PATH}
 
    # Provenance: capture this leaf script's git state for the modulefile
    # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
@@ -620,20 +765,42 @@ else
    fi
    unset _leaf_dir
 
-   # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${HPCTOOLKIT_VERSION}.lua
+   # The - option suppresses tabs. Dual flavor: Lua for Lmod, classic Tcl
+   # otherwise. Both prereq the rocm SDK module and load the (resolved) MPI
+   # module so hpcprof-mpi finds the same PrgEnv MPI it was linked against.
+   HPCTOOLKIT_MODULEFILE="${MODULE_PATH}/${HPCTOOLKIT_VERSION}${MODEXT}"
+   if [ "${MODFLAVOR}" = "lua" ]; then
+      cat <<-EOF | ${MOD_SUDO} tee ${HPCTOOLKIT_MODULEFILE}
 	whatis("HPCToolkit - integrated suite of tools for measurement and analysis of program performance")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
 	local base = "${HPCTOOLKIT_PATH}"
 
 	prereq("${ROCM_MODULE_NAME}")
+	load("${MPI_MODULE}")
 	setenv("HPCTOOLKIT_PATH", base)
 	prepend_path("PATH",pathJoin(base, "bin"))
 	prepend_path("PATH","${HPCVIEWER_PATH}/bin")
 	prepend_path("LD_LIBRARY_PATH",pathJoin(base, "lib"))
 	prepend_path("LD_LIBRARY_PATH","/usr/lib")
 EOF
+   else
+      cat <<-EOF | ${MOD_SUDO} tee ${HPCTOOLKIT_MODULEFILE}
+	#%Module1.0
+	module-whatis "HPCToolkit - integrated suite of tools for measurement and analysis of program performance"
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+
+	set base "${HPCTOOLKIT_PATH}"
+
+	prereq ${ROCM_MODULE_NAME}
+	if { ![ is-loaded ${MPI_MODULE} ] } { module load ${MPI_MODULE} }
+	setenv HPCTOOLKIT_PATH "\$base"
+	prepend-path PATH "\$base/bin"
+	prepend-path PATH "${HPCVIEWER_PATH}/bin"
+	prepend-path LD_LIBRARY_PATH "\$base/lib"
+	prepend-path LD_LIBRARY_PATH "/usr/lib"
+EOF
+   fi
 
 fi
 

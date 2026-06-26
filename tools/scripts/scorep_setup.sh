@@ -225,6 +225,58 @@ if [ "${PDT_PATH_INPUT}" != "" ]; then
    PDT_PATH=${PDT_PATH_INPUT}
 fi
 
+# ── Sudo decision: drop sudo when the install tree is user-owned ──────
+# The leaf default is SUDO=sudo (cleared only inside a Singularity
+# container above). On a cluster with no passwordless sudo and a
+# user-owned install/module tree (this Cray's /shareddata), the ${SUDO}
+# rm/mkdir/make-install/chown blocks below die on a password prompt
+# (job 7984: "sudo: a password is required"), even though the tree is
+# fully writable. Probe the nearest existing ancestor of the install
+# dir for user-writability and drop sudo when we own it. Mirrors the
+# kokkos / magma / petsc / rocshmem writability probes. EUID 0 (root)
+# never needs sudo. The modulefile write has its own PKG_SUDO_MOD
+# EUID-based guard further down, so this only governs the install dirs.
+_probe_writable() {  # $1 = path; echoes "" if writable else "sudo"
+   local p="$1"
+   if [ "${EUID:-$(id -u)}" -eq 0 ]; then echo ""; return; fi
+   while [ ! -e "${p}" ]; do p="$(dirname "${p}")"; done
+   local t
+   t=$(mktemp --tmpdir="${p}" .scorep-probe.XXXXXX 2>/dev/null || true)
+   if [ -n "${t}" ] && [ -f "${t}" ]; then rm -f "${t}"; echo ""; else echo "sudo"; fi
+}
+if [ -n "${SUDO}" ]; then   # not already cleared (e.g. Singularity)
+   SUDO="$(_probe_writable "${SCOREP_PATH}")"
+   if [ -z "${SUDO}" ]; then
+      echo "scorep: install tree ancestor of ${SCOREP_PATH} is user-writable; not using sudo for install"
+   else
+      echo "scorep: install tree ancestor of ${SCOREP_PATH} not user-writable; using sudo for install"
+   fi
+fi
+
+# ── Cray AMD-new env: prefer the loaded mpich-wrappers MPI ───────────
+# In a PrgEnv-amd-new context the active MPI is mpich-wrappers (a
+# from-source MPICH built with FC=amdflang, so its mpicc/mpicxx drive
+# amdclang/amdflang). The leaf default MPI_MODULE=openmpi would instead
+# `module load openmpi` and pull a GNU-based openmpi whose mpicxx wraps
+# gcc -- ScoreP's HIP adapter then aborts configure with "only a
+# Clang-based compiler is supported, got gnu" (job 7985). When the
+# operator did not override --mpi-module and a mpich-wrappers module is
+# already loaded, adopt its exact loaded token (+ the generic "mpich"
+# MPI_CONFIG mapped below) so ScoreP builds against the amdclang-based
+# wrappers. No-op off a Cray (no mpich-wrappers loaded).
+if [ "${MPI_MODULE}" = "openmpi" ] && [ -n "${LOADEDMODULES:-}" ]; then
+   _OLD_IFS="$IFS"; IFS=":"
+   for _m in ${LOADEDMODULES}; do
+      case "${_m}" in
+         mpich-wrappers/*|mpich-wrappers) MPI_MODULE="${_m}"; break ;;
+      esac
+   done
+   IFS="${_OLD_IFS}"; unset _OLD_IFS _m
+   if [ "${MPI_MODULE}" != "openmpi" ]; then
+      echo "scorep: Cray AMD-new env detected; using loaded MPI module '${MPI_MODULE}' (amdclang-based; avoids GNU openmpi HIP-compiler reject)"
+   fi
+fi
+
 # ── BUILD_SCOREP=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
 NOOP_RC=43
 if [ "${BUILD_SCOREP}" = "0" ]; then
@@ -273,8 +325,8 @@ _scorep_on_exit() {
    local rc=$?
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[scorep fail-cleanup] rc=${rc}: removing partial install + modulefile (PDT preserved)"
-      ${SUDO:-sudo} rm -rf "${SCOREP_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${SCOREP_VERSION}.lua"
+      ${SUDO} rm -rf "${SCOREP_PATH}"
+      ${SUDO} rm -f  "${MODULE_PATH}/${SCOREP_VERSION}.lua"
    elif [ ${rc} -ne 0 ]; then
       echo "[scorep fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -337,7 +389,7 @@ else
       fi
    fi
 
-   if [ -f ${CACHE_FILES}/scorep-v${SCOREP_VERSION}.tgz ]; then
+   if [ -f "${CACHE_FILES}/scorep-v${SCOREP_VERSION}.tgz" ]; then
       echo ""
       echo "============================"
       echo " Installing Cached SCORE-P "
@@ -352,9 +404,9 @@ else
       # scorep cache build needed PDT it should ship its own
       # pdt.tgz alongside this one -- not currently supported.)
       cd /opt/rocmplus-${ROCM_VERSION}
-      tar -xpzf ${CACHE_FILES}/scorep-v${SCOREP_VERSION}.tgz
+      tar -xpzf "${CACHE_FILES}/scorep-v${SCOREP_VERSION}.tgz"
       if [ "${USER}" != "sysadmin" ]; then
-         ${SUDO} rm -f ${CACHE_FILES}/scorep-v${SCOREP_VERSION}.tgz
+         ${SUDO} rm -f "${CACHE_FILES}/scorep-v${SCOREP_VERSION}.tgz"
       fi
 
    else
@@ -417,7 +469,7 @@ else
       # (the :-/nonexistent fallbacks make the trap safe even when
       # PDT was cached and the spack vars were never set).
       SCOREP_BUILD_DIR=$(mktemp -d -t scorep-build.XXXXXX)
-      trap '${SUDO:-sudo} rm -rf "${SCOREP_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
+      trap '${SUDO} rm -rf "${SCOREP_BUILD_DIR:-/nonexistent}" "${SPACK_USER_CONFIG_PATH:-/nonexistent}" "${SPACK_USER_CACHE_PATH:-/nonexistent}"' EXIT
       cd "${SCOREP_BUILD_DIR}"
 
 #----- begin PDT install
@@ -485,7 +537,10 @@ else
             MPI_CONFIG="openmpi"
          elif [[ $MPI_MODULE == "cray-mpich" ]]; then
             MPI_CONFIG="cray"
-         elif [[ $MPI_MODULE == "mpich" ]]; then
+         elif [[ $MPI_MODULE == "mpich" || $MPI_MODULE == mpich-wrappers* ]]; then
+            # mpich-wrappers is a from-source MPICH (ABI-compatible) built
+            # with FC=amdflang; ScoreP's generic "mpich" suite handles its
+            # mpicc/mpicxx/mpifort wrappers (which drive amdclang/amdflang).
             MPI_CONFIG="mpich"
          else
             echo " ERROR: --mpi-config not specified at input and not detected through $MPI_MODULE module"
@@ -567,7 +622,15 @@ else
       # to rm -rf spack or scorep-* in CUR_DIR — they were never
       # created there (post-/tmp-build refactor).
 
-      if [[ "${USER}" != "root" ]]; then
+      # Lock the install down to root only when we actually have sudo
+      # authority (SUDO non-empty == install tree is root-owned). On a
+      # user-owned tree (this Cray's /shareddata) the writability probe
+      # above cleared SUDO, so `chown root:root` would run as the regular
+      # user and abort with "Operation not permitted" -- failing the whole
+      # build *after* a successful make install (job 7986). In that case
+      # the files are already owned by (and writable to) the installing
+      # user, which is the intended end state, so skip the hardening.
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
          ${SUDO} find $PDT_PATH_ORIGINAL -type f -execdir chown root:root "{}" +
          ${SUDO} find $SCOREP_PATH -type f -execdir chown root:root "{}" +
          ${SUDO} chmod go-w $PDT_PATH_ORIGINAL
@@ -583,10 +646,28 @@ else
 
    # Create a module file for SCORE-P
    #
-   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
-   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
-   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   # Modulefile-write sudo: probe the module tree for user-writability and
+   # only use sudo when we do NOT own it (mirrors kokkos / magma MOD_SUDO).
+   # An unconditional EUID-based `sudo` (the prior pattern) breaks on a
+   # user-owned module tree with no passwordless sudo -- this Cray's
+   # /shareddata/modules -- where `sudo mkdir`/`sudo tee` hit a password
+   # prompt. Unlike the job-8063 install-tree chown case, a modulefile is
+   # a plain write: if mktemp in the dir succeeds, the tee will too, so the
+   # probe cannot "lie" here. EUID 0 (root) yields "" (no sudo).
+   PKG_SUDO_MOD="$(_probe_writable "${MODULE_PATH}")"
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
+
+   # Modulefile flavor: Lmod consumes <ver>.lua; classic Tcl Environment
+   # Modules consumes an extensionless Tcl file. Emitting Lua unconditionally
+   # (the prior behavior) produced a 9.4.lua that this Cray's Tcl Environment
+   # Modules cannot see ("Unable to locate a modulefile for scorep/9.4").
+   # Detect Lmod via its env markers; default to Tcl so the module is
+   # actually loadable here. Mirrors kokkos/hdf5/netcdf/fftw/magma.
+   if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+      MODFLAVOR="lua"; MODEXT=".lua"
+   else
+      MODFLAVOR="tcl"; MODEXT=""
+   fi
 
    # Provenance: capture this leaf script's git state for the modulefile
    # whatis() line below. Uses LEAF_SCRIPT_PATH (absolute path captured
@@ -612,14 +693,26 @@ else
    unset _leaf_dir
 
    # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${SCOREP_VERSION}.lua
+   if [ "${MODFLAVOR}" = "lua" ]; then
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${SCOREP_VERSION}${MODEXT}
 	whatis(" Score-P Performance Analysis Tool ")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
 	prereq("${ROCM_MODULE_NAME}")
 	prepend_path("PATH","${SCOREP_PATH}/bin")
 	prepend_path("PATH","${PDT_PATH}/bin")
-EOF
+	EOF
+   else
+      cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${SCOREP_VERSION}${MODEXT}
+	#%Module1.0
+	module-whatis " Score-P Performance Analysis Tool "
+	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+
+	prereq ${ROCM_MODULE_NAME}
+	prepend-path PATH "${SCOREP_PATH}/bin"
+	prepend-path PATH "${PDT_PATH}/bin"
+	EOF
+   fi
 
 fi
 

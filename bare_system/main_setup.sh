@@ -130,6 +130,17 @@ SITE_CLI=0
 # is run_rocmplus_install_sweep.sh:--pnetcdf-version (threaded via the
 # sbatch as the PNETCDF_VERSION env var, picked up here).
 : ${PNETCDF_VERSION:=""}
+# NETCDF_PNETCDF_TARBALL: operator-staged official PnetCDF tarball, consumed
+# verbatim by netcdf_setup.sh (no network, pre-generated configure preserved
+# -> skips autoreconf). The official tarball lives ONLY on
+# parallel-netcdf.github.io, which some Cray COMPUTE nodes cannot reach (proxy
+# allows github.com, blocks github.io). If left unset here, the netcdf block
+# below auto-detects a staged tarball under NETCDF_SRC_STAGE_DIR (default
+# /shareddata/src) -- matching the PnetCDF version when known -- and exports
+# it so the leaf picks it up. Set explicitly to override or disable (point at
+# a non-existent path) the auto-detection.
+: ${NETCDF_PNETCDF_TARBALL:=""}
+: ${NETCDF_SRC_STAGE_DIR:="/shareddata/src"}
 : ${PYTHON_VERSION:="12"} # python3 minor release
 : ${USE_MAKEFILE:="0"}
 : ${QUICK_INSTALLS:="0"}     # 1 = skip packages whose wall is >= 20 min (long-pole gate) PLUS the explicit always-skip set likwid + mdb (see QUICK_INSTALLS_PKGS below)
@@ -1103,6 +1114,33 @@ if (( ${#PACKAGES_ARR[@]} > 0 )); then
    if [[ -n "${PKG_VERSIONS_REQ[ftorch]:-}" ]]; then
       PKG_VERSIONS_REQ[ftorch_amdflang]="${PKG_VERSIONS_REQ[ftorch]}"
    fi
+
+   # ── Build-dependency expansion (Cray) ────────────────────────────────
+   # Parallel-Fortran HDF5/netcdf with the new LLVM Flang (amdflang / ftn on
+   # ROCm 7.x) need a Fortran mpi.mod in the NEW-flang format. cray-mpich
+   # ships only classic-Flang V34 mpi.mod (unreadable by new flang), so they
+   # depend on the mpich-wrappers build (standalone MPICH w/ FC=amdflang).
+   # netcdf additionally depends on hdf5 (it links libhdf5 + reuses hdf5's
+   # HDF5_*_COMPILER / HDF5_MPI_MODULE). When the operator whitelists one of
+   # these on a Cray but not its build deps, pull them in automatically so
+   # `--packages netcdf` (or `--packages hdf5`) yields a working
+   # parallel-Fortran build instead of SKIPping (no MPI) or silently falling
+   # back to cray-mpich. Only on a Cray (CRAY_MPICH_VERSION set or
+   # /opt/cray/pe/mpich present); a no-op elsewhere. netcdf is handled first
+   # so enabling hdf5 cascades into the mpich-wrappers rule below.
+   _is_cray_pe=0
+   { [ -n "${CRAY_MPICH_VERSION:-}" ] || [ -d /opt/cray/pe/mpich ]; } && _is_cray_pe=1
+   if [[ "${BUILD_NETCDF}" == "1" ]] && [[ "${BUILD_HDF5}" != "1" ]] && [ "${_is_cray_pe}" = "1" ]; then
+      echo "  netcdf requested on a Cray -> auto-enabling hdf5 dependency (parallel HDF5 + new-flang .mod)"
+      BUILD_HDF5=1
+      unset "DESELECTED_BY[hdf5]"
+   fi
+   if [[ "${BUILD_HDF5}" == "1" ]] && [[ "${BUILD_MPICH_WRAPPERS}" != "1" ]] && [ "${_is_cray_pe}" = "1" ]; then
+      echo "  hdf5 requested on a Cray -> auto-enabling mpich-wrappers dependency (new-flang mpi.mod)"
+      BUILD_MPICH_WRAPPERS=1
+      unset "DESELECTED_BY[mpich-wrappers]"
+   fi
+   unset _is_cray_pe
    echo ""
 fi
 
@@ -1781,16 +1819,23 @@ run_and_log flang-new rocm/scripts/flang-new_setup.sh ${COMMON_OPTIONS} --build-
 run_and_log_versioned openmpi comm/scripts/openmpi_setup.sh ${COMMON_OPTIONS} --build-openmpi ${BUILD_OPENMPI} --build-xpmem 1 ${REPLACE_OPTS} \
    $(path_args " " rocmplus-${ROCMPLUS_SUFFIX}/openmpi)
 
-# rocshmem's RO backend uses the openmpi module built just above, so this
-# block follows openmpi. BUILD_ROCSHMEM=0 opt-out + existence check both
-# live in rocshmem_setup.sh; we thread --build-rocshmem and --mpi-module.
-run_and_log_versioned rocshmem comm/scripts/rocshmem_setup.sh ${COMMON_OPTIONS} --build-rocshmem ${BUILD_ROCSHMEM} --mpi-module openmpi ${REPLACE_OPTS} \
-   $(path_args " " rocmplus-${ROCMPLUS_SUFFIX}/rocshmem)
-
 # mpi4py owns its own version (see comment block at the version pins
 # above). main_setup.sh passes only --install-path (the parent dir);
 # mpi4py_setup.sh appends mpi4py-v${MPI4PY_VERSION} itself.
-run_and_log_versioned mpi4py comm/scripts/mpi4py_setup.sh ${COMMON_OPTIONS} --build-mpi4py ${BUILD_MPI4PY} ${REPLACE_OPTS} \
+#
+# MPI selection: on a Cray PE system (PrgEnv-*), build mpi4py against the
+# loaded cray-mpich rather than the leaf-script default (openmpi). The
+# Cray MPICH install dir is exported as $MPICH_DIR by the cray-mpich
+# module (e.g. /opt/cray/pe/mpich/<ver>/ofi/amd/<x>); when present we
+# thread --mpi-module cray-mpich + --mpi-path $MPICH_DIR so the wheel
+# links the PrgEnv's MPI and the generated modulefile load()s cray-mpich.
+# Non-Cray systems fall through to the leaf default unchanged.
+MPI4PY_MPI_OPTS=""
+if [ -n "${MPICH_DIR:-}" ] && [ -d "${MPICH_DIR}/bin" ]; then
+   MPI4PY_MPI_OPTS="--mpi-module cray-mpich --mpi-path ${MPICH_DIR}"
+   echo "mpi4py: Cray MPICH detected (MPICH_DIR=${MPICH_DIR}); building against cray-mpich"
+fi
+run_and_log_versioned mpi4py comm/scripts/mpi4py_setup.sh ${COMMON_OPTIONS} --build-mpi4py ${BUILD_MPI4PY} ${REPLACE_OPTS} ${MPI4PY_MPI_OPTS} \
    $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${ROCMPLUS} --module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/mpi4py")
 
 # NOTE: the Cray-only mpich-wrappers (standalone MPICH built with FC=amdflang
@@ -1799,6 +1844,28 @@ run_and_log_versioned mpi4py comm/scripts/mpi4py_setup.sh ${COMMON_OPTIONS} --bu
 # run_rocm_build*/craywrap/therock scripts (rocm/scripts/mpich_wrappers_setup.sh),
 # so PrgEnv-amd-new has them at creation. The consumer blocks below still PROBE
 # for the resulting module under rocmplus-<ver>/mpich-wrappers/<ver>.
+
+# rocshmem's RO backend needs an MPI for cmake's find_package(MPI). On a
+# non-Cray system that is the openmpi module built earlier; on a Cray PE
+# there is no openmpi, so thread the PrgEnv MPI instead (same rationale as
+# hdf5/netcdf/fftw/petsc). Prefer the from-source mpich-wrappers (ships
+# mpicc/mpicxx that find_package(MPI) can locate); fall back to cray-mpich.
+# Placed AFTER the mpich-wrappers build above so its modulefile exists for
+# the existence probe. BUILD_ROCSHMEM=0 opt-out + existence check live in
+# rocshmem_setup.sh; we thread --build-rocshmem and --mpi-module.
+ROCSHMEM_MPI_MODULE="openmpi"
+if [ -n "${MPICH_DIR:-}" ] && [ -d "${MPICH_DIR}/bin" ]; then
+   if [ -e "${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/mpich-wrappers/${ROCM_VERSION}" ] \
+      || [ -e "${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/mpich-wrappers/${ROCM_VERSION}.lua" ]; then
+      ROCSHMEM_MPI_MODULE="mpich-wrappers"
+      echo "rocshmem: mpich-wrappers detected; building rocSHMEM RO backend against mpich-wrappers (PrgEnv MPI)"
+   else
+      ROCSHMEM_MPI_MODULE="cray-mpich"
+      echo "rocshmem: Cray MPICH detected (MPICH_DIR=${MPICH_DIR}); building rocSHMEM RO backend against cray-mpich"
+   fi
+fi
+run_and_log_versioned rocshmem comm/scripts/rocshmem_setup.sh ${COMMON_OPTIONS} --build-rocshmem ${BUILD_ROCSHMEM} --mpi-module ${ROCSHMEM_MPI_MODULE} ${REPLACE_OPTS} \
+   $(path_args " " rocmplus-${ROCMPLUS_SUFFIX}/rocshmem)
 
 if [[ "${BUILD_MVAPICH}" == "1" ]] && [[ ! -d ${ROCMPLUS}/mvapich ]]; then
    run_and_log mvapich comm/scripts/mvapich_setup.sh ${COMMON_OPTIONS} ${REPLACE_OPTS} \
@@ -1830,7 +1897,23 @@ run_and_log_versioned mdb tools/scripts/mdb_setup.sh ${COMMON_OPTIONS} --build-m
 run_and_log_versioned intellikit tools/scripts/intellikit_setup.sh ${COMMON_OPTIONS} --build-intellikit ${BUILD_INTELLIKIT} --python-version ${PYTHON_VERSION} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/intellikit)
 
-run_and_log_versioned hpctoolkit tools/scripts/hpctoolkit_setup.sh ${COMMON_OPTIONS} --build-hpctoolkit ${BUILD_HPCTOOLKIT} ${REPLACE_OPTS} \
+# hpctoolkit builds hpcprof-mpi when meson's dependency('MPI') finds mpicc/
+# mpicxx. The leaf default MPI module is "openmpi", which does not exist on a
+# Cray system. When cray-mpich is loaded ($MPICH_DIR exported) prefer the
+# mpich-wrappers leaf (standalone MPICH, MPICH-ABI compatible with cray-mpich,
+# ships mpicc/mpicxx) if its modulefile exists; otherwise fall back to
+# cray-mpich. Non-Cray systems fall through to the leaf default unchanged.
+HPCTOOLKIT_MPI_OPTS=""
+if [ -n "${MPICH_DIR:-}" ] && [ -d "${MPICH_DIR}/bin" ]; then
+   if [ -e "${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/mpich-wrappers/${ROCM_VERSION}" ]; then
+      HPCTOOLKIT_MPI_OPTS="--mpi-module mpich-wrappers"
+      echo "hpctoolkit: mpich-wrappers detected; building hpcprof-mpi against mpich-wrappers (PrgEnv MPI)"
+   else
+      HPCTOOLKIT_MPI_OPTS="--mpi-module cray-mpich"
+      echo "hpctoolkit: Cray MPICH detected (MPICH_DIR=${MPICH_DIR}); building hpcprof-mpi against cray-mpich"
+   fi
+fi
+run_and_log_versioned hpctoolkit tools/scripts/hpctoolkit_setup.sh ${COMMON_OPTIONS} --build-hpctoolkit ${BUILD_HPCTOOLKIT} ${REPLACE_OPTS} ${HPCTOOLKIT_MPI_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/hpctoolkit)
 
 # scorep + tau share ${ROCMPLUS}/pdt. Their setup scripts default to
@@ -1850,7 +1933,23 @@ run_and_log_versioned scorep tools/scripts/scorep_setup.sh ${COMMON_OPTIONS} --b
 
 #run_and_log grafana tools/scripts/grafana_setup.sh
 
-run_and_log tau tools/scripts/tau_setup.sh ${COMMON_OPTIONS} --build-tau ${BUILD_TAU} ${REPLACE_OPTS} ${TAU_REPLACE_PDT} \
+# MPI selection for tau: same Cray-PE rationale as hypre/hdf5/netcdf/petsc.
+# TAU's -mpi support needs mpicc/mpif90 on PATH, and its Fortran MPI wrappers
+# must match the new-flang mpi.mod users compile with. On a Cray that is the
+# from-source mpich-wrappers (mpif90 -> amdflang); else cray-mpich. The leaf
+# default MPI module is "openmpi" (absent on Cray -> preflight SKIP), so
+# thread the right one. Non-Cray systems fall through to the leaf default.
+TAU_MPI_OPTS=""
+if [ -n "${MPICH_DIR:-}" ] && [ -d "${MPICH_DIR}/bin" ]; then
+   if [ -e "${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/mpich-wrappers/${ROCM_VERSION}" ]; then
+      TAU_MPI_OPTS="--mpi-module mpich-wrappers"
+      echo "tau: mpich-wrappers detected; building TAU against mpich-wrappers (PrgEnv MPI, new-flang mpif90/amdflang)"
+   else
+      TAU_MPI_OPTS="--mpi-module cray-mpich"
+      echo "tau: Cray MPICH detected (MPICH_DIR=${MPICH_DIR}); building TAU against cray-mpich"
+   fi
+fi
+run_and_log tau tools/scripts/tau_setup.sh ${COMMON_OPTIONS} --build-tau ${BUILD_TAU} ${REPLACE_OPTS} ${TAU_REPLACE_PDT} ${TAU_MPI_OPTS} \
    $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--tau-install-path ${ROCMPLUS}/tau --pdt-install-path ${ROCMPLUS}/pdt --module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/tau")
 
 #run_and_log compiler extras/scripts/compiler_setup.sh
@@ -1933,25 +2032,157 @@ run_and_log_versioned miniforge3 extras/scripts/miniforge3_setup.sh --rocm-versi
 run_and_log hipifly extras/scripts/hipifly_setup.sh --rocm-version ${ROCM_VERSION} --build-hipifly ${BUILD_HIPIFLY} --hipifly-module ${HIPIFLY_MODULE} ${REPLACE_OPTS} \
    $(path_args hipifly rocmplus-${ROCMPLUS_SUFFIX}/hipifly)
 
-run_and_log_versioned hdf5 extras/scripts/hdf5_setup.sh ${COMMON_OPTIONS} --build-hdf5 ${BUILD_HDF5} ${REPLACE_OPTS} \
+# MPI selection for HDF5 (same Cray-PE rationale as mpi4py above): the leaf
+# default MPI module is "openmpi", which does not exist on a Cray system and
+# would make hdf5's preflight SKIP. When cray-mpich is loaded ($MPICH_DIR is
+# exported by the cray-mpich module) thread --mpi-module cray-mpich so the
+# parallel HDF5 builds with the PrgEnv's cc/CC/ftn wrappers (cray-mpich +
+# new LLVM Flang), producing hdf5.mod files that match user code -- cray-hdf5
+# itself ships classic-Flang .mod that new flang rejects. Non-Cray systems
+# fall through to the leaf default (openmpi) unchanged.
+HDF5_MPI_OPTS=""
+if [ -n "${MPICH_DIR:-}" ] && [ -d "${MPICH_DIR}/bin" ]; then
+   # On a Cray with the new LLVM Flang (amdflang / ftn on ROCm 7.x),
+   # cray-mpich's amd/rocm-compiler mpi.mod is CLASSIC-Flang V34, which new
+   # flang cannot read -- so a parallel-Fortran `use mpi` HDF5 build with
+   # cc/CC/ftn fails. If the mpich-wrappers leaf built a standalone MPICH
+   # with FC=amdflang (new-flang mpi.mod, MPICH-ABI compatible with
+   # cray-mpich), prefer it: thread --mpi-module mpich-wrappers so the leaf
+   # loads that module and builds parallel HDF5 with its mpicc/mpicxx/
+   # mpifort. Fall back to cray-mpich when the wrapper was not built.
+   if [ -e "${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/mpich-wrappers/${ROCM_VERSION}" ]; then
+      HDF5_MPI_OPTS="--mpi-module mpich-wrappers"
+      echo "hdf5: mpich-wrappers detected; building parallel HDF5 against mpich-wrappers (new-flang mpi.mod)"
+   else
+      HDF5_MPI_OPTS="--mpi-module cray-mpich"
+      echo "hdf5: Cray MPICH detected (MPICH_DIR=${MPICH_DIR}); building parallel HDF5 against cray-mpich"
+   fi
+fi
+run_and_log_versioned hdf5 extras/scripts/hdf5_setup.sh ${COMMON_OPTIONS} --build-hdf5 ${BUILD_HDF5} ${REPLACE_OPTS} ${HDF5_MPI_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/hdf5)
 
-run_and_log_versioned netcdf extras/scripts/netcdf_setup.sh ${COMMON_OPTIONS} --build-netcdf ${BUILD_NETCDF} ${REPLACE_OPTS} \
+# MPI selection for netcdf: same Cray-PE rationale as hdf5 above. netcdf
+# links the parallel HDF5 we just built and builds netcdf-fortran + PnetCDF
+# with a Fortran MPI, so it must use the SAME MPI as hdf5 -- the from-source
+# mpich-wrappers (new-flang mpi.mod) when present, else cray-mpich. The leaf
+# default MPI module is "openmpi" (absent on Cray -> preflight SKIP), so
+# thread the right one. Non-Cray systems fall through to the leaf default.
+NETCDF_MPI_OPTS=""
+if [ -n "${MPICH_DIR:-}" ] && [ -d "${MPICH_DIR}/bin" ]; then
+   if [ -e "${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/mpich-wrappers/${ROCM_VERSION}" ]; then
+      NETCDF_MPI_OPTS="--mpi-module mpich-wrappers"
+      echo "netcdf: mpich-wrappers detected; building netcdf/pnetcdf against mpich-wrappers (new-flang mpi.mod)"
+   else
+      NETCDF_MPI_OPTS="--mpi-module cray-mpich"
+      echo "netcdf: Cray MPICH detected (MPICH_DIR=${MPICH_DIR}); building netcdf/pnetcdf against cray-mpich"
+   fi
+fi
+# PnetCDF tarball staging: the official tarball (with a pre-generated
+# `configure`) is only on parallel-netcdf.github.io, unreachable from some
+# Cray compute nodes (proxy blocks github.io; the git-clone fallback then
+# needs autoconf 2.70+/libtool 2.5.4+ which RHEL 9 lacks). If the operator
+# has not pinned NETCDF_PNETCDF_TARBALL, auto-detect a staged tarball under
+# NETCDF_SRC_STAGE_DIR and export it for netcdf_setup.sh. Prefer the
+# version-matched name when PNETCDF_VERSION is known, else newest glob match.
+if [[ "${BUILD_NETCDF}" == "1" ]] && [ -z "${NETCDF_PNETCDF_TARBALL:-}" ] && [ -d "${NETCDF_SRC_STAGE_DIR}" ]; then
+   _staged_pnetcdf=""
+   if [ -n "${PNETCDF_VERSION}" ] && [ -f "${NETCDF_SRC_STAGE_DIR}/pnetcdf-${PNETCDF_VERSION}.tar.gz" ]; then
+      _staged_pnetcdf="${NETCDF_SRC_STAGE_DIR}/pnetcdf-${PNETCDF_VERSION}.tar.gz"
+   else
+      # newest matching tarball (sorted; tail = highest version / mtime-agnostic)
+      _staged_pnetcdf=$(ls -1 "${NETCDF_SRC_STAGE_DIR}"/pnetcdf-*.tar.gz 2>/dev/null | sort -V | tail -n1)
+   fi
+   if [ -n "${_staged_pnetcdf}" ] && [ -f "${_staged_pnetcdf}" ]; then
+      export NETCDF_PNETCDF_TARBALL="${_staged_pnetcdf}"
+      echo "netcdf: using operator-staged PnetCDF tarball ${NETCDF_PNETCDF_TARBALL} (no github.io download)"
+   fi
+   unset _staged_pnetcdf
+elif [ -n "${NETCDF_PNETCDF_TARBALL:-}" ]; then
+   export NETCDF_PNETCDF_TARBALL
+   echo "netcdf: NETCDF_PNETCDF_TARBALL pinned to ${NETCDF_PNETCDF_TARBALL}"
+fi
+
+run_and_log_versioned netcdf extras/scripts/netcdf_setup.sh ${COMMON_OPTIONS} --build-netcdf ${BUILD_NETCDF} ${REPLACE_OPTS} ${NETCDF_MPI_OPTS} \
    $([ -n "${PNETCDF_VERSION}" ] && echo "--pnetcdf-version ${PNETCDF_VERSION}") \
    $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${ROCMPLUS} --netcdf-c-module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/netcdf-c --netcdf-f-module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/netcdf-fortran --pnetcdf-module-path ${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/pnetcdf")
 
-run_and_log_versioned fftw extras/scripts/fftw_setup.sh ${COMMON_OPTIONS} --build-fftw ${BUILD_FFTW} ${REPLACE_OPTS} \
+# MPI selection for fftw: same Cray-PE rationale as hdf5/netcdf above. FFTW's
+# --enable-mpi builds libfftw3*_mpi against an MPI C wrapper, so it should use
+# the SAME MPI as the rest of the PrgEnv stack -- the from-source
+# mpich-wrappers when present, else cray-mpich. The leaf default MPI module is
+# "openmpi" (absent on Cray -> preflight SKIP), so thread the right one.
+# Non-Cray systems fall through to the leaf default (openmpi / mpicc).
+FFTW_MPI_OPTS=""
+if [ -n "${MPICH_DIR:-}" ] && [ -d "${MPICH_DIR}/bin" ]; then
+   if [ -e "${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/mpich-wrappers/${ROCM_VERSION}" ]; then
+      FFTW_MPI_OPTS="--mpi-module mpich-wrappers"
+      echo "fftw: mpich-wrappers detected; building FFTW MPI against mpich-wrappers (PrgEnv MPI)"
+   else
+      FFTW_MPI_OPTS="--mpi-module cray-mpich"
+      echo "fftw: Cray MPICH detected (MPICH_DIR=${MPICH_DIR}); building FFTW MPI against cray-mpich"
+   fi
+fi
+run_and_log_versioned fftw extras/scripts/fftw_setup.sh ${COMMON_OPTIONS} --build-fftw ${BUILD_FFTW} ${REPLACE_OPTS} ${FFTW_MPI_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/fftw)
 
 #run_and_log x11vnc extras/scripts/x11vnc_setup.sh --build-x11vnc ${BUILD_X11VNC}
 
-run_and_log_versioned petsc extras/scripts/petsc_setup.sh ${COMMON_OPTIONS} --build-petsc ${BUILD_PETSC} ${REPLACE_OPTS} \
+# MPI selection for petsc: same Cray-PE rationale as hdf5/netcdf/fftw above.
+# PETSc builds with MPI (--with-mpi-dir) and, when Fortran bindings are on,
+# needs an mpif90 whose .mod format matches what users compile with. On a
+# Cray that is the from-source mpich-wrappers (new LLVM Flang mpif90); else
+# cray-mpich. The leaf default MPI module is "openmpi" (absent on Cray ->
+# preflight SKIP), so thread the right one. Non-Cray systems fall through to
+# the leaf default (openmpi).
+PETSC_MPI_OPTS=""
+if [ -n "${MPICH_DIR:-}" ] && [ -d "${MPICH_DIR}/bin" ]; then
+   if [ -e "${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/mpich-wrappers/${ROCM_VERSION}" ]; then
+      PETSC_MPI_OPTS="--mpi-module mpich-wrappers"
+      echo "petsc: mpich-wrappers detected; building PETSc against mpich-wrappers (new-flang mpif90)"
+   else
+      PETSC_MPI_OPTS="--mpi-module cray-mpich"
+      echo "petsc: Cray MPICH detected (MPICH_DIR=${MPICH_DIR}); building PETSc against cray-mpich"
+   fi
+fi
+# PETSc external-package staging: fblaslapack/metis/parmetis are bitbucket-
+# only and the ANL fallback mirror is also blocked on some Cray proxies, so
+# configure cannot --download them. If the operator hasn't pinned
+# PETSC_PACKAGES_DOWNLOAD_DIR, auto-detect a pre-staged package dir under
+# NETCDF_SRC_STAGE_DIR (default /shareddata/src/petsc-pkgs) and export it so
+# petsc_setup.sh passes --with-packages-download-dir. Same air-gap pattern as
+# NETCDF_PNETCDF_TARBALL above.
+if [[ "${BUILD_PETSC}" == "1" ]] && [ -z "${PETSC_PACKAGES_DOWNLOAD_DIR:-}" ] \
+     && [ -d "${NETCDF_SRC_STAGE_DIR}/petsc-pkgs" ]; then
+   export PETSC_PACKAGES_DOWNLOAD_DIR="${NETCDF_SRC_STAGE_DIR}/petsc-pkgs"
+   echo "petsc: using operator-staged package dir ${PETSC_PACKAGES_DOWNLOAD_DIR} (no bitbucket/ANL download)"
+elif [ -n "${PETSC_PACKAGES_DOWNLOAD_DIR:-}" ]; then
+   export PETSC_PACKAGES_DOWNLOAD_DIR
+   echo "petsc: PETSC_PACKAGES_DOWNLOAD_DIR pinned to ${PETSC_PACKAGES_DOWNLOAD_DIR}"
+fi
+run_and_log_versioned petsc extras/scripts/petsc_setup.sh ${COMMON_OPTIONS} --build-petsc ${BUILD_PETSC} ${REPLACE_OPTS} ${PETSC_MPI_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/petsc)
 
 run_and_log_versioned elpa extras/scripts/elpa_setup.sh  ${COMMON_OPTIONS} --build-elpa ${BUILD_ELPA} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX})
 
-run_and_log_versioned hypre extras/scripts/hypre_setup.sh ${COMMON_OPTIONS} --build-hypre ${BUILD_HYPRE} ${REPLACE_OPTS} \
+# MPI selection for hypre: same Cray-PE rationale as hdf5/netcdf/fftw/petsc
+# above. hypre builds with MPI (find_package(MPI)) and, with Fortran drivers
+# enabled, needs an mpifort whose .mod format matches what users compile with.
+# On a Cray that is the from-source mpich-wrappers (new LLVM Flang mpifort ->
+# amdflang); else cray-mpich. The leaf default MPI module is "openmpi" (absent
+# on Cray -> preflight SKIP), so thread the right one. Non-Cray systems fall
+# through to the leaf default (openmpi).
+HYPRE_MPI_OPTS=""
+if [ -n "${MPICH_DIR:-}" ] && [ -d "${MPICH_DIR}/bin" ]; then
+   if [ -e "${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/mpich-wrappers/${ROCM_VERSION}" ]; then
+      HYPRE_MPI_OPTS="--mpi-module mpich-wrappers"
+      echo "hypre: mpich-wrappers detected; building HYPRE against mpich-wrappers (PrgEnv MPI, new-flang mpifort/amdflang)"
+   else
+      HYPRE_MPI_OPTS="--mpi-module cray-mpich"
+      echo "hypre: Cray MPICH detected (MPICH_DIR=${MPICH_DIR}); building HYPRE against cray-mpich"
+   fi
+fi
+run_and_log_versioned hypre extras/scripts/hypre_setup.sh ${COMMON_OPTIONS} --build-hypre ${BUILD_HYPRE} ${REPLACE_OPTS} ${HYPRE_MPI_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/hypre)
 
 # ─── Long-pole ML builds (jax, tensorflow, pytorch, ftorch) ───────────

@@ -439,6 +439,36 @@ emit_cray_prgenv_ecosystem() {
     if {[is-loaded amd/${_rocm_numeric}]} { module unload amd/${_rocm_numeric} }"
    fi
 
+   # ── Suppress a global "general-package" MODULEPATH entry ─────────────
+   # When the per-version hierarchical ROCm trees (${_pkg_base}/,
+   # ${_plus_base}/) are on MODULEPATH, a sibling global modulefiles dir
+   # (default /shared/apps/modules/rhel9/modulefiles) can shadow them: a
+   # bare `module load rocm-new` / `mpich-wrappers` / ... may resolve to the
+   # global default instead of the local version-matched tree. Drop it from
+   # MODULEPATH on load via remove-path (emitted right after the per-version
+   # prepend-path lines in each PrgEnv). remove-path is:
+   #   * a no-op when the path is absent  -> cross-system safe; and
+   #   * a no-op on unload (Cray Environment Modules 3.2.11 treats
+   #     module use/unuse/remove-path as load-only -- it does NOT re-add a
+   #     removed path), so the dir is not auto-restored. That is acceptable:
+   #     the bare system re-exposes it at the next login.
+   # Configurable via SUPPRESS_MODULEPATH; empty disables the line entirely
+   # (byte-identical to prior behavior).
+   local _suppress_mp="${SUPPRESS_MODULEPATH-/shared/apps/modules/rhel9/modulefiles}"
+   local _mp_suppress_line=""
+   if [ -n "${_suppress_mp}" ]; then
+      _mp_suppress_line="$(cat <<TCL
+# Prefer the hierarchical per-version ROCm trees just prepended over the global
+# general-package modulefiles dir, so a bare \`module load rocm-new\`/... here
+# resolves to the local version-matched tree, not that dir's default.
+# remove-path: no-op when absent (cross-system safe) and no-op on unload
+# (load-only in Modules 3.2.11), so the dir is not auto-restored.
+remove-path MODULEPATH ${_suppress_mp}
+TCL
+)"
+      echo "[cray prgenv ecosystem] suppressing MODULEPATH entry on load: ${_suppress_mp}"
+   fi
+
    echo "[cray prgenv ecosystem] base dir : ${_base_dir}  (PrgEnv-amd-new, PrgEnv-cray-new)"
    echo "[cray prgenv ecosystem] pkg  dir : ${_pkg_dir}  (rocm-new, amd-new, amd, rocm)"
    echo "[cray prgenv ecosystem] plus dir : ${_plus_dir}  (MODULEPATH only)"
@@ -714,7 +744,7 @@ ${_amd_unload}
 # it auto-inverts to a removal that runs after the remove block above.
 prepend-path MODULEPATH \$_modroot/${_pkg_base}
 prepend-path MODULEPATH \$_modroot/${_plus_base}
-
+${_mp_suppress_line}
 if {\$_do_load} {
     # Stock AMD PrgEnv: PE_ENV=AMD + craype wrappers + cray-mpich/libsci. Its
     # internal \`module load amd\` resolves (via the amd/${_rocm} wrapper in the
@@ -801,6 +831,7 @@ if {\$_do_remove} {
 # MODULEPATH self-wiring (relative -> relocatable), same as PrgEnv-amd-new.
 prepend-path MODULEPATH \$_modroot/${_pkg_base}
 prepend-path MODULEPATH \$_modroot/${_plus_base}
+${_mp_suppress_line}
 
 if {\$_do_load} {
     if {![is-loaded PrgEnv-cray]} {
@@ -932,20 +963,23 @@ make_world_readable() {
 #   $6 leaf_commit     short git sha of the caller
 #   $7 leaf_dirty      "clean" / "dirty" / "unknown"
 #
-# The wrappers are ONLY needed when BOTH hold: (a) the env uses MPICH (not
-# OpenMPI -- an OpenMPI PrgEnv already ships an amdflang-compatible mpi.mod) and
-# (b) the local amdflang differs from the Cray-supplied amdflang (same version
-# => cray-mpich's mpi.mod is already readable). This function skips the build in
-# either exception (see MPI_FAMILY / FORTRAN_MATCHES_CRAY below).
+# On a Cray, the wrappers are built whenever the env uses MPICH (the default;
+# an OpenMPI PrgEnv already ships an amdflang-compatible mpi.mod and is skipped
+# via MPI_FAMILY). The build is NOT conditioned on an amdflang version match
+# anymore: cray-mpich's classic-Flang "V34" mpi.mod is unreadable by
+# amdflang-new regardless of version, so PrgEnv-amd-new always needs this
+# from-source wrapper. The old version probe is opt-in via FORTRAN_MATCHES_CRAY
+# (see below).
 #
 # Env knobs (all optional):
 #   BUILD_MPICH_WRAPPERS  1=build+emit (default); 0=skip entirely (no-op return)
 #   MPI_FAMILY            mpich (default) builds; openmpi (or any non-mpich
 #                         value) skips -- OpenMPI-based PrgEnvs need no wrapper.
-#   FORTRAN_MATCHES_CRAY  auto (default) = compare the local amdflang version to
-#                         the Cray-supplied amdflang and skip iff equal; 1=force
-#                         skip (treat as matching); 0=force build (skip the
-#                         version probe). On an inconclusive probe we BUILD.
+#   FORTRAN_MATCHES_CRAY  0 (default) = always build on Cray (skip the version
+#                         probe); 1=force skip (treat as matching cray-mpich);
+#                         auto=compare the local amdflang version to the
+#                         Cray-supplied amdflang and skip iff equal (legacy
+#                         behavior; on an inconclusive probe we BUILD).
 #   MPICH_VERSION         MPICH source version to fetch+build (default 4.3.0)
 #   LIBFABRIC_PATH        --with-libfabric prefix; default: highest
 #                         /opt/cray/libfabric/* (else error-skip)
@@ -1037,16 +1071,22 @@ build_and_emit_mpich_wrappers() {
       return 0
    fi
 
-   # Exception 2: the local amdflang matches the Cray-supplied amdflang version
-   # -> cray-mpich's mpi.mod is already readable, so no wrapper is needed. Only
-   # skip on a POSITIVE match (or an explicit FORTRAN_MATCHES_CRAY=1); an
-   # inconclusive probe falls through to build (the safe default).
-   case "${FORTRAN_MATCHES_CRAY:-auto}" in
+   # Exception 2 (OPT-IN ONLY): historically we skipped the build when the local
+   # amdflang version string matched the Cray-supplied amdflang, on the theory
+   # that cray-mpich's mpi.mod would then be readable. That theory is unsafe:
+   # cray-mpich ships a classic-Flang "V34" mpi.mod that amdflang-new (LLVM
+   # Flang) cannot read AT ALL, and the .mod ABI fingerprint can differ even
+   # between same-numbered amdflang builds -- so a version "match" does NOT mean
+   # cray-mpich's mpi.mod is usable. PrgEnv-amd-new therefore always needs this
+   # from-source amdflang-format wrapper on Cray. The default is now to BUILD;
+   # the version probe runs only when an operator explicitly sets
+   # FORTRAN_MATCHES_CRAY=auto, and FORTRAN_MATCHES_CRAY=1 still force-skips.
+   case "${FORTRAN_MATCHES_CRAY:-0}" in
       1)
          echo "[mpich-wrappers] FORTRAN_MATCHES_CRAY=1 -> Fortran matches Cray, skipping."
          return 0 ;;
       0)
-         echo "[mpich-wrappers] FORTRAN_MATCHES_CRAY=0 -> forcing build (skip version probe)." ;;
+         echo "[mpich-wrappers] FORTRAN_MATCHES_CRAY=0 (default) -> always building on Cray (skip version probe)." ;;
       *)
          local _loc_ver _cray_fc _cray_ver
          _loc_ver="$(_mw_flang_version "${_fc}")"

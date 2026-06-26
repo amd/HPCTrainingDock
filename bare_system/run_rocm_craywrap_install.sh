@@ -45,6 +45,12 @@ LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$
 # MPI family the PrgEnv-amd-new layers on: mpich (default) builds+loads the
 # wrappers; openmpi skips them (OpenMPI ships an amdflang-compatible mpi.mod).
 : ${MPI_FAMILY:="mpich"}
+# Global "general-package" MODULEPATH entry to suppress (drop on load,
+# restore on unload) when the per-version rocm-<ver>/ + rocmplus-<ver>/ trees
+# are prepended, so a bare `module load rocm-new`/... resolves to the local
+# version-matched tree instead of this global default. Empty disables the
+# block. Default is this site's rhel9 general-package modulefiles dir.
+: ${SUPPRESS_MODULEPATH:="/shared/apps/modules/rhel9/modulefiles"}
 SUDO="sudo"
 
 chown_root() { [ "${NO_SUDO}" = "1" ] && return 0; sudo chown "$@"; }
@@ -260,6 +266,19 @@ echo "============================================================"
 echo "  Phase 5: write modulefile ${MODULE_FILE}"
 echo "============================================================"
 ${SUDO} mkdir -p "${MODULE_DIR}"
+
+# Tcl line (Cray base rocm modulefile) that drops a global general-package
+# MODULEPATH entry on load, so a bare `module load rocm-new`/... after
+# `module load rocm/<ver>` prefers the hierarchical rocm-<ver>/ + rocmplus-<ver>/
+# trees prepended just below. remove-path is a no-op when the path is absent
+# (cross-system safe) and a no-op on unload (load-only in Cray Environment
+# Modules 3.2.11), so the dir is not auto-restored. Empty SUPPRESS_MODULEPATH
+# omits the line entirely.
+_BASE_MP_SUPPRESS_TCL=""
+if [ -n "${SUPPRESS_MODULEPATH}" ]; then
+   _BASE_MP_SUPPRESS_TCL="remove-path MODULEPATH ${SUPPRESS_MODULEPATH}"
+fi
+
 if [ "${CRAY_SYSTEM}" = "1" ]; then
 ${SUDO} tee "${MODULE_FILE}" >/dev/null <<EOF
 #%Module
@@ -287,6 +306,7 @@ set _self    [file normalize \${ModulesCurrentModulefile}]
 set _modroot [file dirname [file dirname [file dirname \$_self]]]
 prepend-path MODULEPATH \$_modroot/rocm-${ROCM_NUMERIC}
 prepend-path MODULEPATH \$_modroot/rocmplus-${ROCM_NUMERIC}
+${_BASE_MP_SUPPRESS_TCL}
 EOF
 else
 ${SUDO} tee "${MODULE_FILE}" >/dev/null <<EOF
