@@ -593,20 +593,70 @@ echo "Using ROCM_PATH=${ROCM_PATH} for the rocSHMEM build"
 # the 22.04 nodes (emacs needs GLIBC_2.38; the nodes ship GLIBC 2.35),
 # breaking the whole apt transaction. We rely on the existing
 # /usr/local/bin cmake and only verify it is present below.
+# Prefer to VERIFY these deps rather than INSTALL them. On a cluster with
+# no passwordless sudo and/or no enabled package repos (this Cray), a
+# distro install just fails ("There are no enabled repositories"), so:
+#   1. check whether the build deps are already present;
+#   2. only attempt an install if something is missing AND we both have a
+#      package manager and the rights to use it (root or real passwordless
+#      sudo) -- and even then non-fatally, re-verifying afterwards;
+#   3. essentials still missing with no way to install -> skip rocshmem
+#      (NOOP) rather than dying mid-configure.
+# (cmake is intentionally never installed here; see note above -- verified
+# separately below.)
+_missing_essential=()
+for _c in git gcc g++ make; do
+   command -v "${_c}" >/dev/null 2>&1 || _missing_essential+=("${_c}")
+done
+_have_numa=0
+if [ -e /usr/include/numa.h ] || ls /usr/lib*/libnuma.so* >/dev/null 2>&1 \
+   || { command -v ldconfig >/dev/null 2>&1 && ldconfig -p 2>/dev/null | grep -q 'libnuma\.so'; }; then
+   _have_numa=1
+fi
+
+# package manager for this distro (used only if we end up installing)
 if [ "${DISTRO}" = "ubuntu" ]; then
-   echo "Install of git build-essential libnuma-dev packages (cmake intentionally NOT installed; using /usr/local/bin pip cmake)"
-   if [[ "${DRY_RUN}" == "0" ]]; then
-      ${PKG_SUDO} apt-get update
-      ${PKG_SUDO} apt-get install -y git build-essential libnuma-dev
-   fi
+   PKG_MGR=$(command -v apt-get 2>/dev/null)
 elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
-   echo "Install of git gcc-c++ make numactl-devel packages (cmake intentionally NOT installed; using /usr/local/bin pip cmake)"
-   if [[ "${DRY_RUN}" == "0" ]]; then
-      ${PKG_SUDO} yum install -y git gcc-c++ make numactl-devel
-   fi
+   PKG_MGR=$(command -v dnf 2>/dev/null || command -v yum 2>/dev/null)
 else
    echo "DISTRO version ${DISTRO} not recognized or supported"
    exit ${NOOP_RC}
+fi
+
+if [ "${#_missing_essential[@]}" -eq 0 ] && [ "${_have_numa}" = "1" ]; then
+   echo "rocshmem: all distro build deps present (git/gcc/g++/make + libnuma); skipping package install"
+elif [ "${DRY_RUN}" = "0" ] && [ -n "${PKG_MGR}" ] \
+     && { [ "${EUID:-$(id -u)}" -eq 0 ] || { command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; }; }; then
+   # Package manager present and (apparently) usable: install the missing
+   # pieces. Non-fatal -- a repo-less node fails here, then we fall through
+   # to the presence re-check below.
+   _sudo_pm=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   echo "rocshmem: installing missing distro build deps via $(basename "${PKG_MGR}") (cmake NOT installed; using /usr/local/bin pip cmake)"
+   if [ "${DISTRO}" = "ubuntu" ]; then
+      ${_sudo_pm} "${PKG_MGR}" update || true
+      ${_sudo_pm} "${PKG_MGR}" install -y git build-essential libnuma-dev || true
+   else
+      ${_sudo_pm} "${PKG_MGR}" install -y git gcc-c++ make numactl-devel || true
+   fi
+   _missing_essential=()
+   for _c in git gcc g++ make; do command -v "${_c}" >/dev/null 2>&1 || _missing_essential+=("${_c}"); done
+   [ -e /usr/include/numa.h ] && _have_numa=1
+else
+   echo "rocshmem: no usable package manager / no sudo rights; verifying build deps are present instead of installing"
+fi
+
+# Final gate: the build cannot proceed without the essential tools.
+if [ "${#_missing_essential[@]}" -gt 0 ]; then
+   echo "ERROR: rocshmem build tools missing and cannot be installed here: ${_missing_essential[*]}"
+   echo "       provide them (distro packages or a toolchain module) and re-run; skipping rocshmem for now."
+   exit ${NOOP_RC}
+fi
+echo "rocshmem: build tools present: git=$(command -v git) gcc=$(command -v gcc) g++=$(command -v g++) make=$(command -v make)"
+if [ "${_have_numa}" = "0" ]; then
+   echo "WARNING: rocshmem: libnuma/numactl-devel (numa.h) not found; CMake will disable the GDA backend. Continuing."
+else
+   echo "rocshmem: libnuma present; GDA backend can build."
 fi
 
 # Verify cmake is available (expected: the pip build in /usr/local/bin).

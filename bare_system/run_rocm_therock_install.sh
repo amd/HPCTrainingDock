@@ -410,7 +410,7 @@ if [[ "${MODULES_ONLY}" != "1" ]]; then
 # This mirrors the auto-discovery pattern in install_rocm_tarball.sh
 # upstream (see WebFetch output committed in this script's history).
 echo "============================================================"
-echo "  Phase 1: ${LOCAL_TARBALL_INPUT:+use --local-tarball, skip discovery}${LOCAL_TARBALL_INPUT:-discover tarball for therock-${THEROCK_RELEASE} (${AMDGPU_FAMILY})}"
+echo "  Phase 1: ${LOCAL_TARBALL_INPUT:+use --local-tarball, skip discovery }${LOCAL_TARBALL_INPUT:-discover tarball for therock-${THEROCK_RELEASE} (${AMDGPU_FAMILY})}"
 echo "============================================================"
 
 # KEEP_LOCAL_TARBALL: 1 means ${LOCAL_TARBALL} is the operator's staged input
@@ -576,7 +576,7 @@ trap _therock_on_exit EXIT
 # straight into it -- no `mv extracted_subdir staging_dir` step like
 # the AFAR installer needs.
 echo "============================================================"
-echo "  Phase 2: ${LOCAL_TARBALL_INPUT:+extract staged tarball}${LOCAL_TARBALL_INPUT:-curl} + tar -xzpf -> ${STAGING_DIR}"
+echo "  Phase 2: ${LOCAL_TARBALL_INPUT:+extract staged tarball }${LOCAL_TARBALL_INPUT:-curl} + tar -xzpf -> ${STAGING_DIR}"
 echo "============================================================"
 # curl is preferred over wget here because it's what install_rocm_tarball.sh
 # upstream uses, and the AMD tarball server (repo.amd.com) returns the

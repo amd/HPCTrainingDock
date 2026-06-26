@@ -455,13 +455,16 @@ else
       unset _best_lf _lf
    fi
 
-   if [ -d "$INSTALL_PATH" ]; then
-      if [ -w ${INSTALL_PATH} ]; then
-         SUDO=""
-      else
-         echo "WARNING: using an install path that requires sudo"
-      fi
-   else
+   # Re-affirm the early-probe sudo decision. If the leaf install dir already
+   # exists and is writable, no sudo is needed. Otherwise keep whatever the
+   # early probe decided (SUDO="" when a writable ancestor was found). Only warn
+   # about sudo when we are ACTUALLY going to use it (SUDO non-empty) -- on an
+   # operator-writable tree the leaf simply doesn't exist yet, which is not a
+   # reason to claim we need sudo.
+   if [ -d "$INSTALL_PATH" ] && [ -w "${INSTALL_PATH}" ]; then
+      SUDO=""
+   fi
+   if [ -n "${SUDO}" ]; then
       echo "WARNING: using sudo, make sure you have sudo privileges"
    fi
 

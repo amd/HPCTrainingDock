@@ -63,8 +63,30 @@ fi
 : ${REPLACE_EXISTING:="0"}
 : ${SKIP_PATCHES:="0"}
 : ${KEEP_TARBALLS:="3"}
-: ${DISTRO:="ubuntu"}
-: ${DISTRO_VERSION:="24.04"}
+# DISTRO / DISTRO_VERSION default to the OS this submitter runs on (AAC7 login
+# == the numeric build/stage target), detected from /etc/os-release the same way
+# the *_setup.sh helpers do: NAME lowercased (e.g. "ubuntu", "red hat enterprise
+# linux") + VERSION_ID. run_rocm_build.sh accepts these tokens verbatim (it
+# remaps RHEL-family NAMEs to their base image). An explicit --distro /
+# --distro-version (or pre-set env) still wins. Hardcoded ubuntu/24.04 is only a
+# last-resort fallback when /etc/os-release is unreadable.
+if [[ -r /etc/os-release ]]; then
+   _os_name="$(grep '^NAME=' /etc/os-release | sed -e 's/NAME="\?//' -e 's/"\?$//' | tr '[:upper:]' '[:lower:]')"
+   _os_ver="$(grep '^VERSION_ID=' /etc/os-release | sed -e 's/VERSION_ID="\?//' -e 's/"\?$//' | tr '[:upper:]' '[:lower:]')"
+   # On Red Hat Enterprise Linux, the docker build base image (redhat/ubi9)
+   # reaches subscription-gated repos that break the ROCm build's package
+   # downloads. AlmaLinux is RHEL-ABI-compatible and pulls freely, so build/stage
+   # RHEL targets AS almalinux (run_rocm_build.sh already treats almalinux as a
+   # first-class RHEL_COMPATIBLE distro). Keep the same major.minor version.
+   # An explicit --distro / DISTRO env still wins over this substitution.
+   if [[ "${_os_name}" == "red hat enterprise linux" || "${_os_name}" == rhel* ]]; then
+      echo "[rocm_sweep] NOTE: detected '${_os_name} ${_os_ver}'; building/staging as 'almalinux ${_os_ver}' (avoids RHEL subscription-gated docker download failures)" >&2
+      _os_name="almalinux"
+   fi
+fi
+: ${DISTRO:="${_os_name:-ubuntu}"}
+: ${DISTRO_VERSION:="${_os_ver:-24.04}"}
+unset _os_name _os_ver
 : ${AMDGPU_GFXMODEL:="gfx942;gfx90a"}
 # TOP_INSTALL_PATH / TOP_MODULE_PATH defaults are LEGACY (Ubuntu-24.04
 # /nfsapps test tree). Sentinel-track explicit-vs-default so the
@@ -84,6 +106,45 @@ SITE=""
                                           # https://repo.amd.com/rocm/tarball/ for the full list.
 
 ROCM_VERSIONS_RAW=""
+
+# ── --program-environments (AAC7 high-level interface) ────────────────
+# When set, the sweep is driven by Cray PrgEnv tokens of the form
+#   <flavor>/<pe>-<rocm-suffix>   e.g. PrgEnv-amd-new/8.7.0-7.2.3
+# instead of bare --rocm-versions. Each token's rocm-suffix is resolved to a
+# canonical sweep token via bare_system/rocm_kind_map.conf, the de-duplicated
+# set of canonical tokens drives the install + time budget, and the requested
+# PrgEnv flavor(s) gate which modulefiles are emitted (see the sbatch). All of
+# this new behavior is GATED on PROGRAM_ENVIRONMENTS being non-empty; the legacy
+# --rocm-versions path is byte-identical when it is unset.
+PROGRAM_ENVIRONMENTS_RAW=""
+# PACKAGE_CACHE: where pre-built ROCm package tarballs live for the no-docker
+# (AAC7 Cray login) fallback. When docker/podman is absent on the compute/login
+# node, the sbatch extracts from here instead of building. Default mirrors the
+# shareddata site layout.
+: ${PACKAGE_CACHE:="/shareddata/rocm-package-cache"}
+# PE_VERSION: stock PrgEnv version the generated PrgEnv-*-new modules wrap. In
+# --program-environments mode it is parsed per-token from the <pe> segment; this
+# default is only a fallback/banner value.
+: ${PE_VERSION:=""}
+# Outbound HTTP(S) proxy override for compute-node fetches. Some leaf installers
+# still download from the internet (e.g. mpich-wrappers fetches the MPICH source
+# tarball with wget). AAC7 compute nodes have NO direct internet; they reach the
+# outside through a SITE proxy that the compute node's own /etc/profile sets
+# (e.g. http://172.23.0.12:3128). The sbatch derives that node-side proxy from a
+# login shell by default, so normally nothing needs to be set here.
+#
+# We deliberately do NOT auto-forward the submitter/login env proxy: on the Cray
+# login node it is typically a loopback SSH tunnel (http://127.0.0.1:PORT) that
+# is UNREACHABLE from compute nodes, and forwarding it would override the node's
+# correct site proxy. Use --https-proxy/--http-proxy/--proxy ONLY to override the
+# node-derived value with an explicit, compute-node-reachable proxy URL.
+HTTPS_PROXY_URL="${HTTPS_PROXY_URL:-}"
+HTTP_PROXY_URL="${HTTP_PROXY_URL:-}"
+# Optional explicit node pin (sbatch --nodelist). Useful to target a node with a
+# working builder (podman/docker) for numeric token builds, since builder
+# availability varies per node (e.g. podman is broken on nodes lacking
+# /localnvme). Empty -> let Slurm schedule anywhere in the partition.
+NODELIST="${NODELIST:-}"
 
 usage() {
    cat <<EOF
@@ -129,7 +190,37 @@ Usage: $0 [opts]
                                        base/rocm/therock-X.Y.Z.lua) -- this channel keeps
                                        its pre-unified naming because it sources from a
                                        different upstream.
+   --program-environments "p1 p2 ..."  AAC7 (Cray) high-level interface. Space- or
+                                 comma-separated Cray PrgEnv tokens of the form
+                                 <flavor>/<pe>-<rocm-suffix>, e.g.
+                                   PrgEnv-amd-new/8.7.0-7.2.3
+                                   PrgEnv-cray-new/8.7.0-7.12.0
+                                   PrgEnv-amd-new/8.7.0-afar-23.2.1
+                                   PrgEnv-amd-openmpi/8.7.0-7.12.0
+                                   PrgEnv-amd-openmpi-ucx/8.7.0-7.12.0
+                                 Each rocm-suffix is resolved to a canonical sweep
+                                 token via bare_system/rocm_kind_map.conf, the
+                                 de-duplicated set of canonical tokens is installed
+                                 (built when docker/podman is present, else extracted
+                                 from --package-cache), and only the requested PrgEnv
+                                 flavor(s) are emitted. amd-openmpi / amd-openmpi-ucx
+                                 are a work-in-progress skeleton (the underlying rocm
+                                 is installed; a WIP message is printed).
+                                 Mutually exclusive with --rocm-versions.
+   --package-cache DIR           dir holding pre-built ROCm package tarballs for the
+                                 no-docker fallback (default $PACKAGE_CACHE)
+   --https-proxy URL             override the compute-node site proxy for HTTPS
+                                 fetches (e.g. the mpich-wrappers MPICH download).
+                                 Default: derived on the node from a login shell
+                                 (its /etc/profile site proxy). Use this only to
+                                 force a specific, compute-node-reachable proxy.
+   --http-proxy URL              override the compute-node site proxy for HTTP
+      --proxy URL                   shorthand: set BOTH --https-proxy and --http-proxy
    --partition NAME              Slurm partition (default $PARTITION)
+   --nodelist NODE[,NODE...]     pin the job to specific node(s) (sbatch --nodelist).
+                                 Useful to target a node with a working builder for
+                                 numeric token builds (podman/docker availability
+                                 varies per node). Default: scheduler chooses.
    --min-per-version N           estimated minutes per numeric ROCm build (default $MIN_PER_VERSION)
    --afar-min-per-version N      estimated minutes per AFAR token (default $AFAR_MIN_PER_VERSION)
    --therock-min-per-version N   estimated minutes per TheRock token (default $THEROCK_MIN_PER_VERSION)
@@ -150,6 +241,7 @@ Usage: $0 [opts]
                                      opt          -> /opt + /opt/modules
                                      nfsapps      -> /nfsapps/opt + /nfsapps/modules           (Ubuntu 24.04 NFS test tree)
                                      shared-apps  -> /shared/apps/ubuntu/opt + /shared/apps/modules/ubuntu/lmodfiles  (LIVE cluster tree, Ubuntu 22.04)
+                                     shareddata   -> /shareddata/opt + /shareddata/modules     (AAC7 Cray shared tree)
                                    Absolute path form: any value starting with '/' is treated as a parent prefix, expanded to PREFIX/opt + PREFIX/modules.
                                      e.g. --site /nfsapps/ubuntu-22.04 -> /nfsapps/ubuntu-22.04/opt + /nfsapps/ubuntu-22.04/modules
                                  Explicit --top-install-path / --top-module-path flags override the corresponding preset value.
@@ -163,6 +255,12 @@ DRY_RUN=0
 while [[ $# -gt 0 ]]; do
    case "${1}" in
       --rocm-versions)    shift; ROCM_VERSIONS_RAW=${1} ;;
+      --program-environments) shift; PROGRAM_ENVIRONMENTS_RAW=${1} ;;
+      --package-cache)    shift; PACKAGE_CACHE=${1} ;;
+      --nodelist)         shift; NODELIST=${1} ;;
+      --https-proxy)      shift; HTTPS_PROXY_URL=${1} ;;
+      --http-proxy)       shift; HTTP_PROXY_URL=${1} ;;
+      --proxy)            shift; HTTPS_PROXY_URL=${1}; HTTP_PROXY_URL=${1} ;;
       --partition)        shift; PARTITION=${1} ;;
       --min-per-version)  shift; MIN_PER_VERSION=${1} ;;
       --afar-min-per-version) shift; AFAR_MIN_PER_VERSION=${1} ;;
@@ -213,6 +311,10 @@ if [[ -n "${SITE}" ]]; then
          _SITE_TOP_INSTALL="/shared/apps/ubuntu/opt"
          _SITE_TOP_MODULE="/shared/apps/modules/ubuntu/lmodfiles"
          ;;
+      shareddata)
+         _SITE_TOP_INSTALL="/shareddata/opt"
+         _SITE_TOP_MODULE="/shareddata/modules"
+         ;;
       /*)
          # Absolute-path PREFIX form (e.g. --site /nfsapps/ubuntu-22.04):
          # symmetric layout PREFIX/opt + PREFIX/modules.
@@ -222,7 +324,7 @@ if [[ -n "${SITE}" ]]; then
          unset _SITE_PREFIX
          ;;
       *)
-         echo "ERROR: --site must be a named preset (opt | nfsapps | shared-apps) or an absolute path starting with '/' (got '${SITE}')" >&2
+         echo "ERROR: --site must be a named preset (opt | nfsapps | shared-apps | shareddata) or an absolute path starting with '/' (got '${SITE}')" >&2
          exit 1
          ;;
    esac
@@ -241,6 +343,77 @@ fi
 # explicitly rather than as anonymous "preset defaults".
 [ -z "${TOP_INSTALL_PATH_SOURCE}" ] && TOP_INSTALL_PATH_SOURCE="legacy default (/nfsapps/opt)"
 [ -z "${TOP_MODULE_PATH_SOURCE}"  ] && TOP_MODULE_PATH_SOURCE="legacy default (/nfsapps/modules)"
+
+# ── --program-environments resolution (AAC7 high-level interface) ─────
+# Parse each PrgEnv token <flavor>/<pe>-<rocm-suffix>, resolve the suffix to a
+# canonical sweep token via bare_system/rocm_kind_map.conf, and derive the
+# de-duplicated list of canonical tokens that drives both the install loop (in
+# the sbatch) and the time budget below. The normalized PROGRAM_ENVIRONMENTS
+# string is passed verbatim to the sbatch, which re-parses it to learn the
+# requested flavor(s) + PE version per canonical token.
+PROGRAM_ENVIRONMENTS_NORM=""
+KIND_MAP_CONF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rocm_kind_map.conf"
+if [[ -n "${PROGRAM_ENVIRONMENTS_RAW}" ]]; then
+   if [[ -n "${ROCM_VERSIONS_RAW}" ]]; then
+      echo "ERROR: --program-environments and --rocm-versions are mutually exclusive" >&2
+      exit 1
+   fi
+   [[ -f "${KIND_MAP_CONF}" ]] || { echo "ERROR: kind map ${KIND_MAP_CONF} not found" >&2; exit 1; }
+
+   # Resolve a rocm-suffix to its canonical sweep token via the conf file.
+   resolve_kind() {
+      awk -F= -v s="$1" '
+         /^[[:space:]]*#/ {next}
+         /^[[:space:]]*$/ {next}
+         $1 == s {print $2; found=1; exit}
+         END {exit !found}
+      ' "${KIND_MAP_CONF}"
+   }
+
+   PROGRAM_ENVIRONMENTS_NORM="${PROGRAM_ENVIRONMENTS_RAW//,/ }"
+   read -r -a _PE_TOKENS <<< "${PROGRAM_ENVIRONMENTS_NORM}"
+   (( ${#_PE_TOKENS[@]} == 0 )) && { echo "ERROR: no PrgEnv tokens parsed from '${PROGRAM_ENVIRONMENTS_RAW}'" >&2; exit 1; }
+
+   _CANON_TOKENS=()        # de-duplicated canonical sweep tokens (install order)
+   declare -A _CANON_SEEN=()
+   for _pe_tok in "${_PE_TOKENS[@]}"; do
+      # Split <flavor>/<pe>-<suffix>.
+      if [[ "${_pe_tok}" != */* ]]; then
+         echo "ERROR: PrgEnv token '${_pe_tok}' is not of the form <flavor>/<pe>-<rocm-suffix>" >&2
+         exit 1
+      fi
+      _flavor="${_pe_tok%%/*}"
+      _rest="${_pe_tok#*/}"
+      if [[ "${_rest}" != *-* ]]; then
+         echo "ERROR: PrgEnv token '${_pe_tok}' has no <pe>-<rocm-suffix> after the flavor" >&2
+         exit 1
+      fi
+      _pe="${_rest%%-*}"        # e.g. 8.7.0
+      _suffix="${_rest#*-}"     # e.g. 7.2.3 or afar-23.2.1
+      case "${_flavor}" in
+         PrgEnv-amd-new|PrgEnv-cray-new|PrgEnv-amd-openmpi|PrgEnv-amd-openmpi-ucx) : ;;
+         *) echo "ERROR: unknown PrgEnv flavor '${_flavor}' in token '${_pe_tok}'" >&2
+            echo "       expected one of PrgEnv-amd-new, PrgEnv-cray-new, PrgEnv-amd-openmpi, PrgEnv-amd-openmpi-ucx" >&2
+            exit 1 ;;
+      esac
+      if ! _canon="$(resolve_kind "${_suffix}")" || [[ -z "${_canon}" ]]; then
+         echo "ERROR: rocm-suffix '${_suffix}' (from token '${_pe_tok}') is not registered in ${KIND_MAP_CONF}" >&2
+         echo "       add a line '${_suffix}=<canonical-sweep-token>' to that file." >&2
+         exit 1
+      fi
+      if [[ -z "${_CANON_SEEN[${_canon}]:-}" ]]; then
+         _CANON_TOKENS+=("${_canon}")
+         _CANON_SEEN[${_canon}]=1
+      fi
+      [[ -z "${PE_VERSION}" ]] && PE_VERSION="${_pe}"
+   done
+   unset _pe_tok _flavor _rest _pe _suffix _canon _CANON_SEEN
+
+   # The canonical tokens drive the install loop + time budget exactly like a
+   # hand-written --rocm-versions list would.
+   ROCM_VERSIONS_RAW="${_CANON_TOKENS[*]}"
+   unset _CANON_TOKENS
+fi
 
 [[ -z "${ROCM_VERSIONS_RAW}" ]] && \
    ROCM_VERSIONS_RAW="7.1.0 7.0.2 7.0.1 7.0.0 6.4.3 6.4.2 6.4.1 6.4.0"
@@ -319,11 +492,44 @@ TIME_STR=$(printf '%02d:%02d:00' "${HH}" "${MM}")
 SBATCH_FILE="${REPO_ROOT}/bare_system/run_rocm_build_sweep.sbatch"
 [[ -f "${SBATCH_FILE}" ]] || { echo "ERROR: ${SBATCH_FILE} not found" >&2; exit 1; }
 
+# ---------------- Partition validation / fallback --------------------
+# The built-in default ($PARTITION) is an AAC6 partition (sh5_cpx_admin_long)
+# that does not exist on AAC7. If sinfo is available and the requested
+# partition is not one of this cluster's partitions, fall back to the
+# cluster's DEFAULT partition (the one sinfo marks with a trailing '*')
+# so e.g. `--site shareddata` runs on AAC7 don't have to spell out
+# --partition. An explicit, valid --partition is always honoured; if it is
+# invalid we still fall back (and say so) rather than failing at sbatch.
+if command -v sinfo >/dev/null 2>&1; then
+   _parts="$(sinfo -h -o '%P' 2>/dev/null)"
+   if [[ -n "${_parts}" ]]; then
+      # Names from sinfo may carry a trailing '*' on the default partition.
+      _part_clean="$(printf '%s\n' "${_parts}" | sed 's/\*$//')"
+      if ! printf '%s\n' "${_part_clean}" | grep -qxF "${PARTITION}"; then
+         _default_part="$(printf '%s\n' "${_parts}" | sed -n 's/\*$//p' | head -n1)"
+         if [[ -n "${_default_part}" ]]; then
+            echo "NOTE: partition '${PARTITION}' not found on this cluster;" >&2
+            echo "      falling back to the default partition '${_default_part}'." >&2
+            echo "      (Available: $(printf '%s ' ${_part_clean}))" >&2
+            PARTITION="${_default_part}"
+         else
+            echo "WARNING: partition '${PARTITION}' not found and no default" >&2
+            echo "         partition is marked on this cluster. Available:" >&2
+            echo "         $(printf '%s ' ${_part_clean})" >&2
+            echo "         sbatch will likely reject this; pass --partition." >&2
+         fi
+      fi
+      unset _part_clean _default_part
+   fi
+   unset _parts
+fi
+
 cat <<EOF
 ==================================================================
  ROCm sweep submitter
 ==================================================================
  Partition:        ${PARTITION}
+ Node pin:         ${NODELIST:-<scheduler chooses>}
  Versions (${N}):  ${VERSIONS_ARR[*]}
    numeric (${N_NUMERIC}):  ${NUMERIC_VERSIONS[*]:-<none>}
    AFAR    (${N_AFAR}):     ${AFAR_VERSIONS[*]:-<none>}
@@ -342,6 +548,11 @@ cat <<EOF
  TOP_MODULE_PATH:  ${TOP_MODULE_PATH}   [source: ${TOP_MODULE_PATH_SOURCE}]
  TheRock family:   ${THEROCK_AMDGPU_FAMILY}
  Delta registry:   ${DELTA_CONF}
+ ProgEnv tokens:   ${PROGRAM_ENVIRONMENTS_NORM:-<none>}
+ PE version:       ${PE_VERSION:-<none, auto-detect on node>}
+ HTTPS proxy:      ${HTTPS_PROXY_URL:-<auto: compute-node site proxy>}
+ HTTP proxy:       ${HTTP_PROXY_URL:-<auto: compute-node site proxy>}
+ Package cache:    ${PACKAGE_CACHE}
  sbatch file:      ${SBATCH_FILE}
 ==================================================================
 EOF
@@ -353,10 +564,22 @@ EXPORT_VARS="ALL,ROCM_VERSIONS=${ROCM_VERSIONS_NORM},REPLACE_EXISTING=${REPLACE_
 if [[ -n "${SITE}" ]]; then
    EXPORT_VARS="${EXPORT_VARS},SITE=${SITE}"
 fi
+# --program-environments mode: hand the sbatch the normalized PrgEnv token
+# string (it re-parses flavor + PE version per canonical token), the package
+# cache for the no-docker fallback, and the resolved PE version.
+if [[ -n "${PROGRAM_ENVIRONMENTS_NORM}" ]]; then
+   EXPORT_VARS="${EXPORT_VARS},PROGRAM_ENVIRONMENTS=${PROGRAM_ENVIRONMENTS_NORM},PACKAGE_CACHE=${PACKAGE_CACHE},PE_VERSION=${PE_VERSION}"
+fi
+# Forward the proxy URLs explicitly (single URLs, no commas -> safe in --export).
+# The sbatch turns these into the canonical http(s)_proxy/HTTP(S)_PROXY env for
+# child installers (e.g. mpich-wrappers' wget). no_proxy is carried via ALL.
+[[ -n "${HTTPS_PROXY_URL}" ]] && EXPORT_VARS="${EXPORT_VARS},HTTPS_PROXY_URL=${HTTPS_PROXY_URL}"
+[[ -n "${HTTP_PROXY_URL}"  ]] && EXPORT_VARS="${EXPORT_VARS},HTTP_PROXY_URL=${HTTP_PROXY_URL}"
 
 CMD=( sbatch
       --time="${TIME_STR}"
       --partition="${PARTITION}"
+      ${NODELIST:+--nodelist="${NODELIST}"}
       --export="${EXPORT_VARS}"
       "${SBATCH_FILE}" )
 

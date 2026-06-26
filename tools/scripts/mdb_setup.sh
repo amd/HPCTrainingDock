@@ -206,6 +206,32 @@ fi
 # flavor-detection block at modulefile creation below).
 MODULEFILE_LUA="${MODULE_PATH}/${MDB_VERSION}.lua"
 MODULEFILE_TCL="${MODULE_PATH}/${MDB_VERSION}"
+
+# Install-path sudo (EARLY): probe the nearest existing ancestor of
+# MDB_PATH for user-writability and set SUDO accordingly BEFORE anything
+# that uses ${SUDO} -- the --replace rm below and the _mdb_on_exit trap's
+# fail-cleanup. The default SUDO=sudo (set above) otherwise makes
+# `--replace 1` hit a password prompt on a user-writable tree that has no
+# passwordless sudo (this Cray), failing the whole leaf before the build
+# branch's own probe (further below) ever runs. Mirrors that probe and is
+# idempotent with it.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   SUDO=""
+else
+   _iprobe="${MDB_PATH}"
+   while [ ! -e "${_iprobe}" ]; do _iprobe="$(dirname "${_iprobe}")"; done
+   _itest=$(mktemp --tmpdir="${_iprobe}" .mdb-inst-probe.XXXXXX 2>/dev/null || true)
+   if [ -n "${_itest}" ] && [ -f "${_itest}" ]; then
+      rm -f "${_itest}"
+      SUDO=""
+      echo "mdb: install ancestor ${_iprobe} is user-writable (probe succeeded); not using sudo"
+   else
+      SUDO="sudo"
+      echo "mdb: install ancestor ${_iprobe} not user-writable (probe failed); using sudo"
+   fi
+   unset _iprobe _itest
+fi
+
 if [ "${REPLACE}" = "1" ]; then
    echo "[mdb --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${MDB_PATH}"
@@ -229,11 +255,11 @@ fi
 # Replaces inline build-dir-only traps.
 _mdb_on_exit() {
    local rc=$?
-   [ -n "${MDB_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${MDB_BUILD_ROOT}"
+   [ -n "${MDB_BUILD_ROOT:-}" ] && ${SUDO} rm -rf "${MDB_BUILD_ROOT}"
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[mdb fail-cleanup] rc=${rc}: removing partial install + modulefile"
-      ${SUDO:-sudo} rm -rf "${MDB_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULEFILE_LUA}" "${MODULEFILE_TCL}"
+      ${SUDO} rm -rf "${MDB_PATH}"
+      ${SUDO} rm -f  "${MODULEFILE_LUA}" "${MODULEFILE_TCL}"
    elif [ ${rc} -ne 0 ]; then
       echo "[mdb fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi

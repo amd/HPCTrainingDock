@@ -469,14 +469,46 @@ TCL
       echo "[cray prgenv ecosystem] suppressing MODULEPATH entry on load: ${_suppress_mp}"
    fi
 
+   # ── Requested PrgEnv flavor(s) ───────────────────────────────────────
+   # PRGENV_FLAVORS is a space-separated list of which PrgEnv-*-new flavors to
+   # emit. Default "amd-new cray-new" preserves the historical behavior (both
+   # flavors emitted from one call) for the extract-sweep / AAC6 callers. The
+   # AAC7 --program-environments path sets it per token so a lone PrgEnv-cray-new
+   # request does not also create PrgEnv-amd-new. Tokens are matched leniently
+   # (accepting both "amd-new" and the full "PrgEnv-amd-new" form).
+   local _flavors="${PRGENV_FLAVORS:-amd-new cray-new}"
+   # "none" is an explicit opt-out: the caller wants the rocm SDK + base/per-
+   # package modulefiles installed but NO Cray PrgEnv ecosystem (e.g. the
+   # OpenMPI flavors, which are a work-in-progress and emit their own modules
+   # later). Skip cleanly rather than erroring.
+   if [ "${_flavors}" = "none" ]; then
+      echo "[cray prgenv ecosystem] PRGENV_FLAVORS=none -> skipping PrgEnv ecosystem emission"
+      return 0
+   fi
+   local _want_amd=0 _want_cray=0 _flv
+   for _flv in ${_flavors}; do
+      case "${_flv}" in
+         amd-new|PrgEnv-amd-new)   _want_amd=1 ;;
+         cray-new|PrgEnv-cray-new) _want_cray=1 ;;
+      esac
+   done
+   if [ "${_want_amd}" = "0" ] && [ "${_want_cray}" = "0" ]; then
+      echo "ERROR: emit_cray_prgenv_ecosystem: PRGENV_FLAVORS='${_flavors}' selects neither amd-new nor cray-new" >&2
+      return 2
+   fi
+
+   echo "[cray prgenv ecosystem] flavors  : ${_flavors}  (amd-new=${_want_amd}, cray-new=${_want_cray})"
    echo "[cray prgenv ecosystem] base dir : ${_base_dir}  (PrgEnv-amd-new, PrgEnv-cray-new)"
    echo "[cray prgenv ecosystem] pkg  dir : ${_pkg_dir}  (rocm-new, amd-new, amd, rocm)"
    echo "[cray prgenv ecosystem] plus dir : ${_plus_dir}  (MODULEPATH only)"
    echo "[cray prgenv ecosystem] rocm=${_rocm}  pe=${_pe}  (sudo='${_sudo}')"
 
-   ${_sudo} mkdir -p "${_pkg_dir}/rocm-new" "${_pkg_dir}/amd-new" \
-                     "${_pkg_dir}/amd" "${_pkg_dir}/rocm" \
-                     "${_base_dir}/PrgEnv-amd-new" "${_base_dir}/PrgEnv-cray-new"
+   # rocm-new + the bare rocm wrapper are always needed (both flavors load
+   # rocm-new). The amd-new compiler module + amd wrappers + PrgEnv-amd-new are
+   # only created for the amd-new flavor; PrgEnv-cray-new only for cray-new.
+   ${_sudo} mkdir -p "${_pkg_dir}/rocm-new" "${_pkg_dir}/rocm"
+   [ "${_want_amd}" = "1" ]  && ${_sudo} mkdir -p "${_pkg_dir}/amd-new" "${_pkg_dir}/amd" "${_base_dir}/PrgEnv-amd-new"
+   [ "${_want_cray}" = "1" ] && ${_sudo} mkdir -p "${_base_dir}/PrgEnv-cray-new"
 
    # ---------------- rocm-new/<rocm> ---------------------------------------
    local _f="${_pkg_dir}/rocm-new/${_rocm}"
@@ -566,7 +598,8 @@ prepend-path PE_PKGCONFIG_LIBS  \$CPE_PKGCONFIG_LIB
 EOF
    _chown_root root:root "${_f}"; ${_sudo} chmod 644 "${_f}"; echo "  + ${_f}"
 
-   # ---------------- amd-new/<rocm> ----------------------------------------
+   # ---------------- amd-new/<rocm> (amd-new flavor only) ------------------
+   if [ "${_want_amd}" = "1" ]; then
    _f="${_pkg_dir}/amd-new/${_rocm}"
    ${_sudo} tee "${_f}" >/dev/null <<EOF
 #%Module
@@ -624,6 +657,7 @@ if {[module-info mode remove] || [module-info mode switch1]} {
 }
 EOF
    _chown_root root:root "${_f}"; ${_sudo} chmod 644 "${_f}"; echo "  + ${_f}"
+   fi   # _want_amd (amd-new/<rocm>)
 
    # mpich-wrappers load/unload Tcl injected into PrgEnv-amd-new below. Present
    # only for the MPICH family; empty (omitted) for OpenMPI-based PrgEnvs, which
@@ -673,7 +707,8 @@ TCL
          ;;
    esac
 
-   # ---------------- PrgEnv-amd-new/<pe>-<rocm> (in base_dir) --------------
+   # ---------------- PrgEnv-amd-new/<pe>-<rocm> (amd-new flavor only) ------
+   if [ "${_want_amd}" = "1" ]; then
    _f="${_base_dir}/PrgEnv-amd-new/${_pe}-${_rocm}"
    ${_sudo} tee "${_f}" >/dev/null <<EOF
 #%Module
@@ -769,13 +804,15 @@ ${_mw_load}
 }
 EOF
    _chown_root root:root "${_f}"; ${_sudo} chmod 644 "${_f}"; echo "  + ${_f}"
+   fi   # _want_amd (PrgEnv-amd-new)
 
-   # ---------------- PrgEnv-cray-new/<pe>-<rocm> (in base_dir) ------------
+   # ---------------- PrgEnv-cray-new/<pe>-<rocm> (cray-new flavor only) ---
    # Like stock PrgEnv-cray/<pe> (the Cray CCE compilers cc/CC/ftn stay the
    # compilers) but with the local ROCm ${_rocm} toolkit made available via
    # rocm-new/${_rocm} -- i.e. the SAME ROCm files PrgEnv-amd-new pulls in
    # through amd-new, minus the AMD LLVM compiler swap. Use PrgEnv-amd-new if
    # you want the AMD compiler instead of CCE.
+   if [ "${_want_cray}" = "1" ]; then
    _f="${_base_dir}/PrgEnv-cray-new/${_pe}-${_rocm}"
    ${_sudo} tee "${_f}" >/dev/null <<EOF
 #%Module
@@ -846,8 +883,10 @@ if {\$_do_load} {
 }
 EOF
    _chown_root root:root "${_f}"; ${_sudo} chmod 644 "${_f}"; echo "  + ${_f}"
+   fi   # _want_cray (PrgEnv-cray-new)
 
-   # ---------------- amd/<rocm> (thin wrapper) -----------------------------
+   # ---------------- amd/<rocm> (thin wrapper, amd-new flavor only) --------
+   if [ "${_want_amd}" = "1" ]; then
    _f="${_pkg_dir}/amd/${_rocm}"
    ${_sudo} tee "${_f}" >/dev/null <<EOF
 #%Module
@@ -891,8 +930,9 @@ module load amd-new/${_rocm}
 EOF
       _chown_root root:root "${_f}"; ${_sudo} chmod 644 "${_f}"; echo "  + ${_f}"
    fi
+   fi   # _want_amd (amd/<rocm> + amd/<numeric> wrappers)
 
-   # ---------------- rocm/<rocm> (thin wrapper) ----------------------------
+   # ---------------- rocm/<rocm> (thin wrapper, always) --------------------
    _f="${_pkg_dir}/rocm/${_rocm}"
    ${_sudo} tee "${_f}" >/dev/null <<EOF
 #%Module
