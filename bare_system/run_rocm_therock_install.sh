@@ -830,15 +830,22 @@ if [ "${CRAY_SYSTEM}" = "1" ]; then
          "${LEAF_SCRIPT_DIRTY}"
       # Build + emit the from-source AMD-LLVM MPICH wrappers that
       # PrgEnv-amd-new/<pe>-${ROCM_NUMERIC} auto-loads (amdflang cannot read
-      # cray-mpich's mpi.mod). Non-fatal: skips cleanly if it cannot build.
-      build_and_emit_mpich_wrappers \
-         "${TOP_MODULE_PATH}/rocmplus-therock-${ROCM_NUMERIC}" \
-         "${ROCM_NUMERIC}" \
-         "${INSTALL_DIR}" \
-         "${INSTALL_DIR}/mpich-wrappers" \
-         "${LEAF_SCRIPT_NAME}" \
-         "${LEAF_SCRIPT_COMMIT:0:12}" \
-         "${LEAF_SCRIPT_DIRTY}"
+      # cray-mpich's mpi.mod). This is amd-new-specific: PrgEnv-cray-new uses
+      # cray-mpich, so skip the (~10-min) build when only cray-new is requested.
+      # Non-fatal: skips cleanly if it cannot build.
+      case " ${PRGENV_FLAVORS:-amd-new cray-new} " in
+         *" amd-new "*|*" PrgEnv-amd-new "*)
+            build_and_emit_mpich_wrappers \
+               "${TOP_MODULE_PATH}/rocmplus-therock-${ROCM_NUMERIC}" \
+               "${ROCM_NUMERIC}" \
+               "${INSTALL_DIR}" \
+               "${INSTALL_DIR}/mpich-wrappers" \
+               "${LEAF_SCRIPT_NAME}" \
+               "${LEAF_SCRIPT_COMMIT:0:12}" \
+               "${LEAF_SCRIPT_DIRTY}" ;;
+         *)
+            echo "  (PrgEnv-amd-new not requested; skipping mpich-wrappers build -- cray-new uses cray-mpich)" ;;
+      esac
       echo "  -> expose with: module use ${TOP_MODULE_PATH}/base"
       echo "  -> then:        module swap PrgEnv-cray PrgEnv-amd-new/${PE_VERSION}-${ROCM_NUMERIC}"
       echo "  -> or (CCE+ROCm): module swap PrgEnv-cray PrgEnv-cray-new/${PE_VERSION}-${ROCM_NUMERIC}"

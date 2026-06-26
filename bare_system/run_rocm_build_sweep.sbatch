@@ -254,13 +254,22 @@ if [[ -n "${PROGRAM_ENVIRONMENTS}" ]]; then
    KIND_MAP_CONF="${SLURM_SUBMIT_DIR}/bare_system/rocm_kind_map.conf"
    [[ -f "${KIND_MAP_CONF}" ]] || { echo "ERROR: kind map ${KIND_MAP_CONF} not found" | tee -a "${SUMMARY}"; exit 1; }
 
+   # Conf entries win; an unlisted afar-<REL>[-<NUMERIC>] suffix auto-resolves to
+   # therock-afar-<REL> (the optional trailing -<NUMERIC> is informational and is
+   # stripped). Mirrors resolve_kind() in run_rocm_build_sweep.sh.
    resolve_kind() {
-      awk -F= -v s="$1" '
+      local _s="$1" _hit
+      _hit="$(awk -F= -v s="${_s}" '
          /^[[:space:]]*#/ {next}
          /^[[:space:]]*$/ {next}
          $1 == s {print $2; found=1; exit}
          END {exit !found}
-      ' "${KIND_MAP_CONF}"
+      ' "${KIND_MAP_CONF}")" && [[ -n "${_hit}" ]] && { printf '%s\n' "${_hit}"; return 0; }
+      if [[ "${_s}" =~ ^afar-([0-9]+\.[0-9]+(\.[0-9]+)?)(-[0-9]+\.[0-9]+(\.[0-9]+)?)?$ ]]; then
+         printf 'therock-afar-%s\n' "${BASH_REMATCH[1]}"
+         return 0
+      fi
+      return 1
    }
 
    # ── Usable container-builder detection ────────────────────────────
@@ -510,7 +519,12 @@ EOF
             _afar_wip=1
          else
             _cached="$(find_cached_tarball "${tok}" "${kind}" || true)"
-            _download=0   # therock/therock-afar: fetch directly from repo.amd.com
+            _download=0   # therock/therock-afar: fetch the tarball directly
+            # Upstream tarball host, per kind (used in the download-direct logs).
+            case "${kind}" in
+               therock-afar) _dl_host="repo.radeon.com" ;;
+               *)            _dl_host="repo.amd.com" ;;
+            esac
 
             if [[ -z "${_cached}" ]]; then
                case "${kind}" in
@@ -543,14 +557,15 @@ EOF
                      fi
                      ;;
                   therock|therock-afar)
-                     # TheRock / TheRock-AFAR are PRE-BUILT tarballs hosted on
-                     # repo.amd.com. The package cache is only an optimization
-                     # here: when the tarball is not pre-staged, download it
-                     # directly -- the compute node reaches repo.amd.com through
-                     # the site proxy. The installer's own discovery+curl handles
-                     # the fetch when we omit --local-tarball.
+                     # TheRock (repo.amd.com) / TheRock-AFAR (repo.radeon.com)
+                     # are PRE-BUILT tarballs. The package cache is only an
+                     # optimization here: when the tarball is not pre-staged,
+                     # download it directly -- the compute node reaches the
+                     # upstream host through the site proxy. The installer's own
+                     # discovery+curl/wget handles the fetch when we omit
+                     # --local-tarball.
                      _download=1
-                     echo "[$(date)] ${tok}: not pre-staged in cache; downloading directly from repo.amd.com (via proxy)" | tee -a "${SUMMARY}"
+                     echo "[$(date)] ${tok}: not pre-staged in cache; downloading directly from ${_dl_host} (via proxy)" | tee -a "${SUMMARY}"
                      ;;
                esac
             fi
@@ -609,7 +624,7 @@ EOF
                # ── Install: extract cached/built tarball OR download directly,
                #    then emit the Cray modules. ──
                if [[ ${_download} -eq 1 ]]; then
-                  echo "[$(date)] installing ${kind} ${tok} (download-direct from repo.amd.com)" | tee -a "${SUMMARY}"
+                  echo "[$(date)] installing ${kind} ${tok} (download-direct from ${_dl_host})" | tee -a "${SUMMARY}"
                else
                   echo "[$(date)] extracting ${kind} ${tok} from ${_cached}" | tee -a "${SUMMARY}"
                fi
@@ -643,12 +658,12 @@ EOF
          if [[ ${_rc} -ne 0 ]]; then
             echo "[$(date)] FAIL install ${tok} (rc=${_rc})" | tee -a "${SUMMARY}"
             PE_FAIL+=("${tok}")
-            unset _skip_match _rel _cand _cached _cachetb _lt _lt_args _download _rc _common _afar_wip
+            unset _skip_match _rel _cand _cached _cachetb _lt _lt_args _download _dl_host _rc _common _afar_wip
             continue
          fi
          [[ "${_afar_wip:-0}" -eq 1 ]] || echo "[$(date)] OK install ${tok}" | tee -a "${SUMMARY}"
       fi
-      unset _skip_match _rel _cand _cached _cachetb _lt _lt_args _download _rc _common _mf _afar_wip
+      unset _skip_match _rel _cand _cached _cachetb _lt _lt_args _download _dl_host _rc _common _mf _afar_wip
 
       # ── OpenMPI WIP message (rocm is installed above either way) ───────
       if [[ "${want_openmpi}" -eq 1 ]]; then

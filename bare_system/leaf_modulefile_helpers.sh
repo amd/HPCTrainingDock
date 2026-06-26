@@ -424,6 +424,14 @@ emit_cray_prgenv_ecosystem() {
    # keeps the tree relocatable (matches the base rocm modulefile pattern).
    local _pkg_base;  _pkg_base="$(basename "${_pkg_dir}")"
    local _plus_base; _plus_base="$(basename "${_plus_dir}")"
+   # PrgEnv-cray-new gets its OWN downstream tree (rocmplus-cray-<ver>) instead of
+   # the amd-new one (${_plus_base}): the shared rocmplus tree holds packages
+   # built with the AMD compiler + the from-source mpich-wrappers (amdflang-format
+   # mpi.mod), which are the wrong ABI/MPI for CCE+cray-mpich. The cray tree is
+   # initially empty (cray-new uses cray-mpich/cray-libsci from stock PrgEnv-cray);
+   # a future CCE/cray-mpich rocmplus sweep can populate it.
+   local _plus_cray_base="rocmplus-cray-${_plus_base#rocmplus-}"
+   local _plus_cray_dir; _plus_cray_dir="$(dirname "${_plus_dir}")/${_plus_cray_base}"
 
    # amd-wrapper unload lines for the PrgEnv-amd-new remove path. Stock
    # PrgEnv-amd resolves its compiler via `module load amd` (bare, default) on a
@@ -813,6 +821,11 @@ EOF
    # through amd-new, minus the AMD LLVM compiler swap. Use PrgEnv-amd-new if
    # you want the AMD compiler instead of CCE.
    if [ "${_want_cray}" = "1" ]; then
+   # Ensure the (initially empty) cray-only downstream tree exists + is
+   # traversable so the PrgEnv-cray-new MODULEPATH prepend below resolves and a
+   # future CCE/cray-mpich rocmplus sweep can populate it.
+   ${_sudo} mkdir -p "${_plus_cray_dir}"
+   ${_sudo} chmod 755 "${_plus_cray_dir}"
    _f="${_base_dir}/PrgEnv-cray-new/${_pe}-${_rocm}"
    ${_sudo} tee "${_f}" >/dev/null <<EOF
 #%Module
@@ -865,9 +878,13 @@ if {\$_do_remove} {
     if {[is-loaded PrgEnv-cray]}       { module unload PrgEnv-cray/${_pe} }
 }
 
-# MODULEPATH self-wiring (relative -> relocatable), same as PrgEnv-amd-new.
+# MODULEPATH self-wiring (relative -> relocatable). The rocm-new toolkit lives
+# in ${_pkg_base}; the downstream tree is the cray-only ${_plus_cray_base}
+# (NOT the amd-new ${_plus_base}, whose packages are built with the AMD compiler
+# + mpich-wrappers and are the wrong ABI/MPI for CCE+cray-mpich). cray-new uses
+# cray-mpich/cray-libsci from the stock PrgEnv-cray inherited below.
 prepend-path MODULEPATH \$_modroot/${_pkg_base}
-prepend-path MODULEPATH \$_modroot/${_plus_base}
+prepend-path MODULEPATH \$_modroot/${_plus_cray_base}
 ${_mp_suppress_line}
 
 if {\$_do_load} {

@@ -196,13 +196,20 @@ Usage: $0 [opts]
                                    PrgEnv-amd-new/8.7.0-7.2.3
                                    PrgEnv-cray-new/8.7.0-7.12.0
                                    PrgEnv-amd-new/8.7.0-afar-23.2.1
+                                   PrgEnv-amd-new/8.7.0-afar-23.2.1-7.13.0
                                    PrgEnv-amd-openmpi/8.7.0-7.12.0
                                    PrgEnv-amd-openmpi-ucx/8.7.0-7.12.0
                                  Each rocm-suffix is resolved to a canonical sweep
-                                 token via bare_system/rocm_kind_map.conf, the
+                                 token via bare_system/rocm_kind_map.conf. An
+                                 afar-<REL>[-<NUMERIC>] suffix (e.g. afar-23.2.1 or
+                                 afar-23.2.1-7.13.0) auto-resolves to the TheRock-AFAR
+                                 token therock-afar-<REL> (direct tarball download, no
+                                 entry needed); the optional -<NUMERIC> is informational
+                                 (it mirrors the SDK .info/version). The
                                  de-duplicated set of canonical tokens is installed
                                  (built when docker/podman is present, else extracted
-                                 from --package-cache), and only the requested PrgEnv
+                                 from --package-cache, except TheRock/AFAR which are
+                                 downloaded directly), and only the requested PrgEnv
                                  flavor(s) are emitted. amd-openmpi / amd-openmpi-ucx
                                  are a work-in-progress skeleton (the underlying rocm
                                  is installed; a WIP message is printed).
@@ -360,14 +367,24 @@ if [[ -n "${PROGRAM_ENVIRONMENTS_RAW}" ]]; then
    fi
    [[ -f "${KIND_MAP_CONF}" ]] || { echo "ERROR: kind map ${KIND_MAP_CONF} not found" >&2; exit 1; }
 
-   # Resolve a rocm-suffix to its canonical sweep token via the conf file.
+   # Resolve a rocm-suffix to its canonical sweep token. Conf entries win; if
+   # the suffix is not listed, an afar-<REL>[-<NUMERIC>] suffix auto-resolves to
+   # the TheRock-AFAR canonical token therock-afar-<REL> (direct download, no
+   # cache). The optional trailing -<NUMERIC> is informational only (it mirrors
+   # the tarball's .info/version, which the installer derives) and is stripped.
    resolve_kind() {
-      awk -F= -v s="$1" '
+      local _s="$1" _hit
+      _hit="$(awk -F= -v s="${_s}" '
          /^[[:space:]]*#/ {next}
          /^[[:space:]]*$/ {next}
          $1 == s {print $2; found=1; exit}
          END {exit !found}
-      ' "${KIND_MAP_CONF}"
+      ' "${KIND_MAP_CONF}")" && [[ -n "${_hit}" ]] && { printf '%s\n' "${_hit}"; return 0; }
+      if [[ "${_s}" =~ ^afar-([0-9]+\.[0-9]+(\.[0-9]+)?)(-[0-9]+\.[0-9]+(\.[0-9]+)?)?$ ]]; then
+         printf 'therock-afar-%s\n' "${BASH_REMATCH[1]}"
+         return 0
+      fi
+      return 1
    }
 
    PROGRAM_ENVIRONMENTS_NORM="${PROGRAM_ENVIRONMENTS_RAW//,/ }"
