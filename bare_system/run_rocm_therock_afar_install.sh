@@ -108,6 +108,14 @@ LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$
 : ${TOP_MODULE_PATH:="/nfsapps/modules"}
 : ${REPLACE_EXISTING:="0"}
 : ${KEEP_FAILED_INSTALLS:="0"}
+# MODULES_ONLY: 1 = keep the existing rocm-afar-<rel> SDK tree and ONLY re-emit
+# the modulefiles (base rocm/afar-<rel>-<numeric>, per-package, .pc, and the Cray
+# PrgEnv-amd-new ecosystem + mpich-wrappers). Skips Phase 1 (discovery), Phase 2
+# (download/extract), Phase 3 (derive numeric from staging), Phase 4 (promote)
+# and Phase 6 (rocm_patches.sh): the numeric is read from the existing install's
+# .info/version instead. No tarball is needed. Use it to pick up modulefile-
+# emitter changes (e.g. SUPPRESS_MODULEPATH) without a full re-download/extract.
+: ${MODULES_ONLY:="0"}
 # WORLD_READABLE: 1 = make the install + module trees group/other readable
 # (o+rX) so a shared location (e.g. /shareddata) is usable by other users;
 # 0 = leave perms as-is; "auto" (default) = enable iff TOP_INSTALL_PATH is NOT
@@ -184,6 +192,11 @@ Usage: $0 [opts]
                                 pre-unified-naming layout.
   --keep-failed-installs 0|1    on failure, keep partial install + modulefile
                                 for post-mortem (default ${KEEP_FAILED_INSTALLS})
+  --modules-only 0|1            keep the existing rocm-afar-<REL> tree and ONLY
+                                re-emit modulefiles (base + per-package + .pc +
+                                PrgEnv-amd-new ecosystem + mpich-wrappers); skips
+                                discovery/download/extract/promote + patches so
+                                no tarball is needed (default ${MODULES_ONLY})
   --local-tarball PATH          extract this already-downloaded flang .tar.bz2
                                 instead of discovering + wget-ing it (the
                                 AAC6-build -> transfer -> AAC7-extract path).
@@ -228,6 +241,7 @@ while [[ $# -gt 0 ]]; do
       "--url-base")             shift; URL_BASE=${1};             reset-last ;;
       "--replace-existing")     shift; REPLACE_EXISTING=${1};     reset-last ;;
       "--keep-failed-installs") shift; KEEP_FAILED_INSTALLS=${1}; reset-last ;;
+      "--modules-only")         shift; MODULES_ONLY=${1};         reset-last ;;
       "--skip-patches")         shift; SKIP_PATCHES=${1};         reset-last ;;
       "--patches-log")          shift; PATCHES_LOG=${1};          reset-last ;;
       "--build-mpich-wrappers") shift; BUILD_MPICH_WRAPPERS=${1}; reset-last ;;
@@ -255,6 +269,15 @@ if [[ ! "${THEROCK_AFAR_RELEASE}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
 fi
 if [[ -n "${STAGE_ONLY_DIR}" && -n "${LOCAL_TARBALL_INPUT}" ]]; then
    send-error "--stage-only and --local-tarball are mutually exclusive"
+fi
+if [[ "${MODULES_ONLY}" == "1" ]]; then
+   # modules-only re-emits modulefiles over an EXISTING install: there is no
+   # download or extract, so --stage-only (download-only) is contradictory and
+   # --local-tarball (extract a fresh tree) is meaningless.
+   [[ -n "${STAGE_ONLY_DIR}" ]] && send-error "--modules-only and --stage-only are mutually exclusive"
+   [[ -n "${LOCAL_TARBALL_INPUT}" ]] && \
+      echo "[therock-afar] NOTE: --modules-only set; ignoring --local-tarball '${LOCAL_TARBALL_INPUT}'"
+   LOCAL_TARBALL_INPUT=""
 fi
 
 # Phase 6 default log basename. Set AFTER THEROCK_AFAR_RELEASE is parsed
@@ -334,9 +357,13 @@ if [[ -d "${INSTALL_DIR}" ]]; then
 fi
 # In --stage-only mode we only download the tarball; an existing install
 # is irrelevant and must NOT short-circuit the download.
-if [[ -z "${STAGE_ONLY_DIR}" && -n "${_skip_match}" && "${REPLACE_EXISTING}" != "1" ]]; then
+# In --modules-only mode an existing install is REQUIRED (we re-emit modulefiles
+# for it), so the skip-if-installed short-circuit is disabled; the modules-only
+# branch below (after sudo/Cray resolution) locates the tree and derives numeric.
+if [[ -z "${STAGE_ONLY_DIR}" && -n "${_skip_match}" && "${REPLACE_EXISTING}" != "1" && "${MODULES_ONLY}" != "1" ]]; then
    echo "[$(date)] SKIP therock-afar-${THEROCK_AFAR_RELEASE}: ${_skip_match} already exist"
-   echo "         Pass --replace-existing 1 to re-download + re-extract."
+   echo "         Pass --replace-existing 1 to re-download + re-extract,"
+   echo "         or --modules-only 1 to refresh modulefiles."
    exit 0
 fi
 unset _skip_match
@@ -395,6 +422,40 @@ for d in "${TOP_INSTALL_PATH}" "${TOP_MODULE_PATH}" "${MODULE_DIR}"; do
    fi
 done
 
+# ---------------- --modules-only: locate install + derive numeric ----
+# Keep the existing SDK tree and skip Phases 1-4 (discovery/download/extract/
+# promote) + Phase 6 (patches). INSTALL_DIR is deterministic (keyed on
+# THEROCK_AFAR_RELEASE, set above), so just require it present and read
+# ROCM_NUMERIC from its .info/version, then finalize MODULE_FILE (the work the
+# skipped Phase 3 would have done).
+if [[ "${MODULES_ONLY}" == "1" ]]; then
+   if [[ ! -d "${INSTALL_DIR}" ]]; then
+      echo "ERROR: --modules-only set but ${INSTALL_DIR} does not exist;" >&2
+      echo "       there is no SDK tree to emit modulefiles for. Run a full" >&2
+      echo "       install first (without --modules-only)." >&2
+      exit 1
+   fi
+   ROCM_NUMERIC=""
+   if ${SUDO} test -f "${INSTALL_DIR}/.info/version" 2>/dev/null; then
+      ROCM_NUMERIC="$(${SUDO} cut -f1 -d- "${INSTALL_DIR}/.info/version" 2>/dev/null || true)"
+   fi
+   if [[ -z "${ROCM_NUMERIC}" ]]; then
+      echo "ERROR: --modules-only: cannot derive ROCM_NUMERIC from" >&2
+      echo "       ${INSTALL_DIR}/.info/version" >&2
+      exit 1
+   fi
+   if [ "${CRAY_SYSTEM}" = "1" ]; then
+      MODULE_FILE="${MODULE_DIR}/afar-${THEROCK_AFAR_RELEASE}-${ROCM_NUMERIC}"
+   else
+      MODULE_FILE="${MODULE_DIR}/afar-${THEROCK_AFAR_RELEASE}-${ROCM_NUMERIC}.lua"
+   fi
+   echo "============================================================"
+   echo "  Phases 1-4 + 6 skipped (--modules-only): re-emitting modulefiles for"
+   echo "  existing ${INSTALL_DIR} (ROCM_NUMERIC=${ROCM_NUMERIC})"
+   echo "============================================================"
+fi
+
+if [[ "${MODULES_ONLY}" != "1" ]]; then
 # ---------------- Phase 1: tarball URL discovery ----------------------
 # Scrape the radeon flang/ Apache directory listing. The page is plain
 # HTML with href= the bare filename; a single grep against the body
@@ -759,6 +820,7 @@ chown_root -R root:root "${INSTALL_DIR}"
 ${SUDO} chmod 755 "${INSTALL_DIR}"
 [ "${KEEP_LOCAL_TARBALL}" = "1" ] || rm -f "${LOCAL_TARBALL}"
 echo "Installed: ${INSTALL_DIR}"
+fi   # end Phases 1-4 (skipped in --modules-only mode)
 
 # ---------------- Phase 5: emit GPUSDK modulefile ---------------------
 # Provenance: git-resolve this leaf script so the modulefile's whatis()
@@ -1011,7 +1073,7 @@ fi
 #
 # Gated by --skip-patches (operator opt-out), mirrors the numeric
 # branch's SKIP_PATCHES flag in run_rocm_build.sh:31.
-if [[ "${SKIP_PATCHES}" != "1" ]]; then
+if [[ "${SKIP_PATCHES}" != "1" && "${MODULES_ONLY}" != "1" ]]; then
    echo "============================================================"
    echo "  Phase 6: rocm_patches.sh on ${INSTALL_DIR} (-> ${PATCHES_LOG})"
    echo "============================================================"

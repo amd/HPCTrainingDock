@@ -81,6 +81,14 @@ LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$
 : ${TOP_MODULE_PATH:="/nfsapps/modules"}
 : ${REPLACE_EXISTING:="0"}
 : ${KEEP_FAILED_INSTALLS:="0"}
+# MODULES_ONLY: 1 = keep the existing rocm-therock-<numeric> SDK tree and ONLY
+# re-emit the modulefiles (base rocm/therock-<rel>, per-package, .pc, and the
+# Cray PrgEnv-amd-new ecosystem + mpich-wrappers). Skips Phase 1 (discovery),
+# Phase 2 (download/extract), Phase 3 (derive numeric from staging) and Phase 4
+# (promote): the numeric is read from the existing install's .info/version
+# instead. No tarball is needed. Use it to pick up modulefile-emitter changes
+# (e.g. SUPPRESS_MODULEPATH) without a full multi-GB re-download/extract.
+: ${MODULES_ONLY:="0"}
 # WORLD_READABLE: 1 = make install + module trees group/other readable (o+rX)
 # for a shared location (e.g. /shareddata); 0 = leave as-is; "auto" (default) =
 # enable iff TOP_INSTALL_PATH is NOT under $HOME.
@@ -160,6 +168,11 @@ Usage: $0 [opts]
                                 install + modulefile (default ${REPLACE_EXISTING})
   --keep-failed-installs 0|1    on failure, keep partial install + modulefile
                                 for post-mortem (default ${KEEP_FAILED_INSTALLS})
+  --modules-only 0|1            keep the existing rocm-therock-<numeric> tree and
+                                ONLY re-emit modulefiles (base + per-package +
+                                .pc + PrgEnv-amd-new ecosystem + mpich-wrappers);
+                                skips discovery/download/extract/promote so no
+                                tarball is needed (default ${MODULES_ONLY})
   --local-tarball PATH          extract this already-downloaded
                                 therock-dist-linux-<family>-<ver>.tar.gz
                                 instead of discovering + curl-ing it (the
@@ -201,6 +214,7 @@ while [[ $# -gt 0 ]]; do
       "--url-base")             shift; URL_BASE=${1};             reset-last ;;
       "--replace-existing")     shift; REPLACE_EXISTING=${1};     reset-last ;;
       "--keep-failed-installs") shift; KEEP_FAILED_INSTALLS=${1}; reset-last ;;
+      "--modules-only")         shift; MODULES_ONLY=${1};         reset-last ;;
       "--no-sudo")              shift; NO_SUDO=${1};              reset-last ;;
       "--cray-modules")         CRAY_SYSTEM=1;                    reset-last ;;
       "--local-tarball")        shift; LOCAL_TARBALL_INPUT=${1};  reset-last ;;
@@ -228,6 +242,15 @@ if [[ ! "${THEROCK_RELEASE}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
 fi
 if [[ -n "${STAGE_ONLY_DIR}" && -n "${LOCAL_TARBALL_INPUT}" ]]; then
    send-error "--stage-only and --local-tarball are mutually exclusive"
+fi
+if [[ "${MODULES_ONLY}" == "1" ]]; then
+   # modules-only re-emits modulefiles over an EXISTING install: there is no
+   # download or extract, so --stage-only (download-only) is contradictory and
+   # --local-tarball (extract a fresh tree) is meaningless.
+   [[ -n "${STAGE_ONLY_DIR}" ]] && send-error "--modules-only and --stage-only are mutually exclusive"
+   [[ -n "${LOCAL_TARBALL_INPUT}" ]] && \
+      echo "[therock] NOTE: --modules-only set; ignoring --local-tarball '${LOCAL_TARBALL_INPUT}'"
+   LOCAL_TARBALL_INPUT=""
 fi
 
 MODULE_DIR="${TOP_MODULE_PATH}/base/rocm"
@@ -257,11 +280,16 @@ SKIP_CANDIDATES=( "${TOP_INSTALL_PATH}/rocm-therock-${THEROCK_RELEASE}" )
    && SKIP_CANDIDATES+=( "${TOP_INSTALL_PATH}/rocm-therock-${THEROCK_RELEASE}.0" )
 # In --stage-only mode we only download the tarball; an existing install
 # is irrelevant and must NOT short-circuit the download.
-if [[ -z "${STAGE_ONLY_DIR}" && "${REPLACE_EXISTING}" != "1" ]]; then
+# In --modules-only mode an existing install is REQUIRED (we re-emit modulefiles
+# for it), so the skip-if-installed short-circuit is disabled; the modules-only
+# branch below (after sudo/Cray resolution) locates the tree and derives the
+# numeric.
+if [[ -z "${STAGE_ONLY_DIR}" && "${REPLACE_EXISTING}" != "1" && "${MODULES_ONLY}" != "1" ]]; then
    for _cand in "${SKIP_CANDIDATES[@]}"; do
       if [[ -d "${_cand}" ]]; then
          echo "[$(date)] SKIP therock-${THEROCK_RELEASE}: ${_cand} already exists"
-         echo "         Pass --replace-existing 1 to re-download + re-extract."
+         echo "         Pass --replace-existing 1 to re-download + re-extract,"
+         echo "         or --modules-only 1 to refresh modulefiles."
          exit 0
       fi
    done
@@ -328,6 +356,49 @@ for d in "${TOP_INSTALL_PATH}" "${TOP_MODULE_PATH}" "${MODULE_DIR}"; do
    fi
 done
 
+# ---------------- --modules-only: locate install + derive numeric ----
+# Keep the existing SDK tree and skip Phases 1-4 (discovery/download/extract/
+# promote). The install dir is rocm-therock-<ROCM_NUMERIC>, but ROCM_NUMERIC is
+# only knowable from .info/version, so locate the tree from the Phase 0
+# candidates (and a final glob for alpha/RC dirs the literal candidates miss),
+# then read .info/version (basename fallback) for the numeric.
+if [[ "${MODULES_ONLY}" == "1" ]]; then
+   INSTALL_DIR=""
+   for _cand in "${SKIP_CANDIDATES[@]}"; do
+      [[ -d "${_cand}" ]] && { INSTALL_DIR="${_cand}"; break; }
+   done
+   if [[ -z "${INSTALL_DIR}" ]]; then
+      for _cand in "${TOP_INSTALL_PATH}"/rocm-therock-"${THEROCK_RELEASE}"*; do
+         [[ -d "${_cand}" ]] && { INSTALL_DIR="${_cand}"; break; }
+      done
+   fi
+   unset _cand
+   if [[ -z "${INSTALL_DIR}" || ! -d "${INSTALL_DIR}" ]]; then
+      echo "ERROR: --modules-only set but no rocm-therock-${THEROCK_RELEASE}* install" >&2
+      echo "       exists under ${TOP_INSTALL_PATH}; there is no SDK tree to emit" >&2
+      echo "       modulefiles for. Run a full install first (without --modules-only)." >&2
+      exit 1
+   fi
+   ROCM_NUMERIC=""
+   if ${SUDO} test -f "${INSTALL_DIR}/.info/version" 2>/dev/null; then
+      ROCM_NUMERIC="$(${SUDO} cut -f1 -d- "${INSTALL_DIR}/.info/version" 2>/dev/null || true)"
+   fi
+   # Fallback: derive from the install dir basename (rocm-therock-<numeric>).
+   if [[ -z "${ROCM_NUMERIC}" ]]; then
+      ROCM_NUMERIC="$(basename "${INSTALL_DIR}")"
+      ROCM_NUMERIC="${ROCM_NUMERIC#rocm-therock-}"
+   fi
+   if [[ -z "${ROCM_NUMERIC}" ]]; then
+      echo "ERROR: --modules-only: cannot derive ROCM_NUMERIC from ${INSTALL_DIR}" >&2
+      exit 1
+   fi
+   echo "============================================================"
+   echo "  Phases 1-4 skipped (--modules-only): re-emitting modulefiles for"
+   echo "  existing ${INSTALL_DIR} (ROCM_NUMERIC=${ROCM_NUMERIC})"
+   echo "============================================================"
+fi
+
+if [[ "${MODULES_ONLY}" != "1" ]]; then
 # ---------------- Phase 1: tarball URL discovery ----------------------
 # The tarball name is therock-dist-linux-${AMDGPU_FAMILY}-${VERSION}.tar.gz
 # at https://repo.amd.com/rocm/tarball/. We don't know which X.Y.Z to
@@ -593,6 +664,7 @@ chown_root -R root:root "${INSTALL_DIR}"
 ${SUDO} chmod 755 "${INSTALL_DIR}"
 [ "${KEEP_LOCAL_TARBALL}" = "1" ] || rm -f "${LOCAL_TARBALL}"
 echo "Installed: ${INSTALL_DIR}"
+fi   # end Phases 1-4 (skipped in --modules-only mode)
 
 # ---------------- Phase 5: emit GPUSDK modulefile ---------------------
 # Provenance: capture this leaf script's git state for the whatis() line.

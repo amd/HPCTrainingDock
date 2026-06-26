@@ -33,6 +33,12 @@ LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$
 : ${TOP_MODULE_PATH:="/nfsapps/modules"}
 : ${REPLACE_EXISTING:="0"}
 : ${KEEP_FAILED_INSTALLS:="0"}
+# MODULES_ONLY: 1 = keep the existing rocm-<ver> SDK tree and ONLY re-emit the
+# modulefiles (base rocm/<ver>, per-package, .pc, and the Cray PrgEnv-amd-new
+# ecosystem + mpich-wrappers). Skips Phase 2 (extract) and Phase 4 (promote),
+# so no --local-tarball is needed. Use it to pick up modulefile-emitter changes
+# (e.g. SUPPRESS_MODULEPATH) without a full multi-GB re-extract.
+: ${MODULES_ONLY:="0"}
 # WORLD_READABLE: 1 = make install + module trees group/other readable (o+rX)
 # for a shared location (e.g. /shareddata); 0 = leave as-is; "auto" (default) =
 # enable iff TOP_INSTALL_PATH is NOT under $HOME.
@@ -68,6 +74,9 @@ Usage: $0 [opts]
   --top-module-path  PATH   module root; default ${TOP_MODULE_PATH}
   --replace-existing 0|1    overwrite existing rocm-<ver> + modulefiles (default ${REPLACE_EXISTING})
   --keep-failed-installs 0|1 keep partial artifacts on failure (default ${KEEP_FAILED_INSTALLS})
+  --modules-only 0|1        keep the existing rocm-<ver> tree and ONLY re-emit modulefiles
+                            (base + per-package + .pc + PrgEnv-amd-new ecosystem + mpich-wrappers);
+                            skips extract/promote so --local-tarball is not required (default ${MODULES_ONLY})
   --no-sudo 0|1             force sudo-free (default: auto-detect a writable install parent)
   --cray-modules            force Cray classic Tcl modules + PrgEnv-amd-new ecosystem
                             (auto-detected on Cray PE hosts otherwise)
@@ -94,6 +103,7 @@ while [[ $# -gt 0 ]]; do
       "--top-module-path")      shift; TOP_MODULE_PATH=${1};      reset-last ;;
       "--replace-existing")     shift; REPLACE_EXISTING=${1};     reset-last ;;
       "--keep-failed-installs") shift; KEEP_FAILED_INSTALLS=${1}; reset-last ;;
+      "--modules-only")         shift; MODULES_ONLY=${1};        reset-last ;;
       "--no-sudo")              shift; NO_SUDO=${1};              reset-last ;;
       "--cray-modules")         CRAY_SYSTEM=1;                    reset-last ;;
       "--pe-version")           shift; PE_VERSION=${1};           reset-last ;;
@@ -106,22 +116,39 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -z "${ROCM_VERSION}" ]]       && send-error "--rocm-version is required"
-[[ -z "${LOCAL_TARBALL_INPUT}" ]] && send-error "--local-tarball is required"
 if [[ ! "${ROCM_VERSION}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
    send-error "--rocm-version must be X.Y or X.Y.Z (got '${ROCM_VERSION}')"
 fi
-if [[ ! -f "${LOCAL_TARBALL_INPUT}" ]]; then
-   send-error "--local-tarball '${LOCAL_TARBALL_INPUT}' does not exist"
+if [[ "${MODULES_ONLY}" == "1" ]]; then
+   # modules-only re-emits modulefiles over an EXISTING install -> no tarball.
+   [[ -n "${LOCAL_TARBALL_INPUT}" ]] && \
+      echo "[craywrap] NOTE: --modules-only set; ignoring --local-tarball '${LOCAL_TARBALL_INPUT}'"
+   LOCAL_TARBALL=""
+else
+   [[ -z "${LOCAL_TARBALL_INPUT}" ]] && send-error "--local-tarball is required"
+   if [[ ! -f "${LOCAL_TARBALL_INPUT}" ]]; then
+      send-error "--local-tarball '${LOCAL_TARBALL_INPUT}' does not exist"
+   fi
+   LOCAL_TARBALL="$(cd "$(dirname "${LOCAL_TARBALL_INPUT}")" && pwd -P)/$(basename "${LOCAL_TARBALL_INPUT}")"
 fi
-LOCAL_TARBALL="$(cd "$(dirname "${LOCAL_TARBALL_INPUT}")" && pwd -P)/$(basename "${LOCAL_TARBALL_INPUT}")"
 
 MODULE_DIR="${TOP_MODULE_PATH}/base/rocm"
 INSTALL_DIR="${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}"
 
 # ---------------- Phase 0: skip-if-installed -------------------------
-if [[ -d "${INSTALL_DIR}" && "${REPLACE_EXISTING}" != "1" ]]; then
+if [[ "${MODULES_ONLY}" == "1" ]]; then
+   # modules-only: keep the existing SDK tree; require it to be present since
+   # we are not extracting anything. Proceed to the modulefile emission below.
+   if [[ ! -d "${INSTALL_DIR}" ]]; then
+      echo "ERROR: --modules-only set but ${INSTALL_DIR} does not exist;" >&2
+      echo "       there is no SDK tree to emit modulefiles for. Run a full" >&2
+      echo "       install (with --local-tarball) first." >&2
+      exit 1
+   fi
+   echo "[craywrap] --modules-only: keeping ${INSTALL_DIR}; re-emitting modulefiles only (skipping extract/promote)."
+elif [[ -d "${INSTALL_DIR}" && "${REPLACE_EXISTING}" != "1" ]]; then
    echo "[$(date)] SKIP rocm-${ROCM_VERSION}: ${INSTALL_DIR} already exists"
-   echo "         Pass --replace-existing 1 to re-extract."
+   echo "         Pass --replace-existing 1 to re-extract, or --modules-only 1 to refresh modulefiles."
    exit 0
 fi
 
@@ -167,7 +194,9 @@ done
 STAGING_DIR="${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}.staging.$$"
 
 # ---------------- --replace-existing cleanup ------------------------
-if [[ "${REPLACE_EXISTING}" == "1" ]]; then
+# Skipped in --modules-only mode: there is no tarball to re-extract from, so the
+# existing SDK tree must be kept; the modulefiles below overwrite in place.
+if [[ "${REPLACE_EXISTING}" == "1" && "${MODULES_ONLY}" != "1" ]]; then
    [[ -d "${INSTALL_DIR}" ]] && { echo "[--replace-existing 1] removing ${INSTALL_DIR}"; ${SUDO} rm -rf "${INSTALL_DIR}"; }
    [[ -f "${MODULE_FILE}" ]] && { echo "[--replace-existing 1] removing ${MODULE_FILE}"; ${SUDO} rm -f "${MODULE_FILE}"; }
 fi
@@ -180,13 +209,18 @@ _craywrap_on_exit() {
       echo "[craywrap fail-cleanup] rc=${rc}: removing staging + partial install"
       ${SUDO} rm -rf "${STAGING_DIR}" 2>/dev/null || true
       [ "${PROMOTED_INSTALL}" = "1" ] && ${SUDO} rm -rf "${INSTALL_DIR}" 2>/dev/null || true
-      [ -n "${MODULE_FILE}" ] && ${SUDO} rm -f "${MODULE_FILE}" 2>/dev/null || true
+      # In --modules-only mode keep the pre-existing modulefile on a partial
+      # failure (a re-run overwrites it); only nuke it on a fresh-install fail.
+      [ -n "${MODULE_FILE}" ] && [ "${MODULES_ONLY}" != "1" ] && ${SUDO} rm -f "${MODULE_FILE}" 2>/dev/null || true
    fi
    return ${rc}
 }
 trap _craywrap_on_exit EXIT
 
 # ---------------- Phase 2: extract staged tree ----------------------
+# In --modules-only mode the SDK tree already exists; skip extract (Phase 2)
+# and promote (Phase 4) entirely and jump to the modulefile emission (Phase 5).
+if [[ "${MODULES_ONLY}" != "1" ]]; then
 echo "============================================================"
 echo "  Phase 2: extract ${LOCAL_TARBALL} -> ${STAGING_DIR}"
 echo "============================================================"
@@ -246,6 +280,24 @@ PROMOTED_INSTALL=1
 chown_root -R root:root "${INSTALL_DIR}"
 ${SUDO} chmod 755 "${INSTALL_DIR}"
 echo "Installed: ${INSTALL_DIR}"
+else
+# ---------------- Phase 2/4 skipped (--modules-only) ----------------
+echo "============================================================"
+echo "  Phase 2/4 skipped (--modules-only): re-emitting modulefiles for"
+echo "  existing ${INSTALL_DIR}"
+echo "============================================================"
+# Derive the authoritative numeric from the already-installed tree (same
+# precedence as the extract path), falling back to --rocm-version.
+ROCM_NUMERIC="${ROCM_VERSION}"
+if ${SUDO} test -f "${INSTALL_DIR}/.info/version" 2>/dev/null; then
+   _iv="$(${SUDO} cut -f1 -d- "${INSTALL_DIR}/.info/version" 2>/dev/null || true)"
+   if [[ -n "${_iv}" && "${_iv}" != "${ROCM_VERSION}" ]]; then
+      echo "NOTE: .info/version reports ${_iv}; using it over --rocm-version ${ROCM_VERSION}."
+      ROCM_NUMERIC="${_iv}"
+   fi
+   unset _iv
+fi
+fi
 
 # ---------------- Phase 5: base modulefile --------------------------
 LEAF_SCRIPT_NAME="$(basename "${LEAF_SCRIPT_PATH}")"
