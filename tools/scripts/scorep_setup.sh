@@ -566,6 +566,29 @@ else
       mkdir build
       cd build
 
+      # ── Pin the GCC toolchain for Clang-based CC/CXX ─────────────────
+      # amdclang/amdclang++ auto-select the HIGHEST GCC install found
+      # under /usr/lib/gcc/x86_64-linux-gnu for their libstdc++ headers.
+      # On a compute node carrying an out-of-band newer GCC (observed:
+      # a non-dpkg gcc-13 on one MI300A node but not its sibling) than
+      # the installed libstdc++ runtime, the GCC-13 <iostream> header
+      # emits a reference to std::ios_base_library_init()
+      # (_ZSt21ios_base_library_initv, GLIBCXX_3.4.32) that the image's
+      # 12.3.0 libstdc++.so.6 does not define -> CubeLib/ScoreP dies at
+      # link with "undefined reference to _ZSt21ios_base_library_initv"
+      # on that node only. Pin Clang to the GCC 12 toolchain (matches the
+      # Ubuntu 22.04 image libstdc++ runtime) so the build is reproducible
+      # regardless of stray toolchains on a given node. Guarded: only for
+      # a Clang-based CC and only when the target GCC dir exists -- GCC
+      # drivers and Fortran (amdflang) are left untouched (FC is not
+      # pinned; Fortran does not pull the libstdc++ <iostream> header).
+      GCC_INSTALL_DIR=/usr/lib/gcc/x86_64-linux-gnu/12
+      GCC_TOOLCHAIN_PIN=""
+      if [ -d "${GCC_INSTALL_DIR}" ] && [ -n "${CC:-}" ] && "${CC}" --version 2>/dev/null | grep -qiE 'clang'; then
+         GCC_TOOLCHAIN_PIN="--gcc-install-dir=${GCC_INSTALL_DIR}"
+         echo "scorep: pinning Clang GCC toolchain to ${GCC_INSTALL_DIR} (avoids libstdc++ header/runtime skew)"
+      fi
+
       # ----------------------------------------------------------------
       # LLVM-plugin Triple.h shim (audit_2026_05_01.md / 7973 scorep
       # rc=2). ScoreP 9.4's LLVM plugin source unconditionally includes
@@ -607,7 +630,8 @@ else
       # all remain functional and cover the typical Score-P workflow.
       ../configure --with-rocm=$ROCM_PATH  --with-mpi=$MPI_CONFIG  --prefix=$SCOREP_PATH  --with-librocm_smi64-include=$ROCM_PATH/include/rocm_smi \
                    --with-librocm_smi64-lib=$ROCM_PATH/lib --with-libunwind=download --enable-shared --with-libbfd=download --without-shmem  \
-		   --with-libgotcha=download --without-llvm CC=$CC CXX=$CXX FC=$FC CFLAGS=-fPIE
+		   --with-libgotcha=download --without-llvm CC=$CC CXX=$CXX FC=$FC \
+		   CFLAGS="-fPIE ${GCC_TOOLCHAIN_PIN}" CXXFLAGS="${GCC_TOOLCHAIN_PIN}"
 
       # Parallel build over all allocated cores; install left serial since
       # `make install` is mostly file copies and rarely benefits from -j.
