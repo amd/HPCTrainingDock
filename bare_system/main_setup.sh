@@ -2205,7 +2205,24 @@ fi
 run_and_log_versioned petsc extras/scripts/petsc_setup.sh ${COMMON_OPTIONS} --build-petsc ${BUILD_PETSC} ${REPLACE_OPTS} ${PETSC_MPI_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/petsc)
 
-run_and_log_versioned elpa extras/scripts/elpa_setup.sh  ${COMMON_OPTIONS} --build-elpa ${BUILD_ELPA} ${REPLACE_OPTS} \
+# MPI selection for elpa: same Cray-PE rationale as hdf5/netcdf/fftw/petsc/
+# hypre above. ELPA links MPI (and PETSc, which itself was built against this
+# same MPI), so it must use the SAME MPI -- the from-source mpich-wrappers
+# (new-flang mpi.mod) when present, else cray-mpich. The leaf default MPI module
+# is "openmpi" (absent on Cray -> preflight abort: "MPI module openmpi is not
+# setting the MPI_PATH env variable"), so thread the right one. Non-Cray systems
+# fall through to the leaf default (openmpi).
+ELPA_MPI_OPTS=""
+if [ -n "${MPICH_DIR:-}" ] && [ -d "${MPICH_DIR}/bin" ]; then
+   if [ -e "${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/mpich-wrappers/${ROCM_VERSION}" ]; then
+      ELPA_MPI_OPTS="--mpi-module mpich-wrappers"
+      echo "elpa: mpich-wrappers detected; building ELPA against mpich-wrappers (PrgEnv MPI)"
+   else
+      ELPA_MPI_OPTS="--mpi-module cray-mpich"
+      echo "elpa: Cray MPICH detected (MPICH_DIR=${MPICH_DIR}); building ELPA against cray-mpich"
+   fi
+fi
+run_and_log_versioned elpa extras/scripts/elpa_setup.sh  ${COMMON_OPTIONS} --build-elpa ${BUILD_ELPA} ${REPLACE_OPTS} ${ELPA_MPI_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX})
 
 # MPI selection for hypre: same Cray-PE rationale as hdf5/netcdf/fftw/petsc

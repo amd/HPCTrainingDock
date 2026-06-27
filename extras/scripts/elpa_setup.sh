@@ -340,6 +340,23 @@ else
 
    REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${MPI_MODULE}" "${PETSC_MODULE}" )
    preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
+
+   # ── MPI_PATH derivation (PrgEnv MPI modules don't set MPI_PATH) ──
+   # ELPA links MPI via PETSc (built against this same MPI). On Cray the from-
+   # source mpich-wrappers module exports MPICH_WRAPPERS_DIR (its install root)
+   # and cray-mpich exports MPICH_DIR; neither sets MPI_PATH. Derive it here when
+   # the MPI module didn't (same pattern as petsc_setup.sh). Prefer mpich-wrappers
+   # (new-flang mpif90) so ELPA's Fortran bindings match user code on ROCm 7.x.
+   if [ -z "${MPI_PATH:-}" ]; then
+      if [ -n "${MPICH_WRAPPERS_DIR:-}" ]; then
+         MPI_PATH="${MPICH_WRAPPERS_DIR}"
+         echo "elpa: MPI_PATH derived from MPICH_WRAPPERS_DIR -> ${MPI_PATH}"
+      elif [ -n "${MPICH_DIR:-}" ]; then
+         MPI_PATH="${MPICH_DIR}"
+         echo "elpa: MPI_PATH derived from MPICH_DIR (cray-mpich) -> ${MPI_PATH}"
+      fi
+      export MPI_PATH
+   fi
    if [[ -z "${MPI_PATH:-}" ]]; then
       echo "MPI module ${MPI_MODULE} is not setting the MPI_PATH env variable, aborting..."
       exit 1
@@ -356,10 +373,16 @@ else
    # binutils-dev provides libbfd / libiberty headers/libs that ELPA's
    # linker step pulls in for backtrace support on some configurations.
    # apt-get needs root regardless of the install-path SUDO state
-   # (PKG_SUDO pattern, see petsc_setup.sh / openmpi_setup.sh).
-   PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
-   ${PKG_SUDO} env DEBIAN_FRONTEND=noninteractive apt-get update
-   ${PKG_SUDO} env DEBIAN_FRONTEND=noninteractive apt-get install -y binutils-dev
+   # (PKG_SUDO pattern, see petsc_setup.sh / openmpi_setup.sh). Debian-only:
+   # on a non-Debian host (e.g. RHEL9 Cray) apt-get is absent, so skip and rely
+   # on the system binutils (same guard as hpctoolkit/tau_setup.sh).
+   if command -v apt-get >/dev/null 2>&1; then
+      PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+      ${PKG_SUDO} env DEBIAN_FRONTEND=noninteractive apt-get update
+      ${PKG_SUDO} env DEBIAN_FRONTEND=noninteractive apt-get install -y binutils-dev
+   else
+      echo "elpa: apt-get not present (non-Debian host); relying on system binutils for libbfd/libiberty"
+   fi
 
    # don't use sudo if user has write access to install path
    if [ -d "${INSTALL_PATH}" ]; then
@@ -423,6 +446,85 @@ else
       exit 1
    fi
    unset _n
+
+   # ── autoconf bootstrap (ELPA autogen.sh needs autoconf >= 2.71) ──────
+   # ELPA's master_pre_stage configure.ac requires Autoconf >= 2.71. RHEL9 ships
+   # 2.69, which makes ./autogen.sh (autoreconf) fail with
+   #   "configure.ac:1: error: Autoconf version 2.71 or higher is required".
+   # Per site policy we only SELF-BUILD a newer autoconf when BOTH:
+   #   (a) the system autoconf is older than required, AND
+   #   (b) there is no real passwordless sudo to install one system-wide
+   #       (AAC7 case; the /shareddata tree is user-writable).
+   # When we build it, we expose it as a module that is loaded ONLY for this
+   # ELPA build (build-time tool, not wired into the elpa runtime modulefile).
+   ensure_autoconf_min() {
+      local _required="$1" _build_ver="2.72" _cur=""
+      command -v autoconf >/dev/null 2>&1 && \
+         _cur="$(autoconf --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+      if [ -n "${_cur}" ] && \
+         [ "$(printf '%s\n%s\n' "${_required}" "${_cur}" | sort -V | head -1)" = "${_required}" ]; then
+         echo "elpa: system autoconf ${_cur} >= ${_required}; using it"
+         return 0
+      fi
+      echo "elpa: system autoconf ${_cur:-<none>} < ${_required} (ELPA autogen.sh requires >= ${_required})"
+      # Detect REAL passwordless sudo via the real binary (bypass the AAC7
+      # run-as-user nosudo shim on PATH, which would falsely answer 'yes').
+      local _have_sudo=0 _s
+      for _s in /usr/bin/sudo /bin/sudo /usr/local/bin/sudo; do
+         if [ -x "${_s}" ] && "${_s}" -n true >/dev/null 2>&1; then _have_sudo=1; break; fi
+      done
+      if [ "${_have_sudo}" = "1" ]; then
+         echo "elpa: passwordless sudo available -- not self-building; install autoconf >= ${_required} system-wide and re-run."
+         return 0
+      fi
+      local _ac_root _ac_moddir _ac_modfile
+      _ac_root="$(dirname "${INSTALL_PATH}")/autoconf-${_build_ver}"
+      _ac_moddir="${MODULE_PATH}/autoconf"
+      _ac_modfile="${_ac_moddir}/${_build_ver}.lua"
+      if [ ! -x "${_ac_root}/bin/autoconf" ]; then
+         echo "elpa: building autoconf ${_build_ver} from source into ${_ac_root} (no sudo; system autoconf too old)"
+         local _ac_build _rc; _ac_build="$(mktemp -d -t autoconf-build.XXXXXX)"
+         ( set -e
+           cd "${_ac_build}"
+           _url="https://ftp.gnu.org/gnu/autoconf/autoconf-${_build_ver}.tar.gz"
+           curl -fsSL "${_url}" -o autoconf.tar.gz || wget -q "${_url}" -O autoconf.tar.gz
+           tar xf autoconf.tar.gz
+           cd "autoconf-${_build_ver}"
+           ./configure --prefix="${_ac_root}"
+           make -j"$(nproc)"
+           make install )
+         _rc=$?
+         rm -rf "${_ac_build}"
+         if [ "${_rc}" != "0" ] || [ ! -x "${_ac_root}/bin/autoconf" ]; then
+            echo "ERROR: failed to build autoconf ${_build_ver} into ${_ac_root}" >&2
+            return 1
+         fi
+      else
+         echo "elpa: reusing previously built autoconf ${_build_ver} at ${_ac_root}"
+      fi
+      # Create/refresh the .lua modulefile (consistent with the other rocmplus leaves).
+      mkdir -p "${_ac_moddir}"
+      cat > "${_ac_modfile}" <<-EOF
+	whatis("Autoconf ${_build_ver} - build-time tool (self-built for ELPA where system autoconf < ${_required})")
+	local base = "${_ac_root}"
+	prepend_path("PATH",     pathJoin(base, "bin"))
+	prepend_path("INFOPATH", pathJoin(base, "share", "info"))
+	EOF
+      echo "elpa: created autoconf module ${_ac_modfile}"
+      module load "autoconf/${_build_ver}" 2>/dev/null || true
+      # Belt-and-suspenders: put it first on PATH even if module-load timing missed.
+      case ":${PATH}:" in *":${_ac_root}/bin:"*) ;; *) export PATH="${_ac_root}/bin:${PATH}" ;; esac
+      hash -r 2>/dev/null || true
+      local _now; _now="$(autoconf --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+      echo "elpa: active autoconf now ${_now:-<none>} ($(command -v autoconf 2>/dev/null))"
+      if [ -z "${_now}" ] || \
+         [ "$(printf '%s\n%s\n' "${_required}" "${_now}" | sort -V | head -1)" != "${_required}" ]; then
+         echo "ERROR: autoconf still < ${_required} after bootstrap (${_now:-<none>})" >&2
+         return 1
+      fi
+      return 0
+   }
+   ensure_autoconf_min 2.71 || exit $?
 
    ./autogen.sh
    mkdir build && cd build

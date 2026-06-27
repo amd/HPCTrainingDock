@@ -436,7 +436,7 @@ else
 
       # default build is without mpi
       ENABLE_MPI=""
-      USE_MPICC=""
+      MPICC_BIN=""
       REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${MPI_MODULE}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
@@ -451,18 +451,18 @@ else
       if [ "${MPI_MODULE#mpich-wrappers}" != "${MPI_MODULE}" ] \
            && command -v mpicc >/dev/null 2>&1; then
          ENABLE_MPI="--enable-mpi"
-         USE_MPICC="MPICC=$(command -v mpicc)"
-         echo "FFTW: mpich-wrappers MPI -> MPICC=$(command -v mpicc)"
+         MPICC_BIN="$(command -v mpicc)"
+         echo "FFTW: mpich-wrappers MPI -> MPICC=${MPICC_BIN}"
       elif { [ "${MPI_MODULE}" = "cray-mpich" ] || [ -n "${CRAY_MPICH_VERSION:-}" ] || [ -n "${MPICH_DIR:-}" ]; } \
            && command -v cc >/dev/null 2>&1; then
          ENABLE_MPI="--enable-mpi"
-         USE_MPICC="MPICC=$(command -v cc)"
-         echo "FFTW: Cray PE detected -> MPICC=$(command -v cc) (cray-mpich)"
+         MPICC_BIN="$(command -v cc)"
+         echo "FFTW: Cray PE detected -> MPICC=${MPICC_BIN} (cray-mpich)"
       elif command -v mpicc >/dev/null 2>&1; then
          # OpenMPI / MVAPICH path
          ENABLE_MPI="--enable-mpi"
-         USE_MPICC="MPICC=$(command -v mpicc)"
-         echo "FFTW: MPI -> MPICC=$(command -v mpicc)"
+         MPICC_BIN="$(command -v mpicc)"
+         echo "FFTW: MPI -> MPICC=${MPICC_BIN}"
       else
          echo "FFTW: no MPI C wrapper found; building serial FFTW only"
       fi
@@ -472,9 +472,32 @@ else
          ENABLE_MPI="--enable-mpi"
       elif [ "${ENABLE_MPI_INPUT}" == "0" ]; then
          ENABLE_MPI=""
-         USE_MPICC=""
+         MPICC_BIN=""
          echo "FFTW: --enable-mpi 0 requested; building serial FFTW only"
       fi
+
+      # ── -fPIC for ALL objects (HPE/Cray PE only) ─────────────────────
+      # On an HPE/Cray PE the mpich-wrappers mpicc (and the craype cc) drive
+      # the ROCm clang, whose ld.lld links executables as -pie by default.
+      # FFTW's non-libtool helper archive libbench2.a (built with the serial
+      # CC) and the mpi-bench objects are otherwise compiled without -fPIC,
+      # so the PIE link of mpi/mpi-bench fails with "relocation R_X86_64_32
+      # ... recompile with -fPIC". Bake -fPIC into CC (and MPICC) so every
+      # object -- including the static archives and the final libfftw3.a --
+      # is position-independent. Gate on Cray markers so a stock
+      # OpenMPI/gcc build (GNU ld, non-strict) is left byte-for-byte as is.
+      # The vars are passed as a quoted array because they embed a space; the
+      # unquoted ${...} form would word-split -fPIC into a stray configure arg.
+      PIC_FLAG=""
+      if [ -n "${CRAYPE_VERSION:-}" ] || [ -n "${PE_ENV:-}" ] \
+         || [ -n "${CRAY_MPICH_VERSION:-}" ] || [ -n "${MPICH_DIR:-}" ] \
+         || [ -d /opt/cray/pe ]; then
+         PIC_FLAG=" -fPIC"
+         echo "FFTW: HPE/Cray PE detected -> adding -fPIC (PIE-default ROCm clang/ld.lld)"
+      fi
+      COMPILER_ARGS=( "CC=${C_COMPILER}${PIC_FLAG}" )
+      [ -n "${ENABLE_MPI}" ] && [ -n "${MPICC_BIN}" ] \
+         && COMPILER_ARGS+=( "MPICC=${MPICC_BIN}${PIC_FLAG}" )
 
       # Build under /tmp (compute-node local disk) so the three
       # full builds (double, single, long-double) don't round-trip
@@ -503,7 +526,7 @@ else
       ./configure --prefix=${FFTW_PATH} \
 	          --enable-shared --enable-static --enable-threads --enable-openmp \
 		  ${ENABLE_MPI} --enable-threads --enable-sse2 --enable-avx --enable-avx2 \
-		  CC=${C_COMPILER} ${USE_MPICC}
+		  "${COMPILER_ARGS[@]}"
       make -j ${MAKE_JOBS}
       make install
 
@@ -511,7 +534,7 @@ else
       ./configure --prefix=${FFTW_PATH} \
 	          --enable-shared --enable-static --enable-threads --enable-openmp \
 		  ${ENABLE_MPI} --enable-threads --enable-sse2 --enable-avx --enable-avx2 --enable-float \
-		  CC=${C_COMPILER} ${USE_MPICC}
+		  "${COMPILER_ARGS[@]}"
       make -j ${MAKE_JOBS}
       make install
 
@@ -519,7 +542,7 @@ else
       ./configure --prefix=${FFTW_PATH} \
 	          --enable-shared --enable-static --enable-threads --enable-openmp \
 		  ${ENABLE_MPI} --enable-threads --enable-long-double \
-		  CC=${C_COMPILER} ${USE_MPICC}
+		  "${COMPILER_ARGS[@]}"
       make -j ${MAKE_JOBS}
       make install
 

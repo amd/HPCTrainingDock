@@ -794,6 +794,29 @@ _build_rocprof_sys_helper() {
          zlib1g-dev libzstd-dev libssl-dev || true
    fi
 
+   # ── rprof-sys build-dependency precheck (soft-skip when unsatisfiable) ─
+   # The rocprofiler-systems build pulls in Dyninst, which hard-requires Intel
+   # TBB; without it cmake aborts ("[rocprofiler-systems] TBB was not found").
+   # On the Ubuntu build images TBB is present in the base layer; on a non-Debian
+   # host (e.g. RHEL9 Cray) it is absent and there is no apt/sudo path to add it
+   # here, so the configure can only fail. Detect that up front -- BEFORE the
+   # ~5-10 min clone -- and SOFT-SKIP (return 43), the same convention the
+   # rocprof-compute / instrument-libomp bundles use. rocm_patches then still
+   # succeeds (the rocprof-compute overlay needs no TBB) instead of emitting a
+   # spurious rc=1 for a build that cannot run on this host.
+   if ! { ldconfig -p 2>/dev/null | grep -qiE 'libtbb(malloc)?\.so'; } \
+        && ! pkg-config --exists tbb 2>/dev/null \
+        && [ ! -e /usr/include/tbb/version.h ] \
+        && [ ! -e /usr/include/tbb/tbb_stddef.h ] \
+        && [ ! -e /usr/include/oneapi/tbb/version.h ]; then
+      echo "[rocm_patches] WARNING: Intel TBB not found on this host" >&2
+      echo "[rocm_patches]   (no libtbb via ldconfig, no 'tbb' pkg-config, no tbb/oneapi headers)." >&2
+      echo "[rocm_patches]   rocprofiler-systems (Dyninst) cannot configure without TBB and there is" >&2
+      echo "[rocm_patches]   no apt/sudo path to install it here; skipping the rprof-sys .so rebuild." >&2
+      echo "[rocm_patches]   (soft no-op; the rocprof-compute overlay is unaffected.)" >&2
+      return 43
+   fi
+
    # ── clone (resumable) ────────────────────────────────────────────
    if [ ! -d "${src_root}/.git" ]; then
       echo "[rocm_patches] cloning ${repo} (large; ~5-10 min) ..."
@@ -2084,21 +2107,32 @@ built_instrument_libomp=0
 
 for bundle in ${PATCH_BUNDLES}; do
    case "${bundle}" in
-      rocprof-sys-1.3.0)
-         build_rocprof_sys_1_3_0 && built_rocprof_sys=1 || rc=$? ;;
-      rocprof-sys-1.2.0)
-         # Same post-build finishing-step set as 1.3.0
-         # (patch_module_file + install_rocprof_sys_run_wrapper +
-         # fix_overlay_runpath_and_libunwind + swap_sdk_lib_symlink),
-         # all keyed off built_rocprof_sys=1 below.
-         build_rocprof_sys_1_2_0 && built_rocprof_sys=1 || rc=$? ;;
-      rocprof-sys-1.6.0)
-         # Same post-build finishing-step set as 1.3.0 / 1.2.0; the
-         # finishing-step helpers pick up the patched .so by glob
-         # (`librocprof-sys.so.[0-9]*.[0-9]*.[0-9]*`) so they work
-         # against any of the three SO versions without a special
-         # case.
-         build_rocprof_sys_1_6_0 && built_rocprof_sys=1 || rc=$? ;;
+      rocprof-sys-1.3.0|rocprof-sys-1.2.0|rocprof-sys-1.6.0)
+         # All three rprof-sys baselines share the same post-build
+         # finishing-step set (patch_module_file + install_rocprof_sys_run_wrapper
+         # + fix_overlay_runpath_and_libunwind + swap_sdk_lib_symlink), all keyed
+         # off built_rocprof_sys=1 below; the finishing helpers locate the .so by
+         # glob (`librocprof-sys.so.[0-9]*.[0-9]*.[0-9]*`) so they work for any of
+         # the 1.2.0 / 1.3.0 / 1.6.0 SO versions without a special case.
+         #
+         # Exit 43 is a soft skip: the rocprofiler-systems (Dyninst) build hard-
+         # requires Intel TBB, which is absent on non-Debian hosts (e.g. RHEL9
+         # Cray) with no apt/sudo path to add it. Treat it as success-with-no-
+         # overlay (same as the rocprof-compute bundle) so the rocprof-compute
+         # overlay still applies and the per-package summary stays clean.
+         case "${bundle}" in
+            rocprof-sys-1.3.0) build_rocprof_sys_1_3_0 ;;
+            rocprof-sys-1.2.0) build_rocprof_sys_1_2_0 ;;
+            rocprof-sys-1.6.0) build_rocprof_sys_1_6_0 ;;
+         esac
+         bundle_rc=$?
+         if [ "${bundle_rc}" -eq 0 ]; then
+            built_rocprof_sys=1
+         elif [ "${bundle_rc}" -eq 43 ]; then
+            : # soft skip; leave built_rocprof_sys=0, rc unchanged
+         else
+            rc=${bundle_rc}
+         fi ;;
       rocprof-compute)
          # build_rocprof_compute runs the bundle's own install.sh which
          # edits the modulefile (prepend_path PATH), so there's no

@@ -1241,12 +1241,14 @@ cat <<-EOF | ${SUDO} tee ${MODULE_ROOT}/amd/${ROCM_VERSION}
 	set AMD_BIN          \$AMD_CURPATH/bin
 	set AMD_LIB          \$AMD_CURPATH/lib
 	set AMD_LLVM         \$AMD_CURPATH/llvm
-	set AMD_LLVM_LIB     \$AMD_CURPATH/llvm/lib
-	set AMD_LLVM_INCLUDE \$AMD_CURPATH/llvm/include
 
 	prepend-path PATH                \$AMD_BIN
-	prepend-path C_INCLUDE_PATH      \$AMD_LLVM_INCLUDE
-	prepend-path CPLUS_INCLUDE_PATH  \$AMD_LLVM_INCLUDE
+	# Deliberately do NOT export \$AMD_CURPATH/llvm/include onto C_INCLUDE_PATH /
+	# CPLUS_INCLUDE_PATH: that tree carries the compiler's bundled libc++ (c++/v1)
+	# plus its whole internal header set. clang finds those via its own driver/
+	# resource-dir; exposing them globally injects a second C++ stdlib into every
+	# compile, which collides with the OS libstdc++ pinned via --gcc-install-dir
+	# and corrupts the clang frontend. Keep one stdlib only.
 	prepend-path CMAKE_PREFIX_PATH   \$AMD_CURPATH
 
 	setenv ROCM_COMPILER_PATH        \$AMD_LLVM
@@ -1254,7 +1256,12 @@ cat <<-EOF | ${SUDO} tee ${MODULE_ROOT}/amd/${ROCM_VERSION}
 	setenv CRAY_AMD_COMPILER_PREFIX  \$AMD_CURPATH
 	setenv CRAY_AMD_COMPILER_VERSION \$AMD_LEVEL
 
-	prepend-path LD_LIBRARY_PATH     \$AMD_LLVM_LIB
+	# Deliberately do NOT put \$AMD_CURPATH/llvm/lib on LD_LIBRARY_PATH: it holds
+	# the compiler's own libLLVM/libclang-cpp, which clang/amdclang locate via
+	# their RUNPATH (\$ORIGIN/../lib). Exposing it globally lets a different
+	# LLVM's libLLVM (mixed SDK+compiler env) shadow the SDK clang's own and
+	# dlopen a mismatched libLLVM -> clang heap-corruption crash. \$AMD_LIB
+	# (HIP runtime) is harmless and kept.
 	prepend-path LD_LIBRARY_PATH     \$AMD_LIB
 EOF
 elif [ "${DISTRO}" == "ubuntu" ]; then

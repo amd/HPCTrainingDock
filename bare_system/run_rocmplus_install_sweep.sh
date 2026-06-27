@@ -51,12 +51,35 @@ if ! type module >/dev/null 2>&1; then
    unset _minit
 fi
 if type module >/dev/null 2>&1; then
-   # --force is Lmod-only (tolerates modulefiles removed from disk after
-   # load); Tcl/Cray modulecmd rejects it, so fall back to plain purge.
-   module --force purge 2>/dev/null || module purge 2>/dev/null || true
-   echo "sweep: module purge done; LOADEDMODULES='${LOADEDMODULES:-<empty>}'"
+   # Cray PE (Tmod 3.2.x) must NOT be purged: craype / craype-network-* /
+   # PrgEnv-* are load-order sensitive and do not survive a purge, after
+   # which `craype` can no longer be reloaded (breaks every downstream
+   # PrgEnv load). Since this env is exported into the sbatch job via
+   # --export=ALL, a broken-purged PE would propagate. So on Cray we shed
+   # only the APPLICATION modules (everything whose modulefile is NOT under
+   # /opt/cray) and keep the stock PE; the worker reaches the target PrgEnv
+   # via `module swap`. On Lmod/Tcl (non-Cray) a full purge is safe.
+   if [[ -d /opt/cray/pe || -n "${CRAYPE_VERSION:-}" || -n "${PE_ENV:-}" ]]; then
+      echo "sweep: Cray PE detected -> shedding application modules only (keeping stock Cray PE)."
+      IFS=':' read -ra _lm_arr <<< "${LOADEDMODULES:-}"
+      IFS=':' read -ra _lf_arr <<< "${_LMFILES_:-}"
+      for (( _i=${#_lm_arr[@]}-1; _i>=0; _i-- )); do
+         _lm="${_lm_arr[_i]:-}"
+         [[ -z "${_lm}" ]] && continue
+         _lf="${_lf_arr[_i]:-}"
+         case "${_lm}" in PrgEnv-*) continue ;; esac
+         case "${_lf}" in */opt/cray/*) continue ;; esac
+         module unload "${_lm}" 2>/dev/null || true
+      done
+      unset _lm_arr _lf_arr _lm _lf _i
+   else
+      # --force is Lmod-only (tolerates modulefiles removed from disk after
+      # load); Tcl modulecmd rejects it, so fall back to plain purge.
+      module --force purge 2>/dev/null || module purge 2>/dev/null || true
+   fi
+   echo "sweep: module shed done; LOADEDMODULES='${LOADEDMODULES:-<empty>}'"
 else
-   echo "sweep: WARNING no module system found (tried Lmod + Cray/Tcl env-modules); skipping module purge -- inherited modules may leak into sbatch jobs" >&2
+   echo "sweep: WARNING no module system found (tried Lmod + Cray/Tcl env-modules); skipping module shed -- inherited modules may leak into sbatch jobs" >&2
 fi
 
 : ${PARTITION:="sh5_cpx_admin_long"}
@@ -417,6 +440,16 @@ fi
 VERSIONS_ARR=()
 FLAVORS_ARR=()
 PES_ARR=()
+# PRGENV_MODULES_ARR[i]: the FULL Cray PrgEnv module the job loads on the
+# compute node (e.g. PrgEnv-amd-new/8.7.0-7.13.0), or "" for the legacy
+# --rocm-versions mode (no PrgEnv load). Loading it brings the consumer
+# environment -- cray-mpich ($MPICH_DIR) AND the from-source mpich-wrappers
+# module -- onto the build env, so main_setup.sh's MPI detection fires and the
+# MPI-linked leaves (mpi4py/hypre/petsc/elpa/magma/tau/...) build against the
+# PrgEnv MPI instead of the absent leaf default "openmpi". This applies to BOTH
+# flavors (amd-new loads PrgEnv-amd-new -> mpich-wrappers; cray-new loads
+# PrgEnv-cray-new -> cray-mpich).
+PRGENV_MODULES_ARR=()
 if [[ -n "${PROGRAM_ENVIRONMENTS_RAW}" ]]; then
    PROGRAM_ENVIRONMENTS_NORM="${PROGRAM_ENVIRONMENTS_RAW//,/ }"
    read -r -a _PE_TOKENS <<< "${PROGRAM_ENVIRONMENTS_NORM}"
@@ -442,15 +475,28 @@ if [[ -n "${PROGRAM_ENVIRONMENTS_RAW}" ]]; then
             echo "       expected one of PrgEnv-amd-new, PrgEnv-cray-new, PrgEnv-amd-openmpi, PrgEnv-amd-openmpi-ucx" >&2
             exit 1 ;;
       esac
+      # Derive the PrgEnv module's <pe>-<tag> from the rocm token. The PrgEnv
+      # tag is NOT the rocm token: it is the ROCm NUMERIC for therock trees and
+      # the afar drop (afar-<compiler>) for afar trees, matching the modulefiles
+      # the build scripts lay down (PrgEnv-<flavor>/<pe>-<tag>):
+      #   7.2.4              -> 7.2.4         (identity; numeric release)
+      #   therock-7.13.0     -> 7.13.0        (strip 'therock-' -> SDK numeric)
+      #   afar-23.2.1-7.13.0 -> afar-23.2.1   (strip trailing '-<numeric>')
+      case "${_rocm_token}" in
+         therock-*) _prgenv_tag="${_rocm_token#therock-}" ;;
+         afar-*)    _prgenv_tag="${_rocm_token%-*}" ;;
+         *)         _prgenv_tag="${_rocm_token}" ;;
+      esac
       VERSIONS_ARR+=("${_rocm_token}")
       FLAVORS_ARR+=("${_rpflavor}")
       PES_ARR+=("${_pe}")
+      PRGENV_MODULES_ARR+=("${_flavor}/${_pe}-${_prgenv_tag}")
    done
-   unset _PE_TOKENS _pe_tok _flavor _rest _pe _rocm_token _rpflavor
+   unset _PE_TOKENS _pe_tok _flavor _rest _pe _rocm_token _rpflavor _prgenv_tag
 else
    ROCM_VERSIONS_NORM="${ROCM_VERSIONS_RAW//,/ }"
    read -r -a VERSIONS_ARR <<< "${ROCM_VERSIONS_NORM}"
-   for _ in "${VERSIONS_ARR[@]}"; do FLAVORS_ARR+=("amd"); PES_ARR+=(""); done
+   for _ in "${VERSIONS_ARR[@]}"; do FLAVORS_ARR+=("amd"); PES_ARR+=(""); PRGENV_MODULES_ARR+=(""); done
    unset _
 fi
 N=${#VERSIONS_ARR[@]}
@@ -653,12 +699,13 @@ for v in "${VERSIONS_ARR[@]}"; do
    # FLAVORS_ARR / PES_ARR are index-aligned with VERSIONS_ARR (built above).
    _flavor="${FLAVORS_ARR[i]}"
    _pe="${PES_ARR[i]}"
-   # PRGENV_MODULE is only set for the cray flavor: the job loads it on the
-   # compute node so cray-mpich ($MPICH_DIR) is live and main_setup.sh builds
-   # the MPI-linked packages against it. amd flavor keeps legacy behavior
-   # (no PrgEnv load; mpich-wrappers come from the SDK tree).
-   _prgenv_module=""
-   [[ "${_flavor}" == "cray" && -n "${_pe}" ]] && _prgenv_module="PrgEnv-cray-new/${_pe}"
+   # PRGENV_MODULE: the full Cray PrgEnv the compute-node job loads (computed
+   # during PE-token parsing as PRGENV_MODULES_ARR[i]). Set for BOTH flavors in
+   # --program-environments mode so cray-mpich ($MPICH_DIR) AND the from-source
+   # mpich-wrappers module come onto the build env and main_setup.sh builds the
+   # MPI-linked packages against the PrgEnv MPI. Empty in legacy --rocm-versions
+   # mode (no PrgEnv load).
+   _prgenv_module="${PRGENV_MODULES_ARR[i]}"
    # Job/log label: byte-identical "<v>" for amd (legacy), "cray-<v>" for cray
    # so the two flavors of the same ROCm numeric don't collide in slurm
    # job names or slurm-<jobid>-rocmplus-<label>.{out,err} log filenames.

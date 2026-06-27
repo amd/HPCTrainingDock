@@ -316,26 +316,62 @@ fi
 # is still empty (preserves prior Lmod behavior, no-op on Cray).
 export MODULEPATH="${MODULEPATH:-/shared/apps/modules/ubuntu/lmodfiles/base}"
 
-# Reproducibility: belt-and-suspenders purge in case the submitter
-# forgot to clean their interactive env (the proper purge is now done
-# in the submitter, see run_rocmplus_install_sweep.sh top-of-script).
-# This worker-side purge is INCOMPLETE because Lmod's __LMOD_REF_COUNT_*
-# shell vars are not propagated via sbatch --export=ALL (only env vars
-# are), so it cannot fully reverse PATH/LD_LIBRARY_PATH/MPICC/MPI_PATH
-# additions made on the submitter side -- but it is a no-op when the
-# submitter already purged (no modules to unload), so it costs nothing.
+# Reproducibility: shed any modules the submitter carried in via sbatch
+# --export=ALL. HOW we shed depends on the module system:
+#
+#   * Cray PE (Tmod 3.2.x): NEVER `module purge`. The craype /
+#     craype-network-* / craype-<cpu> / PrgEnv-* modules are load-order
+#     sensitive and do NOT survive a purge -- afterwards even the node's
+#     default PrgEnv-cray can no longer re-resolve `craype` ("Conflicting
+#     PrgEnv-* is loading" / "requirement craype is not loaded"), which
+#     then fails EVERY PrgEnv load below (observed on the MI300A RHEL9
+#     nodes: a purged shell could not reload craype at all). Instead we
+#     leave the stock Cray PE intact and unload only the APPLICATION
+#     modules -- everything whose modulefile is NOT under /opt/cray (the
+#     inherited stock rocm + any openmpi/pytorch/magma/openblas/... a
+#     submitter had loaded). PrgEnv-* is kept on purpose: it is the swap
+#     source for PRGENV_MODULE below (these PrgEnv-{amd,cray}-new modules
+#     `conflict PrgEnv-cray`, so they must be SWAPPED in, not loaded onto
+#     a still-loaded default PrgEnv).
+#
+#   * Lmod / classic Tcl (non-Cray): a full purge is safe and simplest.
+#     --force tolerates modulefiles whose .lua was removed from disk
+#     after the submitter loaded them (plain purge errors on missing
+#     files and leaves the rest loaded).
+#
+# This worker-side shed is still INCOMPLETE for Lmod because the
+# __LMOD_REF_COUNT_* shell vars are not propagated via --export=ALL, so
+# it cannot fully reverse PATH/LD_LIBRARY_PATH/MPICC additions made
+# submitter-side -- but the sweep wrapper now does the matching shed
+# before sbatch, so this is belt-and-suspenders.
 #
 # History: slurm 8385 (2026-05-05) failed because the submitter had
 # openmpi/5.0.10 + pytorch/2.9.1 + magma + openblas loaded; UCX picked
 # up the stale $MPICC and tried to link against a libucc.so.1 that the
-# build was about to delete via --replace 1. Fix: do `module purge` on
-# the submitter side BEFORE invoking sbatch (or via the sweep script
-# wrapper, which now does it automatically).
-#
-# --force tolerates modulefiles whose .lua was removed from disk after
-# the submitter loaded them (otherwise plain `module purge` errors out
-# on missing files and leaves the rest loaded).
-module --force purge 2>/dev/null || module purge 2>/dev/null || true
+# build was about to delete via --replace 1. Both paths clear that.
+_is_cray_pe=0
+if [[ -d /opt/cray/pe || -n "${CRAYPE_VERSION:-}" || -n "${PE_ENV:-}" ]]; then
+   _is_cray_pe=1
+fi
+if [[ "${_is_cray_pe}" == 1 ]]; then
+   echo "Cray PE detected: NOT purging; shedding application modules only (keeping stock Cray PE for swap)."
+   # LOADEDMODULES and _LMFILES_ are parallel ':'-lists in Tmod. Unload
+   # in reverse (dependents before prereqs); keep anything under /opt/cray
+   # and keep PrgEnv-* (the swap source for PRGENV_MODULE below).
+   IFS=':' read -ra _lm_arr <<< "${LOADEDMODULES:-}"
+   IFS=':' read -ra _lf_arr <<< "${_LMFILES_:-}"
+   for (( _i=${#_lm_arr[@]}-1; _i>=0; _i-- )); do
+      _lm="${_lm_arr[_i]:-}"
+      [[ -z "${_lm}" ]] && continue
+      _lf="${_lf_arr[_i]:-}"
+      case "${_lm}" in PrgEnv-*) continue ;; esac
+      case "${_lf}" in */opt/cray/*) continue ;; esac
+      module unload "${_lm}" 2>/dev/null || true
+   done
+   unset _lm_arr _lf_arr _lm _lf _i
+else
+   module --force purge 2>/dev/null || module purge 2>/dev/null || true
+fi
 
 # When the operator passed --site / --top-module-path to point at a
 # segregated tree (e.g. /nfsapps/ubuntu-22.04/modules), prepend that
@@ -363,26 +399,57 @@ echo "Effective MODULEPATH: ${MODULEPATH}"
 module load "rocm/${ROCM_VERSION}"
 echo "Loaded module rocm/${ROCM_VERSION}; ROCM_PATH=${ROCM_PATH:-<unset>}"
 
-# ── Cray PrgEnv: bring cray-mpich onto the env so main_setup.sh builds
-#    the MPI-linked packages (mpi4py/rocshmem/hdf5/netcdf/fftw/petsc)
-#    against cray-mpich instead of the amd-new openmpi/mpich-wrappers.
-#    main_setup.sh keys off $MPICH_DIR (exported by the cray-mpich
-#    module) for that selection. Best-effort: a load failure is a hard
-#    error for the cray flavor (a silent fall-through would mis-build
-#    against the wrong MPI and pollute rocmplus-cray-<v>).
+# ── Cray PrgEnv: load the full programming-environment module so the MPI
+#    that main_setup.sh's leaves link against is live on the build env.
+#    Both flavors rely on this:
+#      * amd  -> PrgEnv-amd-new/<pe>-<tag> loads PrgEnv-amd/<pe> (cray-mpich ->
+#                $MPICH_DIR) AND the from-source mpich-wrappers module (amdflang
+#                mpi.mod). main_setup.sh keys off $MPICH_DIR to then thread
+#                --mpi-module mpich-wrappers into the MPI-linked leaves.
+#      * cray -> PrgEnv-cray-new/<pe>-<tag> loads cray-mpich (CCE).
+#    Without it, $MPICH_DIR is unset and every MPI-linked leaf
+#    (mpi4py/rocshmem/hdf5/netcdf/fftw/petsc/hypre/elpa/magma/tau) falls back to
+#    the leaf default "openmpi", which does not exist on Cray -> SKIP/fail.
+#    The PrgEnv module also swaps the just-loaded rocm/<token> to its matching
+#    rocm-new/<numeric> (same SDK install, same ROCM_PATH). A load failure is a
+#    hard error: a silent fall-through would mis-build against the wrong MPI.
 if [[ -n "${PRGENV_MODULE}" ]]; then
    echo "Loading programming-environment module: ${PRGENV_MODULE}"
-   # NB: do NOT pipe `module load` through sed/tee -- the pipe runs it in a
-   # subshell and the env changes ($MPICH_DIR, MODULEPATH, PATH, ...) would
-   # be lost. Load directly, then echo a confirmation.
-   if ! module load "${PRGENV_MODULE}"; then
+   # NB: do NOT pipe `module load`/`module swap` through sed/tee -- the pipe
+   # runs it in a subshell and the env changes ($MPICH_DIR, MODULEPATH,
+   # PATH, ...) would be lost. Run directly, then echo a confirmation.
+   #
+   # On Cray PE the PrgEnv-{amd,cray}-new modules declare `conflict
+   # PrgEnv-cray` (etc.), so a plain `module load` ABORTS while the node's
+   # default PrgEnv is still loaded -- and it IS, because we deliberately
+   # did not purge it above. Swap from whatever PrgEnv-* is active instead;
+   # that is exactly how these modulefiles are meant to be entered (see
+   # their header: `module swap PrgEnv-cray <this>`). Fall back to a plain
+   # load when no PrgEnv is active (non-Cray, or an already-clean Cray env).
+   _prgenv_rc=0
+   _active_prgenv=""
+   if [[ "${_is_cray_pe}" == 1 ]]; then
+      for _lm in ${LOADEDMODULES//:/ }; do
+         case "${_lm}" in PrgEnv-*) _active_prgenv="${_lm}"; break ;; esac
+      done
+   fi
+   if [[ "${_is_cray_pe}" == 1 && -n "${_active_prgenv}" ]]; then
+      echo "  Cray PE: swapping ${_active_prgenv} -> ${PRGENV_MODULE}"
+      module swap "${_active_prgenv}" "${PRGENV_MODULE}" || _prgenv_rc=$?
+   else
+      module load "${PRGENV_MODULE}" || _prgenv_rc=$?
+   fi
+   if [[ "${_prgenv_rc}" != 0 ]]; then
       echo "ERROR: failed to load PRGENV_MODULE='${PRGENV_MODULE}'" >&2
       exit 1
    fi
-   if [[ "${ROCMPLUS_FLAVOR}" == "cray" && ( -z "${MPICH_DIR:-}" || ! -d "${MPICH_DIR}/bin" ) ]]; then
-      echo "WARNING: ROCMPLUS_FLAVOR=cray but \$MPICH_DIR is unset/missing after loading ${PRGENV_MODULE};" >&2
-      echo "         MPI-linked packages will fall back to the leaf default (openmpi) rather than cray-mpich." >&2
-      echo "         Ensure ${PRGENV_MODULE} (or a cray-mpich module) is loadable on this node." >&2
+   unset _prgenv_rc _active_prgenv _lm
+   echo "Loaded ${PRGENV_MODULE}; MPICH_DIR=${MPICH_DIR:-<unset>}"
+   if [[ -z "${MPICH_DIR:-}" || ! -d "${MPICH_DIR}/bin" ]]; then
+      echo "WARNING: \$MPICH_DIR is unset/missing after loading ${PRGENV_MODULE};" >&2
+      echo "         MPI-linked packages will fall back to the leaf default (openmpi)" >&2
+      echo "         rather than the PrgEnv MPI (mpich-wrappers / cray-mpich)." >&2
+      echo "         Ensure ${PRGENV_MODULE} is loadable and brings cray-mpich on this node." >&2
    fi
 fi
 module list 2>&1 | sed 's/^/  /'

@@ -870,6 +870,40 @@ ${SUDO} mkdir -p "${MODULE_DIR}"
 #                                   release tags can't collide on the
 #                                   rocmplus side even if they happen
 #                                   to ship the same SDK numeric).
+
+# ── Resolve the host GCC install dir for hipcc's --gcc-install-dir ───────
+# Pinning HIPCC_{COMPILE,LINK}_FLAGS_APPEND points hipcc/clang++ (-x hip) at
+# the OS GCC so it uses the system libstdc++ headers/libs instead of the newer
+# libc++ bundled in the SDK's LLVM (that mismatch breaks HIP C++ builds). The
+# dir is distro-specific (RHEL: /usr/lib/gcc/x86_64-redhat-linux/<ver>;
+# Debian: .../x86_64-linux-gnu/<ver>), so DETECT it rather than hardcode a
+# Debian path. Detection is based on g++ (the C++ driver) plus a real compile
+# probe: on some hosts a newer gcc (e.g. gcc-13) is on PATH WITHOUT the matching
+# g++/libstdc++-devel, which silently breaks every hipcc compile -- the probe
+# rejects such a pick so we fall back to the default system C++ driver/GCC
+# version for the OS.
+GCC_INSTALL_DIR=""
+for _cxx in g++ c++; do
+   command -v "${_cxx}" >/dev/null 2>&1 || continue
+   _d="$(dirname "$("${_cxx}" -print-libgcc-file-name 2>/dev/null)" 2>/dev/null)"
+   { [ -n "${_d}" ] && [ -e "${_d}/crtbegin.o" ]; } || { _d=""; continue; }
+   printf 'int main(){return 0;}\n' | "${_cxx}" -x c++ -c -o /dev/null - >/dev/null 2>&1 || { _d=""; continue; }
+   GCC_INSTALL_DIR="${_d}"; break
+done
+unset _cxx _d
+if [ -n "${GCC_INSTALL_DIR}" ]; then
+   echo "[therock-afar] host GCC install dir for hipcc: ${GCC_INSTALL_DIR} (g++ $(g++ -dumpversion 2>/dev/null), $(g++ -dumpmachine 2>/dev/null))"
+   HIPCC_TCL_LINES="setenv HIPCC_COMPILE_FLAGS_APPEND \"--gcc-install-dir=${GCC_INSTALL_DIR}\"
+setenv HIPCC_LINK_FLAGS_APPEND    \"--gcc-install-dir=${GCC_INSTALL_DIR}\""
+   HIPCC_LUA_LINES="setenv(\"HIPCC_COMPILE_FLAGS_APPEND\", \"--gcc-install-dir=${GCC_INSTALL_DIR}\")
+setenv(\"HIPCC_LINK_FLAGS_APPEND\",    \"--gcc-install-dir=${GCC_INSTALL_DIR}\")"
+else
+   echo "[therock-afar] WARNING: no working host g++/GCC install dir found (g++ missing or libstdc++-devel absent);" >&2
+   echo "[therock-afar]          HIPCC_*_FLAGS_APPEND will NOT be pinned -- HIP C++ builds may pick the wrong libc++." >&2
+   HIPCC_TCL_LINES="# host GCC install dir not detected -- HIPCC_*_FLAGS_APPEND intentionally unset"
+   HIPCC_LUA_LINES="-- host GCC install dir not detected -- HIPCC_*_FLAGS_APPEND intentionally unset"
+fi
+
 if [ "${CRAY_SYSTEM}" = "1" ]; then
 # ---- Cray Tcl modulefile (classic environment-modules) ----
 ${SUDO} tee "${MODULE_FILE}" >/dev/null <<EOF
@@ -891,8 +925,7 @@ set base ${INSTALL_DIR}
 
 setenv ROCM_PATH               \$base
 setenv HSA_NO_SCRATCH_RECLAIM  1
-setenv HIPCC_COMPILE_FLAGS_APPEND "--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11"
-setenv HIPCC_LINK_FLAGS_APPEND    "--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11"
+${HIPCC_TCL_LINES}
 
 prepend-path LD_LIBRARY_PATH    \$base/lib
 prepend-path C_INCLUDE_PATH     \$base/include
@@ -931,8 +964,7 @@ prepend_path("CPATH",              pathJoin(base, "include"))
 prepend_path("PATH",               pathJoin(base, "bin"))
 prepend_path("INCLUDE",            pathJoin(base, "include"))
 setenv("HSA_NO_SCRATCH_RECLAIM", "1")
-setenv("HIPCC_COMPILE_FLAGS_APPEND", "--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11")
-setenv("HIPCC_LINK_FLAGS_APPEND",    "--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11")
+${HIPCC_LUA_LINES}
 setenv("ROCM_PATH", base)
 prepend_path("MODULEPATH", pathJoin(mbase, "rocm-afar-${THEROCK_AFAR_RELEASE}"))
 prepend_path("MODULEPATH", pathJoin(mbase, "rocmplus-afar-${THEROCK_AFAR_RELEASE}-${ROCM_NUMERIC}"))

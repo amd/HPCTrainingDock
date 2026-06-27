@@ -630,8 +630,13 @@ module-whatis "AMD LLVM Compiler (local TheRock ${_rocm}); mirrors amd/<sys>."
 set ROCM_NEW ${_install}
 
 prepend-path PATH                \$ROCM_NEW/bin
-prepend-path C_INCLUDE_PATH      \$ROCM_NEW/llvm/include
-prepend-path CPLUS_INCLUDE_PATH  \$ROCM_NEW/llvm/include
+# Deliberately do NOT export \$ROCM_NEW/llvm/include onto C_INCLUDE_PATH /
+# CPLUS_INCLUDE_PATH: that tree carries the compiler's bundled libc++ (c++/v1)
+# plus its whole internal header set. clang finds those via its own driver/
+# resource-dir; exposing them globally injects a second C++ stdlib into every
+# compile, which collides with the OS libstdc++ pinned via --gcc-install-dir
+# (and, in mixed SDK+compiler trees like afar-on-therock, with a different
+# LLVM's libc++) and corrupts the clang frontend. Keep one stdlib only.
 prepend-path CMAKE_PREFIX_PATH   \$ROCM_NEW
 setenv ROCM_COMPILER_PATH        \$ROCM_NEW/llvm
 setenv ROCM_COMPILER_VERSION     ${_rocm}
@@ -647,7 +652,14 @@ setenv CRAY_AMD_COMPILER_VERSION ${_rocm_numeric}
 # Cray-native: make the ftn/cc/CC wrappers drive the new LLVM amdflang/amdclang
 # (unset would fall back to flang-classic and emit an 'Unrecognized' warning).
 setenv AMD_COMPILER_TYPE         DEFAULT
-prepend-path LD_LIBRARY_PATH     \$ROCM_NEW/llvm/lib
+# Deliberately do NOT put \$ROCM_NEW/llvm/lib on LD_LIBRARY_PATH: it holds the
+# compiler's own libLLVM/libclang-cpp, which the clang/amdclang binaries already
+# locate via their RUNPATH (\$ORIGIN/../lib). Exposing it globally is redundant
+# in a self-consistent tree, but in a mixed SDK+compiler env (afar compiler on
+# the therock SDK) it makes a DIFFERENT LLVM's libLLVM win over the SDK clang's
+# RUNPATH (LD_LIBRARY_PATH beats RUNPATH), dlopen'ing a mismatched libLLVM into
+# the clang driver -> heap corruption ("corrupted size vs. prev_size") crash.
+# \$ROCM_NEW/lib (HIP runtime) is harmless and kept.
 prepend-path LD_LIBRARY_PATH     \$ROCM_NEW/lib
 
 # Bring in the matching ROCm ${_rocm} runtime so loading the compiler also sets
