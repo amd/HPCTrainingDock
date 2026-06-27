@@ -882,9 +882,21 @@ print('matdensecupmimpl.h patched: added <cuda/std/iterator> for CCCL 3.0+')
          # Eigen defines a safe wrapper (ei_maybe_separate_arguments) but EigenTesting.cmake
          # does not use it. Disabling tests skips the entire EigenTesting.cmake code path.
          #
+         # -DCMAKE_C_COMPILER / -DCMAKE_CXX_COMPILER: Eigen's project() enables
+         # C/CXX, and without pinning them cmake auto-detects the first cc/CC
+         # on PATH. On a Cray PE that is the craype cc/CC wrapper, whose
+         # compiler check aborts with "Unable to determine compiler version
+         # ... CRAY_AMD_COMPILER_VERSION is defined" -- that var is never set
+         # by the from-source PrgEnv-amd-new (it loads its own ROCm, not the
+         # stock Cray `amd` compiler module). PETSc/SLEPc above sidestep this
+         # via --with-mpi-dir (mpicc/mpicxx from mpich-wrappers); use those
+         # same known-good wrappers here so Eigen bypasses craype cc/CC too
+         # (slurm 8143). They are guaranteed present (PETSc's --with-mpi-dir
+         # requires ${MPI_PATH}/bin/mpicc).
          cmake -DCMAKE_INSTALL_PREFIX=$EIGEN_PATH -DCHOLMOD_LIBRARIES=$PETSC_PATH/lib -DCHOLMOD_INCLUDES=$PETSC_PATH/include \
                -DKLU_LIBRARIES=$PETSC_PATH/lib -DKLU_INCLUDES=$PETSC_PATH/include \
                -DCMAKE_PREFIX_PATH=${ROCM_PATH} -DCMAKE_MODULE_PATH=${ROCM_PATH}/hip/cmake \
+               -DCMAKE_C_COMPILER=${MPI_PATH}/bin/mpicc -DCMAKE_CXX_COMPILER=${MPI_PATH}/bin/mpicxx \
                -DEIGEN_BUILD_TESTING=OFF ..
          if [ $? -ne 0 ]; then
             echo "ERROR: Eigen cmake configuration failed"

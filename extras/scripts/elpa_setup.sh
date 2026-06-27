@@ -314,7 +314,7 @@ if [[ -z "${ROCM_MODULE_NAME}" ]]; then
    fi
 fi
 
-if [ -f ${CACHE_FILES}/elpa-v${ELPA_VERSION}.tgz ]; then
+if [ -f "${CACHE_FILES}/elpa-v${ELPA_VERSION}.tgz" ]; then
    echo ""
    echo "============================"
    echo " Installing Cached ELPA v${ELPA_VERSION}"

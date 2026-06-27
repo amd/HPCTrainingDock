@@ -759,8 +759,25 @@ else
          TAU_BUILD_LLVM_OPT="LLVM_PLUGIN="
       fi
 
+      # ── -fPIC for ALL objects (HPE/Cray PE only) ─────────────────────
+      # Mirrors the FFTW fix: on an HPE/Cray PE the cc/CC wrappers drive the
+      # ROCm clang, whose ld.lld links executables -pie by default. TAU's
+      # static libs (libTAU*.a) and the helper/wrapper objects are otherwise
+      # compiled without -fPIC, so the final PIE link fails with "relocation
+      # R_X86_64_32 ... recompile with -fPIC". -useropt threads -fPIC onto
+      # every compile so every object (and the .a archives) is position-
+      # independent. Gate on Cray markers so a stock OpenMPI/gcc build (GNU
+      # ld, non-strict) is left exactly as-is.
+      TAU_PIC_OPT=""
+      if [ -n "${CRAYPE_VERSION:-}" ] || [ -n "${PE_ENV:-}" ] \
+         || [ -n "${CRAY_MPICH_VERSION:-}" ] || [ -n "${MPICH_DIR:-}" ] \
+         || [ -d /opt/cray/pe ]; then
+         TAU_PIC_OPT="-useropt=-fPIC"
+         echo "tau: HPE/Cray PE detected -> adding -fPIC via -useropt (PIE-default ROCm clang/ld.lld)"
+      fi
+
       # configure with: MPI OMPT OPENMP PDT ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -pdt=${PDT_PATH} -iowrapper
+      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT}
 
       # LLVM_PLUGIN= on every `${SUDO} ... make install` line below skips
       # plugins/llvm in the root install pass. Why: TAU's top-level
@@ -783,43 +800,43 @@ else
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: MPI PDT ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -pdt=${PDT_PATH} -iowrapper
+      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: OMPT OPENMP PDT ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -pdt=${PDT_PATH} -iowrapper
+      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: PDT ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -pdt=${PDT_PATH} -iowrapper
+      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -iowrapper
+      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -iowrapper ${TAU_PIC_OPT}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: OMPT OPENMP ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -iowrapper
+      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -iowrapper ${TAU_PIC_OPT}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: MPI ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -mpi -iowrapper
+      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -mpi -iowrapper ${TAU_PIC_OPT}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: MPI OMPT OPENMP ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -iowrapper
+      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -iowrapper ${TAU_PIC_OPT}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=

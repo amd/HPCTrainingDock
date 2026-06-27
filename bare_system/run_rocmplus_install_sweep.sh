@@ -55,31 +55,24 @@ if type module >/dev/null 2>&1; then
    # PrgEnv-* are load-order sensitive and do not survive a purge, after
    # which `craype` can no longer be reloaded (breaks every downstream
    # PrgEnv load). Since this env is exported into the sbatch job via
-   # --export=ALL, a broken-purged PE would propagate. So on Cray we shed
-   # only the APPLICATION modules (everything whose modulefile is NOT under
-   # /opt/cray) and keep the stock PE; the worker reaches the target PrgEnv
-   # via `module swap`. On Lmod/Tcl (non-Cray) a full purge is safe.
+   # --export=ALL, a broken-purged PE would propagate. `module reset` is
+   # the Cray-blessed clean-to-defaults: it restores the node's default
+   # module collection (stock PrgEnv-cray + craype + default rocm, craype
+   # intact) and drops any application/site modules loaded here -- so a
+   # stale site PrgEnv-{amd,cray}-new (e.g. an afar env left over from a
+   # prior submit) cannot leak into the sbatch job. On Lmod/Tcl (non-Cray)
+   # a full purge is safe.
    if [[ -d /opt/cray/pe || -n "${CRAYPE_VERSION:-}" || -n "${PE_ENV:-}" ]]; then
-      echo "sweep: Cray PE detected -> shedding application modules only (keeping stock Cray PE)."
-      IFS=':' read -ra _lm_arr <<< "${LOADEDMODULES:-}"
-      IFS=':' read -ra _lf_arr <<< "${_LMFILES_:-}"
-      for (( _i=${#_lm_arr[@]}-1; _i>=0; _i-- )); do
-         _lm="${_lm_arr[_i]:-}"
-         [[ -z "${_lm}" ]] && continue
-         _lf="${_lf_arr[_i]:-}"
-         case "${_lm}" in PrgEnv-*) continue ;; esac
-         case "${_lf}" in */opt/cray/*) continue ;; esac
-         module unload "${_lm}" 2>/dev/null || true
-      done
-      unset _lm_arr _lf_arr _lm _lf _i
+      echo "sweep: Cray PE detected -> 'module reset' to system defaults (purge wedges craype)."
+      module reset 2>/dev/null || true
    else
       # --force is Lmod-only (tolerates modulefiles removed from disk after
       # load); Tcl modulecmd rejects it, so fall back to plain purge.
       module --force purge 2>/dev/null || module purge 2>/dev/null || true
    fi
-   echo "sweep: module shed done; LOADEDMODULES='${LOADEDMODULES:-<empty>}'"
+   echo "sweep: module reset/purge done; LOADEDMODULES='${LOADEDMODULES:-<empty>}'"
 else
-   echo "sweep: WARNING no module system found (tried Lmod + Cray/Tcl env-modules); skipping module shed -- inherited modules may leak into sbatch jobs" >&2
+   echo "sweep: WARNING no module system found (tried Lmod + Cray/Tcl env-modules); skipping module reset -- inherited modules may leak into sbatch jobs" >&2
 fi
 
 : ${PARTITION:="sh5_cpx_admin_long"}

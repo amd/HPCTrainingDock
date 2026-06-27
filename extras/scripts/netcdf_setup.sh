@@ -1297,9 +1297,19 @@ else
          sed -i ''"${LINE}"'i set(HAVE_DEF_VAR_SZIP TRUE)' CMakeLists.txt
 
          mkdir build && cd build
+         # -DCMAKE_C_COMPILER=${C_COMPILER}: netcdf-fortran's project() also
+         # enables C, and without pinning it cmake auto-detects the first
+         # `cc` on PATH. On a Cray PE that is the craype `cc` wrapper, which
+         # aborts the compiler check with "Unable to determine compiler
+         # version ... CRAY_AMD_COMPILER_VERSION is defined" -- that var is
+         # never set by the from-source PrgEnv-amd-new (it loads its own
+         # ROCm, not the stock Cray `amd` compiler module). netcdf-c above
+         # already pins ${C_COMPILER} and builds clean; mirror it here so
+         # netcdf-fortran bypasses the craype wrapper too (slurm 8143).
          cmake -DCMAKE_INSTALL_PREFIX=${NETCDF_F_PATH} \
    	       -DCMAKE_INSTALL_LIBDIR=lib \
    	       -DENABLE_TESTS=OFF -DBUILD_EXAMPLES=OFF \
+   	       -DCMAKE_C_COMPILER=${C_COMPILER} \
    	       -DCMAKE_Fortran_COMPILER=$F_COMPILER ..
 
          cmake --build . -j ${MAKE_JOBS}

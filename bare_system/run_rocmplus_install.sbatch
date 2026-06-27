@@ -324,15 +324,21 @@ export MODULEPATH="${MODULEPATH:-/shared/apps/modules/ubuntu/lmodfiles/base}"
 #     sensitive and do NOT survive a purge -- afterwards even the node's
 #     default PrgEnv-cray can no longer re-resolve `craype` ("Conflicting
 #     PrgEnv-* is loading" / "requirement craype is not loaded"), which
-#     then fails EVERY PrgEnv load below (observed on the MI300A RHEL9
-#     nodes: a purged shell could not reload craype at all). Instead we
-#     leave the stock Cray PE intact and unload only the APPLICATION
-#     modules -- everything whose modulefile is NOT under /opt/cray (the
-#     inherited stock rocm + any openmpi/pytorch/magma/openblas/... a
-#     submitter had loaded). PrgEnv-* is kept on purpose: it is the swap
-#     source for PRGENV_MODULE below (these PrgEnv-{amd,cray}-new modules
-#     `conflict PrgEnv-cray`, so they must be SWAPPED in, not loaded onto
-#     a still-loaded default PrgEnv).
+#     then fails EVERY PrgEnv load below (observed wedging the MI300A
+#     RHEL9 nodes: a purged shell could not reload craype at all).
+#     `module reset` is the Cray-blessed equivalent: it restores the
+#     node's DEFAULT module collection (stock PrgEnv-cray + craype + the
+#     default rocm) with craype intact, while DROPPING any application /
+#     site modules a submitter carried in -- including a stale site
+#     PrgEnv-{amd,cray}-new that would otherwise leak its toolchain/MPI
+#     into this job (the afar-into-therock contamination seen in slurm
+#     8142). We then drop the reset-restored default rocm so the explicit
+#     `module load rocm/${ROCM_VERSION}` below does not hit the rocm-vs-
+#     rocm `conflict`, and the PrgEnv swap below enters from stock
+#     PrgEnv-cray. NB: `module reset` restores the loaded SET but does not
+#     undo `module use` MODULEPATH prepends -- harmless here because the
+#     PrgEnv-*-new modulefile prepends its own version-matched tree ahead
+#     of any lingering entries.
 #
 #   * Lmod / classic Tcl (non-Cray): a full purge is safe and simplest.
 #     --force tolerates modulefiles whose .lua was removed from disk
@@ -342,7 +348,7 @@ export MODULEPATH="${MODULEPATH:-/shared/apps/modules/ubuntu/lmodfiles/base}"
 # This worker-side shed is still INCOMPLETE for Lmod because the
 # __LMOD_REF_COUNT_* shell vars are not propagated via --export=ALL, so
 # it cannot fully reverse PATH/LD_LIBRARY_PATH/MPICC additions made
-# submitter-side -- but the sweep wrapper now does the matching shed
+# submitter-side -- but the sweep wrapper now does the matching reset
 # before sbatch, so this is belt-and-suspenders.
 #
 # History: slurm 8385 (2026-05-05) failed because the submitter had
@@ -354,21 +360,15 @@ if [[ -d /opt/cray/pe || -n "${CRAYPE_VERSION:-}" || -n "${PE_ENV:-}" ]]; then
    _is_cray_pe=1
 fi
 if [[ "${_is_cray_pe}" == 1 ]]; then
-   echo "Cray PE detected: NOT purging; shedding application modules only (keeping stock Cray PE for swap)."
-   # LOADEDMODULES and _LMFILES_ are parallel ':'-lists in Tmod. Unload
-   # in reverse (dependents before prereqs); keep anything under /opt/cray
-   # and keep PrgEnv-* (the swap source for PRGENV_MODULE below).
-   IFS=':' read -ra _lm_arr <<< "${LOADEDMODULES:-}"
-   IFS=':' read -ra _lf_arr <<< "${_LMFILES_:-}"
-   for (( _i=${#_lm_arr[@]}-1; _i>=0; _i-- )); do
-      _lm="${_lm_arr[_i]:-}"
-      [[ -z "${_lm}" ]] && continue
-      _lf="${_lf_arr[_i]:-}"
-      case "${_lm}" in PrgEnv-*) continue ;; esac
-      case "${_lf}" in */opt/cray/*) continue ;; esac
-      module unload "${_lm}" 2>/dev/null || true
+   echo "Cray PE detected: 'module reset' to system defaults (purge wedges craype on these nodes)."
+   module reset 2>/dev/null || true
+   # reset restores the DEFAULT rocm (e.g. rocm/7.0.3); drop it by exact
+   # loaded name so the explicit `module load rocm/${ROCM_VERSION}` below
+   # does not collide with the rocm-vs-rocm conflict.
+   for _lm in ${LOADEDMODULES//:/ }; do
+      case "${_lm}" in rocm/*) module unload "${_lm}" 2>/dev/null || true ;; esac
    done
-   unset _lm_arr _lf_arr _lm _lf _i
+   unset _lm
 else
    module --force purge 2>/dev/null || module purge 2>/dev/null || true
 fi
