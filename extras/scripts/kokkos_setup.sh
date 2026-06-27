@@ -631,6 +631,44 @@ else
    fi
    unset _leaf_dir
 
+   # A consumer satisfies the ROCm dependency with either the local TheRock
+   # real module (rocm-new/<ver>) or its alias (rocm/<ver>): PrgEnv-amd-new
+   # loads rocm-new/<ver> directly (NOT rocm/<ver>), while a bare
+   # `module load rocm/<ver>` pulls it in under the alias name. A plain
+   # `prereq rocm/<ver>` therefore FAILS under PrgEnv-amd-new (only
+   # rocm-new/<ver> is loaded) -- which is why the kokkos APU test, run on a
+   # Cray under PrgEnv-amd-new, could not `module load kokkos` (slurm: kokkos
+   # ERROR:151 prereq rocm/7.2.4 not satisfied). Tcl `prereq` with several
+   # names is satisfied if ANY is loaded; Lmod's equivalent is prereq_any().
+   # AAC7 gate: rocm-new is only a real modulefile on a TheRock /
+   # PrgEnv-amd-new site (AAC7); on a stock site (e.g. AAC6) only rocm/<ver>
+   # exists, so widen only when a rocm-new modulefile is discoverable on
+   # MODULEPATH. Mirrors hipifly/hdf5/petsc.
+   rocm_new_available() {
+      local _d _OIFS="${IFS}"; IFS=":"
+      for _d in ${MODULEPATH:-}; do
+         if [ -d "${_d}/rocm-new" ]; then IFS="${_OIFS}"; return 0; fi
+      done
+      IFS="${_OIFS}"; return 1
+   }
+   _RPV="${ROCM_MODULE_NAME##*/}"
+   case "${ROCM_MODULE_NAME}" in
+      rocm/*|rocm-new/*)
+         if rocm_new_available; then
+            ROCM_PREREQ_TCL="rocm-new/${_RPV} rocm/${_RPV}"
+            ROCM_PREREQ_LUA="prereq_any(\"rocm-new/${_RPV}\", \"rocm/${_RPV}\")"
+         else
+            ROCM_PREREQ_TCL="rocm/${_RPV}"
+            ROCM_PREREQ_LUA="prereq(\"rocm/${_RPV}\")"
+         fi
+         ;;
+      *)
+         ROCM_PREREQ_TCL="${ROCM_MODULE_NAME}"
+         ROCM_PREREQ_LUA="prereq(\"${ROCM_MODULE_NAME}\")"
+         ;;
+   esac
+   unset _RPV
+
    # The - option suppresses tabs.
    # LD_LIBRARY_PATH is now required because we build BUILD_SHARED_LIBS=ON
    # (libkokkoscore.so etc).  Harmless on a static-only install (LD_LIBRARY_PATH
@@ -641,7 +679,7 @@ else
 	whatis("Kokkos version ${KOKKOS_VERSION} - Performance Portability Language")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
-	prereq("${ROCM_MODULE_NAME}")
+	${ROCM_PREREQ_LUA}
 	prepend_path("PATH","${KOKKOS_PATH}")
 	prepend_path("LD_LIBRARY_PATH","${KOKKOS_PATH}/${KOKKOS_LIBDIR}")
 	setenv("Kokkos_ROOT","${KOKKOS_PATH}")
@@ -654,7 +692,7 @@ else
 	module-whatis "Kokkos version ${KOKKOS_VERSION} - Performance Portability Language"
 	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
 
-	prereq ${ROCM_MODULE_NAME}
+	prereq ${ROCM_PREREQ_TCL}
 	prepend-path PATH "${KOKKOS_PATH}"
 	prepend-path LD_LIBRARY_PATH "${KOKKOS_PATH}/${KOKKOS_LIBDIR}"
 	setenv Kokkos_ROOT "${KOKKOS_PATH}"

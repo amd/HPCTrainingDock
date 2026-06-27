@@ -143,7 +143,7 @@ SITE_CLI=0
 : ${NETCDF_SRC_STAGE_DIR:="/shareddata/src"}
 : ${PYTHON_VERSION:="12"} # python3 minor release
 : ${USE_MAKEFILE:="0"}
-: ${QUICK_INSTALLS:="0"}     # 1 = skip packages whose wall is >= 20 min (long-pole gate) PLUS the explicit always-skip set likwid + mdb (see QUICK_INSTALLS_PKGS below)
+: ${QUICK_INSTALLS:="0"}     # 1 = skip packages whose wall is >= 20 min (long-pole gate) PLUS the explicit always-skip set intellikit (see QUICK_INSTALLS_PKGS below)
 : ${REPLACE_EXISTING:="0"}   # 1 = remove prior rocmplus-<v> install + module dirs first
 : ${KEEP_FAILED_INSTALLS:="0"}  # 1 = keep partial install dirs/modulefiles when a package fails (for post-mortem)
 # SKIP_PATCHES: operator opt-out for the rocm_patches.sh step (line ~1651
@@ -227,7 +227,7 @@ usage()
    echo "  --install-rocprof-compute-from-source [0 or 1]:  default is $INSTALL_ROCPROF_COMPUTE_FROM_SOURCE (false)"
    echo "  --install-rocprof-sys-from-source [0 or 1]:  default is $INSTALL_ROCPROF_SYS_FROM_SOURCE (false)"
    echo "  --use-makefile [0 or 1]:  default is 0 (false)"
-   echo "  --quick-installs [0 or 1]:  skip packages whose wall >= 20 min (measured from job 8065 sweep): pytorch (91m), tensorflow (70m), jax (34m, when policy gate allows). Also skips ftorch (transitive: needs pytorch), julia (dormant: no install wired), and likwid + mdb + intellikit (explicit always-skip in quick mode regardless of wall, e.g. so per-tool iteration does not retrigger their builds and their occasional flakiness does not block the long-pole iteration loop). Threshold raised from 15 -> 20 min after job 8065 audit moved petsc (17m) and scorep (17m) under the cutoff. Default $QUICK_INSTALLS"
+   echo "  --quick-installs [0 or 1]:  skip packages whose wall >= 20 min (measured from job 8065 sweep): pytorch (91m), tensorflow (70m), jax (34m, when policy gate allows). Also skips ftorch (transitive: needs pytorch), julia (dormant: no install wired), and intellikit (explicit always-skip in quick mode regardless of wall, e.g. so per-tool iteration does not retrigger its build and its network-heavy monorepo clone does not block the long-pole iteration loop). likwid + mdb are now BUILT in quick mode (sub-minute builds, useful by default). Threshold raised from 15 -> 20 min after job 8065 audit moved petsc (17m) and scorep (17m) under the cutoff. Default $QUICK_INSTALLS"
    echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf the versioned subdir under \${TOP_INSTALL_PATH} (the version itself lives in the leaf script). Default $REPLACE_EXISTING"
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
    echo "  --skip-patches [0 or 1]:  operator opt-out for the rocm-patches step (rocm/scripts/rocm_patches.sh). Default 0 runs the step; for most ROCm versions the patches script self-no-ops via NOOP_RC=43 so the cost is nil. Set to 1 when targeting a tree where the patches overlay would mismatch the runtime (e.g. 7.2.0 / 7.2.1 patches built for a newer userland and running on Ubuntu 22.04 nodes). When skipped, the per-package summary records 'rocm-patches(--skip-patches)' in the DESELECTED bucket. Default $SKIP_PATCHES"
@@ -693,14 +693,16 @@ declare -A DESELECTED_BY=()
 # sides of the line.
 #
 # Plus an explicit always-skip set (packages added to QUICK_INSTALLS_PKGS
-# regardless of wall time): likwid + mdb + intellikit. likwid and mdb are
-# sub-minute builds in practice (see the wall-time table below for the most
-# recent sample); intellikit is heavier (~7 min: clones the monorepo, builds
-# the C++ tools, pulls many PyPI deps) and network-dependent. None are here
-# for the wall-time reason (intellikit is under the 20-min cutoff) -- they are
-# an operator opt-out for the quick-installs iteration loop. Operators who do
-# want them in a quick run can pass --packages "... likwid mdb intellikit ..."
-# explicitly: --packages always wins over --quick-installs.
+# regardless of wall time): intellikit. It is heavier (~7 min: clones the
+# monorepo, builds the C++ tools, pulls many PyPI deps) and network-dependent;
+# it is here as an operator opt-out for the quick-installs iteration loop, NOT
+# for the wall-time reason (it is under the 20-min cutoff). Operators who do
+# want it in a quick run can pass --packages "... intellikit ..." explicitly:
+# --packages always wins over --quick-installs.
+#
+# NOTE: likwid + mdb were previously in this always-skip set but are now BUILT
+# under --quick-installs (they are sub-minute builds and useful by default);
+# only intellikit remains an explicit quick-mode opt-out.
 #
 # Wall-time data sources, newest first (delta is mtime of the per-package
 # log file vs. the previous one, in a full --quick-installs 0 run):
@@ -726,12 +728,10 @@ declare -A DESELECTED_BY=()
 #   mpi4py        1:41         1:41         1:37        BUILD (< 20 min)
 #   kokkos        1:31         0:30        n/a          BUILD (< 20 min)
 #   hip-python    1:17         1:20        n/a          BUILD (< 20 min)
-#   likwid       <1m          <1m          n/a          SKIP  (operator opt-out, not wall:
-#                                                              explicit always-skip in
-#                                                              QUICK_INSTALLS_PKGS)
-#   mdb          <1m          <1m          n/a          SKIP  (operator opt-out, not wall:
-#                                                              explicit always-skip in
-#                                                              QUICK_INSTALLS_PKGS)
+#   likwid       <1m          <1m          n/a          BUILD (< 20 min; now built in
+#                                                              quick mode too)
+#   mdb          <1m          <1m          n/a          BUILD (< 20 min; now built in
+#                                                              quick mode too)
 #   intellikit   ~7m          n/a          n/a          SKIP  (operator opt-out, not wall:
 #                                                              explicit always-skip in
 #                                                              QUICK_INSTALLS_PKGS;
@@ -756,7 +756,7 @@ declare -A DESELECTED_BY=()
 # package by exporting BUILD_<name>=1 between this point and sub-script
 # invocation; we don't expose per-package CLI flags here on purpose.
 QUICK_INSTALLS_PKGS=( BUILD_PYTORCH BUILD_TENSORFLOW BUILD_JAX BUILD_FTORCH \
-                     BUILD_JULIA BUILD_LIKWID BUILD_MDB BUILD_INTELLIKIT )
+                     BUILD_JULIA BUILD_INTELLIKIT )
 QUICK_INSTALLS_THRESHOLD_MIN=20
 if [[ "${QUICK_INSTALLS}" == "1" ]]; then
    echo ""
@@ -783,8 +783,6 @@ if [[ "${QUICK_INSTALLS}" == "1" ]]; then
                            # one-line marker for both, not the verbose
                            # 3-line "skipped" banner for ftorch_amdflang.
                            DESELECTED_BY[ftorch_amdflang]="quick-installs" ;;
-         BUILD_LIKWID)     DESELECTED_BY[likwid]="quick-installs" ;;
-         BUILD_MDB)        DESELECTED_BY[mdb]="quick-installs" ;;
          BUILD_INTELLIKIT) DESELECTED_BY[intellikit]="quick-installs" ;;
          BUILD_JULIA)      ;;  # dormant: no run_and_log call exists
       esac

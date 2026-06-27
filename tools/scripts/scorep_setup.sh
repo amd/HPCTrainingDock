@@ -716,13 +716,43 @@ else
    fi
    unset _leaf_dir
 
+   # ROCm prereq: accept rocm-new/<ver> OR rocm/<ver>. Under PrgEnv-amd-new
+   # the loaded ROCm module is rocm-new/<ver>, not rocm/<ver>, so a plain
+   # `prereq rocm/<ver>` fails there. Widen only when a rocm-new modulefile
+   # is discoverable on MODULEPATH (AAC7 / TheRock site); stock sites (AAC6)
+   # keep the plain rocm/<ver> prereq. Mirrors hipifly/hdf5/petsc.
+   rocm_new_available() {
+      local _d _OIFS="${IFS}"; IFS=":"
+      for _d in ${MODULEPATH:-}; do
+         if [ -d "${_d}/rocm-new" ]; then IFS="${_OIFS}"; return 0; fi
+      done
+      IFS="${_OIFS}"; return 1
+   }
+   _RPV="${ROCM_MODULE_NAME##*/}"
+   case "${ROCM_MODULE_NAME}" in
+      rocm/*|rocm-new/*)
+         if rocm_new_available; then
+            ROCM_PREREQ_TCL="rocm-new/${_RPV} rocm/${_RPV}"
+            ROCM_PREREQ_LUA="prereq_any(\"rocm-new/${_RPV}\", \"rocm/${_RPV}\")"
+         else
+            ROCM_PREREQ_TCL="rocm/${_RPV}"
+            ROCM_PREREQ_LUA="prereq(\"rocm/${_RPV}\")"
+         fi
+         ;;
+      *)
+         ROCM_PREREQ_TCL="${ROCM_MODULE_NAME}"
+         ROCM_PREREQ_LUA="prereq(\"${ROCM_MODULE_NAME}\")"
+         ;;
+   esac
+   unset _RPV
+
    # The - option suppresses tabs
    if [ "${MODFLAVOR}" = "lua" ]; then
       cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${SCOREP_VERSION}${MODEXT}
 	whatis(" Score-P Performance Analysis Tool ")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
-	prereq("${ROCM_MODULE_NAME}")
+	${ROCM_PREREQ_LUA}
 	prepend_path("PATH","${SCOREP_PATH}/bin")
 	prepend_path("PATH","${PDT_PATH}/bin")
 	EOF
@@ -732,7 +762,7 @@ else
 	module-whatis " Score-P Performance Analysis Tool "
 	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
 
-	prereq ${ROCM_MODULE_NAME}
+	prereq ${ROCM_PREREQ_TCL}
 	prepend-path PATH "${SCOREP_PATH}/bin"
 	prepend-path PATH "${PDT_PATH}/bin"
 	EOF

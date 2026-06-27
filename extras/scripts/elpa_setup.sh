@@ -671,6 +671,33 @@ if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
 fi
 unset _leaf_dir
 
+# ROCm prereq: accept rocm-new/<ver> OR rocm/<ver>. Under PrgEnv-amd-new the
+# loaded ROCm module is rocm-new/<ver>, not rocm/<ver>, so a plain
+# `prereq rocm/<ver>` fails there. Widen only when a rocm-new modulefile is
+# discoverable on MODULEPATH (AAC7 / TheRock site); stock sites (AAC6) keep the
+# plain rocm/<ver> prereq. Mirrors hipifly/hdf5/petsc.
+rocm_new_available() {
+   local _d _OIFS="${IFS}"; IFS=":"
+   for _d in ${MODULEPATH:-}; do
+      if [ -d "${_d}/rocm-new" ]; then IFS="${_OIFS}"; return 0; fi
+   done
+   IFS="${_OIFS}"; return 1
+}
+_RPV="${ROCM_MODULE_NAME##*/}"
+case "${ROCM_MODULE_NAME}" in
+   rocm/*|rocm-new/*)
+      if rocm_new_available; then
+         ROCM_PREREQ_LUA="prereq_any(\"rocm-new/${_RPV}\", \"rocm/${_RPV}\")"
+      else
+         ROCM_PREREQ_LUA="prereq(\"rocm/${_RPV}\")"
+      fi
+      ;;
+   *)
+      ROCM_PREREQ_LUA="prereq(\"${ROCM_MODULE_NAME}\")"
+      ;;
+esac
+unset _RPV
+
 # The - option suppresses tabs.
 #
 # We prereq() the rocm module and load() the petsc module. The petsc
@@ -689,7 +716,7 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${ELPA_VERSION}.lua
 
 	local base = "${INSTALL_PATH}"
 
-	prereq("${ROCM_MODULE_NAME}")
+	${ROCM_PREREQ_LUA}
 	load("${PETSC_MODULE}")
 	setenv("ELPA_PATH", base)
 	setenv("ELPA_DIR",  base)

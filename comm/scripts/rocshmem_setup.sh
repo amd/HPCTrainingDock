@@ -886,6 +886,36 @@ if [[ "${DRY_RUN}" == "0" ]]; then
       MODFLAVOR="tcl"
    fi
 
+   # ROCm prereq: accept rocm-new/<ver> OR rocm/<ver>. Under PrgEnv-amd-new
+   # the loaded ROCm module is rocm-new/<ver>, not rocm/<ver>, so a plain
+   # `prereq rocm/<ver>` fails there. Widen only when a rocm-new modulefile
+   # is discoverable on MODULEPATH (AAC7 / TheRock site); stock sites (AAC6)
+   # keep the plain rocm/<ver> prereq. Mirrors hipifly/hdf5/petsc.
+   rocm_new_available() {
+      local _d _OIFS="${IFS}"; IFS=":"
+      for _d in ${MODULEPATH:-}; do
+         if [ -d "${_d}/rocm-new" ]; then IFS="${_OIFS}"; return 0; fi
+      done
+      IFS="${_OIFS}"; return 1
+   }
+   _RPV="${ROCM_MODULE_NAME##*/}"
+   case "${ROCM_MODULE_NAME}" in
+      rocm/*|rocm-new/*)
+         if rocm_new_available; then
+            ROCM_PREREQ_TCL="rocm-new/${_RPV} rocm/${_RPV}"
+            ROCM_PREREQ_LUA="prereq_any(\"rocm-new/${_RPV}\", \"rocm/${_RPV}\")"
+         else
+            ROCM_PREREQ_TCL="rocm/${_RPV}"
+            ROCM_PREREQ_LUA="prereq(\"rocm/${_RPV}\")"
+         fi
+         ;;
+      *)
+         ROCM_PREREQ_TCL="${ROCM_MODULE_NAME}"
+         ROCM_PREREQ_LUA="prereq(\"${ROCM_MODULE_NAME}\")"
+         ;;
+   esac
+   unset _RPV
+
    # The - option suppresses leading tabs. For the RO backend we also load
    # the MPI module so the host-side reverse-offload runtime is on the
    # library/launch path at runtime.
@@ -907,7 +937,7 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPATH", pathJoin(base, "include"))
 	prepend_path("PATH", pathJoin(base, "bin"))
-	prereq("${ROCM_MODULE_NAME}")
+	${ROCM_PREREQ_LUA}
 EOF
    else
       cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULEFILE}
@@ -928,7 +958,7 @@ EOF
 	prepend-path CPLUS_INCLUDE_PATH \$base/include
 	prepend-path CPATH \$base/include
 	prepend-path PATH \$base/bin
-	prereq ${ROCM_MODULE_NAME}
+	prereq ${ROCM_PREREQ_TCL}
 EOF
    fi
 
