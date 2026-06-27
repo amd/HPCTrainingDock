@@ -27,19 +27,36 @@ set -uo pipefail
 #   (2) Once the submitter env is clean, every sbatch we launch from
 #       here propagates a clean env BY CONSTRUCTION -- no env-scrub
 #       gymnastics in the per-job script.
-# Source lmod.sh first because this script may be invoked as a fresh
-# bash process (./run_rocmplus_install_sweep.sh ...), in which case the
-# `module` shell function from the parent shell is NOT inherited.
-if [[ -r /etc/profile.d/lmod.sh ]]; then
-   # shellcheck disable=SC1091
-   source /etc/profile.d/lmod.sh
-   # --force tolerates modulefiles the submitter loaded but were since
-   # removed from disk (otherwise plain purge errors out and leaves the
-   # rest loaded).
+# Initialize a module system so we can purge inherited modules. This must
+# work on BOTH Lmod (AAC6 Ubuntu, /etc/profile.d/lmod.sh) AND classic Tcl
+# environment-modules -- in particular AAC7 (HPE/Cray) uses Cray PE "Tmod"
+# 3.2.x via /opt/cray/pe/modules (LMOD_DIR unset, MODULESHOME points there).
+# This script may be invoked as a fresh `./run_rocmplus_install_sweep.sh`
+# process, so the `module` function from the parent shell may not be
+# inherited; source whichever init exists. (Cray exports the `module`
+# function via `export -f`, so it is sometimes already defined -- in which
+# case we skip sourcing.)
+if ! type module >/dev/null 2>&1; then
+   for _minit in \
+         /etc/profile.d/lmod.sh \
+         "${MODULESHOME:+${MODULESHOME}/init/bash}" \
+         /opt/cray/pe/modules/*/init/bash \
+         /etc/profile.d/modules.sh \
+         /usr/share/lmod/lmod/init/profile \
+         /usr/share/Modules/init/bash; do
+      [[ -n "${_minit}" && -r "${_minit}" ]] || continue
+      # shellcheck disable=SC1090
+      source "${_minit}" && type module >/dev/null 2>&1 && { echo "sweep: sourced module init ${_minit}"; break; }
+   done
+   unset _minit
+fi
+if type module >/dev/null 2>&1; then
+   # --force is Lmod-only (tolerates modulefiles removed from disk after
+   # load); Tcl/Cray modulecmd rejects it, so fall back to plain purge.
    module --force purge 2>/dev/null || module purge 2>/dev/null || true
-   echo "sweep: module --force purge done; LOADEDMODULES='${LOADEDMODULES:-<empty>}'"
+   echo "sweep: module purge done; LOADEDMODULES='${LOADEDMODULES:-<empty>}'"
 else
-   echo "sweep: WARNING /etc/profile.d/lmod.sh not readable; skipping module purge -- inherited modules may leak into sbatch jobs" >&2
+   echo "sweep: WARNING no module system found (tried Lmod + Cray/Tcl env-modules); skipping module purge -- inherited modules may leak into sbatch jobs" >&2
 fi
 
 : ${PARTITION:="sh5_cpx_admin_long"}
@@ -120,6 +137,17 @@ fi
 : ${MAX_PARALLEL:=1}
 
 ROCM_VERSIONS_RAW=""
+# PROGRAM_ENVIRONMENTS_RAW: AAC7 (Cray) high-level interface, mirroring
+# run_rocm_build_sweep.sh. Space-/comma-separated Cray PrgEnv tokens of the
+# form <flavor>/<pe>-<rocm-modulefile-token>, e.g.
+#   PrgEnv-amd-new/8.7.0-7.2.3            -> rocmplus-7.2.3       (amd tree)
+#   PrgEnv-cray-new/8.7.0-7.2.3          -> rocmplus-cray-7.2.3  (cray tree)
+#   PrgEnv-amd-new/8.7.0-afar-23.2.1-7.13.0 -> rocmplus-afar-...  (amd tree)
+# Unlike the build sweep, flavors are NOT collapsed to a canonical token:
+# each (flavor, rocm) pair is a DISTINCT job writing a DISTINCT rocmplus
+# tree, so PrgEnv-amd-new and PrgEnv-cray-new for the same ROCm numeric
+# never clobber each other. Mutually exclusive with --rocm-versions.
+PROGRAM_ENVIRONMENTS_RAW=""
 # START_AFTER and START_AFTER_ANY: optional pre-wired dependencies for the
 # first wave (the first MAX_PARALLEL jobs in submission order):
 #   START_AFTER       single jobid, treated as afterany:JID
@@ -137,10 +165,33 @@ START_AFTER=""
 START_AFTER_ANY=""
 DRY_RUN=0
 
+# Outbound proxy for compute-node fetches. Leave EMPTY by default: the sbatch
+# worker auto-derives the compute node's own /etc/profile site proxy (AAC7
+# nodes egress through it; e.g. http://172.23.0.12:3128). Use --https-proxy/
+# --http-proxy/--proxy ONLY to override that auto-derivation.
+HTTPS_PROXY_URL="${HTTPS_PROXY_URL:-}"
+HTTP_PROXY_URL="${HTTP_PROXY_URL:-}"
+
 usage() {
    cat <<EOF
 Usage: $0 [opts]
-   --rocm-versions "v1 v2 ..."   space- or comma-separated list of ROCm modulefile tokens (REQUIRED).
+   --program-environments "p1 p2 ..."  AAC7 (Cray) high-level interface mirroring
+                                 run_rocm_build_sweep.sh. Space-/comma-separated Cray
+                                 PrgEnv tokens of the form <flavor>/<pe>-<rocm-token>:
+                                   PrgEnv-amd-new/8.7.0-7.2.3       -> rocmplus-7.2.3       (amd tree)
+                                   PrgEnv-cray-new/8.7.0-7.2.3      -> rocmplus-cray-7.2.3  (cray tree)
+                                   PrgEnv-amd-new/8.7.0-afar-23.2.1-7.13.0
+                                 <flavor> is one of PrgEnv-amd-new, PrgEnv-cray-new,
+                                 PrgEnv-amd-openmpi, PrgEnv-amd-openmpi-ucx; only
+                                 PrgEnv-cray-new maps to the separate rocmplus-cray-<v>
+                                 tree (all amd flavors share rocmplus-<v>). <rocm-token>
+                                 is the rocm modulefile token (same validation as
+                                 --rocm-versions). For the cray flavor the job loads
+                                 <flavor>/<pe> on the compute node so the MPI-linked
+                                 packages build against cray-mpich. Pair with --packages
+                                 to install a curated subset into the cray tree.
+                                 Mutually exclusive with --rocm-versions.
+   --rocm-versions "v1 v2 ..."   space- or comma-separated list of ROCm modulefile tokens (REQUIRED unless --program-environments is used).
                                  Accepts BOTH regular numeric (e.g. 7.2.1) AND release-candidate
                                  flavor (e.g. therock-23.2.0, afar-22.2.0, afar-7.0.5) tokens
                                  in the same list. Each token must resolve to an existing
@@ -162,10 +213,16 @@ Usage: $0 [opts]
                                      opt          -> /opt + /opt/modules                       (standard system install; default for fresh /opt dev machines once legacy defaults are removed)
                                      nfsapps      -> /nfsapps/opt + /nfsapps/modules           (NFS test tree; Ubuntu 24.04 builds)
                                      shared-apps  -> /shared/apps/ubuntu/opt + /shared/apps/modules/ubuntu/lmodfiles  (LIVE cluster tree; Ubuntu 22.04 -- writes are visible to all users immediately)
+                                     shareddata   -> /shareddata/opt + /shareddata/modules          (AAC7 Cray shared tree; mirrors run_rocm_build_sweep.sh)
                                    Absolute path form: any value starting with '/' is treated as a parent prefix, expanded to PREFIX/opt + PREFIX/modules.
                                      e.g. --site /nfsapps/ubuntu-22.04 -> /nfsapps/ubuntu-22.04/opt + /nfsapps/ubuntu-22.04/modules
                                      (useful for distro-segregated test trees that don't fit the named presets)
                                  Any explicit --top-* / --rocm-* flag overrides the corresponding preset value (so e.g. \`--site nfsapps --rocm-install-path /opt\` is valid).
+   --https-proxy URL             override the compute-node site proxy for HTTPS
+                                 (e.g. http://172.23.0.12:3128). Default: auto-derive
+                                 the compute node's own /etc/profile proxy in the sbatch.
+   --http-proxy URL              override the compute-node site proxy for HTTP
+      --proxy URL                   shorthand: set BOTH --https-proxy and --http-proxy
    --python-version N            python3 minor release (default: distro-native -- 10 on Ubuntu 22.04, 12 on 24.04)
    --quick-installs 0|1          skip long-pole packages -- pytorch / tensorflow / jax / ftorch / julia
                                  (wall >= 20 min) PLUS the explicit always-skip set likwid + mdb
@@ -241,6 +298,7 @@ EOF
 while [[ $# -gt 0 ]]; do
    case "${1}" in
       --rocm-versions)     shift; ROCM_VERSIONS_RAW=${1} ;;
+      --program-environments) shift; PROGRAM_ENVIRONMENTS_RAW=${1} ;;
       --partition)         shift; PARTITION=${1} ;;
       --time)              shift; TIME_PER_JOB=${1} ;;
       --amdgpu-gfxmodel)   shift; AMDGPU_GFXMODEL=${1} ;;
@@ -249,6 +307,9 @@ while [[ $# -gt 0 ]]; do
       --rocm-install-path) shift; ROCM_INSTALLPATH=${1} ;;
       --rocm-path)         shift; ROCM_PATH=${1} ;;
       --site)              shift; SITE=${1} ;;
+      --https-proxy)       shift; HTTPS_PROXY_URL=${1} ;;
+      --http-proxy)        shift; HTTP_PROXY_URL=${1} ;;
+      --proxy)             shift; HTTPS_PROXY_URL=${1}; HTTP_PROXY_URL=${1} ;;
       --python-version)    shift; PYTHON_VERSION=${1} ;;
       --quick-installs)    shift; QUICK_INSTALLS=${1} ;;
       --replace-existing)  shift; REPLACE_EXISTING=${1} ;;
@@ -266,7 +327,14 @@ while [[ $# -gt 0 ]]; do
    shift
 done
 
-[[ -z "${ROCM_VERSIONS_RAW}" ]] && { echo "ERROR: --rocm-versions is required" >&2; usage; }
+if [[ -n "${PROGRAM_ENVIRONMENTS_RAW}" && -n "${ROCM_VERSIONS_RAW}" ]]; then
+   echo "ERROR: --program-environments and --rocm-versions are mutually exclusive" >&2
+   usage
+fi
+if [[ -z "${PROGRAM_ENVIRONMENTS_RAW}" && -z "${ROCM_VERSIONS_RAW}" ]]; then
+   echo "ERROR: one of --rocm-versions or --program-environments is required" >&2
+   usage
+fi
 
 # ── --site preset application ─────────────────────────────────────────
 # Same resolution shape as main_setup.sh (see "Path resolution" block
@@ -288,6 +356,12 @@ if [[ -n "${SITE}" ]]; then
          _SITE_TOP_INSTALL="/shared/apps/ubuntu/opt"
          _SITE_TOP_MODULE="/shared/apps/modules/ubuntu/lmodfiles"
          ;;
+      shareddata)
+         # AAC7 (HPE/Cray) shared tree -- mirrors run_rocm_build_sweep.sh
+         # so the rocmplus install lands on the same tree the SDK build did.
+         _SITE_TOP_INSTALL="/shareddata/opt"
+         _SITE_TOP_MODULE="/shareddata/modules"
+         ;;
       /*)
          # Absolute-path PREFIX form (e.g. --site /nfsapps/ubuntu-22.04):
          # symmetric layout PREFIX/opt + PREFIX/modules. See the matching
@@ -298,7 +372,7 @@ if [[ -n "${SITE}" ]]; then
          unset _SITE_PREFIX
          ;;
       *)
-         echo "ERROR: --site must be a named preset (opt | nfsapps | shared-apps) or an absolute path starting with '/' (got '${SITE}')" >&2
+         echo "ERROR: --site must be a named preset (opt | nfsapps | shared-apps | shareddata) or an absolute path starting with '/' (got '${SITE}')" >&2
          exit 1
          ;;
    esac
@@ -331,11 +405,56 @@ if ! [[ "${MAX_PARALLEL}" =~ ^[1-9][0-9]*$ ]]; then
    exit 1
 fi
 
-# Normalize version list.
-ROCM_VERSIONS_NORM="${ROCM_VERSIONS_RAW//,/ }"
-read -r -a VERSIONS_ARR <<< "${ROCM_VERSIONS_NORM}"
+# ── Build the per-job spec arrays: VERSIONS_ARR (rocm modulefile token),
+#    FLAVORS_ARR (amd|cray), PES_ARR (stock PrgEnv version, or empty) ──
+# Two input modes feed the same three parallel arrays so the submission
+# loop below is mode-agnostic:
+#   * legacy --rocm-versions : every job is flavor=amd, pe="" (byte-identical
+#                              to the prior single-array behavior).
+#   * --program-environments : each <flavor>/<pe>-<token> yields one job;
+#                              PrgEnv-cray-new -> flavor=cray, everything
+#                              else -> flavor=amd.
+VERSIONS_ARR=()
+FLAVORS_ARR=()
+PES_ARR=()
+if [[ -n "${PROGRAM_ENVIRONMENTS_RAW}" ]]; then
+   PROGRAM_ENVIRONMENTS_NORM="${PROGRAM_ENVIRONMENTS_RAW//,/ }"
+   read -r -a _PE_TOKENS <<< "${PROGRAM_ENVIRONMENTS_NORM}"
+   (( ${#_PE_TOKENS[@]} == 0 )) && { echo "ERROR: no PrgEnv tokens parsed from '${PROGRAM_ENVIRONMENTS_RAW}'" >&2; exit 1; }
+   for _pe_tok in "${_PE_TOKENS[@]}"; do
+      # Split <flavor>/<pe>-<rocm-token>.
+      if [[ "${_pe_tok}" != */* ]]; then
+         echo "ERROR: PrgEnv token '${_pe_tok}' is not of the form <flavor>/<pe>-<rocm-token>" >&2
+         exit 1
+      fi
+      _flavor="${_pe_tok%%/*}"
+      _rest="${_pe_tok#*/}"
+      if [[ "${_rest}" != *-* ]]; then
+         echo "ERROR: PrgEnv token '${_pe_tok}' has no <pe>-<rocm-token> after the flavor" >&2
+         exit 1
+      fi
+      _pe="${_rest%%-*}"        # stock PrgEnv version, e.g. 8.7.0
+      _rocm_token="${_rest#*-}" # rocm modulefile token, e.g. 7.2.3 or afar-23.2.1-7.13.0
+      case "${_flavor}" in
+         PrgEnv-cray-new)                                  _rpflavor="cray" ;;
+         PrgEnv-amd-new|PrgEnv-amd-openmpi|PrgEnv-amd-openmpi-ucx) _rpflavor="amd" ;;
+         *) echo "ERROR: unknown PrgEnv flavor '${_flavor}' in token '${_pe_tok}'" >&2
+            echo "       expected one of PrgEnv-amd-new, PrgEnv-cray-new, PrgEnv-amd-openmpi, PrgEnv-amd-openmpi-ucx" >&2
+            exit 1 ;;
+      esac
+      VERSIONS_ARR+=("${_rocm_token}")
+      FLAVORS_ARR+=("${_rpflavor}")
+      PES_ARR+=("${_pe}")
+   done
+   unset _PE_TOKENS _pe_tok _flavor _rest _pe _rocm_token _rpflavor
+else
+   ROCM_VERSIONS_NORM="${ROCM_VERSIONS_RAW//,/ }"
+   read -r -a VERSIONS_ARR <<< "${ROCM_VERSIONS_NORM}"
+   for _ in "${VERSIONS_ARR[@]}"; do FLAVORS_ARR+=("amd"); PES_ARR+=(""); done
+   unset _
+fi
 N=${#VERSIONS_ARR[@]}
-(( N == 0 )) && { echo "ERROR: no ROCm versions parsed from '${ROCM_VERSIONS_RAW}'" >&2; exit 1; }
+(( N == 0 )) && { echo "ERROR: no ROCm versions parsed" >&2; exit 1; }
 
 # Pre-flight: every version must have a rocm modulefile in EITHER the
 # live system tree OR the operator-chosen ${TOP_MODULE_PATH}/base/rocm
@@ -425,6 +544,38 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SBATCH_FILE="${REPO_ROOT}/bare_system/run_rocmplus_install.sbatch"
 [[ -f "${SBATCH_FILE}" ]] || { echo "ERROR: ${SBATCH_FILE} not found" >&2; exit 1; }
 
+# ---------------- Partition validation / fallback --------------------
+# The built-in default ($PARTITION) is an AAC6 partition (sh5_cpx_admin_long)
+# that does not exist on AAC7. If sinfo is available and the requested
+# partition is not one of this cluster's partitions, fall back to the
+# cluster's DEFAULT partition (the one sinfo marks with a trailing '*')
+# so e.g. `--site shareddata` runs on AAC7 don't have to spell out
+# --partition. An explicit, valid --partition is always honoured; if it is
+# invalid we still fall back (and say so) rather than failing at sbatch.
+if command -v sinfo >/dev/null 2>&1; then
+   _parts="$(sinfo -h -o '%P' 2>/dev/null)"
+   if [[ -n "${_parts}" ]]; then
+      # Names from sinfo may carry a trailing '*' on the default partition.
+      _part_clean="$(printf '%s\n' "${_parts}" | sed 's/\*$//')"
+      if ! printf '%s\n' "${_part_clean}" | grep -qxF "${PARTITION}"; then
+         _default_part="$(printf '%s\n' "${_parts}" | sed -n 's/\*$//p' | head -n1)"
+         if [[ -n "${_default_part}" ]]; then
+            echo "NOTE: partition '${PARTITION}' not found on this cluster;" >&2
+            echo "      falling back to the default partition '${_default_part}'." >&2
+            echo "      (Available: $(printf '%s ' ${_part_clean}))" >&2
+            PARTITION="${_default_part}"
+         else
+            echo "WARNING: partition '${PARTITION}' not found and no default" >&2
+            echo "         partition is marked on this cluster. Available:" >&2
+            echo "         $(printf '%s ' ${_part_clean})" >&2
+            echo "         sbatch will likely reject this; pass --partition." >&2
+         fi
+      fi
+      unset _part_clean _default_part
+   fi
+   unset _parts
+fi
+
 cat <<EOF
 ==================================================================
  ROCm-plus install sweep submitter
@@ -432,12 +583,16 @@ cat <<EOF
  Partition:         ${PARTITION}
  Time per version:  ${TIME_PER_JOB}
  Versions (${N}):     ${VERSIONS_ARR[*]}   (mixed numeric + RC-flavor tokens OK; RC trees install to rocmplus-<prefix>-<numeric>/)
+ Flavors:           ${FLAVORS_ARR[*]}   (amd -> rocmplus-<v>; cray -> rocmplus-cray-<v>)$([[ -n "${PROGRAM_ENVIRONMENTS_RAW}" ]] && echo "
+ ProgEnv tokens:    ${PROGRAM_ENVIRONMENTS_RAW}")
  GFX:               ${AMDGPU_GFXMODEL}
  Site preset:       ${SITE_SUMMARY}
  TOP_INSTALL_PATH:  ${TOP_INSTALL_PATH}
  TOP_MODULE_PATH:   ${TOP_MODULE_PATH}
  ROCM_INSTALLPATH:  ${ROCM_INSTALLPATH}
  ROCM_PATH:         ${ROCM_PATH:-<auto: module show rocm/<v> on compute node>}
+ HTTPS proxy:       ${HTTPS_PROXY_URL:-<auto: compute-node site proxy>}
+ HTTP proxy:        ${HTTP_PROXY_URL:-<auto: compute-node site proxy>}
  PYTHON_VERSION:    ${PYTHON_VERSION:+3.}${PYTHON_VERSION:-<auto: distro-native on compute node>}
  QUICK_INSTALLS:    ${QUICK_INSTALLS}
  REPLACE_EXISTING:  ${REPLACE_EXISTING}
@@ -494,7 +649,25 @@ JOBIDS_ONLY=()
 SUBMITTED=()
 i=0
 for v in "${VERSIONS_ARR[@]}"; do
+   # Per-job programming-environment flavor (amd|cray) + stock PrgEnv version.
+   # FLAVORS_ARR / PES_ARR are index-aligned with VERSIONS_ARR (built above).
+   _flavor="${FLAVORS_ARR[i]}"
+   _pe="${PES_ARR[i]}"
+   # PRGENV_MODULE is only set for the cray flavor: the job loads it on the
+   # compute node so cray-mpich ($MPICH_DIR) is live and main_setup.sh builds
+   # the MPI-linked packages against it. amd flavor keeps legacy behavior
+   # (no PrgEnv load; mpich-wrappers come from the SDK tree).
+   _prgenv_module=""
+   [[ "${_flavor}" == "cray" && -n "${_pe}" ]] && _prgenv_module="PrgEnv-cray-new/${_pe}"
+   # Job/log label: byte-identical "<v>" for amd (legacy), "cray-<v>" for cray
+   # so the two flavors of the same ROCm numeric don't collide in slurm
+   # job names or slurm-<jobid>-rocmplus-<label>.{out,err} log filenames.
+   _jlabel="${v}"
+   [[ "${_flavor}" == "cray" ]] && _jlabel="cray-${v}"
+
    EXPORT_VARS="ALL,ROCM_VERSION=${v}"
+   EXPORT_VARS+=",ROCMPLUS_FLAVOR=${_flavor}"
+   [[ -n "${_prgenv_module}" ]] && EXPORT_VARS+=",PRGENV_MODULE=${_prgenv_module}"
    EXPORT_VARS+=",AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL}"
    EXPORT_VARS+=",TOP_INSTALL_PATH=${TOP_INSTALL_PATH}"
    EXPORT_VARS+=",TOP_MODULE_PATH=${TOP_MODULE_PATH}"
@@ -504,6 +677,8 @@ for v in "${VERSIONS_ARR[@]}"; do
    # auto-derive fire for SITE/ROCM_PATH, and netcdf_setup.sh's leaf
    # default fire for PNETCDF_VERSION).
    [[ -n "${SITE}"            ]] && EXPORT_VARS+=",SITE=${SITE}"
+   [[ -n "${HTTPS_PROXY_URL}" ]] && EXPORT_VARS+=",HTTPS_PROXY_URL=${HTTPS_PROXY_URL}"
+   [[ -n "${HTTP_PROXY_URL}"  ]] && EXPORT_VARS+=",HTTP_PROXY_URL=${HTTP_PROXY_URL}"
    [[ -n "${ROCM_PATH}"       ]] && EXPORT_VARS+=",ROCM_PATH=${ROCM_PATH}"
    [[ -n "${PNETCDF_VERSION}" ]] && EXPORT_VARS+=",PNETCDF_VERSION=${PNETCDF_VERSION}"
    EXPORT_VARS+=",PYTHON_VERSION=${PYTHON_VERSION}"
@@ -527,11 +702,11 @@ for v in "${VERSIONS_ARR[@]}"; do
    fi
 
    CMD=( sbatch
-         --job-name="rocmplus_${v}"
+         --job-name="rocmplus_${_jlabel}"
          --time="${TIME_PER_JOB}"
          --partition="${PARTITION}"
-         --output="slurm-%j-rocmplus-${v}.out"
-         --error="slurm-%j-rocmplus-${v}.err"
+         --output="slurm-%j-rocmplus-${_jlabel}.out"
+         --error="slurm-%j-rocmplus-${_jlabel}.err"
          --export="${EXPORT_VARS}" )
 
    if [[ -n "${DEP}" ]]; then
@@ -541,15 +716,15 @@ for v in "${VERSIONS_ARR[@]}"; do
 
    if (( DRY_RUN == 1 )); then
       printf '[DRY] (depends on %s) ' "${DEP:-<none>}"; printf '%q ' "${CMD[@]}"; echo
-      JOBID="<would-be-jobid-${v}>"
-      SUBMITTED+=( "${v}=${JOBID}" )
+      JOBID="<would-be-jobid-${_jlabel}>"
+      SUBMITTED+=( "${_jlabel}=${JOBID}" )
       JOBIDS_ONLY+=( "${JOBID}" )
       i=$((i + 1))
       continue
    fi
 
-   echo "Submitting rocmplus install for ${v} (depends on ${DEP:-<none>})..."
-   OUT=$("${CMD[@]}") || { echo "ERROR: sbatch failed for ${v}" >&2; exit 1; }
+   echo "Submitting rocmplus install for ${_jlabel} (flavor=${_flavor}${_prgenv_module:+, PrgEnv=${_prgenv_module}}; depends on ${DEP:-<none>})..."
+   OUT=$("${CMD[@]}") || { echo "ERROR: sbatch failed for ${_jlabel}" >&2; exit 1; }
    echo "  ${OUT}"
    # "Submitted batch job NNN" -> NNN
    JOBID=$(awk '{print $NF}' <<< "${OUT}")
@@ -557,7 +732,7 @@ for v in "${VERSIONS_ARR[@]}"; do
       echo "ERROR: could not parse jobid from sbatch output: ${OUT}" >&2
       exit 1
    fi
-   SUBMITTED+=( "${v}=${JOBID}" )
+   SUBMITTED+=( "${_jlabel}=${JOBID}" )
    JOBIDS_ONLY+=( "${JOBID}" )
    i=$((i + 1))
 done
@@ -566,7 +741,9 @@ echo ""
 echo "=================================================================="
 echo " Submitted chain (${#SUBMITTED[@]} jobs):"
 for entry in "${SUBMITTED[@]}"; do
-   echo "   rocm-${entry%=*}  ->  jobid ${entry#*=}"
+   # entry key is the job label: "<v>" (amd) or "cray-<v>" (cray), which is
+   # exactly the rocmplus-<label> tree the job populates.
+   echo "   rocmplus-${entry%=*}  ->  jobid ${entry#*=}"
 done
 echo ""
 echo " Monitor:"

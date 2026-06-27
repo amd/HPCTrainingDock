@@ -234,6 +234,7 @@ usage()
    echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, likwid, mdb, intellikit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, hpctoolkit, likwid, mdb, intellikit, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Currently supported only for pytorch; keys are aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build."
    echo "  --rocm-rc-prefix [ FAMILY ]:  release-candidate family name (e.g. 'therock', 'afar'). Auto-detected from \${ROCM_PATH} basename for rocm-{therock,afar}-* trees. Empty for regular releases. When non-empty, install/module dirs become rocmplus-\${FAMILY}-\${ROCM_VERSION}/ instead of rocmplus-\${ROCM_VERSION}/ -- EXCEPT for FAMILY='afar', where the suffix is rocmplus-afar-\${ROCM_RC_COMPILER}-\${ROCM_VERSION}/ (compiler-AND-rocm-keyed; see --rocm-rc-compiler). Default: auto-detected (empty for regular releases)."
    echo "  --rocm-rc-compiler [ COMPILER ]:  compiler/AFAR release number for AFAR trees (e.g. '22.2.0' for rocm-afar-22.2.0, '23.2.1' for rocm-afar-23.2.1 a.k.a. the TheRock-AFAR drop). Auto-detected from \${ROCM_PATH} basename when ROCM_RC_PREFIX='afar'. Empty for non-afar trees. When non-empty AND ROCM_RC_PREFIX='afar', the rocmplus suffix becomes afar-\${COMPILER}-\${ROCM_VERSION} so two AFAR drops with the same SDK numeric but different compiler releases get distinct rocmplus trees. Default: auto-detected."
+   echo "  --rocmplus-flavor [ amd|cray ]:  programming-environment whose downstream tree this build populates. 'amd' (default) -> rocmplus-\${SUFFIX} (PrgEnv-amd-new: AMD compiler + from-source mpich-wrappers). 'cray' -> rocmplus-cray-\${SUFFIX} (PrgEnv-cray-new: CCE + cray-mpich), the separate tree PrgEnv-cray-new modulefiles point at, so a cray build never clobbers the amd-new tree for the same ROCm numeric. Default: amd (byte-identical legacy behavior)."
    echo "  --pnetcdf-version [ PNETCDF_VERSION ]:  PnetCDF version threaded through to extras/scripts/netcdf_setup.sh --pnetcdf-version. Empty (default) -> leaf script's internal default. Install lands at rocmplus-<v>/pnetcdf-v\$PNETCDF_VERSION/ with a pnetcdf/\$PNETCDF_VERSION modulefile."
    echo "  --help: prints this message"
    exit 1
@@ -355,6 +356,11 @@ do
           ROCM_RC_COMPILER_USER_SET=1
           reset-last
           ;;
+      "--rocmplus-flavor")
+          shift
+          ROCMPLUS_FLAVOR=${1}
+          reset-last
+          ;;
       "--help")
           usage
           ;;
@@ -412,6 +418,13 @@ if [ -n "${SITE}" ]; then
          _SITE_TOP_INSTALL="/shared/apps/ubuntu/opt"
          _SITE_TOP_MODULE="/shared/apps/modules/ubuntu/lmodfiles"
          ;;
+      shareddata)
+         # AAC7 (HPE/Cray) shared tree. Mirrors run_rocm_build_sweep.sh's
+         # `shareddata` preset so the SDK build and the rocmplus install
+         # land on the same tree.
+         _SITE_TOP_INSTALL="/shareddata/opt"
+         _SITE_TOP_MODULE="/shareddata/modules"
+         ;;
       /*)
          # Absolute-path PREFIX form (e.g. --site /nfsapps/ubuntu-22.04):
          # symmetric layout PREFIX/opt + PREFIX/modules. Matches the
@@ -429,7 +442,7 @@ if [ -n "${SITE}" ]; then
          unset _SITE_PREFIX
          ;;
       *)
-         echo "ERROR: --site must be a named preset (opt | nfsapps | shared-apps) or an absolute path prefix starting with '/' (got '${SITE}')" >&2
+         echo "ERROR: --site must be a named preset (opt | nfsapps | shared-apps | shareddata) or an absolute path prefix starting with '/' (got '${SITE}')" >&2
          exit 1
          ;;
    esac
@@ -548,6 +561,24 @@ ROCM_MODULE_VERSION=""
 : ${ROCM_RC_PREFIX_USER_SET:=0}
 : ${ROCM_RC_COMPILER:=""}
 : ${ROCM_RC_COMPILER_USER_SET:=0}
+# ROCMPLUS_FLAVOR selects which programming-environment's downstream tree
+# this sweep populates:
+#   * "amd"  (default) -> rocmplus-<suffix>      (PrgEnv-amd-new ecosystem:
+#                          AMD compiler + from-source mpich-wrappers). Legacy
+#                          behavior -- byte-identical when the flag is absent.
+#   * "cray"           -> rocmplus-cray-<suffix> (PrgEnv-cray-new ecosystem:
+#                          CCE + cray-mpich/cray-libsci). Matches the separate
+#                          tree PrgEnv-cray-new modulefiles already point at
+#                          (see emit_cray_prgenv_ecosystem in
+#                          leaf_modulefile_helpers.sh: rocmplus-cray-<ver>).
+# The "cray-" element is prepended to ROCMPLUS_SUFFIX below so BOTH the
+# install dir and the module category dir land in the cray tree, never
+# clobbering the amd-new tree for the same ROCm numeric.
+: ${ROCMPLUS_FLAVOR:="amd"}
+case "${ROCMPLUS_FLAVOR}" in
+   amd|cray) : ;;
+   *) echo "ERROR: --rocmplus-flavor must be 'amd' or 'cray' (got '${ROCMPLUS_FLAVOR}')" >&2; exit 1 ;;
+esac
 
 if [ -n "${ROCM_PATH}" ] && [ -d "${ROCM_PATH}" ]; then
    if [ -f "${ROCM_PATH}/.info/version" ]; then
@@ -1463,6 +1494,9 @@ if [ "${ROCM_RC_PREFIX}" = "afar" ] && [ -n "${ROCM_RC_COMPILER}" ]; then
 else
    _RPS_PREVIEW="${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCM_VERSION}"
 fi
+# cray flavor lands in the separate rocmplus-cray-<suffix> tree (see
+# ROCMPLUS_FLAVOR note above + the canonical assignment below).
+[ "${ROCMPLUS_FLAVOR}" = "cray" ] && _RPS_PREVIEW="cray-${_RPS_PREVIEW}"
 
 echo ""
 echo "=================================================================="
@@ -1471,6 +1505,7 @@ echo "=================================================================="
 echo "  ROCm version      : ${ROCM_VERSION}"
 echo "  ROCM_RC_PREFIX    : '${ROCM_RC_PREFIX}'   (install/module suffix: rocmplus-${_RPS_PREVIEW})"
 echo "  ROCM_RC_COMPILER  : '${ROCM_RC_COMPILER}'   (afar trees only; embedded in rocmplus suffix above)"
+echo "  ROCMPLUS_FLAVOR   : '${ROCMPLUS_FLAVOR}'   (amd -> rocmplus-<suffix>; cray -> rocmplus-cray-<suffix>)"
 echo "  AMDGPU_GFXMODEL   : ${AMDGPU_GFXMODEL}"
 echo "  PYTHON_VERSION    : 3.${PYTHON_VERSION}"
 echo "  DISTRO            : ${DISTRO} ${DISTRO_VERSION}"
@@ -1541,6 +1576,14 @@ if [ "${ROCM_RC_PREFIX}" = "afar" ] && [ -n "${ROCM_RC_COMPILER}" ]; then
    ROCMPLUS_SUFFIX="afar-${ROCM_RC_COMPILER}-${ROCM_VERSION}"
 else
    ROCMPLUS_SUFFIX="${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCM_VERSION}"
+fi
+# PrgEnv-cray-new ecosystem: prepend "cray-" so the install + module
+# category dirs become rocmplus-cray-<suffix>, matching the tree
+# emit_cray_prgenv_ecosystem() (leaf_modulefile_helpers.sh) points the
+# PrgEnv-cray-new MODULEPATH at. Default flavor "amd" leaves the suffix
+# untouched (byte-identical legacy behavior).
+if [ "${ROCMPLUS_FLAVOR}" = "cray" ]; then
+   ROCMPLUS_SUFFIX="cray-${ROCMPLUS_SUFFIX}"
 fi
 ROCMPLUS="${TOP_INSTALL_PATH}/rocmplus-${ROCMPLUS_SUFFIX}"
 

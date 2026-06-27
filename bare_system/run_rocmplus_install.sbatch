@@ -95,6 +95,18 @@ PACKAGES_LIST="${PACKAGES_LIST:-}"
 # threads it to extras/scripts/netcdf_setup.sh. Same shape as the
 # optional SITE / ROCM_PATH pass-throughs below.
 PNETCDF_VERSION="${PNETCDF_VERSION:-}"
+# ROCMPLUS_FLAVOR / PRGENV_MODULE: programming-environment selector (set by
+# run_rocmplus_install_sweep.sh --program-environments). Defaults preserve
+# byte-identical legacy behavior for plain --rocm-versions submissions.
+#   ROCMPLUS_FLAVOR  amd (default) -> rocmplus-<v> (AMD compiler + mpich-wrappers)
+#                    cray          -> rocmplus-cray-<v> (CCE + cray-mpich)
+#   PRGENV_MODULE    optional module to load BEFORE main_setup so the build
+#                    links the right MPI (e.g. PrgEnv-cray-new/8.7.0). For the
+#                    cray flavor this is what brings cray-mpich onto the env
+#                    ($MPICH_DIR), which main_setup.sh keys off to build
+#                    mpi4py/rocshmem/hdf5/... against cray-mpich.
+ROCMPLUS_FLAVOR="${ROCMPLUS_FLAVOR:-amd}"
+PRGENV_MODULE="${PRGENV_MODULE:-}"
 
 # Auto-detect python minor version from the compute node's distro when the
 # caller did not pin one. Ubuntu 22.04 ships /usr/bin/python3.10 by default;
@@ -122,6 +134,61 @@ fi
 
 NFSAPPS_PARENT="/nfsapps"
 
+# ── Outbound proxy for compute-node fetches ───────────────────────────
+# Some leaf installers still download from the internet on the compute node
+# (e.g. fetching source tarballs with wget/git). AAC7 compute nodes have NO
+# direct internet; they egress through a SITE proxy that the node's own
+# /etc/profile sets (e.g. http://172.23.0.12:3128). A non-login sbatch like
+# this one does NOT source /etc/profile, so we must derive that proxy explicitly.
+#
+# Priority:
+#   1. An explicit operator override (submitter --https-proxy -> HTTPS_PROXY_URL).
+#   2. The compute node's own login-shell proxy (sources /etc/profile here).
+#   3. Inherited env -- but ONLY if it is not a loopback proxy.
+# Loopback proxies (http://127.0.0.1:PORT, localhost, [::1]) are login-node SSH
+# tunnels that compute nodes cannot reach; using one is worse than none, so we
+# reject it everywhere (it would override the node's working site proxy).
+_is_loopback_proxy() { case "${1}" in *127.0.0.1*|*localhost*|*'[::1]'*) return 0 ;; *) return 1 ;; esac; }
+
+# (2) what does a login shell on THIS node resolve the proxy to?
+_node_https="$(bash -lc 'printf %s "${https_proxy:-${HTTPS_PROXY:-}}"' 2>/dev/null || true)"
+_node_http="$(bash -lc 'printf %s "${http_proxy:-${HTTP_PROXY:-}}"' 2>/dev/null || true)"
+
+HTTPS_PROXY_URL="${HTTPS_PROXY_URL:-}"
+HTTP_PROXY_URL="${HTTP_PROXY_URL:-}"
+if [[ -z "${HTTPS_PROXY_URL}" ]]; then
+   if [[ -n "${_node_https}" ]] && ! _is_loopback_proxy "${_node_https}"; then
+      HTTPS_PROXY_URL="${_node_https}"
+   elif [[ -n "${https_proxy:-}" ]] && ! _is_loopback_proxy "${https_proxy}"; then
+      HTTPS_PROXY_URL="${https_proxy}"
+   fi
+fi
+if [[ -z "${HTTP_PROXY_URL}" ]]; then
+   if [[ -n "${_node_http}" ]] && ! _is_loopback_proxy "${_node_http}"; then
+      HTTP_PROXY_URL="${_node_http}"
+   elif [[ -n "${http_proxy:-}" ]] && ! _is_loopback_proxy "${http_proxy}"; then
+      HTTP_PROXY_URL="${http_proxy}"
+   fi
+fi
+[[ -z "${HTTP_PROXY_URL}" && -n "${HTTPS_PROXY_URL}" ]] && HTTP_PROXY_URL="${HTTPS_PROXY_URL}"
+# Final guard: never propagate a loopback proxy (even if explicitly forwarded).
+_is_loopback_proxy "${HTTPS_PROXY_URL}" && HTTPS_PROXY_URL=""
+_is_loopback_proxy "${HTTP_PROXY_URL}"  && HTTP_PROXY_URL=""
+unset _node_https _node_http
+
+if [[ -n "${HTTPS_PROXY_URL}" || -n "${HTTP_PROXY_URL}" ]]; then
+   export https_proxy="${HTTPS_PROXY_URL}" HTTPS_PROXY="${HTTPS_PROXY_URL}"
+   export http_proxy="${HTTP_PROXY_URL}"   HTTP_PROXY="${HTTP_PROXY_URL}"
+   echo "[rocmplus] proxy for compute-node fetches: https='${HTTPS_PROXY_URL}' http='${HTTP_PROXY_URL}'"
+else
+   # No usable proxy and (typically) no direct internet -> internet fetches will fail.
+   export https_proxy="" HTTPS_PROXY="" http_proxy="" HTTP_PROXY=""
+   echo "[rocmplus] NOTE: no usable (non-loopback) proxy found on $(hostname);"
+   echo "[rocmplus]       internet fetches (e.g. source tarball downloads)"
+   echo "[rocmplus]       will fail unless this node has direct internet."
+   echo "[rocmplus]       Override with: run_rocmplus_install_sweep.sh --https-proxy URL"
+fi
+
 echo "=================================================================="
 echo " rocmplus install job ${SLURM_JOB_ID} starting at $(date) on $(hostname)"
 echo " ROCM_VERSION:     ${ROCM_VERSION}"
@@ -137,7 +204,32 @@ echo " REPLACE_EXISTING: ${REPLACE_EXISTING}"
 echo " KEEP_FAILED:      ${KEEP_FAILED_INSTALLS}"
 echo " PACKAGES_LIST:    ${PACKAGES_LIST:-<all>}"
 echo " PNETCDF_VERSION:  ${PNETCDF_VERSION:-<leaf default>}"
+echo " ROCMPLUS_FLAVOR:  ${ROCMPLUS_FLAVOR}  (amd -> rocmplus-<v>; cray -> rocmplus-cray-<v>)"
+echo " PRGENV_MODULE:    ${PRGENV_MODULE:-<none>}"
+echo " HTTPS proxy:      ${HTTPS_PROXY_URL:-<none>}"
+echo " HTTP proxy:       ${HTTP_PROXY_URL:-<none>}"
 echo "=================================================================="
+
+# ── AAC7 (HPE/Cray) no-passwordless-sudo support ──────────────────────
+# AAC6 compute nodes have passwordless sudo and a root-owned /nfsapps tree;
+# AAC7 (HPE/Cray) has NO passwordless sudo but the /shareddata install tree is
+# user-writable. A session "no-sudo" shim (~/.nosudo-shim/sudo) strips sudo's
+# own options and runs the wrapped command AS THE USER (no-oping chown/chgrp).
+# If passwordless sudo is unavailable and the shim exists, prepend it to PATH
+# so every `sudo ...` in this job (the self-heal below AND the downstream
+# install/patch scripts, e.g. rocm_patches.sh) runs without ever hitting an
+# interactive password prompt. `sudo -n true` returns non-zero WITHOUT
+# prompting, so this never hangs.
+if ! sudo -n true 2>/dev/null; then
+   if [[ -x "${HOME}/.nosudo-shim/sudo" ]]; then
+      echo "[rocmplus] no passwordless sudo on $(hostname); using ${HOME}/.nosudo-shim (run-as-user)"
+      export PATH="${HOME}/.nosudo-shim:${PATH}"
+   else
+      echo "[rocmplus] WARNING: no passwordless sudo and no ${HOME}/.nosudo-shim;" >&2
+      echo "[rocmplus]          sudo calls may prompt/fail. Ensure the install tree" >&2
+      echo "[rocmplus]          (${TOP_INSTALL_PATH}, ${TOP_MODULE_PATH}) is user-writable." >&2
+   fi
+fi
 
 # ── 1. Ensure /nfsapps is writable on this compute node ──────────────
 # The login node exports /nfsapps rw to sh5 nodes via
@@ -166,31 +258,63 @@ else
 fi
 
 # ── 2. Self-heal install/module roots if missing ─────────────────────
+# Prefer a plain user mkdir (works when the parent tree is user-writable,
+# e.g. /shareddata on AAC7). Only fall back to sudo when that fails (e.g. the
+# root-owned /nfsapps tree on AAC6, where sudo is passwordless or the nosudo
+# shim is on PATH).
 for d in "${TOP_INSTALL_PATH}" "${TOP_MODULE_PATH}"; do
-   if ! sudo -n test -d "${d}" 2>/dev/null; then
-      echo "Creating missing ${d}"
+   [[ -d "${d}" ]] && continue
+   echo "Creating missing ${d}"
+   if ! mkdir -p "${d}" 2>/dev/null; then
       sudo install -d -o root -g root -m 0755 "${d}"
    fi
 done
 
-# ── 3. Source Lmod and load rocm/${ROCM_VERSION} ─────────────────────
+# ── 3. Initialize the module system + load rocm/${ROCM_VERSION} ──────
 # Slurm runs the batch script under a non-login shell, so /etc/profile.d
-# is not sourced automatically. /etc/profile.d/lmod.sh is the canonical
-# init: it sets MODULEPATH from /etc/lmod/modulespath *and* defines the
-# `module` function. /etc/profile.d/z00_lmod.sh only defines the function,
-# so MODULEPATH would stay empty if we only sourced that one.
-if [[ -r /etc/profile.d/lmod.sh ]]; then
-   # shellcheck disable=SC1091
-   source /etc/profile.d/lmod.sh
-elif [[ -r /usr/share/lmod/lmod/init/profile ]]; then
-   # shellcheck disable=SC1091
-   source /usr/share/lmod/lmod/init/profile
-   # MODULEPATH wasn't set by the init; fall back to the documented system path.
-   export MODULEPATH="${MODULEPATH:-/shared/apps/modules/ubuntu/lmodfiles/base}"
+# is not sourced automatically and the `module` function is usually not
+# defined yet.
+# Initialize a module system that works on BOTH Lmod (AAC6 Ubuntu) AND
+# classic Tcl environment-modules. AAC7 (HPE/Cray) uses Cray PE "Tmod"
+# 3.2.x via /opt/cray/pe/modules -- LMOD_DIR is unset and there is no
+# /etc/profile.d/lmod.sh there, so the prior Lmod-only block hard-failed
+# on Cray. We prefer an already-defined `module` function (Cray exports it
+# via `export -f`, and sbatch --export=ALL can carry it across), else
+# source whichever init exists. MODULESHOME is propagated by --export=ALL
+# on Cray, so it is tried early. The Cray init PRESERVES an existing
+# MODULEPATH (only prepends system paths), so the inherited site tree
+# survives; we re-prepend ${TOP_MODULE_PATH}/base below regardless.
+if ! type module >/dev/null 2>&1; then
+   _module_inited=0
+   for _minit in \
+         /etc/profile.d/lmod.sh \
+         "${MODULESHOME:+${MODULESHOME}/init/bash}" \
+         /opt/cray/pe/modules/*/init/bash \
+         /etc/profile.d/modules.sh \
+         /usr/share/lmod/lmod/init/profile \
+         /usr/share/Modules/init/bash; do
+      [[ -n "${_minit}" && -r "${_minit}" ]] || continue
+      # shellcheck disable=SC1090
+      if source "${_minit}" && type module >/dev/null 2>&1; then
+         echo "Sourced module init: ${_minit}"
+         _module_inited=1
+         break
+      fi
+   done
+   if [[ "${_module_inited}" != 1 ]]; then
+      echo "ERROR: could not initialize a module system (tried Lmod + Cray/Tcl env-modules)." >&2
+      echo "       Checked: /etc/profile.d/{lmod,modules}.sh, \${MODULESHOME}/init/bash," >&2
+      echo "       /opt/cray/pe/modules/*/init/bash, /usr/share/{lmod/lmod/init/profile,Modules/init/bash}" >&2
+      exit 1
+   fi
+   unset _minit _module_inited
 else
-   echo "ERROR: Cannot find Lmod init script (/etc/profile.d/lmod.sh)." >&2
-   exit 1
+   echo "module function already defined (inherited); using it"
 fi
+# Lmod-via-profile fallback may leave MODULEPATH empty; the Cray/Tcl inits
+# populate it themselves. Only backstop the documented system path when it
+# is still empty (preserves prior Lmod behavior, no-op on Cray).
+export MODULEPATH="${MODULEPATH:-/shared/apps/modules/ubuntu/lmodfiles/base}"
 
 # Reproducibility: belt-and-suspenders purge in case the submitter
 # forgot to clean their interactive env (the proper purge is now done
@@ -238,6 +362,29 @@ echo "Effective MODULEPATH: ${MODULEPATH}"
 # entry that contains the matching modulefile.
 module load "rocm/${ROCM_VERSION}"
 echo "Loaded module rocm/${ROCM_VERSION}; ROCM_PATH=${ROCM_PATH:-<unset>}"
+
+# ── Cray PrgEnv: bring cray-mpich onto the env so main_setup.sh builds
+#    the MPI-linked packages (mpi4py/rocshmem/hdf5/netcdf/fftw/petsc)
+#    against cray-mpich instead of the amd-new openmpi/mpich-wrappers.
+#    main_setup.sh keys off $MPICH_DIR (exported by the cray-mpich
+#    module) for that selection. Best-effort: a load failure is a hard
+#    error for the cray flavor (a silent fall-through would mis-build
+#    against the wrong MPI and pollute rocmplus-cray-<v>).
+if [[ -n "${PRGENV_MODULE}" ]]; then
+   echo "Loading programming-environment module: ${PRGENV_MODULE}"
+   # NB: do NOT pipe `module load` through sed/tee -- the pipe runs it in a
+   # subshell and the env changes ($MPICH_DIR, MODULEPATH, PATH, ...) would
+   # be lost. Load directly, then echo a confirmation.
+   if ! module load "${PRGENV_MODULE}"; then
+      echo "ERROR: failed to load PRGENV_MODULE='${PRGENV_MODULE}'" >&2
+      exit 1
+   fi
+   if [[ "${ROCMPLUS_FLAVOR}" == "cray" && ( -z "${MPICH_DIR:-}" || ! -d "${MPICH_DIR}/bin" ) ]]; then
+      echo "WARNING: ROCMPLUS_FLAVOR=cray but \$MPICH_DIR is unset/missing after loading ${PRGENV_MODULE};" >&2
+      echo "         MPI-linked packages will fall back to the leaf default (openmpi) rather than cray-mpich." >&2
+      echo "         Ensure ${PRGENV_MODULE} (or a cray-mpich module) is loadable on this node." >&2
+   fi
+fi
 module list 2>&1 | sed 's/^/  /'
 
 # Sanity check: the resolved ROCM_PATH must exist. Historically we
@@ -382,6 +529,7 @@ bare_system/main_setup.sh \
    --rocm-version         "${ROCM_NUMERIC}" \
    --rocm-rc-prefix       "${ROCM_RC_PREFIX}" \
    --rocm-rc-compiler     "${ROCM_RC_COMPILER}" \
+   --rocmplus-flavor      "${ROCMPLUS_FLAVOR}" \
    --rocm-install-path    "${ROCM_INSTALLPATH}" \
    --top-install-path     "${TOP_INSTALL_PATH}" \
    --top-module-path      "${TOP_MODULE_PATH}" \
