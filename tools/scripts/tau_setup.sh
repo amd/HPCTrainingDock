@@ -683,6 +683,20 @@ else
       elif [ -f "${ROCM_PATH}/llvm/include/clang/Basic/SourceManager.h" ]; then
          TAU_LLVM_CLANG_INC="${ROCM_PATH}/llvm/include"
       fi
+      # plugins/llvm/src/Instrument.cpp also #includes "llvm/Passes/PassPlugin.h"
+      # (line 64), not just <clang/Basic/SourceManager.h>. TheRock/AFAR SDKs
+      # ship the clang dev tree (so the SourceManager.h probe above passes) but
+      # PRUNE the LLVM pass-plugin header, so the compile dies on the missing
+      # PassPlugin.h (slurm 8170, rocm-therock-7.13.0: "Instrument.cpp:64: fatal
+      # error: llvm/Passes/PassPlugin.h: No such file or directory"). Require
+      # PassPlugin.h too; when it is absent, clear TAU_LLVM_CLANG_INC so every
+      # gate below takes its "skip plugin" branch and TAU still builds without
+      # the optional compiler-instrumentation plugin.
+      if [ -n "${TAU_LLVM_CLANG_INC}" ] \
+         && [ ! -f "${TAU_LLVM_CLANG_INC}/llvm/Passes/PassPlugin.h" ]; then
+         echo "tau: ${TAU_LLVM_CLANG_INC}/llvm/Passes/PassPlugin.h missing (TheRock/AFAR LLVM lacks the pass-plugin header); disabling LLVM instrumentation plugin"
+         TAU_LLVM_CLANG_INC=""
+      fi
       if [ -n "${TAU_LLVM_CLANG_INC}" ] && [ -d "${ROCM_PATH}/llvm/lib/cmake/llvm" ]; then
          echo "tau: clang dev tree found (${TAU_LLVM_CLANG_INC}); LLVM instrumentation plugin will be built"
          if [ -f plugins/llvm/Makefile ]; then

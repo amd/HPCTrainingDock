@@ -403,6 +403,25 @@ if true; then
              -e '/^PREFIX/s!/usr/local!'"${LIKWID_PATH}"'!' \
              config.mk
 
+      # likwid's rocmon does `#include <rocprofiler.h>`, resolved via
+      # config.mk's ROCPROFILERINCLUDE (default $(ROCM_HOME)/include/rocprofiler,
+      # the classic ROCm layout). TheRock/AFAR SDKs drop the classic header and
+      # ship it under include/rocprofiler-sdk/ instead (slurm 8170,
+      # rocm-therock-7.13.0: "rocmon_types.h:39: fatal error: rocprofiler.h: No
+      # such file or directory"). Repoint ROCPROFILERINCLUDE at whichever
+      # directory actually holds rocprofiler.h; if neither layout has it,
+      # disable the ROCm (rocmon) interface so likwid still builds its CPU
+      # perf tooling rather than hard-failing on the missing header.
+      if [ -f "${ROCM_PATH}/include/rocprofiler/rocprofiler.h" ]; then
+         echo "likwid: rocprofiler.h at include/rocprofiler (classic layout); ROCPROFILERINCLUDE unchanged"
+      elif [ -f "${ROCM_PATH}/include/rocprofiler-sdk/rocprofiler.h" ]; then
+         echo "likwid: rocprofiler.h only under include/rocprofiler-sdk (TheRock/AFAR layout); repointing ROCPROFILERINCLUDE there"
+         sed -i -e '/^ROCPROFILERINCLUDE/s#=.*#= $(ROCM_HOME)/include/rocprofiler-sdk#' config.mk
+      else
+         echo "likwid: WARNING no rocprofiler.h under include/rocprofiler or include/rocprofiler-sdk; disabling ROCM_INTERFACE (rocmon) so likwid still builds"
+         sed -i -e '/^ROCM_INTERFACE/s/true/false/' config.mk
+      fi
+
       # Access mode: likwid's default `accessdaemon` builds a setuid-root
       # helper (likwid-accessD) and `make install` chowns it to root +
       # chmod 4755 -- which requires root. On a user-writable, non-root
