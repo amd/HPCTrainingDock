@@ -742,6 +742,14 @@ else
          # not the cmake compilers (cray-mpich path).
          HYPRE_CMAKE_ARGS=(
             -DCMAKE_INSTALL_PREFIX="$HYPRE_PATH"
+            # Pin the library subdir to lib/ (not lib64/). CMake's
+            # GNUInstallDirs defaults to lib64/ on RHEL-family distros (the
+            # Cray nodes) but lib/ on Debian/Ubuntu, so an unpinned build
+            # landed libHYPRE.so in lib64/ -- breaking consumers/tests that
+            # reference ${HYPRE_ROOT}/lib. Pinning keeps the layout identical
+            # across distros. Mirrors netcdf_setup.sh. (The lib64 detection
+            # below is kept as a defensive fallback.)
+            -DCMAKE_INSTALL_LIBDIR=lib
             -DHYPRE_ENABLE_MIXEDINT=ON
             -DHYPRE_ENABLE_MPI=ON
             -DHYPRE_ENABLE_OPENMP=ON
