@@ -640,27 +640,25 @@ else
    # Cray under PrgEnv-amd-new, could not `module load kokkos` (slurm: kokkos
    # ERROR:151 prereq rocm/7.2.4 not satisfied). Tcl `prereq` with several
    # names is satisfied if ANY is loaded; Lmod's equivalent is prereq_any().
-   # AAC7 gate: rocm-new is only a real modulefile on a TheRock /
-   # PrgEnv-amd-new site (AAC7); on a stock site (e.g. AAC6) only rocm/<ver>
-   # exists, so widen only when a rocm-new modulefile is discoverable on
-   # MODULEPATH. Mirrors hipifly/hdf5/petsc.
-   rocm_new_available() {
-      local _d _OIFS="${IFS}"; IFS=":"
-      for _d in ${MODULEPATH:-}; do
-         if [ -d "${_d}/rocm-new" ]; then IFS="${_OIFS}"; return 0; fi
-      done
-      IFS="${_OIFS}"; return 1
-   }
+   # Always widen the ROCm prereq to accept BOTH the real TheRock module
+   # (rocm-new/<ver>, loaded directly by PrgEnv-amd-new) and its alias
+   # (rocm/<ver>, pulled in by a bare `module load rocm/<ver>`). A Tcl
+   # `prereq a b` (and Lmod prereq_any) is satisfied if ANY listed module is
+   # loaded and does NOT require the named modules to exist -- so listing
+   # rocm-new/<ver> is harmless on a stock site (e.g. AAC6, where it is never
+   # loaded) and correct on a TheRock/PrgEnv-amd-new site (AAC7). An earlier
+   # MODULEPATH-scan gate ("only widen when a rocm-new dir is discoverable")
+   # produced a false negative here: the rocm-new modulefiles live under a
+   # different MODULEPATH entry (rocm-<ver>) than the consumer's own dir
+   # (rocmplus-<ver>), which need not be on the worker's MODULEPATH at build
+   # time, so the gate emitted a bare `prereq rocm/<ver>` that then FAILED
+   # under PrgEnv-amd-new (slurm: kokkos ERROR:151 prereq rocm/7.2.4 not
+   # satisfied). Unconditional widening removes that fragility.
    _RPV="${ROCM_MODULE_NAME##*/}"
    case "${ROCM_MODULE_NAME}" in
       rocm/*|rocm-new/*)
-         if rocm_new_available; then
-            ROCM_PREREQ_TCL="rocm-new/${_RPV} rocm/${_RPV}"
-            ROCM_PREREQ_LUA="prereq_any(\"rocm-new/${_RPV}\", \"rocm/${_RPV}\")"
-         else
-            ROCM_PREREQ_TCL="rocm/${_RPV}"
-            ROCM_PREREQ_LUA="prereq(\"rocm/${_RPV}\")"
-         fi
+         ROCM_PREREQ_TCL="rocm-new/${_RPV} rocm/${_RPV}"
+         ROCM_PREREQ_LUA="prereq_any(\"rocm-new/${_RPV}\", \"rocm/${_RPV}\")"
          ;;
       *)
          ROCM_PREREQ_TCL="${ROCM_MODULE_NAME}"

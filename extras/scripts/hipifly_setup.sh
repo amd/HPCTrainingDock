@@ -361,13 +361,8 @@ else
    _RPV="${ROCM_MODULE_NAME##*/}"
    case "${ROCM_MODULE_NAME}" in
       rocm/*|rocm-new/*)
-         if rocm_new_available; then
-            ROCM_PREREQ_TCL="rocm-new/${_RPV} rocm/${_RPV}"
-            ROCM_PREREQ_LUA="prereq_any(\"rocm-new/${_RPV}\", \"rocm/${_RPV}\")"
-         else
-            ROCM_PREREQ_TCL="rocm/${_RPV}"
-            ROCM_PREREQ_LUA="prereq(\"rocm/${_RPV}\")"
-         fi
+         ROCM_PREREQ_TCL="rocm-new/${_RPV} rocm/${_RPV}"
+         ROCM_PREREQ_LUA="prereq_any(\"rocm-new/${_RPV}\", \"rocm/${_RPV}\")"
          ;;
       *)
          ROCM_PREREQ_TCL="${ROCM_MODULE_NAME}"
