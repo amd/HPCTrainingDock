@@ -755,6 +755,18 @@ TCL
 
 module-whatis "PrgEnv-amd ${_pe} specialized to local amd-new/${_rocm} + rocm-new/${_rocm}."
 
+# Programming-environment policy: the craype cc/CC/ftn wrappers MUST drive the
+# new LLVM amdflang/amdclang and NEVER fall back to flang-classic. The
+# amd-new/${_rocm} compiler module loaded below also sets this, but pinning it
+# here at the PE level guarantees the policy holds regardless of the compiler
+# module's load order. flang-classic links its Fortran runtime DYNAMICALLY
+# (NEEDED libflang.so / libpgmath.so), so any binary built with it then needs
+# those .so at run time -- a path the amdflang-new runtime does not expose
+# (the "libpgmath.so / libflang.so: cannot open shared object file" failures).
+# flang-new links that runtime statically, so binaries are self-contained.
+# setenv auto-inverts on unload/switch, mirroring the amd-new module.
+setenv AMD_COMPILER_TYPE DEFAULT
+
 # Mutually exclusive with the other programming environments. We intentionally
 # do NOT conflict PrgEnv-amd, because we load it internally to inherit its PE
 # wiring.

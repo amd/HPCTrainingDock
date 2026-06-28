@@ -1476,6 +1476,7 @@ else
 
 	local base = "${PNETCDF_PATH}"
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("PATH", pathJoin(base, "bin"))
@@ -1491,6 +1492,7 @@ EOF
 
 	set base "${PNETCDF_PATH}"
 	prepend-path LD_LIBRARY_PATH \$base/lib
+	prepend-path LIBRARY_PATH \$base/lib
 	prepend-path C_INCLUDE_PATH \$base/include
 	prepend-path CPLUS_INCLUDE_PATH \$base/include
 	prepend-path PATH \$base/bin
@@ -1570,6 +1572,7 @@ EOF
 	${NETCDF_C_PNETCDF_LOAD}
 	local base = "${NETCDF_C_PATH}"
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPATH", pathJoin(base, "include"))
@@ -1588,6 +1591,7 @@ EOF
 	${NETCDF_C_PNETCDF_LOAD}
 	set base "${NETCDF_C_PATH}"
 	prepend-path LD_LIBRARY_PATH \$base/lib
+	prepend-path LIBRARY_PATH \$base/lib
 	prepend-path C_INCLUDE_PATH \$base/include
 	prepend-path CPLUS_INCLUDE_PATH \$base/include
 	prepend-path CPATH \$base/include
@@ -1630,6 +1634,7 @@ EOF
 	load("netcdf-c/${NETCDF_C_VERSION}")
 	local base = "${NETCDF_F_PATH}"
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPATH", pathJoin(base, "include"))
@@ -1647,6 +1652,7 @@ EOF
 	module load netcdf-c/${NETCDF_C_VERSION}
 	set base "${NETCDF_F_PATH}"
 	prepend-path LD_LIBRARY_PATH \$base/lib
+	prepend-path LIBRARY_PATH \$base/lib
 	prepend-path C_INCLUDE_PATH \$base/include
 	prepend-path CPLUS_INCLUDE_PATH \$base/include
 	prepend-path CPATH \$base/include
