@@ -12,68 +12,13 @@
 
 set -uo pipefail
 
-# Reproducibility: discard any modules the submitter happened to have
-# loaded interactively before running this sweep. Doing the purge HERE
-# (in the submitter's process tree) instead of in the per-job sbatch is
-# strictly better for two reasons:
-#   (1) The submitter shell has Lmods full state (LOADEDMODULES,
-#       _LMFILES_, and any per-shell __LMOD_REF_COUNT_* tracking) so the
-#       purge can fully reverse PATH/LD_LIBRARY_PATH/MPICC/MPI_PATH/etc.
-#       The sbatch worker's --export=ALL inherits env vars but NOT
-#       Lmod's internal shell-only ref counters, so a worker-side purge
-#       is incomplete (slurm 8385/8386/8387, 2026-05-05: openmpi rebuild
-#       failed because UCX picked up a stale $MPICC pointing at a
-#       --replace 1-deleted /shared/.../openmpi-.../bin/mpicc).
-#   (2) Once the submitter env is clean, every sbatch we launch from
-#       here propagates a clean env BY CONSTRUCTION -- no env-scrub
-#       gymnastics in the per-job script.
-# Initialize a module system so we can purge inherited modules. This must
-# work on BOTH Lmod (AAC6 Ubuntu, /etc/profile.d/lmod.sh) AND classic Tcl
-# environment-modules -- in particular AAC7 (HPE/Cray) uses Cray PE "Tmod"
-# 3.2.x via /opt/cray/pe/modules (LMOD_DIR unset, MODULESHOME points there).
-# This script may be invoked as a fresh `./run_rocmplus_install_sweep.sh`
-# process, so the `module` function from the parent shell may not be
-# inherited; source whichever init exists. (Cray exports the `module`
-# function via `export -f`, so it is sometimes already defined -- in which
-# case we skip sourcing.)
-if ! type module >/dev/null 2>&1; then
-   for _minit in \
-         /etc/profile.d/lmod.sh \
-         "${MODULESHOME:+${MODULESHOME}/init/bash}" \
-         /opt/cray/pe/modules/*/init/bash \
-         /etc/profile.d/modules.sh \
-         /usr/share/lmod/lmod/init/profile \
-         /usr/share/Modules/init/bash; do
-      [[ -n "${_minit}" && -r "${_minit}" ]] || continue
-      # shellcheck disable=SC1090
-      source "${_minit}" && type module >/dev/null 2>&1 && { echo "sweep: sourced module init ${_minit}"; break; }
-   done
-   unset _minit
-fi
-if type module >/dev/null 2>&1; then
-   # Cray PE (Tmod 3.2.x) must NOT be purged: craype / craype-network-* /
-   # PrgEnv-* are load-order sensitive and do not survive a purge, after
-   # which `craype` can no longer be reloaded (breaks every downstream
-   # PrgEnv load). Since this env is exported into the sbatch job via
-   # --export=ALL, a broken-purged PE would propagate. `module reset` is
-   # the Cray-blessed clean-to-defaults: it restores the node's default
-   # module collection (stock PrgEnv-cray + craype + default rocm, craype
-   # intact) and drops any application/site modules loaded here -- so a
-   # stale site PrgEnv-{amd,cray}-new (e.g. an afar env left over from a
-   # prior submit) cannot leak into the sbatch job. On Lmod/Tcl (non-Cray)
-   # a full purge is safe.
-   if [[ -d /opt/cray/pe || -n "${CRAYPE_VERSION:-}" || -n "${PE_ENV:-}" ]]; then
-      echo "sweep: Cray PE detected -> 'module reset' to system defaults (purge wedges craype)."
-      module reset 2>/dev/null || true
-   else
-      # --force is Lmod-only (tolerates modulefiles removed from disk after
-      # load); Tcl modulecmd rejects it, so fall back to plain purge.
-      module --force purge 2>/dev/null || module purge 2>/dev/null || true
-   fi
-   echo "sweep: module reset/purge done; LOADEDMODULES='${LOADEDMODULES:-<empty>}'"
-else
-   echo "sweep: WARNING no module system found (tried Lmod + Cray/Tcl env-modules); skipping module reset -- inherited modules may leak into sbatch jobs" >&2
-fi
+# NOTE: this submitter does NOT need to reset/purge its own modules.
+# Each sbatch below is launched with a CURATED --export list (no "ALL",
+# see EXPORT_VARS), so the submitter's interactive environment -- including
+# any PrgEnv-{amd,cray}-new / afar modules left loaded here -- is never
+# propagated to the worker. The worker self-bootstraps the Cray module
+# system from the node default and loads only its own PRGENV_MODULE, so the
+# master process stays clean BY CONSTRUCTION with no module gymnastics.
 
 : ${PARTITION:="sh5_cpx_admin_long"}
 : ${TIME_PER_JOB:="24:00:00"}        # walltime per version
@@ -705,7 +650,13 @@ for v in "${VERSIONS_ARR[@]}"; do
    _jlabel="${v}"
    [[ "${_flavor}" == "cray" ]] && _jlabel="cray-${v}"
 
-   EXPORT_VARS="ALL,ROCM_VERSION=${v}"
+   # Curated export (NO "ALL"): the worker gets ONLY these vars + SLURM_*,
+   # so the submitter's interactive login environment -- in particular any
+   # leftover site PrgEnv-{amd,cray}-new (afar) with its LOADEDMODULES /
+   # MODULEPATH afar trees / ROCM_PATH / MPICH_WRAPPERS_DIR -- never reaches
+   # the build. The worker self-bootstraps the Cray module system and loads
+   # only its PRGENV_MODULE, so the master needs no module reset/cleaning.
+   EXPORT_VARS="ROCM_VERSION=${v}"
    EXPORT_VARS+=",ROCMPLUS_FLAVOR=${_flavor}"
    [[ -n "${_prgenv_module}" ]] && EXPORT_VARS+=",PRGENV_MODULE=${_prgenv_module}"
    EXPORT_VARS+=",AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL}"

@@ -41,7 +41,7 @@
 # The submitter chains one of these per ROCm version with --dependency=afterany
 # so the chain proceeds even if a single version fails.
 #
-# Required env (passed via sbatch --export=ALL,...):
+# Required env (passed via the sweep's curated sbatch --export list):
 #   ROCM_VERSION         single ROCm version this job targets (e.g. 7.0.2)
 # Optional env (with defaults):
 #   AMDGPU_GFXMODEL      gfx942;gfx90a  (order matters: first arch is the
@@ -62,7 +62,7 @@ set -uo pipefail
 
 cd "${SLURM_SUBMIT_DIR}"
 
-ROCM_VERSION="${ROCM_VERSION:?ROCM_VERSION must be set via --export=ALL,ROCM_VERSION=...}"
+ROCM_VERSION="${ROCM_VERSION:?ROCM_VERSION must be set via sbatch --export=ROCM_VERSION=...}"
 AMDGPU_GFXMODEL="${AMDGPU_GFXMODEL:-gfx942;gfx90a}"
 # Path knobs: the sweep submitter
 # (bare_system/run_rocmplus_install_sweep.sh) is responsible for
@@ -278,12 +278,12 @@ done
 # classic Tcl environment-modules. AAC7 (HPE/Cray) uses Cray PE "Tmod"
 # 3.2.x via /opt/cray/pe/modules -- LMOD_DIR is unset and there is no
 # /etc/profile.d/lmod.sh there, so the prior Lmod-only block hard-failed
-# on Cray. We prefer an already-defined `module` function (Cray exports it
-# via `export -f`, and sbatch --export=ALL can carry it across), else
-# source whichever init exists. MODULESHOME is propagated by --export=ALL
-# on Cray, so it is tried early. The Cray init PRESERVES an existing
-# MODULEPATH (only prepends system paths), so the inherited site tree
-# survives; we re-prepend ${TOP_MODULE_PATH}/base below regardless.
+# on Cray. With the sweep's curated --export (no "ALL"), the submitter's
+# `module` function and MODULESHOME are NOT inherited, so this self-bootstrap
+# is the primary path: source whichever init exists. (If a `module` function
+# is somehow already defined, e.g. a direct sbatch from a Cray login shell,
+# we reuse it.) The Cray init establishes MODULEPATH from the node default;
+# we re-prepend ${TOP_MODULE_PATH}/base below regardless.
 if ! type module >/dev/null 2>&1; then
    _module_inited=0
    for _minit in \
@@ -316,45 +316,25 @@ fi
 # is still empty (preserves prior Lmod behavior, no-op on Cray).
 export MODULEPATH="${MODULEPATH:-/shared/apps/modules/ubuntu/lmodfiles/base}"
 
-# Reproducibility: shed any modules the submitter carried in via sbatch
-# --export=ALL. HOW we shed depends on the module system:
+# Establish a known module baseline before loading the explicit rocm and
+# PrgEnv. The submitter no longer propagates its environment (the sweep
+# uses a curated --export with no "ALL"), so there is nothing contaminating
+# to scrub here; this is just the normal "enter from the node default"
+# preamble:
 #
-#   * Cray PE (Tmod 3.2.x): NEVER `module purge`. The craype /
-#     craype-network-* / craype-<cpu> / PrgEnv-* modules are load-order
-#     sensitive and do NOT survive a purge -- afterwards even the node's
-#     default PrgEnv-cray can no longer re-resolve `craype` ("Conflicting
-#     PrgEnv-* is loading" / "requirement craype is not loaded"), which
-#     then fails EVERY PrgEnv load below (observed wedging the MI300A
-#     RHEL9 nodes: a purged shell could not reload craype at all).
-#     `module reset` is the Cray-blessed equivalent: it restores the
-#     node's DEFAULT module collection (stock PrgEnv-cray + craype + the
-#     default rocm) with craype intact, while DROPPING any application /
-#     site modules a submitter carried in -- including a stale site
-#     PrgEnv-{amd,cray}-new that would otherwise leak its toolchain/MPI
-#     into this job (the afar-into-therock contamination seen in slurm
-#     8142). We then drop the reset-restored default rocm so the explicit
-#     `module load rocm/${ROCM_VERSION}` below does not hit the rocm-vs-
-#     rocm `conflict`, and the PrgEnv swap below enters from stock
-#     PrgEnv-cray. NB: `module reset` restores the loaded SET but does not
-#     undo `module use` MODULEPATH prepends -- harmless here because the
-#     PrgEnv-*-new modulefile prepends its own version-matched tree ahead
-#     of any lingering entries.
+#   * Cray PE (Tmod 3.2.x): NEVER `module purge` -- craype /
+#     craype-network-* / craype-<cpu> / PrgEnv-* are load-order sensitive
+#     and do NOT survive a purge (afterwards even the default PrgEnv-cray
+#     cannot re-resolve `craype`, which wedges every PrgEnv load and was
+#     observed bricking the MI300A RHEL9 nodes). `module reset` is the
+#     Cray-blessed clean-to-defaults: it (re)establishes the node's DEFAULT
+#     collection (stock PrgEnv-cray + craype + the default rocm) with
+#     craype intact. We then drop the default rocm so the explicit
+#     `module load rocm/${ROCM_VERSION}` below does not hit the rocm-vs-rocm
+#     `conflict`, and the PrgEnv swap below enters from stock PrgEnv-cray.
 #
 #   * Lmod / classic Tcl (non-Cray): a full purge is safe and simplest.
-#     --force tolerates modulefiles whose .lua was removed from disk
-#     after the submitter loaded them (plain purge errors on missing
-#     files and leaves the rest loaded).
-#
-# This worker-side shed is still INCOMPLETE for Lmod because the
-# __LMOD_REF_COUNT_* shell vars are not propagated via --export=ALL, so
-# it cannot fully reverse PATH/LD_LIBRARY_PATH/MPICC additions made
-# submitter-side -- but the sweep wrapper now does the matching reset
-# before sbatch, so this is belt-and-suspenders.
-#
-# History: slurm 8385 (2026-05-05) failed because the submitter had
-# openmpi/5.0.10 + pytorch/2.9.1 + magma + openblas loaded; UCX picked
-# up the stale $MPICC and tried to link against a libucc.so.1 that the
-# build was about to delete via --replace 1. Both paths clear that.
+#     --force tolerates modulefiles whose .lua was removed from disk.
 _is_cray_pe=0
 if [[ -d /opt/cray/pe || -n "${CRAYPE_VERSION:-}" || -n "${PE_ENV:-}" ]]; then
    _is_cray_pe=1
