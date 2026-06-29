@@ -284,6 +284,25 @@ else
    unset _iprobe _itest
 fi
 
+# ── Cray/HPE hard opt-out (force BUILD_HPCTOOLKIT=0) ─────────────────
+# hpcrun injects its measurement runtime via LD_AUDIT/LD_PRELOAD plus the
+# HPCRUN_* environment. On this Cray/HPE PE + ROCm stack the `-e gpu=rocm`
+# path spawns a helper shell for a counter probe; because the injection
+# env is inherited, hpcrun re-injects into that shell, whose startup
+# spawns the probe again -> an unbounded, self-replicating fork bomb
+# (observed: ~49k `sh -c mx_counters` processes wedging a compute node;
+# ctest --timeout cannot reap a tree that regenerates faster than it can
+# be killed). No env/ulimit knob removes the recursion -- only not
+# exposing the broken capability does -- so we refuse to build/install
+# hpctoolkit on Cray/HPE hosts. Non-Cray hosts are unaffected and build
+# normally. Detect via the same signals used elsewhere in this repo.
+if [ -f /etc/cray-release ] || [ -n "${CRAYPE_VERSION:-}" ] || [ -d /opt/cray/pe ]; then
+   if [ "${BUILD_HPCTOOLKIT}" != "0" ]; then
+      echo "[hpctoolkit] Cray/HPE PE detected; forcing BUILD_HPCTOOLKIT=0 (hpcrun gpu=rocm fork-bomb; see comment in $(basename "${BASH_SOURCE[0]}"))."
+      BUILD_HPCTOOLKIT=0
+   fi
+fi
+
 # ── --replace + EXIT trap (see hypre_setup.sh for design) ────────────
 # ── BUILD_HPCTOOLKIT=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
 NOOP_RC=43
