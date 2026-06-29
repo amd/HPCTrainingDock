@@ -361,18 +361,36 @@ else
    #      basename == module name) but wrong for therock-afar.
    #   3. rocm/${ROCM_VERSION}: standalone-invocation fallback when
    #      neither LOADEDMODULES nor ROCM_PATH is populated.
-   # Two-pass over LOADEDMODULES: prefer a rocm/* matching the requested
-   # ROCM_VERSION before falling back to the first rocm/*. A Cray
-   # PrgEnv-amd-new shell can have several rocm/* loaded at once; taking
-   # the first match would key the build + modulefile on the wrong SDK.
+   # Multi-pass over LOADEDMODULES. PrgEnv-amd-new loads the REAL TheRock
+   # module rocm-new/<token> directly (never the rocm/ alias). On therock
+   # drops that live token (e.g. rocm-new/7.13.0) differs from both the
+   # ROCM_VERSION tag (therock-7.13.0) and the install-dir basename
+   # (rocm-therock-7.13.0), so the actually-loaded rocm-new/* is the only
+   # reliable source of the true module token. Prefer an exact ROCM_VERSION
+   # match (real or alias), then any loaded rocm-new/*, then any rocm/* alias.
+   # A Cray PrgEnv-amd-new shell can have several rocm modules loaded at once;
+   # picking the wrong one would key the build + modulefile on the wrong SDK.
    ROCM_MODULE_NAME=""
    if [[ -n "${LOADEDMODULES:-}" ]]; then
       _OLD_IFS="${IFS}"; IFS=":"
+      # Pass 1: exact requested-version match (real module or alias). For
+      # numeric and afar drops the module token equals ROCM_VERSION.
       for _m in ${LOADEDMODULES}; do
          case "${_m}" in
-            rocm/${ROCM_VERSION}) ROCM_MODULE_NAME="${_m}"; break ;;
+            rocm-new/${ROCM_VERSION}|rocm/${ROCM_VERSION}) ROCM_MODULE_NAME="${_m}"; break ;;
          esac
       done
+      # Pass 2: the actually-loaded TheRock real module (rocm-new/<token>),
+      # which carries the correct numeric token on therock drops where the
+      # ROCM_VERSION tag and the install-dir basename do not.
+      if [[ -z "${ROCM_MODULE_NAME}" ]]; then
+         for _m in ${LOADEDMODULES}; do
+            case "${_m}" in
+               rocm-new/*) ROCM_MODULE_NAME="${_m}"; break ;;
+            esac
+         done
+      fi
+      # Pass 3: a loaded rocm/ alias.
       if [[ -z "${ROCM_MODULE_NAME}" ]]; then
          for _m in ${LOADEDMODULES}; do
             case "${_m}" in
