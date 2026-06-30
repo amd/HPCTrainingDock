@@ -398,6 +398,41 @@ else
    unset _probe _wtest
 fi
 
+# ── Early sudo decision for the MODULE tree (separate from install tree) ──
+# The modulefiles live in a DIFFERENT tree (NETCDF_*_MODULE_PATH, e.g.
+# /shared/apps/modules/.../rocmplus-<v>/netcdf-c) than the install base
+# (NETCDF_INSTALL_BASE, e.g. /shared/apps/ubuntu/opt/rocmplus-<v>). These two
+# trees can have DIFFERENT ownership: on AAC the install tree is user-writable
+# (so the early probe above clears ${SUDO}) but the module tree is root-owned.
+# The --replace block and the EXIT-trap fail-cleanup remove the OLD modulefile
+# with sudo-or-not, and keying that off the install-tree ${SUDO}="" made the
+# modulefile rm hit:
+#   rm: cannot remove '.../netcdf-c/4.10.0.lua': Permission denied
+# which under `set -e` aborted the whole build BEFORE compiling (7.2.3 nightly,
+# job 12981). Decide sudo for modulefile REMOVAL independently by probing the
+# module tree's nearest existing ancestor -- the same mktemp touch-probe the
+# PKG_SUDO_MOD block below uses for modulefile WRITES, but computed early so
+# --replace / fail-cleanup can delete a root-owned modulefile. mktemp (NOT
+# `[ -w ]`) for the NFS/ACL lying-probe reason noted above. On a Cray the
+# module tree is user-writable and compute nodes have no passwordless sudo, so
+# the probe correctly yields SUDO_MOD="" there (no spurious `sudo` prompt).
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   SUDO_MOD=""
+else
+   _mprobe="${NETCDF_C_MODULE_PATH}"
+   while [ ! -e "${_mprobe}" ]; do _mprobe="$(dirname "${_mprobe}")"; done
+   _mwtest=$(mktemp --tmpdir="${_mprobe}" .netcdf-early-mod-probe.XXXXXX 2>/dev/null || true)
+   if [ -n "${_mwtest}" ] && [ -f "${_mwtest}" ]; then
+      rm -f "${_mwtest}"
+      SUDO_MOD=""
+      echo "netcdf: module tree ancestor ${_mprobe} is user-writable (probe succeeded); not using sudo for modulefile removal"
+   else
+      SUDO_MOD="sudo"
+      echo "netcdf: module tree ancestor ${_mprobe} not user-writable (probe failed); using sudo for modulefile removal"
+   fi
+   unset _mprobe _mwtest
+fi
+
 # ── --replace: remove prior installs + modulefiles BEFORE building ────
 # --replace 1 acts as a convenience alias that flips all three
 # component knobs on. Individual --replace-netcdf-{c,f}/--replace-pnetcdf
@@ -412,16 +447,19 @@ if [ "${REPLACE_NETCDF_C}" = "1" ]; then
    echo "  install dir: ${NETCDF_C_PATH}"
    echo "  modulefile:  ${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}{,.lua}"
    ${SUDO} rm -rf "${NETCDF_C_PATH}"
-   # Remove both flavors (Lmod .lua and Tcl no-extension).
-   ${SUDO} rm -f  "${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua" "${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}"
+   # Modulefile removal uses ${SUDO_MOD} (module-tree decision), not ${SUDO}
+   # (install-tree): the two trees can differ in ownership. Remove both
+   # flavors (Lmod .lua and Tcl no-extension).
+   ${SUDO_MOD} rm -f  "${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua" "${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}"
 fi
 if [ "${REPLACE_NETCDF_F}" = "1" ]; then
    echo "[netcdf --replace-netcdf-f 1] removing prior netcdf-fortran install + modulefile if present"
    echo "  install dir: ${NETCDF_F_PATH}"
    echo "  modulefile:  ${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}{,.lua}"
    ${SUDO} rm -rf "${NETCDF_F_PATH}"
+   # Modulefile removal uses ${SUDO_MOD} (module-tree decision), not ${SUDO}.
    # Remove both flavors (Lmod .lua and Tcl no-extension).
-   ${SUDO} rm -f  "${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua" "${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}"
+   ${SUDO_MOD} rm -f  "${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua" "${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}"
 fi
 if [ "${REPLACE_PNETCDF}" = "1" ]; then
    echo "[netcdf --replace-pnetcdf 1] removing prior pnetcdf install"
@@ -477,20 +515,23 @@ _netcdf_on_exit() {
       # top of an existing netcdf-c-v4.10.0) would wipe the working
       # sibling component on PnetCDF build failure.
       # Remove both modulefile flavors (Lmod .lua and Tcl no-extension).
-      # ${SUDO} verbatim (NOT ${SUDO:-sudo}): the early-probe may set SUDO=""
-      # for an operator-writable tree, and cleanup must then run WITHOUT sudo
-      # (compute nodes have no passwordless sudo). Mirrors hdf5_setup.sh.
+      # Install dirs use ${SUDO} (install-tree decision); modulefiles use
+      # ${SUDO_MOD} (module-tree decision) -- the two trees can have different
+      # ownership (AAC: install-tree user-writable, module-tree root-owned).
+      # Both are verbatim (NOT ${VAR:-sudo}): a user-writable tree clears the
+      # respective var to "" and cleanup must then run WITHOUT sudo (compute
+      # nodes have no passwordless sudo). Mirrors hdf5_setup.sh.
       if [ "${_pre_existed_netcdf_c:-0}" != "1" ]; then
          ${SUDO} rm -rf "${NETCDF_C_PATH}"
-         ${SUDO} rm -f  "${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua" "${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}"
+         ${SUDO_MOD} rm -f  "${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}.lua" "${NETCDF_C_MODULE_PATH}/${NETCDF_C_VERSION}"
       fi
       if [ "${_pre_existed_netcdf_f:-0}" != "1" ]; then
          ${SUDO} rm -rf "${NETCDF_F_PATH}"
-         ${SUDO} rm -f  "${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua" "${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}"
+         ${SUDO_MOD} rm -f  "${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}.lua" "${NETCDF_F_MODULE_PATH}/${NETCDF_F_VERSION}"
       fi
       if [ "${_pre_existed_pnetcdf:-0}" != "1" ]; then
          ${SUDO} rm -rf "${PNETCDF_PATH}"
-         ${SUDO} rm -f  "${PNETCDF_MODULE_PATH}/${PNETCDF_VERSION}.lua" "${PNETCDF_MODULE_PATH}/${PNETCDF_VERSION}"
+         ${SUDO_MOD} rm -f  "${PNETCDF_MODULE_PATH}/${PNETCDF_VERSION}.lua" "${PNETCDF_MODULE_PATH}/${PNETCDF_VERSION}"
       fi
    elif [ ${rc} -ne 0 ]; then
       echo "[netcdf fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
