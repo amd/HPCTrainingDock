@@ -649,29 +649,19 @@ else
    fi
    unset _leaf_dir
 
-   # A consumer satisfies the ROCm dependency with either the local TheRock
-   # real module (rocm-new/<ver>) or its alias (rocm/<ver>): PrgEnv-amd-new
-   # loads rocm-new/<ver> directly (NOT rocm/<ver>), while a bare
-   # `module load rocm/<ver>` pulls it in under the alias name. A plain
-   # `prereq rocm/<ver>` therefore FAILS under PrgEnv-amd-new (only
-   # rocm-new/<ver> is loaded) -- which is why the kokkos APU test, run on a
-   # Cray under PrgEnv-amd-new, could not `module load kokkos` (slurm: kokkos
-   # ERROR:151 prereq rocm/7.2.4 not satisfied). Tcl `prereq` with several
-   # names is satisfied if ANY is loaded; Lmod's equivalent is prereq_any().
-   # Always widen the ROCm prereq to accept BOTH the real TheRock module
-   # (rocm-new/<ver>, loaded directly by PrgEnv-amd-new) and its alias
-   # (rocm/<ver>, pulled in by a bare `module load rocm/<ver>`). A Tcl
-   # `prereq a b` (and Lmod prereq_any) is satisfied if ANY listed module is
-   # loaded and does NOT require the named modules to exist -- so listing
-   # rocm-new/<ver> is harmless on a stock site (e.g. AAC6, where it is never
-   # loaded) and correct on a TheRock/PrgEnv-amd-new site (AAC7). An earlier
-   # MODULEPATH-scan gate ("only widen when a rocm-new dir is discoverable")
-   # produced a false negative here: the rocm-new modulefiles live under a
-   # different MODULEPATH entry (rocm-<ver>) than the consumer's own dir
-   # (rocmplus-<ver>), which need not be on the worker's MODULEPATH at build
-   # time, so the gate emitted a bare `prereq rocm/<ver>` that then FAILED
-   # under PrgEnv-amd-new (slurm: kokkos ERROR:151 prereq rocm/7.2.4 not
-   # satisfied). Unconditional widening removes that fragility.
+   # A consumer satisfies the ROCm dependency with either the local TheRock real
+   # module (rocm-new/<ver>) or its alias (rocm/<ver>). On a Cray/TheRock site
+   # PrgEnv-amd-new loads BOTH names (rocm-new/<ver> directly, plus the
+   # rocm/<ver> alias whose body just re-loads rocm-new -- a no-op), mirroring
+   # how its internal `module load amd` leaves both amd/<ver> and amd-new/<ver>
+   # loaded; a bare `module load rocm/<ver>` likewise yields both. So list BOTH
+   # names in the prereq. This matters on the compute nodes' Cray PE Environment
+   # Modules 3.2.11, where `prereq a b` requires ALL listed modules (AND; 3.2.11
+   # has no prereq-any) -- PrgEnv-amd-new is responsible for loading both names
+   # so that AND is satisfied. On Environment Modules 4.x/5.x `prereq` is ANY-of,
+   # so listing both is fine there too, and rocm-new/<ver> is simply never loaded
+   # on a stock site (e.g. AAC6), where rocm/<ver> alone satisfies it. Lmod uses
+   # prereq_any().
    _RPV="${ROCM_MODULE_NAME##*/}"
    case "${ROCM_MODULE_NAME}" in
       rocm/*|rocm-new/*)

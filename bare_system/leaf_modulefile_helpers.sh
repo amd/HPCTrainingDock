@@ -798,6 +798,11 @@ set _do_remove [expr {[module-info mode remove] || [module-info mode switch1]}]
 if {\$_do_remove} {
 ${_mw_remove}
     if {[is-loaded rocm-new/${_rocm}]} { module unload rocm-new/${_rocm} }
+    # Unload the rocm/${_rocm} alias loaded on the load path (see below).
+    # Mirrors the amd-new -> amd alias unload order; the alias's auto-inverse
+    # \`module unload rocm-new/${_rocm}\` is then a no-op since rocm-new was just
+    # unloaded above.
+    if {[is-loaded rocm/${_rocm}]}     { module unload rocm/${_rocm} }
     if {[is-loaded amd-new/${_rocm}]}  { module unload amd-new/${_rocm} }
 ${_amd_unload}
     if {[is-loaded PrgEnv-amd]}        { module unload PrgEnv-amd/${_pe} }
@@ -831,6 +836,19 @@ if {\$_do_load} {
         module swap rocm rocm-new/${_rocm}
     } elseif {![is-loaded rocm-new/${_rocm}]} {
         module load rocm-new/${_rocm}
+    }
+    # Also load the rocm/${_rocm} ALIAS so BOTH the alias name and the real
+    # rocm-new/${_rocm} appear in LOADEDMODULES, mirroring how the internal
+    # \`module load amd\` leaves both amd/${_rocm} and amd-new/${_rocm} loaded.
+    # Consumer modulefiles in the rocmplus tree declare
+    # \`prereq rocm-new/${_rocm} rocm/${_rocm}\`, which under the compute nodes'
+    # Cray PE Environment Modules 3.2.11 requires ALL listed modules (AND;
+    # 3.2.11 has no prereq-any), so the rocm/${_rocm} half must be present too.
+    # The alias body just (re)loads rocm-new/${_rocm} -- a no-op here since it is
+    # already loaded above. (On Modules 4.x/5.x prereq is ANY-of, so this is
+    # merely redundant, not harmful.)
+    if {![is-loaded rocm/${_rocm}]} {
+        module load rocm/${_rocm}
     }
 ${_mw_load}
 }
