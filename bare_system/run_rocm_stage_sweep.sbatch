@@ -84,6 +84,16 @@ manifest_add() {
    printf '%s\n' "${out%$'\t'}" >> "${MANIFEST}"
 }
 
+# A bare numeric >= 7.10.0 is only available as a TheRock tarball (the docker
+# numeric line ends below 7.10.0); stage it via the TheRock download path with
+# kind=therock so Phase B installs it with numeric naming. Mirrors
+# _is_therock_numeric in run_rocm_build_sweep.{sh,sbatch}.
+_is_therock_numeric() {
+   local _t="$1"
+   [[ "${_t}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
+   [ "$(printf '%s\n' "7.10.0" "${_t}" | sort -V | head -n1)" = "7.10.0" ]
+}
+
 for v in "${VERSIONS[@]}"; do
    echo "" | tee -a "${SUMMARY}"
    echo "[$(date)] STAGE ${v}" | tee -a "${SUMMARY}"
@@ -105,7 +115,9 @@ for v in "${VERSIONS[@]}"; do
          echo "[$(date)] FAIL ${v}" | tee -a "${SUMMARY}"; FAIL+=("${v}")
       fi
 
-   elif [[ "${v}" == therock-* ]]; then
+   elif [[ "${v}" == therock-* ]] || _is_therock_numeric "${v}"; then
+      # Explicit therock-<rel> token OR a bare numeric >= 7.10.0 (TheRock-only);
+      # ${v#therock-} yields the numeric release either way.
       rel="${v#therock-}"
       before=$(ls -1 "${STAGE_DIR}" 2>/dev/null)
       if bare_system/run_rocm_therock_install.sh \

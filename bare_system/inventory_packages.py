@@ -302,7 +302,13 @@ def list_pkgs(root, version):
 # ships with the corresponding rocm SDK. Mapping rocmplus-<suffix> back to
 # the SDK path is non-trivial for RC trees:
 #   rocmplus-7.2.1                  <- rocm-7.2.1            (1:1)
-#   rocmplus-therock-7.13.0         <- rocm-therock-7.13.0   (numeric from .info/version)
+#   rocmplus-7.13.0                 <- rocm-7.13.0           (1:1; TheRock numeric
+#                                                             release >= 7.10.0 now
+#                                                             uses plain numeric
+#                                                             naming, no therock- prefix)
+#   rocmplus-therock-7.13.0         <- rocm-therock-7.13.0   (LEGACY pre-refactor RC
+#                                                             tree; still rendered if
+#                                                             present on disk)
 #   rocmplus-afar-22.2.0-7.2.0      <- rocm-afar-22.2.0      (compiler tag from basename,
 #                                                             numeric from .info/version)
 #   rocmplus-afar-23.2.1-7.13.0     <- rocm-afar-23.2.1      (ditto; this is the
@@ -321,11 +327,12 @@ def _rocm_sdk_map(roots):
     """Return {ROCMPLUS_SUFFIX: /path/to/rocm-<basename>} discovered under roots.
 
     Suffix is what `main_setup.sh` would name the rocmplus tree:
-      * numeric                       (regular release; SDK basename =
-                                       rocm-<numeric>)
+      * numeric                       (regular release OR a TheRock numeric
+                                       release >= 7.10.0, both SDK basename =
+                                       rocm-<numeric>, e.g. rocm-7.13.0)
       * '<family>-<numeric>'          (non-afar RC tree; SDK basename =
-                                       rocm-<family>-<numeric>, e.g.
-                                       rocm-therock-7.13.0)
+                                       rocm-<family>-<numeric>, e.g. a LEGACY
+                                       pre-refactor rocm-therock-7.13.0 tree)
       * 'afar-<compiler>-<numeric>'   (AFAR family; SDK basename =
                                        rocm-afar-<compiler>, e.g.
                                        rocm-afar-22.2.0; the numeric

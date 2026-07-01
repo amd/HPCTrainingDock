@@ -250,6 +250,18 @@ SUMMARY="sweep_summary_$(date +%Y%m%d_%H%M%S)_job${SLURM_JOB_ID}.out"
 # only the requested PrgEnv flavor(s). OpenMPI flavors are a WIP skeleton: the
 # rocm SDK is installed (no PrgEnv ecosystem) and a work-in-progress message is
 # printed.
+# Version-threshold predicate (top-level so BOTH the --program-environments
+# flow and the legacy --rocm-versions loop can use it): a bare numeric ROCm
+# token >= 7.10.0 is only available as a pre-built TheRock tarball (the
+# docker-built numeric release line ends below 7.10.0), so it takes the
+# TheRock install path with numeric naming (rocm-<numeric>, rocm/<numeric>,
+# rocmplus-<numeric>) even though it carries no `therock-` prefix.
+_is_therock_numeric() {
+   local _t="$1"
+   [[ "${_t}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
+   [ "$(printf '%s\n' "7.10.0" "${_t}" | sort -V | head -n1)" = "7.10.0" ]
+}
+
 if [[ -n "${PROGRAM_ENVIRONMENTS}" ]]; then
    KIND_MAP_CONF="${SLURM_SUBMIT_DIR}/bare_system/rocm_kind_map.conf"
    [[ -f "${KIND_MAP_CONF}" ]] || { echo "ERROR: kind map ${KIND_MAP_CONF} not found" | tee -a "${SUMMARY}"; exit 1; }
@@ -269,7 +281,26 @@ if [[ -n "${PROGRAM_ENVIRONMENTS}" ]]; then
          printf 'therock-afar-%s\n' "${BASH_REMATCH[1]}"
          return 0
       fi
+      # Bare numeric X.Y[.Z] -> identity; the >= 7.10.0 threshold (classify_kind
+      # below) decides docker-build vs TheRock-tarball, so numeric TheRock
+      # releases need no conf entry.
+      if [[ "${_s}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+         printf '%s\n' "${_s}"
+         return 0
+      fi
       return 1
+   }
+
+   # Classify a canonical token into its install kind. Centralized so every
+   # dispatch site agrees: therock-afar-* -> therock-afar; therock-* -> therock;
+   # bare numeric >= 7.10.0 -> therock (numeric TheRock); else numeric (docker).
+   classify_kind() {
+      local _tok="$1"
+      if   [[ "${_tok}" == therock-afar-* ]]; then echo "therock-afar"
+      elif [[ "${_tok}" == therock-* ]];      then echo "therock"
+      elif [[ "${_tok}" == afar-* ]];         then echo "afar"
+      elif _is_therock_numeric "${_tok}";      then echo "therock"
+      else echo "numeric"; fi
    }
 
    # ── Usable container-builder detection ────────────────────────────
@@ -449,11 +480,9 @@ EOF
       # mpich-wrappers are only consumed by PrgEnv-amd-new; build them only then.
       case " ${emit_set} " in *" amd-new "*) BUILD_MW=1 ;; *) BUILD_MW=0 ;; esac
 
-      # Determine the canonical token's install kind.
-      if [[ "${tok}" == therock-afar-* ]]; then kind="therock-afar"
-      elif [[ "${tok}" == therock-* ]];   then kind="therock"
-      elif [[ "${tok}" == afar-* ]];      then kind="afar"
-      else kind="numeric"; fi
+      # Determine the canonical token's install kind (bare numeric >= 7.10.0
+      # classifies as therock -- numeric TheRock tarball with numeric naming).
+      kind="$(classify_kind "${tok}")"
 
       {
          echo ""
@@ -477,8 +506,11 @@ EOF
             _rel="${tok#afar-}"
             [[ -d "${TOP_INSTALL_PATH}/rocm-afar-${_rel}" ]] && _skip_match="${TOP_INSTALL_PATH}/rocm-afar-${_rel}" ;;
          therock)
+            # Numeric naming: install dir is rocm-<numeric> (no therock- prefix).
+            # tok is either therock-<rel> (legacy label) or a bare numeric; strip
+            # the optional therock- so _rel is the numeric either way.
             _rel="${tok#therock-}"
-            for _cand in "${TOP_INSTALL_PATH}/rocm-therock-${_rel}" "${TOP_INSTALL_PATH}/rocm-therock-${_rel}.0"; do
+            for _cand in "${TOP_INSTALL_PATH}/rocm-${_rel}" "${TOP_INSTALL_PATH}/rocm-${_rel}.0"; do
                [[ -d "${_cand}" ]] && { _skip_match="${_cand}"; break; }
             done ;;
          numeric)
@@ -760,9 +792,10 @@ for v in "${VERSIONS[@]}"; do
       fi
       unset _afar_rel
    elif [[ "${v}" == therock-* ]]; then
+      # Numeric naming: TheRock installs to rocm-<numeric> (no therock- prefix).
       _trel="${v#therock-}"
-      for _cand in "${TOP_INSTALL_PATH}/rocm-therock-${_trel}" \
-                   "${TOP_INSTALL_PATH}/rocm-therock-${_trel}.0"; do
+      for _cand in "${TOP_INSTALL_PATH}/rocm-${_trel}" \
+                   "${TOP_INSTALL_PATH}/rocm-${_trel}.0"; do
          if [[ -d "${_cand}" ]]; then
             _skip_match="${_cand}"
             break
@@ -770,6 +803,8 @@ for v in "${VERSIONS[@]}"; do
       done
       unset _cand _trel
    else
+      # Bare numeric (docker-built < 7.10.0 OR TheRock-sourced >= 7.10.0) both
+      # install to rocm-<numeric>, so a single check covers both.
       [[ -d "${TOP_INSTALL_PATH}/rocm-${v}" ]] && _skip_match="${TOP_INSTALL_PATH}/rocm-${v}"
    fi
    if [[ -n "${_skip_match}" && "${REPLACE_EXISTING}" != "1" ]]; then
@@ -833,7 +868,10 @@ for v in "${VERSIONS[@]}"; do
    # dir (no wrapper segment to drop), reads .info/version to derive the
    # final install-dir basename (rocm-therock-<numeric>), and writes
    # a GPUSDK-shaped modulefile under base/rocm/therock-<token>.lua.
-   if [[ "${v}" == therock-* ]]; then
+   # Explicit therock-<rel> token OR a bare numeric >= 7.10.0 (which is only
+   # available as a TheRock tarball). Both install with numeric naming;
+   # ${v#therock-} yields the numeric either way.
+   if [[ "${v}" == therock-* ]] || _is_therock_numeric "${v}"; then
       THEROCK_REL="${v#therock-}"
       {
          echo ""

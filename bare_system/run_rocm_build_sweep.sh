@@ -384,6 +384,14 @@ if [[ -n "${PROGRAM_ENVIRONMENTS_RAW}" ]]; then
          printf 'therock-afar-%s\n' "${BASH_REMATCH[1]}"
          return 0
       fi
+      # Bare numeric X.Y[.Z] resolves to itself (identity). The install
+      # dispatch decides docker-build vs TheRock-tarball by the >= 7.10.0
+      # threshold (see _is_therock_numeric below and the sbatch), so a
+      # numeric TheRock release (7.12.0, 7.13.0, ...) needs NO conf entry.
+      if [[ "${_s}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+         printf '%s\n' "${_s}"
+         return 0
+      fi
       return 1
    }
 
@@ -453,6 +461,17 @@ N=${#VERSIONS_ARR[@]}
 #       docker + make + extract + patches, ~95 min wall.
 # Split here so the time budget reflects reality and the submitter
 # banner surfaces the per-bucket counts.
+# Version-threshold predicate: a bare numeric ROCm token >= 7.10.0 is only
+# available as a pre-built TheRock tarball (the docker-built numeric release
+# line ends below 7.10.0), so it takes the TheRock install path even though it
+# carries no `therock-` prefix. sort -V comparison: token sorts >= 7.10.0 iff
+# 7.10.0 is the first line of `printf '7.10.0\n<tok>\n' | sort -V`.
+_is_therock_numeric() {
+   local _t="$1"
+   [[ "${_t}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
+   [ "$(printf '%s\n' "7.10.0" "${_t}" | sort -V | head -n1)" = "7.10.0" ]
+}
+
 AFAR_VERSIONS=()
 THEROCK_VERSIONS=()
 NUMERIC_VERSIONS=()
@@ -460,6 +479,9 @@ for _v in "${VERSIONS_ARR[@]}"; do
    if [[ "${_v}" == afar-* ]]; then
       AFAR_VERSIONS+=("${_v}")
    elif [[ "${_v}" == therock-* ]]; then
+      THEROCK_VERSIONS+=("${_v}")
+   elif _is_therock_numeric "${_v}"; then
+      # Bare numeric >= 7.10.0 -> TheRock tarball path (numeric naming).
       THEROCK_VERSIONS+=("${_v}")
    else
       NUMERIC_VERSIONS+=("${_v}")

@@ -74,9 +74,22 @@ done
 
 ROCM_VERSIONS_NORM="${ROCM_VERSIONS_RAW//,/ }"
 read -r -a ARR <<< "${ROCM_VERSIONS_NORM}"
+
+# A bare numeric >= 7.10.0 is a TheRock tarball (download ~6 min), not a docker
+# build (~95 min); classify it with the downloads for the time budget. Mirrors
+# _is_therock_numeric in run_rocm_build_sweep.{sh,sbatch}.
+_is_therock_numeric() {
+   local _t="$1"
+   [[ "${_t}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
+   [ "$(printf '%s\n' "7.10.0" "${_t}" | sort -V | head -n1)" = "7.10.0" ]
+}
+
 N_NUM=0; N_DL=0
 for v in "${ARR[@]}"; do
-   case "${v}" in therock-*|afar-*) N_DL=$((N_DL+1)) ;; *) N_NUM=$((N_NUM+1)) ;; esac
+   case "${v}" in
+      therock-*|afar-*) N_DL=$((N_DL+1)) ;;
+      *) if _is_therock_numeric "${v}"; then N_DL=$((N_DL+1)); else N_NUM=$((N_NUM+1)); fi ;;
+   esac
 done
 TOTAL_MIN=$(( N_NUM*MIN_PER_NUMERIC + N_DL*MIN_PER_DOWNLOAD + MARGIN_MIN ))
 (( TOTAL_MIN > MAX_TIME_MIN )) && TOTAL_MIN=${MAX_TIME_MIN}

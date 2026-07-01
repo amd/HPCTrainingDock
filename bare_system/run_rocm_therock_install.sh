@@ -36,24 +36,21 @@
 #      into a staging dir under ${TOP_INSTALL_PATH}/. No rename of
 #      a wrapper dir is needed (TheRock tarballs have no wrapper).
 #   3. Read .info/version from the staged tree -> ROCM_NUMERIC.
-#   4. Move staging dir to the final ${TOP_INSTALL_PATH}/rocm-therock-
-#      ${ROCM_NUMERIC} (the .info/version-derived install dir; this
-#      is the authoritative naming -- the github-tag form `therock-7.13`
-#      is a label only).
-#   5. Emit ${TOP_MODULE_PATH}/base/rocm/therock-${THEROCK_RELEASE}.lua
-#      using THE USER-SUPPLIED DOWNLOAD TAG as the module name (e.g.
-#      `therock-7.13.lua` for the github tag `therock-7.13`,
-#      `therock-23.2.1.lua` for the older 23.x.y scheme). This makes
-#      provenance obvious to operators -- the module name they load
-#      maps 1:1 to the github release tag they (or a prior sweep)
-#      asked for. Inside the modulefile, ROCM_PATH and the two
-#      MODULEPATH prepends use the .info/version-derived form
-#      (rocm-therock-${ROCM_NUMERIC} / rocmplus-therock-${ROCM_NUMERIC})
-#      so runtime version comparisons -- which read either
-#      ${ROCM_PATH}/.info/version or the basename of ${ROCM_PATH} --
-#      see the authoritative SDK numeric (e.g. 7.13.0) and not the
-#      github tag form. This is the SAME pattern used by the existing
-#      cluster-deployed therock-23.x.y.lua modules; mirror it exactly.
+#   4. Move staging dir to the final ${TOP_INSTALL_PATH}/rocm-
+#      ${ROCM_NUMERIC} (the .info/version-derived install dir).
+#   5. Emit ${TOP_MODULE_PATH}/base/rocm/${ROCM_NUMERIC}.lua using the
+#      .info/version-derived SDK NUMERIC as the module name (e.g.
+#      `7.13.0.lua`). NUMERIC NAMING (TheRock >= 7.10.0): a TheRock
+#      release is registered exactly like a docker-built numeric
+#      release -- module `rocm/${ROCM_NUMERIC}`, SDK tree
+#      `rocm-${ROCM_NUMERIC}`, package tree `rocmplus-${ROCM_NUMERIC}`,
+#      `PrgEnv-amd-new/<pe>-${ROCM_NUMERIC}` -- differing ONLY in source
+#      (repo.amd.com tarball) and packaging (extract vs build). The
+#      github-tag form `therock-7.13` remains a download label only
+#      (${THEROCK_RELEASE}); it no longer appears in any output name.
+#      Inside the modulefile, ROCM_PATH and the two MODULEPATH prepends
+#      use the .info/version numeric so runtime version comparisons see
+#      the authoritative SDK numeric (e.g. 7.13.0).
 #
 # This script is invoked one-per-token by bare_system/run_rocm_build_sweep.sbatch
 # when the sweep loop sees a token of the form therock-X.Y[.Z]. The sweep's
@@ -164,11 +161,11 @@ Usage: $0 [opts]
                                  for nightlies, https://rocm.prereleases.amd.com/tarball
                                  for prereleases, etc. See
                                  https://github.com/ROCm/TheRock/blob/main/dockerfiles/install_rocm_tarball.sh)
-  --replace-existing 0|1        overwrite existing rocm-therock-<numeric>
+  --replace-existing 0|1        overwrite existing rocm-<numeric>
                                 install + modulefile (default ${REPLACE_EXISTING})
   --keep-failed-installs 0|1    on failure, keep partial install + modulefile
                                 for post-mortem (default ${KEEP_FAILED_INSTALLS})
-  --modules-only 0|1            keep the existing rocm-therock-<numeric> tree and
+  --modules-only 0|1            keep the existing rocm-<numeric> tree and
                                 ONLY re-emit modulefiles (base + per-package +
                                 .pc + PrgEnv-amd-new ecosystem + mpich-wrappers);
                                 skips discovery/download/extract/promote so no
@@ -254,15 +251,27 @@ if [[ "${MODULES_ONLY}" == "1" ]]; then
 fi
 
 MODULE_DIR="${TOP_MODULE_PATH}/base/rocm"
-# Module file basename uses the USER-SUPPLIED DOWNLOAD TAG verbatim
-# (e.g. therock-7.13.lua for github tag therock-7.13). This makes
-# provenance obvious -- the loaded module name maps 1:1 to what was
-# fetched from upstream. The install dir name (and ROCM_PATH inside
-# the modulefile) is the .info/version-derived form, derived in
-# Phase 3 below. The two intentionally diverge: that's the whole
-# point of separating "where did this come from" (module name) from
-# "what version does the SDK report itself as" (install dir + ROCM_PATH).
-MODULE_FILE="${MODULE_DIR}/therock-${THEROCK_RELEASE}.lua"
+# NUMERIC NAMING (TheRock >= 7.10.0): the module basename is the
+# .info/version-derived SDK numeric (e.g. 7.13.0), matching the
+# docker-built numeric releases -- a TheRock release differs from a
+# numeric release ONLY in source (repo.amd.com tarball) and packaging
+# (extract vs build), never in the module/tree names. ROCM_NUMERIC is
+# not known until Phase 3, so MODULE_FILE is finalized there (see the
+# "finalize MODULE_FILE" block just before Phase 5). The candidate
+# list below -- built from the user-supplied release token, both X.Y
+# and X.Y.0 forms, both flavors -- lets --replace-existing remove a
+# stale numeric modulefile before ROCM_NUMERIC is derived.
+MODULE_FILE=""
+MODULE_FILE_CANDIDATES=(
+   "${MODULE_DIR}/${THEROCK_RELEASE}"
+   "${MODULE_DIR}/${THEROCK_RELEASE}.lua"
+)
+if [[ "${THEROCK_RELEASE}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+   MODULE_FILE_CANDIDATES+=(
+      "${MODULE_DIR}/${THEROCK_RELEASE}.0"
+      "${MODULE_DIR}/${THEROCK_RELEASE}.0.lua"
+   )
+fi
 
 # ---------------- Phase 0: skip-if-installed pre-check ----------------
 # We don't yet know the .info/version-derived install dir basename
@@ -275,9 +284,9 @@ MODULE_FILE="${MODULE_DIR}/therock-${THEROCK_RELEASE}.lua"
 # `therock-7.13.0`) without us having to download the tarball to learn
 # .info/version. If a directory matches AND --replace-existing is not
 # set, exit 0 cleanly (the sweep counts this as SKIP).
-SKIP_CANDIDATES=( "${TOP_INSTALL_PATH}/rocm-therock-${THEROCK_RELEASE}" )
+SKIP_CANDIDATES=( "${TOP_INSTALL_PATH}/rocm-${THEROCK_RELEASE}" )
 [[ "${THEROCK_RELEASE}" =~ ^[0-9]+\.[0-9]+$ ]] \
-   && SKIP_CANDIDATES+=( "${TOP_INSTALL_PATH}/rocm-therock-${THEROCK_RELEASE}.0" )
+   && SKIP_CANDIDATES+=( "${TOP_INSTALL_PATH}/rocm-${THEROCK_RELEASE}.0" )
 # In --stage-only mode we only download the tarball; an existing install
 # is irrelevant and must NOT short-circuit the download.
 # In --modules-only mode an existing install is REQUIRED (we re-emit modulefiles
@@ -322,10 +331,12 @@ fi
 echo "[therock] NO_SUDO=${NO_SUDO}  CRAY_SYSTEM=${CRAY_SYSTEM}  (sudo='${SUDO}')"
 
 # Cray uses classic Tcl modulefiles (extensionless); Lmod uses .lua.
+# MODULE_FILE itself is finalized once ROCM_NUMERIC is known (numeric
+# basename); here we only record the flavor extension.
 if [ "${CRAY_SYSTEM}" = "1" ]; then
-   MODULE_FILE="${MODULE_DIR}/therock-${THEROCK_RELEASE}"
+   MODULE_EXT=""
 else
-   MODULE_FILE="${MODULE_DIR}/therock-${THEROCK_RELEASE}.lua"
+   MODULE_EXT=".lua"
 fi
 
 if [ "${NO_SUDO}" = "1" ]; then
@@ -368,13 +379,13 @@ if [[ "${MODULES_ONLY}" == "1" ]]; then
       [[ -d "${_cand}" ]] && { INSTALL_DIR="${_cand}"; break; }
    done
    if [[ -z "${INSTALL_DIR}" ]]; then
-      for _cand in "${TOP_INSTALL_PATH}"/rocm-therock-"${THEROCK_RELEASE}"*; do
+      for _cand in "${TOP_INSTALL_PATH}"/rocm-"${THEROCK_RELEASE}"*; do
          [[ -d "${_cand}" ]] && { INSTALL_DIR="${_cand}"; break; }
       done
    fi
    unset _cand
    if [[ -z "${INSTALL_DIR}" || ! -d "${INSTALL_DIR}" ]]; then
-      echo "ERROR: --modules-only set but no rocm-therock-${THEROCK_RELEASE}* install" >&2
+      echo "ERROR: --modules-only set but no rocm-${THEROCK_RELEASE}* install" >&2
       echo "       exists under ${TOP_INSTALL_PATH}; there is no SDK tree to emit" >&2
       echo "       modulefiles for. Run a full install first (without --modules-only)." >&2
       exit 1
@@ -383,10 +394,10 @@ if [[ "${MODULES_ONLY}" == "1" ]]; then
    if ${SUDO} test -f "${INSTALL_DIR}/.info/version" 2>/dev/null; then
       ROCM_NUMERIC="$(${SUDO} cut -f1 -d- "${INSTALL_DIR}/.info/version" 2>/dev/null || true)"
    fi
-   # Fallback: derive from the install dir basename (rocm-therock-<numeric>).
+   # Fallback: derive from the install dir basename (rocm-<numeric>).
    if [[ -z "${ROCM_NUMERIC}" ]]; then
       ROCM_NUMERIC="$(basename "${INSTALL_DIR}")"
-      ROCM_NUMERIC="${ROCM_NUMERIC#rocm-therock-}"
+      ROCM_NUMERIC="${ROCM_NUMERIC#rocm-}"
    fi
    if [[ -z "${ROCM_NUMERIC}" ]]; then
       echo "ERROR: --modules-only: cannot derive ROCM_NUMERIC from ${INSTALL_DIR}" >&2
@@ -439,7 +450,7 @@ if [[ -n "${LOCAL_TARBALL_INPUT}" ]]; then
    TARBALL_URL="file://${_abs}"
    LOCAL_TARBALL="${_abs}"
    KEEP_LOCAL_TARBALL=1
-   STAGING_DIR="${TOP_INSTALL_PATH}/rocm-therock-${ACTUAL_VERSION}.staging.$$"
+   STAGING_DIR="${TOP_INSTALL_PATH}/rocm-${ACTUAL_VERSION}.staging.$$"
    echo "Using local tarball: ${_abs}  (parsed version ${ACTUAL_VERSION})"
    unset _abs _bn
 else
@@ -489,7 +500,7 @@ fi
 LOCAL_TARBALL="/tmp/therock-dist-linux-${AMDGPU_FAMILY}-${ACTUAL_VERSION}.tar.gz"
 # Staging dir under the install root so the final mv is rename-only
 # (same filesystem == atomic, no NFS cross-mount data copy).
-STAGING_DIR="${TOP_INSTALL_PATH}/rocm-therock-${ACTUAL_VERSION}.staging.$$"
+STAGING_DIR="${TOP_INSTALL_PATH}/rocm-${ACTUAL_VERSION}.staging.$$"
 fi   # end discovery-vs-local-tarball
 
 # --stage-only: redirect the download into the staging dir and protect it
@@ -511,11 +522,13 @@ echo "  DISTRO               : ${DISTRO} ${DISTRO_VERSION} (informational only)"
 echo "  Tarball URL          : ${TARBALL_URL}"
 echo "  Local tarball        : ${LOCAL_TARBALL}"
 echo "  Staging dir          : ${STAGING_DIR}"
-echo "  Module file          : ${MODULE_FILE}"
+# MODULE_FILE is finalized from ROCM_NUMERIC before Phase 5; show the
+# predicted numeric modulefile here (assumes ROCM_NUMERIC==ACTUAL_VERSION).
+echo "  Predicted module     : ${MODULE_DIR}/${ACTUAL_VERSION}${MODULE_EXT}"
 # Predicted install dir assumes ROCM_NUMERIC == ACTUAL_VERSION
 # (the common case); Phase 4 finalizes from .info/version and may
 # differ for alpha/RC tarballs.
-echo "  Predicted install    : ${TOP_INSTALL_PATH}/rocm-therock-${ACTUAL_VERSION}"
+echo "  Predicted install    : ${TOP_INSTALL_PATH}/rocm-${ACTUAL_VERSION}"
 echo "  REPLACE_EXISTING     : ${REPLACE_EXISTING}"
 echo "  KEEP_FAILED_INSTALLS : ${KEEP_FAILED_INSTALLS}"
 echo "============================================================"
@@ -539,11 +552,16 @@ if [[ -z "${STAGE_ONLY_DIR}" && "${REPLACE_EXISTING}" == "1" ]]; then
          ${SUDO} rm -rf "${_cand}"
       fi
    done
-   if [[ -f "${MODULE_FILE}" ]]; then
-      echo "[--replace-existing 1] removing ${MODULE_FILE}"
-      ${SUDO} rm -f "${MODULE_FILE}"
-   fi
-   unset _cand
+   # MODULE_FILE (numeric basename) isn't known until ROCM_NUMERIC is
+   # derived, so remove any stale numeric modulefile via the candidate list
+   # (both X.Y / X.Y.0 forms, both flavors) built from the release token.
+   for _mcand in "${MODULE_FILE_CANDIDATES[@]}"; do
+      if [[ -f "${_mcand}" ]]; then
+         echo "[--replace-existing 1] removing ${_mcand}"
+         ${SUDO} rm -f "${_mcand}"
+      fi
+   done
+   unset _cand _mcand
 fi
 
 # ---------------- EXIT-trap fail-cleanup ------------------------------
@@ -632,11 +650,11 @@ echo "ROCM_NUMERIC (from .info/version): ${ROCM_NUMERIC}"
 if [[ "${ACTUAL_VERSION}" != "${ROCM_NUMERIC}" ]]; then
    echo "NOTE: tarball filename version (${ACTUAL_VERSION}) differs from"
    echo "      .info/version (${ROCM_NUMERIC}); install dir will use the"
-   echo "      .info/version-derived form (rocm-therock-${ROCM_NUMERIC})."
+      echo "      .info/version-derived form (rocm-${ROCM_NUMERIC})."
 fi
 
 # ---------------- Phase 4: promote staging to final install dir -------
-INSTALL_DIR="${TOP_INSTALL_PATH}/rocm-therock-${ROCM_NUMERIC}"
+INSTALL_DIR="${TOP_INSTALL_PATH}/rocm-${ROCM_NUMERIC}"
 echo "============================================================"
 echo "  Phase 4: promote staging -> ${INSTALL_DIR}"
 echo "============================================================"
@@ -686,6 +704,9 @@ if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
 fi
 unset _leaf_dir
 
+# Finalize the numeric modulefile path now that ROCM_NUMERIC + MODULE_EXT
+# are both known (both the normal and --modules-only flows have set them).
+MODULE_FILE="${MODULE_DIR}/${ROCM_NUMERIC}${MODULE_EXT}"
 echo "============================================================"
 echo "  Phase 5: write modulefile ${MODULE_FILE}"
 echo "============================================================"
@@ -734,14 +755,14 @@ if [ "${CRAY_SYSTEM}" = "1" ]; then
 ${SUDO} tee "${MODULE_FILE}" >/dev/null <<EOF
 #%Module
 #
-# ROCm (TheRock release therock-${THEROCK_RELEASE}) -- Tcl modulefile.
-# Source: tarball ${ACTUAL_VERSION}, family ${AMDGPU_FAMILY}
+# ROCm ${ROCM_NUMERIC} (TheRock source) -- Tcl modulefile.
+# Source: TheRock tarball ${ACTUAL_VERSION} (release therock-${THEROCK_RELEASE}), family ${AMDGPU_FAMILY}
 # SDK numeric: ${ROCM_NUMERIC} (.info/version) -> ROCM_PATH=${INSTALL_DIR}
 # Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})
 
 conflict rocm
 
-module-whatis "ROCm TheRock therock-${THEROCK_RELEASE} (SDK ${ROCM_NUMERIC})"
+module-whatis "ROCm ${ROCM_NUMERIC} (TheRock source, tarball ${ACTUAL_VERSION})"
 
 set base  ${INSTALL_DIR}
 
@@ -763,14 +784,14 @@ prepend-path PATH               \$base/share/rocprofiler-systems/bin
 # the module-root that holds rocm-therock-<numeric>/ and rocmplus-...).
 set _self    [file normalize \${ModulesCurrentModulefile}]
 set _modroot [file dirname [file dirname [file dirname \$_self]]]
-prepend-path MODULEPATH \$_modroot/rocm-therock-${ROCM_NUMERIC}
-prepend-path MODULEPATH \$_modroot/rocmplus-therock-${ROCM_NUMERIC}
+prepend-path MODULEPATH \$_modroot/rocm-${ROCM_NUMERIC}
+prepend-path MODULEPATH \$_modroot/rocmplus-${ROCM_NUMERIC}
 EOF
 else
 # ---- Lmod .lua modulefile ----
 ${SUDO} tee "${MODULE_FILE}" >/dev/null <<EOF
 whatis("Name: ROCm")
-whatis("Version: therock-${THEROCK_RELEASE}")
+whatis("Version: ${ROCM_NUMERIC}")
 whatis("Category: AMD")
 whatis("ROCm")
 whatis("Set HIPCC_VERBOSE=7 to see what hipcc is doing for the compilation and link")
@@ -790,8 +811,8 @@ prepend_path("INCLUDE",            pathJoin(base, "include"))
 setenv("HSA_NO_SCRATCH_RECLAIM", "1")
 ${HIPCC_LUA_LINES}
 setenv("ROCM_PATH", base)
-prepend_path("MODULEPATH", pathJoin(mbase, "rocm-therock-${ROCM_NUMERIC}"))
-prepend_path("MODULEPATH", pathJoin(mbase, "rocmplus-therock-${ROCM_NUMERIC}"))
+prepend_path("MODULEPATH", pathJoin(mbase, "rocm-${ROCM_NUMERIC}"))
+prepend_path("MODULEPATH", pathJoin(mbase, "rocmplus-${ROCM_NUMERIC}"))
 family("GPUSDK")
 
 -- Place the rocprof-sys-run wrapper (which applies a libbfd LD_PRELOAD
@@ -810,14 +831,14 @@ ${SUDO} chmod 644 "${MODULE_FILE}"
 # MODULEPATH prepended above). The helper feature-gates each emission on
 # disk presence (TheRock tarballs vary in what components ship).
 echo "============================================================"
-echo "  Phase 5b: per-package modulefiles under ${TOP_MODULE_PATH}/rocm-therock-${ROCM_NUMERIC}/"
+echo "  Phase 5b: per-package modulefiles under ${TOP_MODULE_PATH}/rocm-${ROCM_NUMERIC}/"
 echo "============================================================"
 # shellcheck source=bare_system/leaf_modulefile_helpers.sh
 source "$(dirname "${LEAF_SCRIPT_PATH}")/leaf_modulefile_helpers.sh"
 emit_per_package_modulefiles \
-   "${TOP_MODULE_PATH}/rocm-therock-${ROCM_NUMERIC}" \
+   "${TOP_MODULE_PATH}/rocm-${ROCM_NUMERIC}" \
    "${ROCM_NUMERIC}" \
-   "rocm/therock-${THEROCK_RELEASE}" \
+   "rocm/${ROCM_NUMERIC}" \
    "${INSTALL_DIR}" \
    "${LEAF_SCRIPT_NAME}" \
    "${LEAF_SCRIPT_COMMIT:0:12}" \
@@ -852,8 +873,8 @@ if [ "${CRAY_SYSTEM}" = "1" ]; then
       echo "  PrgEnv-amd version to wrap: ${PE_VERSION}"
       emit_cray_prgenv_ecosystem \
          "${TOP_MODULE_PATH}/base" \
-         "${TOP_MODULE_PATH}/rocm-therock-${ROCM_NUMERIC}" \
-         "${TOP_MODULE_PATH}/rocmplus-therock-${ROCM_NUMERIC}" \
+         "${TOP_MODULE_PATH}/rocm-${ROCM_NUMERIC}" \
+         "${TOP_MODULE_PATH}/rocmplus-${ROCM_NUMERIC}" \
          "${ROCM_NUMERIC}" \
          "${INSTALL_DIR}" \
          "${PE_VERSION}" \
@@ -868,7 +889,7 @@ if [ "${CRAY_SYSTEM}" = "1" ]; then
       case " ${PRGENV_FLAVORS:-amd-new cray-new} " in
          *" amd-new "*|*" PrgEnv-amd-new "*)
             build_and_emit_mpich_wrappers \
-               "${TOP_MODULE_PATH}/rocmplus-therock-${ROCM_NUMERIC}" \
+               "${TOP_MODULE_PATH}/rocmplus-${ROCM_NUMERIC}" \
                "${ROCM_NUMERIC}" \
                "${INSTALL_DIR}" \
                "${INSTALL_DIR}/mpich-wrappers" \
@@ -899,16 +920,16 @@ if [ "${_world_ro}" = "1" ]; then
    make_world_readable \
       "${INSTALL_DIR}" \
       "${TOP_MODULE_PATH}/base" \
-      "${TOP_MODULE_PATH}/rocm-therock-${ROCM_NUMERIC}" \
-      "${TOP_MODULE_PATH}/rocmplus-therock-${ROCM_NUMERIC}" \
+      "${TOP_MODULE_PATH}/rocm-${ROCM_NUMERIC}" \
+      "${TOP_MODULE_PATH}/rocmplus-${ROCM_NUMERIC}" \
       "${MODULE_FILE}"
 fi
 unset _world_ro
 
 echo ""
 echo "============================================================"
-echo "  Done: therock-${THEROCK_RELEASE} (ROCM_NUMERIC=${ROCM_NUMERIC})"
+echo "  Done: ROCm ${ROCM_NUMERIC} (TheRock source, release therock-${THEROCK_RELEASE})"
 echo "  Install: ${INSTALL_DIR}"
-echo "  Module : ${MODULE_FILE}  (loads rocm/therock-${THEROCK_RELEASE},"
-echo "                            ROCM_PATH=rocm-therock-${ROCM_NUMERIC})"
+echo "  Module : ${MODULE_FILE}  (loads rocm/${ROCM_NUMERIC},"
+echo "                            ROCM_PATH=rocm-${ROCM_NUMERIC})"
 echo "============================================================"
