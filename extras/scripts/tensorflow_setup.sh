@@ -511,21 +511,58 @@ else
       # HIP_VERSION is MAJOR*10_000_000 + MINOR*100_000 + PATCH (defined in
       # <rocm>/include/hip/hip_version.h). 71300000 = 7.13.0.
       #
-      # Branch gate: apply only on known pre-fix TF branches. When ROCm/
-      # tensorflow-upstream ships a branch with the fix, that branch will
-      # NOT match the case below and we leave its source untouched.
-      # If/when a new pre-fix branch shows up, extend the case.
+      # Gate on BOTH the TF branch AND the actual ROCm/HIP version:
+      #   1. Branch gate: apply only on known pre-fix TF branches. When
+      #      ROCm/tensorflow-upstream ships a branch with the fix, that
+      #      branch will NOT match the case below and we leave its source
+      #      untouched. If/when a new pre-fix branch shows up, extend it.
+      #   2. Version gate: the new kernel-arg API only exists in ROCm
+      #      7.13.0+, so there is nothing to guard against on older ROCm.
+      #      Attempting the patch on (e.g.) 7.2.4 needlessly runs a fragile
+      #      dry-run that can abort a build that never needed the patch
+      #      (observed on a Cray PrgEnv-amd 7.2.4 build, slurm job 8355).
       #
-      # Verified syntax-only against both rocm-7.13.0 and rocm-7.2.3
-      # headers; preprocessor selects the right branch in each.
+      # Version source (most reliable first), so this works on a Cray where
+      # ROCm arrives via PrgEnv-amd modules rather than a `rocm` module and
+      # the module label (e.g. "8.7.0-7.2.4") is not a clean version field:
+      #   a. ${ROCM_PATH}/include/hip/hip_version.h  -> authoritative
+      #      HIP_VERSION components the compiler will actually see.
+      #   b. ${ROCM_PATH}/.info/version              -> e.g. "7.2.4".
+      # Encoded as MAJOR*10_000_000 + MINOR*100_000 + PATCH to match the
+      # HIP_VERSION scheme; 71300000 = 7.13.0. Fail-open to "no patch" when
+      # neither source is readable (safe on older/site-pinned Cray ROCm).
+      _HIP_VERSION_INT=0
+      _hip_ver_h="${ROCM_PATH:-/opt/rocm}/include/hip/hip_version.h"
+      _rocm_info_ver="${ROCM_PATH:-/opt/rocm}/.info/version"
+      if [[ -r "${_hip_ver_h}" ]]; then
+         _hv_major=$(awk '/#define[[:space:]]+HIP_VERSION_MAJOR/ {print $3}' "${_hip_ver_h}")
+         _hv_minor=$(awk '/#define[[:space:]]+HIP_VERSION_MINOR/ {print $3}' "${_hip_ver_h}")
+         _hv_patch=$(awk '/#define[[:space:]]+HIP_VERSION_PATCH/ {print $3}' "${_hip_ver_h}")
+         _HIP_VERSION_INT=$(( ${_hv_major:-0}*10000000 + ${_hv_minor:-0}*100000 + ${_hv_patch:-0} ))
+      elif [[ -r "${_rocm_info_ver}" ]]; then
+         # .info/version looks like "7.2.4" (may carry a trailing "-<build>")
+         _rv=$(head -n1 "${_rocm_info_ver}" | cut -d'-' -f1)
+         _rv_major=$(echo "${_rv}" | cut -d'.' -f1)
+         _rv_minor=$(echo "${_rv}" | cut -d'.' -f2)
+         _rv_patch=$(echo "${_rv}" | cut -d'.' -f3)
+         _HIP_VERSION_INT=$(( ${_rv_major:-0}*10000000 + ${_rv_minor:-0}*100000 + ${_rv_patch:-0} ))
+      fi
+      echo "tensorflow: detected HIP/ROCm version int ${_HIP_VERSION_INT} (>=71300000 triggers HIP 7.13+ patches)"
+
       case "${GIT_BRANCH}" in
          r2.20-rocm-enhanced|r2.19-rocm-enhanced|r2.18-rocm-enhanced|r2.17-rocm-enhanced|r2.16-rocm-enhanced|r2.15-rocm-enhanced)
-            _GKH_NEEDS_HIP713_PATCH=1
+            _GKH_BRANCH_PREFIX=1
             ;;
          *)
-            _GKH_NEEDS_HIP713_PATCH=0
+            _GKH_BRANCH_PREFIX=0
             ;;
       esac
+      if [[ "${_GKH_BRANCH_PREFIX}" == "1" && "${_HIP_VERSION_INT}" -ge 71300000 ]]; then
+         _GKH_NEEDS_HIP713_PATCH=1
+      else
+         _GKH_NEEDS_HIP713_PATCH=0
+      fi
+      unset _hip_ver_h _rocm_info_ver _hv_major _hv_minor _hv_patch _rv _rv_major _rv_minor _rv_patch
       if [[ "${_GKH_NEEDS_HIP713_PATCH}" == "1" ]]; then
          _GKH_PATCH_FILE=tensorflow/core/util/gpu_kernel_helper.h
          echo ""
@@ -634,16 +671,13 @@ GKH_PATCH_EOF
       # ROCm's flatbuffers tree -- only hipdnn does, and TF does not
       # consume hipdnn.
       #
-      # Branch gate: same set as the HIP API patch above. Future ROCm/
-      # tensorflow-upstream branches that change the BUILD.tpl shape
+      # Branch + version gate: same criteria as the HIP API patch above
+      # (both the pre-fix branch set AND ROCm/HIP >= 7.13.0). The ROCm
+      # flatbuffers header tree that this fix works around also only ships
+      # on 7.13.0+, so there is nothing to exclude on older ROCm. Future
+      # ROCm/tensorflow-upstream branches that change the BUILD.tpl shape
       # will fail the dry-run; abort with a loud diagnostic.
-      if [[ "${_GKH_NEEDS_HIP713_PATCH:-}" == "1" || \
-            "${GIT_BRANCH}" == "r2.20-rocm-enhanced" || \
-            "${GIT_BRANCH}" == "r2.19-rocm-enhanced" || \
-            "${GIT_BRANCH}" == "r2.18-rocm-enhanced" || \
-            "${GIT_BRANCH}" == "r2.17-rocm-enhanced" || \
-            "${GIT_BRANCH}" == "r2.16-rocm-enhanced" || \
-            "${GIT_BRANCH}" == "r2.15-rocm-enhanced" ]]; then
+      if [[ "${_GKH_NEEDS_HIP713_PATCH:-}" == "1" ]]; then
          _ROCM_FB_PATCH_FILE=third_party/xla/third_party/gpus/rocm/BUILD.tpl
          echo ""
          echo "tensorflow: applying ROCm-flatbuffers shadowing fix to ${_ROCM_FB_PATCH_FILE}"
