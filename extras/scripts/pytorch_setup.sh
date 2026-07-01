@@ -1496,6 +1496,76 @@ else
    echo "======================================"
    echo ""
 
+   # ── Cray cray-python selection (RHEL/Cray PE) ─────────────────────────
+   # On the AAC7 Cray (RHEL 9.6) the OS-default /usr/bin/python3 is 3.9,
+   # which is below the >=3.10 floor that modern PyTorch (>=2.9) and
+   # AOTriton (>=0.10b) require. CMake's FindPython3 therefore skips 3.9 and
+   # auto-selects the bare system /usr/bin/python3.11 (3.11.11) -- which has
+   # NO dev package (no Python.h / libpython3.11.so), so AOTriton's
+   # find_package(Python3 ... Development) fails with "Could NOT find
+   # Python3 (missing: Python3_INCLUDE_DIRS Python3_LIBRARIES ...)" (job
+   # 8368, logs_06_30_2026/rocm-7.2.4_8368/log_pytorch_06_30_2026.txt).
+   #
+   # The Cray PE ships cray-python modules (e.g. 3.11.7, 3.12.12) whose
+   # /opt/cray/pe/python/<ver> tree DOES carry full dev headers + libs. Load
+   # the one matching PYTHON_VERSION so `python3`, `python3 -m venv`, pip and
+   # AOTriton's cmake all resolve to a python that both satisfies >=3.10 AND
+   # provides the Development components. PYTHON3_FOR_BUILD is then pinned
+   # into the AOTriton cmake below via -DPython3_EXECUTABLE so cmake cannot
+   # drift back to the dev-less /usr/bin/python3.11 (whose higher patch level
+   # would otherwise win FindPython3's version sort).
+   PYTHON3_FOR_BUILD="$(command -v python3)"
+   if [[ "${RHEL_COMPATIBLE}" == 1 ]] && type module >/dev/null 2>&1; then
+      _cray_py_mod=$(module -t avail cray-python 2>&1 \
+         | sed 's/(default)//' \
+         | grep -E "^cray-python/3\.${PYTHON_VERSION}\." \
+         | sort -V | tail -1)
+      if [[ -n "${_cray_py_mod}" ]]; then
+         echo "pytorch: loading ${_cray_py_mod} (Cray PE python with dev headers, satisfies >=3.10 for PyTorch/AOTriton)"
+         module load "${_cray_py_mod}"
+         PYTHON3_FOR_BUILD="$(command -v python3)"
+      else
+         echo "pytorch: WARNING no cray-python/3.${PYTHON_VERSION}.* module found; falling back to ${PYTHON3_FOR_BUILD}"
+         echo "pytorch: WARNING AOTriton's find_package(Python3 ... Development) may fail if this python lacks dev headers."
+      fi
+      unset _cray_py_mod
+   fi
+   echo "pytorch: build python3 = ${PYTHON3_FOR_BUILD} ($(${PYTHON3_FOR_BUILD} --version 2>&1))"
+
+   # ── Triton prebuilt-LLVM variant selection for RHEL/Cray ─────────────
+   # AOTriton builds a bundled Triton from source, which downloads a
+   # prebuilt LLVM from oaitriton.blob.core.windows.net. Triton's setup.py
+   # picks the variant purely from glibc version:
+   #     vglibc > 2.28 -> "ubuntu-x64"   (built on Ubuntu w/ GCC 12+)
+   #     vglibc > 2.17 -> "almalinux-x64" (built for the RHEL/Alma family)
+   # RHEL 9.6 has glibc 2.34, so Triton mis-selects "ubuntu-x64" -- whose
+   # mlir-tblgen needs libstdc++ GLIBCXX_3.4.30 (GCC 12). RHEL 9.6's system
+   # /lib64/libstdc++.so.6 tops out at GLIBCXX_3.4.29 (GCC 11) and the RHEL
+   # gcc-toolsets ship libstdc++ only as a static _nonshared.a (no shared
+   # .so.6 with the newer symbols), so the ubuntu-x64 mlir-tblgen aborts:
+   #   "libstdc++.so.6: version `GLIBCXX_3.4.30' not found" (job 8375,
+   #   logs_06_30_2026/rocm-7.2.4_8375/log_pytorch_06_30_2026.txt).
+   # Force the RHEL-family "almalinux-x64" LLVM instead: its mlir-tblgen
+   # only needs GLIBCXX_3.4.21 / GLIBC_2.16 (verified to run on this node),
+   # so it works against the stock RHEL 9.6 libstdc++. Honoured by Triton's
+   # setup.py get_llvm_package_info() via the TRITON_LLVM_SYSTEM_SUFFIX env.
+   if [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
+      export TRITON_LLVM_SYSTEM_SUFFIX="almalinux-x64"
+      echo "pytorch: TRITON_LLVM_SYSTEM_SUFFIX=${TRITON_LLVM_SYSTEM_SUFFIX} (RHEL: use RHEL-family prebuilt LLVM, not ubuntu-x64 which needs GLIBCXX_3.4.30)"
+   fi
+
+   # NOTE: On RHEL the prebuilt Triton LLVM (almalinux-x64) static libs are
+   # compiled with GCC 12+ and reference std::__glibcxx_assert_fail, a symbol
+   # absent from RHEL 9.6's default GCC 11.5 libstdc++, so linking libtriton.so
+   # with the stock /usr/bin/c++ fails (job 8376: undefined reference to
+   # `std::__glibcxx_assert_fail'). The fix is to build AOTriton/Triton with a
+   # gcc-toolset >=12 -- but that is activated *only around the AOTriton build*
+   # (see the "gcc-toolset" bracket further below), NOT globally: GCC 12's
+   # headers otherwise trip PyTorch/fbgemm's -Werror (emmintrin.h
+   # '__m128i __Y = __Y;' maybe-uninitialized, job 8377). PyTorch links the
+   # *shared* libaotriton_v2.so, which is self-contained, so the PyTorch wheel
+   # build does not need the GCC>=12 libstdc++.
+
    AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
    CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
    if [ -f ${CACHE_FILES}/pytorch-v${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.tgz ]; then
@@ -2134,6 +2204,33 @@ else
          echo "pytorch: NOTE: ${TRITON_CMAKELISTS} has no -Werror; skip patch (aotriton may have changed triton pin)"
       fi
 
+      # ── gcc-toolset bracket (BEGIN): host C++ >=12 for AOTriton/Triton ──
+      # Activate a gcc-toolset >=12 for the AOTriton configure + `ninja
+      # install` below (the latter builds the bundled Triton wheel, which
+      # statically links the GCC-12-built almalinux-x64 LLVM and therefore
+      # needs a libstdc++ that defines std::__glibcxx_assert_fail -- absent
+      # from RHEL 9.6's default GCC 11.5; job 8376). Scoped, not global: the
+      # PyTorch wheel build further down must keep the default toolchain or
+      # GCC 12's headers trip fbgemm's -Werror (job 8377). The matching
+      # "gcc-toolset bracket (END)" restores PATH/LD_LIBRARY_PATH afterwards.
+      _gts_saved_PATH="${PATH}"
+      _gts_saved_LDLP="${LD_LIBRARY_PATH:-}"
+      _gts_active=""
+      if [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
+         for _gts in 12 13 14; do
+            if [[ -f "/opt/rh/gcc-toolset-${_gts}/enable" ]]; then
+               source "/opt/rh/gcc-toolset-${_gts}/enable"
+               _gts_active="${_gts}"
+               break
+            fi
+         done
+         if [[ -n "${_gts_active}" ]]; then
+            echo "pytorch: [aotriton] activated gcc-toolset-${_gts_active} ($(c++ --version 2>&1 | head -1)) so Triton links against a GCC>=12 libstdc++"
+         else
+            echo "pytorch: [aotriton] WARNING no gcc-toolset (>=12) under /opt/rh; Triton link may fail on __glibcxx_assert_fail"
+         fi
+      fi
+
       mkdir -p build && cd build
 
       if [[ "${AMDGPU_GFXMODEL}" == "gfx90a" ]]; then
@@ -2188,7 +2285,11 @@ else
          "-Damd_comgr_DIR=${ROCM_PATH}/lib/cmake/amd_comgr" \
          "-Dhsakmt_DIR=${ROCM_PATH}/lib/cmake/hsakmt" \
       )
-      cmake -DAOTRITON_HIPCC_PATH=${ROCM_PATH}/bin "${AOTRITON_HIP_OVERRIDES[@]}" ${AOTRITON_EXTRA_CMAKE_FLAGS} -DCMAKE_INSTALL_PREFIX=${AOTRITON_PATH} -DCMAKE_BUILD_TYPE=Release -DAOTRITON_GPU_BUILD_TIMEOUT=0  -G Ninja ..
+      # -DPython3_EXECUTABLE pins FindPython3 to the build python resolved
+      # above (cray-python on the Cray). Without it, AOTriton's cmake
+      # re-runs its own FindPython3 version sort and picks the dev-less
+      # /usr/bin/python3.11 (job 8368). See the cray-python block above.
+      cmake -DAOTRITON_HIPCC_PATH=${ROCM_PATH}/bin "${AOTRITON_HIP_OVERRIDES[@]}" ${AOTRITON_EXTRA_CMAKE_FLAGS} -DPython3_EXECUTABLE="${PYTHON3_FOR_BUILD}" -DCMAKE_INSTALL_PREFIX=${AOTRITON_PATH} -DCMAKE_BUILD_TYPE=Release -DAOTRITON_GPU_BUILD_TIMEOUT=0  -G Ninja ..
       AOTRITON_CONFIGURE_RC=$?
       if [ ${AOTRITON_CONFIGURE_RC} -ne 0 ]; then
          echo ""
@@ -2218,6 +2319,21 @@ else
          echo "ERROR: ROCm-bundled lld 19+ and that the file existed."
          exit 1
       fi
+
+      # ── gcc-toolset bracket (END): restore default host toolchain ──────
+      # AOTriton/Triton are built; drop back to the default compiler so the
+      # PyTorch/fbgemm wheel build below is NOT compiled with GCC 12 (whose
+      # emmintrin.h self-init idiom trips fbgemm's -Werror; job 8377).
+      if [[ -n "${_gts_active}" ]]; then
+         export PATH="${_gts_saved_PATH}"
+         if [[ -n "${_gts_saved_LDLP}" ]]; then
+            export LD_LIBRARY_PATH="${_gts_saved_LDLP}"
+         else
+            unset LD_LIBRARY_PATH
+         fi
+         echo "pytorch: [aotriton] restored default host toolchain ($(c++ --version 2>&1 | head -1)) for the pytorch wheel build"
+      fi
+      unset _gts _gts_active _gts_saved_PATH _gts_saved_LDLP
 
       # ── Post-install sanity probe (critical short-circuit) ────────────
       # User directive 2026-05-16: short-circuit the build if AOTriton
