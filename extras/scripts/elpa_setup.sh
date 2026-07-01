@@ -61,10 +61,10 @@ ROCM_VERSION=6.2.0
 # upstream has not cut a numbered release that includes the AMD GPU
 # kernels we need. The default version string embeds the short commit
 # so the modulefile name is unambiguous; --elpa-version overrides it.
-ELPA_VERSION="master-c7234ec"
+ELPA_VERSION="master-548c64b"
 ELPA_GIT_REPO="https://gitlab.mpcdf.mpg.de/elpa/elpa.git"
-ELPA_GIT_BRANCH="master_pre_stage"
-ELPA_GIT_COMMIT="c7234ecf26a51041946df4d9640214f2943abf06"
+ELPA_GIT_BRANCH="master"
+ELPA_GIT_COMMIT="548c64b76e31d7f467a6a450ff1c09e2359a782a"
 INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}/elpa-v${ELPA_VERSION}
 INSTALL_PATH_INPUT=""
 # --install-path: parent dir; the script appends elpa-v${ELPA_VERSION}
@@ -426,26 +426,36 @@ else
    # only thing the kernel actually needs since the value is then
    # passed by value into the GPU kernel.
    #
-   # Three call sites in src/elpa1/GPU/tridiag_gpu.h:
+   # Three complex-scalar memcpy sources in src/elpa1/GPU/tridiag_gpu.h:
    #   gpu_set_e_vec_scale_set_one_store_v_row -> xf_host_or_dev
    #   gpu_store_u_v_in_uv_vu                  -> vav_host_or_dev, tau_host_or_dev
+   # As of commit 548c64b7, upstream commit 23340e2a ("Safer fix for
+   # Fortran-HIP misalignment for complex datatype") already laundered the
+   # xf source via reinterpret_cast<const void*>, but left vav/tau plain, so
+   # we launder ONLY vav/tau here (2 seds). const void* (upstream) and
+   # const char* (here) are equivalent: both drop the over-alignment
+   # assumption so hipcc emits an unaligned load.
    #
-   # If ELPA_GIT_COMMIT is bumped past the upstream fix for this issue,
-   # this patch will fail to apply (no matching lines) and the verify
-   # block below will exit 1 -- re-validate against the new commit.
+   # The verify block below asserts NO plain (T*) memcpy source remains, so
+   # it is robust to upstream laundering some or all of the sites: if
+   # ELPA_GIT_COMMIT is bumped and a site reverts to the plain form, it
+   # exit 1s -- re-validate against the new commit.
    sed -i \
-      -e 's|std::memcpy(&xf_host_value, xf_host_or_dev, sizeof(T));|std::memcpy(\&xf_host_value, reinterpret_cast<const char*>(xf_host_or_dev), sizeof(T));|' \
       -e 's|std::memcpy(&vav_host_value, vav_host_or_dev, sizeof(T));|std::memcpy(\&vav_host_value, reinterpret_cast<const char*>(vav_host_or_dev), sizeof(T));|' \
       -e 's|std::memcpy(&tau_host_value, tau_host_or_dev, sizeof(T));|std::memcpy(\&tau_host_value, reinterpret_cast<const char*>(tau_host_or_dev), sizeof(T));|' \
       src/elpa1/GPU/tridiag_gpu.h
 
-   _n=$(grep -c 'reinterpret_cast<const char\*>' src/elpa1/GPU/tridiag_gpu.h)
-   if [ "${_n}" != "3" ]; then
-      echo "ERROR: ELPA alignment patch did not apply (got ${_n} hits in tridiag_gpu.h, expected 3)"
+   # After patching, NO complex-scalar memcpy source may remain in the plain
+   # (over-aligned T*) form. xf is laundered upstream via const void*; vav/tau
+   # are laundered here via const char*. Asserting zero plain forms is robust
+   # to upstream fixing any subset of the sites.
+   _plain=$(grep -cE 'std::memcpy\(&(xf|vav|tau)_host_value, (xf|vav|tau)_host_or_dev, sizeof\(T\)\);' src/elpa1/GPU/tridiag_gpu.h)
+   if [ "${_plain}" != "0" ]; then
+      echo "ERROR: ELPA alignment patch incomplete: ${_plain} plain memcpy source(s) remain in tridiag_gpu.h"
       echo "       The file may have changed at ${ELPA_GIT_COMMIT}; re-validate the patch."
       exit 1
    fi
-   unset _n
+   unset _plain
 
    # ── autoconf bootstrap (ELPA autogen.sh needs autoconf >= 2.71) ──────
    # ELPA's master_pre_stage configure.ac requires Autoconf >= 2.71. RHEL9 ships
