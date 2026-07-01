@@ -325,16 +325,39 @@ if [[ -z "${ROCM_MODULE_NAME}" ]]; then
    fi
 fi
 
+# ── BUILD_ROCSHMEM=0 short-circuit: operator opt-out ─────────────────
+# MUST run BEFORE the ROCm-version guard below. When an operator deselects
+# rocshmem (e.g. `--packages netcdf` makes main_setup.sh set
+# BUILD_ROCSHMEM=0), we want a clean NOOP_RC=43 SKIP regardless of ROCm
+# version. Previously this gate lived AFTER the version guard, so on ROCm
+# < 6.4.0 the guard's `exit 1` fired first and a *deselected* rocshmem was
+# reported as FAILED(rc=1) -- observed across the whole 6.x netcdf sweep
+# (jobs 13106-13112), tagging netcdf-only jobs as failed even though netcdf
+# itself succeeded. Matches the openmpi / netcdf / hypre opt-out-first pattern.
+NOOP_RC=43
+if [ "${BUILD_ROCSHMEM}" = "0" ]; then
+   echo "[rocshmem BUILD_ROCSHMEM=0] operator opt-out; skipping (no source build, no cache restore)."
+   exit ${NOOP_RC}
+fi
+
 # ── ROCm version guard ────────────────────────────────────────────────
 # rocSHMEM requires ROCm 6.4.0 or later (HIP runtime + the RO/IPC build
-# paths). awk numeric comparison, same idiom as rocprofiler-sdk_setup.sh.
-result=`echo $ROCM_VERSION | awk '$1>=6.4.0'` && echo $result >/dev/null
-if [[ "${result}" == "" ]]; then # ROCM_VERSION < 6.4.0
-   echo "The rocSHMEM library can be installed only for ROCm versions greater than or equal to 6.4.0"
+# paths). Use `sort -V` for the comparison: the previous
+# `awk '$1>=6.4.0'` idiom was BROKEN -- `6.4.0` is a malformed awk numeric
+# literal (multi-dot), so the field ("6.4.0") compared as 6.4 against a
+# garbage constant and the guard wrongly REJECTED the supported 6.4.x line
+# too (verified: `echo 6.4.0 | awk '$1>=6.4.0'` prints nothing). sort -V
+# does a proper dotted-version comparison.
+MIN_ROCM_VERSION=6.4.0
+_lowest_rocm=$(printf '%s\n%s\n' "${MIN_ROCM_VERSION}" "${ROCM_VERSION}" | sort -V | head -n1)
+if [ "${ROCM_VERSION}" != "${MIN_ROCM_VERSION}" ] && [ "${_lowest_rocm}" = "${ROCM_VERSION}" ]; then
+   # ROCM_VERSION sorts strictly below ${MIN_ROCM_VERSION} -> unsupported
+   echo "The rocSHMEM library can be installed only for ROCm versions greater than or equal to ${MIN_ROCM_VERSION}"
    echo "You selected this as ROCm version: $ROCM_VERSION"
-   echo "Select an appropriate ROCm version with --rocm-version <ROCM_VERSION>, with <ROCM_VERSION> >= 6.4.0"
+   echo "Select an appropriate ROCm version with --rocm-version <ROCM_VERSION>, with <ROCM_VERSION> >= ${MIN_ROCM_VERSION}"
    exit 1
 fi
+unset _lowest_rocm
 
 # ── Source selection ─────────────────────────────────────────────────
 # rocSHMEM for ROCm 7.1.x and 7.2.x must be pulled from the legacy
@@ -375,12 +398,9 @@ INSTALL_PATH="${INSTALL_PATH%/}"
 
 ROCSHMEM_PATH="${INSTALL_PATH}/rocshmem-${ROCSHMEM_VERSION}-${BACKEND_CONFIG}"
 
-# ── BUILD_ROCSHMEM=0 short-circuit: operator opt-out ─────────────────
-NOOP_RC=43
-if [ "${BUILD_ROCSHMEM}" = "0" ]; then
-   echo "[rocshmem BUILD_ROCSHMEM=0] operator opt-out; skipping (no source build, no cache restore)."
-   exit ${NOOP_RC}
-fi
+# NOTE: the BUILD_ROCSHMEM=0 operator opt-out (NOOP_RC=43) now runs earlier,
+# BEFORE the ROCm-version guard (see above), so a deselected rocshmem skips
+# cleanly on every ROCm version instead of failing the guard on 6.x.
 
 echo ""
 echo "============================"
