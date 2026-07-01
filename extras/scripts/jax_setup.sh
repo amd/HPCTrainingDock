@@ -238,18 +238,78 @@ JAX_POLICY_SKIP=0
 #     so the failure is cheap and legible instead of opaque.
 #   * To use a non-5.0 JAX line on ROCm 6.x, pass --jax-version X.Y
 #     and JAX_VERSION_USER_SET will keep that override intact.
+# ── Ensure a JAX-capable Python, preferring Cray-python ──────────────
+# The JAX_VERSION policy below is keyed on the *effective* Python
+# version (MAJOR.MINOR of the python3 that will actually drive
+# build/build.py and the final pip install), NOT on the distro. The
+# old gate keyed on Ubuntu 22.04 and silently mis-fired on RHEL9/Cray,
+# where the system python is 3.9 -- too old for ANY ROCm-7 JAX line and
+# the direct cause of the job-8354 failure ("Specified python version:
+# 3.9 ... available: 3.11, 3.12, 3.13, 3.14").
+#
+# Preferred remedy on a Cray: load a cray-python module that provides
+# Python >= 3.11 (e.g. cray-python/3.11.7, cray-python/3.12.12). That
+# lets us keep the newest JAX line (8.0). We only do this when the
+# current python3 is < 3.11 so we never perturb an already-adequate
+# interpreter. If no such module exists (non-Cray host), we fall
+# through to selecting an older JAX line that matches the python we
+# have (see policy gate below).
+_jax_pymajor() { python3 -c 'import sys; print(sys.version_info.major)' 2>/dev/null || echo 0; }
+_jax_pyminor() { python3 -c 'import sys; print(sys.version_info.minor)' 2>/dev/null || echo 0; }
+PYMAJOR=$(_jax_pymajor); PYMINOR=$(_jax_pyminor)
+echo "jax: system python3 is ${PYMAJOR}.${PYMINOR} ($(command -v python3 2>/dev/null))"
+if { [ "${PYMAJOR}" -lt 3 ] || { [ "${PYMAJOR}" -eq 3 ] && [ "${PYMINOR}" -lt 11 ]; }; } 2>/dev/null; then
+   echo "jax: python3 < 3.11; looking for a cray-python >= 3.11 module ..."
+   # Pick the newest cray-python whose version is >= 3.11.
+   # Split on any whitespace so this works with both terse (`-t`, one
+   # module per line) and verbose (`cray-python/3.11.7  cray-python/...`)
+   # `module avail` output, on Lmod or environment-modules.
+   _cray_py_mod=$(module -t avail cray-python 2>&1 \
+                    | tr '[:space:]' '\n' | sed 's/(default)//' \
+                    | grep -E '^cray-python/3\.(1[1-9]|[2-9][0-9])(\.|$)' \
+                    | sort -V | tail -1)
+   if [ -n "${_cray_py_mod}" ]; then
+      echo "jax: loading ${_cray_py_mod} to satisfy the JAX >= 3.11 Python requirement"
+      module load "${_cray_py_mod}" 2>&1 || echo "jax: WARNING: 'module load ${_cray_py_mod}' failed"
+      PYMAJOR=$(_jax_pymajor); PYMINOR=$(_jax_pyminor)
+      echo "jax: python3 is now ${PYMAJOR}.${PYMINOR} ($(command -v python3 2>/dev/null))"
+   else
+      echo "jax: no cray-python >= 3.11 module available; will select an older JAX line if the python allows it."
+   fi
+fi
+unset -f _jax_pymajor _jax_pyminor
+
+# ── JAX_VERSION policy gate (python-version-keyed) ───────────────────
+# Only applies when the operator did NOT pass --jax-version (that
+# override always wins; see JAX_VERSION_USER_SET). Compatibility:
+#   python >= 3.11  ->  keep default JAX 8.0 (ROCm 7+)
+#   python == 3.10  ->  JAX 6.0 (transition line, cp310 wheels)  (ROCm 7+)
+#   python <  3.10  ->  no ROCm-7 JAX line supports it; mark not-buildable
+#   ROCm 6.x        ->  JAX 5.0 (newest line for ROCm 6.x + py3.10)
 ROCM_MAJOR=${ROCM_VERSION%%.*}
-if [ "${ROCM_MAJOR}" -ge 7 ] 2>/dev/null && [ "${DISTRO_VERSION}" = "22.04" ] && [ "${JAX_VERSION_USER_SET}" = "0" ]; then
-   echo "[jax policy] ROCm ${ROCM_VERSION} on Ubuntu ${DISTRO_VERSION} (Python 3.10):"
-   echo "             defaulting JAX_VERSION to 6.0 (the transition release that"
-   echo "             supports both ROCm 7 ABI and Python 3.10 via cp310 wheels)."
-   echo "             Override with --jax-version X.Y if you want a different line."
-   JAX_VERSION=6.0
-elif [ "${ROCM_MAJOR}" = "6" ] && [ "${JAX_VERSION_USER_SET}" = "0" ]; then
-   echo "[jax policy] ROCm ${ROCM_VERSION} (6.x): defaulting JAX_VERSION to 5.0"
-   echo "             (the newest line that supports both ROCm 6.x and Python 3.10)."
-   echo "             Override with --jax-version X.Y if you want a different line."
-   JAX_VERSION=5.0
+if [ "${JAX_VERSION_USER_SET}" = "0" ]; then
+   if [ "${ROCM_MAJOR}" -ge 7 ] 2>/dev/null; then
+      if [ "${PYMAJOR}" -eq 3 ] && [ "${PYMINOR}" -ge 11 ] 2>/dev/null; then
+         echo "[jax policy] python ${PYMAJOR}.${PYMINOR} (>= 3.11) on ROCm ${ROCM_VERSION}: keeping JAX ${JAX_VERSION}."
+      elif [ "${PYMAJOR}" -eq 3 ] && [ "${PYMINOR}" -eq 10 ] 2>/dev/null; then
+         echo "[jax policy] python 3.10 on ROCm ${ROCM_VERSION}: JAX 7.1/8.0 dropped 3.10;"
+         echo "             defaulting JAX_VERSION to 6.0 (transition release, cp310 wheels)."
+         echo "             Override with --jax-version X.Y for a different line."
+         JAX_VERSION=6.0
+      else
+         echo "[jax policy] python ${PYMAJOR}.${PYMINOR} is too old for any ROCm-7 JAX line"
+         echo "             (JAX 6.0 needs 3.10, JAX 7.1/8.0 need >= 3.11) and no cray-python"
+         echo "             >= 3.11 module was found: marking jax NOT buildable on this stack."
+         echo "             Fixes: load/install Python >= 3.11 (cray-python) or use ROCm 6.x."
+         JAX_POLICY_SKIP=1
+         BUILD_JAX=0
+      fi
+   elif [ "${ROCM_MAJOR}" = "6" ]; then
+      echo "[jax policy] ROCm ${ROCM_VERSION} (6.x): defaulting JAX_VERSION to 5.0"
+      echo "             (the newest line that supports both ROCm 6.x and Python 3.10)."
+      echo "             Override with --jax-version X.Y if you want a different line."
+      JAX_VERSION=5.0
+   fi
 fi
 unset ROCM_MAJOR
 
