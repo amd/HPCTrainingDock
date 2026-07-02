@@ -449,7 +449,9 @@ else
    # (over-aligned T*) form. xf is laundered upstream via const void*; vav/tau
    # are laundered here via const char*. Asserting zero plain forms is robust
    # to upstream fixing any subset of the sites.
-   _plain=$(grep -cE 'std::memcpy\(&(xf|vav|tau)_host_value, (xf|vav|tau)_host_or_dev, sizeof\(T\)\);' src/elpa1/GPU/tridiag_gpu.h)
+   # NOTE: grep -c exits 1 when the count is 0; under `set -e` that would
+   # abort here on the (desired) zero-plain-forms case, so `|| true`.
+   _plain=$(grep -cE 'std::memcpy\(&(xf|vav|tau)_host_value, (xf|vav|tau)_host_or_dev, sizeof\(T\)\);' src/elpa1/GPU/tridiag_gpu.h || true)
    if [ "${_plain}" != "0" ]; then
       echo "ERROR: ELPA alignment patch incomplete: ${_plain} plain memcpy source(s) remain in tridiag_gpu.h"
       echo "       The file may have changed at ${ELPA_GIT_COMMIT}; re-validate the patch."
