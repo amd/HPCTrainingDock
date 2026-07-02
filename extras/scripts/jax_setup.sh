@@ -642,6 +642,43 @@ else
       export HERMETIC_PYTHON_VERSION
       echo "jax: HERMETIC_PYTHON_VERSION=${HERMETIC_PYTHON_VERSION}"
 
+      # ── Keep ROCm's include dirs off the vendored-LLVM compiles ───────
+      # The rocm modulefile does `prepend-path CPATH $ROCM_PATH/include`
+      # (and the Cray build adds $ROCM_PATH/mpich-wrappers/include).
+      # Bazel's autoconfigured C++ toolchain bakes CPATH into EVERY
+      # compile action as explicit -I flags -- including the compiles of
+      # jax's *vendored* @llvm-project (e.g. mlir:CAPIIR) -- even though
+      # each action runs under `env -`. On ROCm 7.13.0 the packaged
+      # $ROCM_PATH/include/mlir-c/Dialect/Func.h #includes a generated
+      # companion (mlir/Dialect/Func/Transforms/Passes.capi.h.inc) that
+      # ROCm ships only under $ROCM_PATH/lib/llvm/include, so that stray
+      # -I$ROCM_PATH/include makes clang pick up the system mlir-c header
+      # whose .inc companion is absent from that prefix -> "file not
+      # found" and jaxlib_wheel fails to build (job 8406, ROCm 7.13.0).
+      # jax/xla receive their ROCm headers through --rocm_path, not
+      # CPATH, so scrub the ROCm entries out of the *_INCLUDE_PATH vars
+      # before invoking bazel. Call this immediately before each
+      # `python3 build/build.py` (after any `module load amdclang`, which
+      # can re-prepend CPATH).
+      _jax_strip_rocm_cpath() {
+         local _var _out _dir _p _OLD_IFS
+         for _var in CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH; do
+            _p="${!_var:-}"
+            [ -z "${_p}" ] && continue
+            _out=""
+            _OLD_IFS="${IFS}"; IFS=":"
+            for _dir in ${_p}; do
+               case "${_dir}" in
+                  "${ROCM_PATH}"/include|"${ROCM_PATH}"/mpich-wrappers/include) ;;
+                  *) _out="${_out:+${_out}:}${_dir}" ;;
+               esac
+            done
+            IFS="${_OLD_IFS}"
+            export "${_var}=${_out}"
+         done
+         echo "jax: sanitized include env for bazel (dropped \$ROCM_PATH include dirs): CPATH='${CPATH:-}'"
+      }
+
       AMDGPU_GFXMODEL=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/,/g'`
 
       git clone --depth 1 --branch rocm-jaxlib-v0.${JAX_VERSION} https://github.com/ROCm/xla.git
@@ -689,6 +726,7 @@ else
             module load amdclang
             export CLANG_COMPILER=`which clang`
             sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|g" .bazelrc
+            _jax_strip_rocm_cpath
             python3 build/build.py build --rocm_path=$ROCM_PATH \
                                          --bazel_options=--override_repository=xla=$XLA_PATH \
                                          --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
@@ -715,6 +753,7 @@ else
 	    cd rocm-jax/jax_rocm_plugin
             sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|g" .bazelrc
             sed -i "s|gfx906,gfx908,gfx90a,gfx942,gfx1030,gfx1100,gfx1101,gfx1200,gfx1201|$AMDGPU_GFXMODEL|g" .bazelrc
+	    _jax_strip_rocm_cpath
 	    python3 build/build.py build --rocm_path=$ROCM_PATH \
                                          --bazel_options=--override_repository=xla=$XLA_PATH \
                                          --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
@@ -745,6 +784,7 @@ else
                export CLANG_COMPILER=`which clang`
                sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|g" .bazelrc
                # build the wheel for jaxlib using clang (which is the default)
+               _jax_strip_rocm_cpath
                python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
                                       --bazel_options=--override_repository=xla=$XLA_PATH \
                                       --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
@@ -778,6 +818,7 @@ else
                module load amdclang
                export CLANG_COMPILER=`which clang`
                sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|g" .bazelrc
+               _jax_strip_rocm_cpath
                python3 build/build.py build --rocm_path=$ROCM_PATH \
                                             --bazel_options=--override_repository=xla=$XLA_PATH \
                                             --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
@@ -819,6 +860,7 @@ else
                module load amdclang
                export CLANG_COMPILER=`which clang`
                sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|g" .bazelrc
+               _jax_strip_rocm_cpath
                python3 build/build.py build --rocm_path=$ROCM_PATH \
                                             --bazel_options=--override_repository=xla=$XLA_PATH \
                                             --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
@@ -842,6 +884,7 @@ else
 
             else
                # build the wheel for jaxlib using gcc
+               _jax_strip_rocm_cpath
                python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
                                       --bazel_options=--override_repository=xla=$XLA_PATH \
                                       --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \

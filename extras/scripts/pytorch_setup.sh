@@ -68,7 +68,18 @@ BUILD_PYTORCH=0
 # an unrecognised ROCm.
 PYTORCH_VERSION=2.9.1
 PYTORCH_VERSION_USER_SET=0
-PYTHON_VERSION=10
+# PYTHON_VERSION: the python3 minor release used both to build the wheels
+# and to lay out every .../lib/python3.${PYTHON_VERSION}/site-packages
+# install path + modulefile prepend. Rather than hard-coding a minor
+# (which drifts from the host -- e.g. an assumed 3.10 on a RHEL 9.6 Cray
+# whose OS default is 3.9), default it to the OS-default /usr/bin/python3
+# minor. The build-python selection block (search "select a build
+# python") may raise this to a loaded cray-python module's minor when the
+# requested PyTorch imposes a higher floor. An explicit --python-version
+# overrides both (flips PYTHON_VERSION_USER_SET=1 and bypasses the
+# auto-derive, mirroring PYTORCH_VERSION_USER_SET).
+PYTHON_VERSION_USER_SET=0
+PYTHON_VERSION=$(python3 -c 'import sys; print(sys.version_info.minor)' 2>/dev/null || echo 10)
 # torchvision / torchaudio defaults are placeholders; the resolution
 # block below the arg parser overwrites them from
 # PYTORCH_COMPANION_VERSIONS using PYTORCH_VERSION's major.minor key
@@ -371,6 +382,47 @@ default_pytorch_version_for_rocm() {
       # "I don't know" and the resolver keeps the file-default (2.9.1).
       *)                                    echo ""       ;;
    esac
+}
+
+# ── Minimum python3 minor required by a PyTorch major.minor ───────────
+# Source of truth for the python floor a given PyTorch build imposes.
+# Evidence: the build-python selection comment further down (search
+# "Build-python floor") records that modern PyTorch (>=2.9) AND
+# AOTriton (>=0.10b, which those PTs pin) require python >=3.10; the OS
+# default /usr/bin/python3 on the RHEL 9.6 Cray is 3.9, below that floor.
+# Older PyTorch (2.3..2.8) still build on python 3.9. Echoes the bare
+# minor integer (e.g. "9" or "10"). Keyed on PT major.minor so patch
+# releases inherit (2.9.1 -> "2.9").
+min_python_minor_for_pytorch() {
+   local pt_mm="$1"
+   case "${pt_mm}" in
+      2.3|2.4|2.5|2.6|2.7|2.8) echo "9"  ;;
+      2.9|2.10|2.11|2.12)      echo "10" ;;
+      # Unknown/off-table PT: assume the modern >=3.10 floor (safer than
+      # silently permitting 3.9 for a PT whose real floor we don't know).
+      *)                       echo "10" ;;
+   esac
+}
+
+# ── Inverse: newest PyTorch that runs on a given python3 minor ────────
+# Given an available python3 minor (integer, e.g. 9), echo the newest
+# PyTorch patch version whose min_python_minor_for_pytorch floor is
+# <= that minor. Used by the build-python selection's last-resort
+# downgrade branch when neither the OS python nor any cray-python module
+# meets the requested PT's floor. Mirrors the patch tags used by
+# default_pytorch_version_for_rocm. Empty stdout means "no known PyTorch
+# runs on a python this old" (caller hard-errors).
+newest_pytorch_for_python_minor() {
+   local avail="$1"
+   # Highest floor first; first row whose floor <= avail wins.
+   if [[ "${avail}" -ge 10 ]]; then
+      echo "2.12.0"
+   elif [[ "${avail}" -ge 9 ]]; then
+      # Newest PT still buildable on python 3.9 is the 2.8 line.
+      echo "2.8.0"
+   else
+      echo ""
+   fi
 }
 
 # ── AOTriton CMake flags keyed off AOTRITON_VERSION (not PT) ──────────
@@ -947,8 +999,15 @@ reset-last()
 # next to the header for one-command revert.
 patch_rocm_bf16_header_for_gcc()
 {
-   local hdr="${ROCM_PATH:-}/include/hip/amd_detail/amd_hip_bf16.h"
-   if [ -z "${ROCM_PATH:-}" ] || [ ! -f "${hdr}" ]; then
+   # $1 (optional): ROCm root whose include/ tree to patch. Defaults to
+   # ${ROCM_PATH}. afar builds compile against a SEPARATE afar SDK include
+   # tree (e.g. /shareddata/opt/rocm-afar-23.2.1/include) that is NOT
+   # ${ROCM_PATH}, so the call site passes that root explicitly for a
+   # second patch pass (see slurm 8441, 2026-07-01: afar's own
+   # amd_hip_bf16.h was unpatched and broke Blas.cpp on gcc-11).
+   local _rocm_root="${1:-${ROCM_PATH:-}}"
+   local hdr="${_rocm_root}/include/hip/amd_detail/amd_hip_bf16.h"
+   if [ -z "${_rocm_root}" ] || [ ! -f "${hdr}" ]; then
       echo "pytorch: no ${hdr} -- skipping bf16 host-compat patch"
       return 0
    fi
@@ -1062,6 +1121,7 @@ do
       "--python-version")
           shift
           PYTHON_VERSION=${1}
+          PYTHON_VERSION_USER_SET=1
 	  reset-last
           ;;
       "--mpi-module")
@@ -1174,6 +1234,99 @@ done
 # --torchvision-version / etc. resolves to the same final state regardless
 # of CLI ordering.
 resolve_pytorch_stack_versions
+
+# ── Build-python floor: select a build python that meets the PT floor ──
+# Modern PyTorch (>=2.9) and the AOTriton releases those PTs pin
+# (>=0.10b) require python >=3.10; AOTriton's cmake does a hard
+# find_package(Python3 ... >=3.10) and aborts otherwise (jobs 8405-8409,
+# 2026-07-01: OS-default /usr/bin/python3 was 3.9.21 on the RHEL 9.6
+# Cray, so every build FAILED at the AOTriton configure step).
+#
+# Policy (decided 2026-07-01): use the OS-default python when it already
+# meets the requested PyTorch's floor; otherwise PREFER loading a
+# cray-python module whose minor satisfies the floor (the Cray PE python
+# trees carry the dev headers/libs AOTriton's find_package(Python3 ...
+# Development) needs); only if NO satisfying python exists do we fall
+# back to an earlier PyTorch that runs on the OS-default python.
+#
+# PYTHON_VERSION is (re)set to the minor of whichever interpreter is
+# chosen so every downstream .../lib/python3.${PYTHON_VERSION}/
+# site-packages install path + modulefile prepend matches the python
+# that actually built the wheels. CRAY_PYTHON_MODULE is exported for the
+# modulefile heredocs so `module load pytorch` pulls the same python.
+CRAY_PYTHON_MODULE=""
+PYTHON3_FOR_BUILD="$(command -v python3)"
+if [[ "${BUILD_PYTORCH}" != "0" ]]; then
+   # Floor = the minimum python this PyTorch imposes. --python-version is
+   # only a "want at least this" HINT that can RAISE the floor, never a
+   # hard pin that disables the cray-python selection: the sweep sbatch
+   # passes --python-version unconditionally with its own distro guess
+   # (10 on this RHEL 9.6 Cray), so honouring it verbatim would skip the
+   # cray-python load and build against 3.9 (jobs 8423-8427, 2026-07-01).
+   # The actual interpreter is always re-checked below (mirrors the jax
+   # setup's cray-python logic).
+   _req_py_minor=$(min_python_minor_for_pytorch "${PT_MAJOR_MINOR}")
+   if [[ "${PYTHON_VERSION_USER_SET}" -eq 1 ]]; then
+      if [[ "${PYTHON_VERSION}" -gt "${_req_py_minor}" ]]; then
+         echo "pytorch: --python-version 3.${PYTHON_VERSION} raises the python floor above PyTorch ${PYTORCH_VERSION}'s own 3.${_req_py_minor}"
+         _req_py_minor="${PYTHON_VERSION}"
+      elif [[ "${PYTHON_VERSION}" -lt "${_req_py_minor}" ]]; then
+         echo "pytorch: --python-version 3.${PYTHON_VERSION} is below PyTorch ${PYTORCH_VERSION}'s 3.${_req_py_minor} floor; enforcing 3.${_req_py_minor}"
+      fi
+   fi
+   _os_py_minor=$("${PYTHON3_FOR_BUILD}" -c 'import sys; print(sys.version_info.minor)' 2>/dev/null || echo 0)
+
+   if [[ "${_os_py_minor}" -ge "${_req_py_minor}" ]]; then
+      # The interpreter already on PATH meets the floor.
+      PYTHON_VERSION="${_os_py_minor}"
+      echo "pytorch: python3 3.${_os_py_minor} (${PYTHON3_FOR_BUILD}) satisfies the 3.${_req_py_minor} floor for PyTorch ${PYTORCH_VERSION}"
+   else
+      # Below floor: prefer the HIGHEST cray-python module whose minor >=
+      # floor. The awk filter keeps only cray-python/3.<minor>.* rows with
+      # <minor> >= floor so a 3.10 floor accepts 3.11 / 3.12 (the old code
+      # hard-matched the literal PYTHON_VERSION minor and silently missed
+      # 3.11/3.12 -- jobs 8405-8409).
+      if [[ "${RHEL_COMPATIBLE}" == 1 ]] && type module >/dev/null 2>&1; then
+         _cray_py_mod=$(module -t avail cray-python 2>&1 \
+            | sed 's/(default)//' \
+            | grep -E "^cray-python/3\.[0-9]+\." \
+            | awk -F'[/.]' -v req="${_req_py_minor}" '$3 >= req {print $0}' \
+            | sort -V | tail -1)
+      else
+         _cray_py_mod=""
+      fi
+      if [[ -n "${_cray_py_mod}" ]]; then
+         echo "pytorch: python3 3.${_os_py_minor} < 3.${_req_py_minor} floor; loading ${_cray_py_mod} (Cray PE python with dev headers)"
+         module load "${_cray_py_mod}"
+         CRAY_PYTHON_MODULE="${_cray_py_mod}"
+         PYTHON3_FOR_BUILD="$(command -v python3)"
+         PYTHON_VERSION="$("${PYTHON3_FOR_BUILD}" -c 'import sys; print(sys.version_info.minor)' 2>/dev/null || echo "${_req_py_minor}")"
+      elif [[ "${PYTORCH_VERSION_USER_SET}" -eq 1 ]]; then
+         # PyTorch version is user-pinned, so we must not silently
+         # downgrade it; warn and proceed (AOTriton may reject 3.9).
+         echo "pytorch: WARNING no python3 >= 3.${_req_py_minor} available (have 3.${_os_py_minor}, no satisfying cray-python) and PyTorch ${PYTORCH_VERSION} is user-pinned; build may fail at AOTriton's find_package(Python3)."
+         PYTHON_VERSION="${_os_py_minor}"
+      else
+         # No OS or cray-python meets the floor -> downgrade to the newest
+         # PyTorch that runs on the interpreter we have, then re-resolve so
+         # AOTriton/companion pins re-derive for the fallback PT.
+         _fallback_pt=$(newest_pytorch_for_python_minor "${_os_py_minor}")
+         if [[ -z "${_fallback_pt}" ]]; then
+            echo "ERROR: no python3 >= 3.${_req_py_minor} available (have 3.${_os_py_minor}, no satisfying cray-python module)" >&2
+            echo "ERROR: and no known PyTorch builds on python 3.${_os_py_minor}. Install a newer python or provide a cray-python module." >&2
+            exit 1
+         fi
+         echo "pytorch: no python3 >= 3.${_req_py_minor} available (have 3.${_os_py_minor}, no satisfying cray-python)."
+         echo "pytorch: downgrading PyTorch ${PYTORCH_VERSION} -> ${_fallback_pt} to fit python 3.${_os_py_minor}."
+         PYTORCH_VERSION="${_fallback_pt}"
+         PYTORCH_VERSION_USER_SET=1   # pin so the re-resolve keeps the fallback PT
+         PYTHON_VERSION="${_os_py_minor}"
+         resolve_pytorch_stack_versions
+      fi
+   fi
+   echo "pytorch: build python3 = ${PYTHON3_FOR_BUILD} ($(${PYTHON3_FOR_BUILD} --version 2>&1)); install layout uses python3.${PYTHON_VERSION}"
+   unset _req_py_minor _os_py_minor _cray_py_mod _fallback_pt
+fi
 
 # Variant-suffix from curated overrides (aotriton/triton/flashattention).
 # Empty for canonical (manifest-pinned) builds; "-aotriton-X-..." when
@@ -1496,41 +1649,16 @@ else
    echo "======================================"
    echo ""
 
-   # ── Cray cray-python selection (RHEL/Cray PE) ─────────────────────────
-   # On the AAC7 Cray (RHEL 9.6) the OS-default /usr/bin/python3 is 3.9,
-   # which is below the >=3.10 floor that modern PyTorch (>=2.9) and
-   # AOTriton (>=0.10b) require. CMake's FindPython3 therefore skips 3.9 and
-   # auto-selects the bare system /usr/bin/python3.11 (3.11.11) -- which has
-   # NO dev package (no Python.h / libpython3.11.so), so AOTriton's
-   # find_package(Python3 ... Development) fails with "Could NOT find
-   # Python3 (missing: Python3_INCLUDE_DIRS Python3_LIBRARIES ...)" (job
-   # 8368, logs_06_30_2026/rocm-7.2.4_8368/log_pytorch_06_30_2026.txt).
-   #
-   # The Cray PE ships cray-python modules (e.g. 3.11.7, 3.12.12) whose
-   # /opt/cray/pe/python/<ver> tree DOES carry full dev headers + libs. Load
-   # the one matching PYTHON_VERSION so `python3`, `python3 -m venv`, pip and
-   # AOTriton's cmake all resolve to a python that both satisfies >=3.10 AND
-   # provides the Development components. PYTHON3_FOR_BUILD is then pinned
-   # into the AOTriton cmake below via -DPython3_EXECUTABLE so cmake cannot
-   # drift back to the dev-less /usr/bin/python3.11 (whose higher patch level
-   # would otherwise win FindPython3's version sort).
-   PYTHON3_FOR_BUILD="$(command -v python3)"
-   if [[ "${RHEL_COMPATIBLE}" == 1 ]] && type module >/dev/null 2>&1; then
-      _cray_py_mod=$(module -t avail cray-python 2>&1 \
-         | sed 's/(default)//' \
-         | grep -E "^cray-python/3\.${PYTHON_VERSION}\." \
-         | sort -V | tail -1)
-      if [[ -n "${_cray_py_mod}" ]]; then
-         echo "pytorch: loading ${_cray_py_mod} (Cray PE python with dev headers, satisfies >=3.10 for PyTorch/AOTriton)"
-         module load "${_cray_py_mod}"
-         PYTHON3_FOR_BUILD="$(command -v python3)"
-      else
-         echo "pytorch: WARNING no cray-python/3.${PYTHON_VERSION}.* module found; falling back to ${PYTHON3_FOR_BUILD}"
-         echo "pytorch: WARNING AOTriton's find_package(Python3 ... Development) may fail if this python lacks dev headers."
-      fi
-      unset _cray_py_mod
-   fi
-   echo "pytorch: build python3 = ${PYTHON3_FOR_BUILD} ($(${PYTHON3_FOR_BUILD} --version 2>&1))"
+   # ── Cray cray-python selection: done earlier ──────────────────────────
+   # The build python (OS-default vs a cray-python module that meets the
+   # requested PyTorch's floor, vs a PyTorch downgrade) was already
+   # selected right after resolve_pytorch_stack_versions -- see the
+   # "Build-python floor" block above. That block set PYTHON3_FOR_BUILD,
+   # PYTHON_VERSION and CRAY_PYTHON_MODULE (all globals that persist into
+   # this build branch). PYTHON3_FOR_BUILD is pinned into AOTriton's cmake
+   # below via -DPython3_EXECUTABLE so cmake cannot drift back to a
+   # dev-less system python (e.g. /usr/bin/python3.11 with no Python.h).
+   echo "pytorch: build python3 = ${PYTHON3_FOR_BUILD} ($(${PYTHON3_FOR_BUILD} --version 2>&1))${CRAY_PYTHON_MODULE:+ [module ${CRAY_PYTHON_MODULE}]}"
 
    # ── Triton prebuilt-LLVM variant selection for RHEL/Cray ─────────────
    # AOTriton builds a bundled Triton from source, which downloads a
@@ -2483,9 +2611,109 @@ else
       cd pytorch_build
       export PYTORCH_BUILD_DIR=`pwd`
 
+      # ── Pin CMake < 4 in the build venv ───────────────────────────────
+      # PyTorch's requirements(-build).txt pins only `cmake>=3.27` (no
+      # upper bound), so a fresh venv resolves it to CMake 4.x
+      # (cmake-4.3.4 as of 2026-07). CMake 4 removed compatibility with
+      # cmake_minimum_required(VERSION < 3.5), which breaks PyTorch's
+      # bundled third-party trees AND the NNPACK "confu" subprojects it
+      # DOWNLOADS at configure time (e.g. build/confu-srcs/six):
+      #   CMake Error at CMakeLists.txt:1 (CMAKE_MINIMUM_REQUIRED):
+      #     Compatibility with CMake < 3.5 has been removed from CMake.
+      # Jobs 8429 (PT 2.9.1 on rocm-7.13.0) and 8432 (PT 2.9.1 on
+      # rocm-7.12.0) failed here on 2026-07-01. The existing
+      # third_party/*/CMakeLists.txt sed-to-3.5 fixup (search
+      # "CMAKE_MINIMUM_REQUIRED(VERSION 3.5)") cannot reach the confu-
+      # DOWNLOADED sources, so we pin CMake to the newest 3.x instead --
+      # the toolchain these PyTorch lines were actually tested against.
+      # Installing it first means the later `pip install -r
+      # requirements.txt` sees `cmake>=3.27` already satisfied and does
+      # not upgrade to 4.x. Bounded `<4` keeps PT 2.11's `>=3.27` happy
+      # too (a 3.31.x satisfies both), so this is safe across the matrix.
+      echo "pytorch: pinning CMake < 4 in the build venv (PyTorch requirements leave cmake>=3.27 unbounded -> would pull CMake 4.x, which drops cmake_minimum_required < 3.5)"
+      pip3 install "cmake>=3.27,<4"
+      echo "pytorch: build cmake = $(command -v cmake) ($(cmake --version 2>&1 | head -1))"
+
       export _GLIBCXX_USE_CXX11_ABI=1
       export ROCM_HOME=${ROCM_PATH}
       export ROCM_SOURCE_DIR=${ROCM_PATH}
+
+      # ── Align roctracer headers with the HIP SDK actually compiled against ──
+      # kineto's CMake locates roctracer via ROCM_SOURCE_DIR
+      # (ROCTRACER_INCLUDE_DIR = ${ROCM_SOURCE_DIR}/include/roctracer) and then
+      # includes roctracer_hip.h -> hip_ostream_ops.h, an auto-generated
+      # pretty-printer for HIP structs. That file MUST come from the same ROCm
+      # tree as the <hip/hip_runtime_api.h> the translation unit compiles
+      # against, or it dereferences hipLaunchAttributeValue members that the
+      # other tree's union does not define.
+      #
+      # On afar builds the two diverge: the amd/afar module puts afar's
+      # hipcc/hipconfig on PATH, so PyTorch's find_package(hip) resolves HIP to
+      # the afar SDK (e.g. /shareddata/opt/rocm-afar-23.2.1), while ROCM_PATH is
+      # remapped to the numeric rocm tree (/shareddata/opt/rocm-7.13.0). With
+      # ROCM_SOURCE_DIR left at the numeric tree, kineto pulled the NEWER
+      # 7.13.0 hip_ostream_ops.h whose operator<<(hipLaunchAttributeValue)
+      # prints v.clusterSchedulingPolicyPreference -- a Hopper thread-block-
+      # cluster attribute the older afar HIP union lacks -- so every
+      # RoctracerLogger/CuptiActivityProfiler TU failed with:
+      #   hip_ostream_ops.h:3625: 'const hipLaunchAttributeValue' has no member
+      #   named 'clusterSchedulingPolicyPreference'   (job 8431, 2026-07-01).
+      #
+      # afar ships its OWN self-consistent roctracer (hip_ostream_ops.h with no
+      # cluster fields + roctracer_hip.h), but the afar SDK path is NOT exposed
+      # to this build phase: ROCM_PATH is remapped to the numeric tree, ROCM_VERSION
+      # is the numeric string here (e.g. "7.13.0"), and both `hipconfig --path`
+      # and `command -v hipcc` resolve to the numeric tree via /opt/rocm -- so
+      # neither ROCM_VERSION nor runtime probes can find afar (verified: jobs
+      # 8437/8438/8440, 2026-07-01, all silent no-ops). The one reliable afar
+      # signal that survives into this phase is INSTALL_PATH, whose rocmplus
+      # suffix carries the release token (e.g.
+      # /.../rocmplus-afar-23.2.1-7.13.0/pytorch-v2.9.1). From it the afar SDK
+      # dir is rocm-<release> alongside the numeric tree, i.e.
+      #   $(dirname ROCM_PATH)/rocm-afar-23.2.1.
+      #
+      # Strategy (afar builds only, and only when a real skew exists -- i.e. the
+      # roctracer we would otherwise use references the cluster field that
+      # afar's HIP union lacks):
+      #   1. Reconstruct the afar SDK path from INSTALL_PATH (plus a glob of
+      #      sibling rocm-afar-* trees and the hipcc/hipconfig roots as extra
+      #      candidates) and pick the first whose roctracer hip_ostream_ops.h
+      #      does NOT reference clusterSchedulingPolicyPreference (i.e. it
+      #      matches afar's older HIP union). Align ROCM_SOURCE_DIR to it so
+      #      HIP + roctracer are one matched set and kineto STAYS enabled.
+      #   2. If no matching roctracer tree can be found, disable the roctracer
+      #      profiler (USE_KINETO=0) so the build still completes. Non-afar
+      #      builds never enter this block.
+      if [[ "${INSTALL_PATH}" == *afar* ]]; then
+         _RT_HDR="${ROCM_SOURCE_DIR}/include/roctracer/hip_ostream_ops.h"
+         if [ -f "${_RT_HDR}" ] && grep -q "clusterSchedulingPolicyPreference" "${_RT_HDR}"; then
+            _RP_SUFFIX="${INSTALL_PATH#*/rocmplus-}"; _RP_SUFFIX="${_RP_SUFFIX%%/*}"
+            _AFAR_SDK="$(dirname "${ROCM_PATH}")/rocm-${_RP_SUFFIX%-*}"
+            _HIPCC="$(command -v hipcc 2>/dev/null || true)"
+            _HIPCC_ROOT=""
+            [ -n "${_HIPCC}" ] && _HIPCC_ROOT="$(cd "$(dirname "${_HIPCC}")/.." 2>/dev/null && pwd || true)"
+            _RT_MATCH=""
+            for _cand in "${_AFAR_SDK}" "$(dirname "${ROCM_PATH}")"/rocm-afar-* "${_HIPCC_ROOT}" "$(hipconfig --path 2>/dev/null || true)"; do
+               [ -n "${_cand}" ] || continue
+               _cand_hdr="${_cand}/include/roctracer/hip_ostream_ops.h"
+               if [ -f "${_cand}/include/roctracer/roctracer_hip.h" ] && [ -f "${_cand_hdr}" ] \
+                  && ! grep -q "clusterSchedulingPolicyPreference" "${_cand_hdr}"; then
+                  _RT_MATCH="${_cand}"
+                  break
+               fi
+            done
+            if [ -n "${_RT_MATCH}" ]; then
+               echo "pytorch(afar): aligning ROCM_SOURCE_DIR to matching roctracer tree ${_RT_MATCH} (was ${ROCM_SOURCE_DIR}); kineto stays enabled"
+               export ROCM_SOURCE_DIR="${_RT_MATCH}"
+            else
+               echo "pytorch(afar): no roctracer tree matches afar's HIP union (clusterSchedulingPolicyPreference skew); disabling kineto (USE_KINETO=0) to unblock the build"
+               export USE_KINETO=0
+            fi
+            unset _RP_SUFFIX _AFAR_SDK _HIPCC _HIPCC_ROOT _RT_MATCH _cand _cand_hdr
+         fi
+         unset _RT_HDR
+      fi
+
       export USE_ROCM=1
       export USE_CUDA=0
       export MAX_JOBS=40
@@ -3131,6 +3359,23 @@ PY
       # broken there too -- the typedef block stays #if-skipped on
       # clang/amdclang/hipcc, so it's a no-op runtime-wise on those SDKs.
       patch_rocm_bf16_header_for_gcc
+
+      # afar builds compile against a SEPARATE afar SDK include tree (not
+      # ${ROCM_PATH}), whose amd_hip_bf16.h is identically broken for
+      # gcc<13 hosts. The pass above only patched ${ROCM_PATH}; reconstruct
+      # the afar SDK root from INSTALL_PATH (same derivation as the kineto
+      # ROCM_SOURCE_DIR alignment above) and patch its header too. Without
+      # this, torch's aten/src/ATen/native/hip/Blas.cpp fails on gcc-11
+      # with "'__bf16' was not declared" (slurm 8441, 2026-07-01).
+      if [[ "${INSTALL_PATH}" == *afar* ]]; then
+         _BF16_RP_SUFFIX="${INSTALL_PATH#*/rocmplus-}"; _BF16_RP_SUFFIX="${_BF16_RP_SUFFIX%%/*}"
+         _BF16_AFAR_SDK="$(dirname "${ROCM_PATH}")/rocm-${_BF16_RP_SUFFIX%-*}"
+         if [ -d "${_BF16_AFAR_SDK}/include" ] && [ "${_BF16_AFAR_SDK}" != "${ROCM_PATH}" ]; then
+            echo "pytorch(afar): also patching afar SDK bf16 header under ${_BF16_AFAR_SDK}"
+            patch_rocm_bf16_header_for_gcc "${_BF16_AFAR_SDK}"
+         fi
+         unset _BF16_RP_SUFFIX _BF16_AFAR_SDK
+      fi
 
       # ── HIP_CXX_FLAGS leak to torch_python C sources (issue #103222) ──
       # caffe2/CMakeLists.txt:1768 (v2.9.1; same line in upstream main):
@@ -3802,8 +4047,82 @@ print('  torch.cuda.is_available() =', torch.cuda.is_available())
       rm -f "${TORCHAUDIO_TGZ}"
       cd "audio-${TORCHAUDIO_VERSION}"
       export PYTHONPATH=${TORCHAUDIO_PATH}/lib/python3.${PYTHON_VERSION}/site-packages:$PYTHONPATH
+
+      # ── Disable host OpenMP for torchaudio on ROCm >= 7.12 ────────────
+      # torchaudio's CMake defaults USE_OPENMP=ON (torchaudio's setup.py:
+      # _USE_OPENMP = USE_OPENMP env (default True) AND torch built with the
+      # ATen OpenMP backend -> passes -DUSE_OPENMP:BOOL=ON), which adds
+      # -fopenmp=libomp to the libtorchaudio compiles. On ROCm >= 7.12 the
+      # bundled clang (22 on 7.12, 23 on 7.13) resolves that OpenMP link to
+      # the amdgcn DEVICE runtime and device builtins and injects them as
+      # absolute-path inputs into the final libtorchaudio.so link:
+      #   .../llvm/lib/amdgcn-amd-amdhsa/libompdevice.a
+      #   .../llvm/lib/clang/<v>/lib/amdgcn-amd-amdhsa/libclang_rt.builtins.a
+      # That link is driven by the Cray CC wrapper (host ld.lld), which
+      # rejects the amdgcn objects:
+      #   ld.lld: error: ...libompdevice.a(...) is incompatible with elf64-x86-64
+      # torch itself is unaffected (its HIP objects are linked by the clang
+      # driver, which keeps the device/host split). This broke PT 2.9.1 on
+      # rocm-7.12.0 (job 8435) and rocm-7.13.0 (8434/8439) on 2026-07-01;
+      # PT 2.11 on rocm-7.2.x (clang < 22) links torchaudio cleanly WITH
+      # OpenMP, so this is gated to ROCm >= 7.12 to leave those builds
+      # unchanged. torchaudio's own CPU kernels lose OpenMP threading, but
+      # tensor ops still parallelise through libtorch's ATen OpenMP backend.
+      _TA_OMP_SAVED_SET="${USE_OPENMP+x}"
+      _TA_OMP_SAVED_VAL="${USE_OPENMP:-}"
+      _TA_ROCM_MAJOR="${ROCM_MAJOR_MINOR%%.*}"
+      _TA_ROCM_MINOR="${ROCM_MAJOR_MINOR#*.}"
+      if { [ "${_TA_ROCM_MAJOR}" -gt 7 ] 2>/dev/null; } || \
+         { [ "${_TA_ROCM_MAJOR}" -eq 7 ] 2>/dev/null && [ "${_TA_ROCM_MINOR}" -ge 12 ] 2>/dev/null; }; then
+         echo "torchaudio: exporting USE_OPENMP=0 for ROCm ${ROCM_MAJOR_MINOR} (clang links OpenMP device libs libompdevice.a into the host libtorchaudio.so -> 'incompatible with elf64-x86-64'; disabling host OpenMP avoids the amdgcn device runtime)"
+         export USE_OPENMP=0
+      fi
+
+      # ── afar linker/libLLVM alignment for torchaudio ──────────────────
+      # torchaudio's cmake runs a plain C-compiler ABI probe through Cray
+      # `cc`, which invokes afar's clang -> afar's ld.lld. afar's ld.lld
+      # dynamically needs libLLVM.so.23.0git and its own copy under
+      # ${AFAR_SDK}/lib/llvm/lib carries the symbol setBitcodeLibFuncs
+      # (version LLVM_23.0). But our earlier ${ROCM_PATH}/llvm/lib exports
+      # (LIBRARY_PATH/LDFLAGS/LD_LIBRARY_PATH, numeric rocm-7.13.0) put a
+      # DIFFERENT libLLVM.so.23.0git build (same version string, no such
+      # symbol) ahead on LD_LIBRARY_PATH, so afar's ld.lld loads the wrong
+      # libLLVM and dies: "ld.lld: undefined symbol: ...setBitcodeLibFuncs
+      # ..., version LLVM_23.0" (slurm 8444, 2026-07-01; torch itself built
+      # fine because its HIP link went through afar's clang driver). Fix:
+      # for afar builds, prepend the afar SDK's own llvm/lib to
+      # LD_LIBRARY_PATH for the torchaudio install so afar's ld.lld
+      # resolves its self-consistent libLLVM. Restored right after.
+      _TA_LDLP_SAVED_SET="${LD_LIBRARY_PATH+x}"
+      _TA_LDLP_SAVED_VAL="${LD_LIBRARY_PATH:-}"
+      if [[ "${INSTALL_PATH}" == *afar* ]]; then
+         _TA_RP_SUFFIX="${INSTALL_PATH#*/rocmplus-}"; _TA_RP_SUFFIX="${_TA_RP_SUFFIX%%/*}"
+         _TA_AFAR_LLVM_LIB="$(dirname "${ROCM_PATH}")/rocm-${_TA_RP_SUFFIX%-*}/lib/llvm/lib"
+         if [ -f "${_TA_AFAR_LLVM_LIB}/libLLVM.so.23.0git" ] || ls "${_TA_AFAR_LLVM_LIB}"/libLLVM.so* >/dev/null 2>&1; then
+            echo "torchaudio(afar): prepending afar llvm/lib ${_TA_AFAR_LLVM_LIB} to LD_LIBRARY_PATH so afar's ld.lld loads its matching libLLVM (avoids numeric rocm-7.13.0 libLLVM symbol skew)"
+            export LD_LIBRARY_PATH="${_TA_AFAR_LLVM_LIB}:${LD_LIBRARY_PATH:-}"
+         fi
+         unset _TA_RP_SUFFIX _TA_AFAR_LLVM_LIB
+      fi
+
       python3 setup.py install --prefix=${TORCHAUDIO_PATH}
       TORCHAUDIO_INSTALL_RC=$?
+
+      # Restore LD_LIBRARY_PATH to its prior state so later packages are unaffected.
+      if [ "${_TA_LDLP_SAVED_SET}" = "x" ]; then
+         export LD_LIBRARY_PATH="${_TA_LDLP_SAVED_VAL}"
+      else
+         unset LD_LIBRARY_PATH
+      fi
+      unset _TA_LDLP_SAVED_SET _TA_LDLP_SAVED_VAL
+
+      # Restore USE_OPENMP to its prior state so later packages are unaffected.
+      if [ "${_TA_OMP_SAVED_SET}" = "x" ]; then
+         export USE_OPENMP="${_TA_OMP_SAVED_VAL}"
+      else
+         unset USE_OPENMP
+      fi
+      unset _TA_OMP_SAVED_SET _TA_OMP_SAVED_VAL _TA_ROCM_MAJOR _TA_ROCM_MINOR
       # rc gate (Bug 2b, twin of the torchvision rc gate above). Same
       # rationale: the setuptools<81 pin block earlier in this branch
       # covers the pkg_resources crash for both, but a different
@@ -4064,6 +4383,21 @@ unset _nl
 echo "[modulefile-emit] IS_PT_2_10_PLUS=${IS_PT_2_10_PLUS}; companion prepends:"
 printf '  %s\n' "${MODULE_COMPANION_PREPENDS}" | sed 's/^/    /'
 
+# ── cray-python modulefile load ──────────────────────────────────────
+# When the build-python selection loaded a cray-python module (because
+# the OS-default python was below this PyTorch's floor -- see the
+# "Build-python floor" block), the same module must be loaded at runtime
+# so `module load pytorch` resolves python3 to the >=3.10 interpreter the
+# wheels were built for AND so the python3.${PYTHON_VERSION}/site-packages
+# prepends below point at a matching interpreter. Empty (no line emitted)
+# when the OS-default python already met the floor.
+if [[ -n "${CRAY_PYTHON_MODULE}" ]]; then
+   MODULE_CRAY_PYTHON_LOAD="-- cray-python: the >=3.10 interpreter (with dev libs) PyTorch was built against
+	load(\"${CRAY_PYTHON_MODULE}\")"
+else
+   MODULE_CRAY_PYTHON_LOAD=""
+fi
+
 # the - option suppresses tabs
 cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua
 	whatis("PyTorch version ${PYTORCH_VERSION} with ROCm Support${PYTORCH_INSTALL_SUFFIX:+ (variant: ${PYTORCH_INSTALL_SUFFIX#-})}")
@@ -4073,6 +4407,7 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INST
 	whatis("FlashAttention: ${FLASHATTENTION_VERSION}")
 
 	prereq("${ROCM_MODULE_NAME}")
+	${MODULE_CRAY_PYTHON_LOAD}
 	-- openmpi is required because libtorch_cpu links libmpi.so when
 	-- USE_MPI=1 was set at build time (which it is in pytorch_setup.sh).
 	load("${MPI_MODULE}")

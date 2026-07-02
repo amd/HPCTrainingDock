@@ -565,6 +565,24 @@ else
       unset _hip_ver_h _rocm_info_ver _hv_major _hv_minor _hv_patch _rv _rv_major _rv_minor _rv_patch
       if [[ "${_GKH_NEEDS_HIP713_PATCH}" == "1" ]]; then
          _GKH_PATCH_FILE=tensorflow/core/util/gpu_kernel_helper.h
+         # Self-healing gate: the ROCm/tensorflow-upstream *-rocm-enhanced
+         # branches are rolling. ROCm has since replaced the legacy HIP
+         # kernel-arg packing call sites -- pArgs<0>(tup,_Args) /
+         # validateArgsCountType(function,tup_) -- with a version-agnostic
+         # detail::GetArrayOfElementPointers(...) + direct hipLaunchKernel
+         # path that already compiles on ROCm 7.13+ (verified on
+         # r2.20-rocm-enhanced, 2026-07-01). When those legacy markers are
+         # gone the header needs no guard, so SKIP instead of aborting the
+         # whole TF build on a dry-run mismatch (the job 8406 / 8408
+         # rocm-7.13.0 failure mode). Only insist the patch applies when the
+         # legacy call sites are actually still present.
+         if ! grep -q 'pArgs<0>(tup, _Args)' "${_GKH_PATCH_FILE}" 2>/dev/null; then
+            echo ""
+            echo "tensorflow: HIP 7.13+ kernel-arg API guard NOT needed on branch ${GIT_BRANCH}"
+            echo "            (legacy pArgs<0>/validateArgsCountType call sites already replaced"
+            echo "             upstream by detail::GetArrayOfElementPointers; nothing to patch)."
+            echo ""
+         else
          echo ""
          echo "tensorflow: applying HIP 7.13+ kernel-arg API guard to ${_GKH_PATCH_FILE}"
          echo "            (branch=${GIT_BRANCH}; see comment block in tensorflow_setup.sh)"
@@ -631,9 +649,14 @@ GKH_PATCH_EOF
 GKH_PATCH_EOF
          echo "tensorflow: HIP 7.13+ kernel-arg API guard applied."
          echo ""
+         fi
          unset _GKH_PATCH_FILE
       fi
-      unset _GKH_NEEDS_HIP713_PATCH
+      # NOTE: do NOT unset _GKH_NEEDS_HIP713_PATCH here -- the flatbuffers
+      # block below reuses it as its version+branch gate. It was previously
+      # unset at this point, which silently disabled the flatbuffers fix
+      # (only masked because the pre-fix gpu_kernel_helper.h patch aborted
+      # first). It is unset after the flatbuffers block instead.
 
       # ── ROCm 7.13+ flatbuffers shadowing fix ─────────────────────────
       # ROCm 7.13.0 is the FIRST ROCm release that ships a flatbuffers
@@ -750,6 +773,7 @@ ROCM_FB_PATCH_EOF
          echo ""
          unset _ROCM_FB_PATCH_FILE
       fi
+      unset _GKH_NEEDS_HIP713_PATCH
 
       # AMDGPU_GFXMODEL is auto-detected from `rocminfo` (line 7) and on
       # multi-GPU nodes can be a `;`-separated list, e.g. "gfx942;gfx90a".
