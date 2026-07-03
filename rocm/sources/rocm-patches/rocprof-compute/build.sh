@@ -88,6 +88,30 @@ source venv/bin/activate
 
 python3 -m pip install --upgrade pip 2>&1 | tail -3 | tee -a "$LOG"
 
+# ── Nuitka version selection (PEP 695 gate) ──────────────────────────
+# The historical pin (Nuitka==2.6) crashes with an AssertionError in
+# nuitka/tree/ReformulationAssignmentStatements.py:buildTypeAliasNode on
+# PEP 695 generic type aliases (`type X[T] = ...`), a syntax Python 3.12
+# introduced. Ubuntu 24.04 ships python3.12, so the rocprof-compute
+# dependency closure now contains that syntax and the onefile build aborts
+# (see Nuitka issues #3469 / #3692). Nuitka 4.1.3 handles the full PEP 695
+# surface (generic type aliases, generic classes/functions, and ParamSpec
+# aliases -- 2.8.x fixes the alias but still asserts on ParamSpec).
+#
+# Ubuntu 22.04 ships python3.10, which has no PEP 695 syntax at all, so we
+# keep the known-good 2.6 pin there rather than perturb a working toolchain.
+# The gate is on the Ubuntu major version (>= 24.04 -> 4.1.3); every other
+# distro/version keeps 2.6. This applies to BOTH the pinned requirements
+# (repinned below) and the explicit `pip install nuitka==...` line.
+NUITKA_VERSION="2.6"
+_os_id="$(. /etc/os-release && echo "${ID:-}")"
+_os_ver="$(. /etc/os-release && echo "${VERSION_ID:-}")"
+if [ "${_os_id}" = "ubuntu" ] && [ -n "${_os_ver}" ] \
+   && [ "$(printf '%s\n' "24.04" "${_os_ver}" | sort -V | head -n1)" = "24.04" ]; then
+    NUITKA_VERSION="4.1.3"
+fi
+echo "[build] Nuitka version selected: ${NUITKA_VERSION} (distro=${_os_id:-?} ${_os_ver:-?}, python=$(python3 -V 2>&1))" | tee -a "$LOG"
+
 if [ -n "$RC_FLAVOUR" ]; then
     # Commit-pinned clone for RC trees.  VERSION.sha on RC trees ships
     # an abbreviated SHA (e.g. `bc96f0a`, `167a9576`) which git's
@@ -338,6 +362,9 @@ Werkzeug==3.1.5
 zipp==3.23.0
 zstandard==0.25.0
 EOF
+        # Repin Nuitka per the PEP 695 gate (see NUITKA_VERSION above) so the
+        # `-r requirements.txt` install below doesn't downgrade back to 2.6.
+        sed -i "s/^Nuitka==.*/Nuitka==${NUITKA_VERSION}/" requirements.txt
     elif [ "$DISTRO_ID" = "rhel" ] || [ "$DISTRO_ID" = "rocky" ] || [ "$DISTRO_ID" = "almalinux" ] || [ "$DISTRO_ID" = "centos" ]; then
         echo "[build] pinning requirements.txt for RHEL-family / ROCm $ROCM_VERSION" | tee -a "$LOG"
         mv requirements.txt requirements.txt.upstream
@@ -405,10 +432,14 @@ urllib3==2.6.3
 Werkzeug==3.1.5
 zipp==3.23.0
 EOF
+        # Repin Nuitka per the PEP 695 gate (see NUITKA_VERSION above). No-op
+        # on RHEL-family today (gate only bumps Ubuntu 24.04) but keeps the two
+        # pinned blocks symmetric if the gate is later widened.
+        sed -i "s/^Nuitka==.*/Nuitka==${NUITKA_VERSION}/" requirements.txt
     fi
 fi
 
-python3 -m pip install nuitka==2.6 patchelf 2>&1 | tail -3 | tee -a "$LOG"
+python3 -m pip install "nuitka==${NUITKA_VERSION}" patchelf 2>&1 | tail -3 | tee -a "$LOG"
 python3 -m pip install -r requirements.txt 2>&1 | tail -10 | tee -a "$LOG"
 
 UPSTREAM_VERSION=$(cat VERSION)

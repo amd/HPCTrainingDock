@@ -310,9 +310,24 @@ INSTALL_PARENT="${TOP_INSTALL_PATH%/*}"
 
 # no-sudo auto-detect: a $HOME install on a login node has a directly
 # user-writable install parent and needs neither sudo nor root ownership.
+#
+# Do NOT rely on `test -w` here. Over NFSv4 (e.g. the sh5 compute nodes'
+# `warewulf:/nfsapps` re-export) access(2) reports a root-owned 0755 directory
+# as writable to an unprivileged user, yet the actual mkdir is denied with
+# EACCES. That false-positive silently selected the sudo-free path, so the
+# staging `mkdir` (make_dir_root) failed and every TheRock install on /nfsapps
+# aborted. Probe with a REAL write (create+remove a temp dir) so the decision
+# matches what the filesystem will actually allow.
+_therock_can_write() {
+   local _d="$1" _t
+   [ -d "${_d}" ] || return 1
+   _t="$(mktemp -d "${_d}/.wtest.XXXXXX" 2>/dev/null)" || return 1
+   rmdir "${_t}" 2>/dev/null || true
+   return 0
+}
 if [ -z "${NO_SUDO}" ]; then
-   if [ -w "${INSTALL_PARENT}" ] 2>/dev/null \
-      || { [ ! -e "${INSTALL_PARENT}" ] && [ -w "$(dirname "${INSTALL_PARENT}")" ] 2>/dev/null; }; then
+   if _therock_can_write "${INSTALL_PARENT}" \
+      || { [ ! -e "${INSTALL_PARENT}" ] && _therock_can_write "$(dirname "${INSTALL_PARENT}")"; }; then
       NO_SUDO=1
    else
       NO_SUDO=0
@@ -340,9 +355,12 @@ else
 fi
 
 if [ "${NO_SUDO}" = "1" ]; then
-   # User-writable install: no remount, no root test -- just check directly.
-   if [ ! -w "${INSTALL_PARENT}" ]; then
+   # User-writable install: no remount, no root test -- just probe a real write
+   # (see _therock_can_write above: NFSv4 `test -w` can't be trusted). This also
+   # gives a clean early error if --no-sudo 1 was forced on a root-owned tree.
+   if ! _therock_can_write "${INSTALL_PARENT}"; then
       echo "ERROR: ${INSTALL_PARENT} is not writable by $(id -un) on $(hostname); aborting." >&2
+      echo "       (root-owned tree? drop --no-sudo 1 so the installer uses sudo.)" >&2
       exit 1
    fi
 else
