@@ -164,9 +164,48 @@ else
         git -c advice.detachedHead=false checkout "rocm-${ROCM_VERSION}" 2>&1 | tail -3 | tee -a "$LOG"
         cd projects/rocprofiler-compute
     else
-        echo "[build] cloning rocprofiler-compute @ rocm-${ROCM_VERSION} ..." | tee -a "$LOG"
-        git clone --depth 1 --branch "rocm-${ROCM_VERSION}" \
-            https://github.com/ROCm/rocprofiler-compute.git 2>&1 | tail -3 | tee -a "$LOG"
+        # Official standalone rocprofiler-compute repo (rocm-7.0.x and older).
+        # rocprofiler-compute is tagged `rocm-<ver>` for only a subset of ROCm
+        # releases: point/delta releases such as 6.3.4 have NO matching tag or
+        # branch upstream (the highest rocm-6.3 tag is rocm-6.3.3, then it
+        # jumps to rocm-6.4.0). `git clone --branch rocm-6.3.4` therefore fails
+        # hard. Resolve the best `rocm-<major>.<minor>.<patch>` ref by walking
+        # the patch level down to .0 and cloning the first one that exists, so
+        # a delta release still builds against its nearest base line.
+        RPC_URL="https://github.com/ROCm/rocprofiler-compute.git"
+        _rpc_major="${ROCM_VERSION%%.*}"
+        _rpc_tmp="${ROCM_VERSION#*.}"; _rpc_minor="${_rpc_tmp%%.*}"
+        _rpc_patch="${ROCM_VERSION##*.}"
+        RPC_REF=""
+        case "$_rpc_patch" in
+            ''|*[!0-9]*)
+                # Non-standard version string: only try the exact ref.
+                if git ls-remote --exit-code "$RPC_URL" "rocm-${ROCM_VERSION}" >/dev/null 2>&1; then
+                    RPC_REF="rocm-${ROCM_VERSION}"
+                fi
+                ;;
+            *)
+                for _p in $(seq "$_rpc_patch" -1 0); do
+                    _cand="rocm-${_rpc_major}.${_rpc_minor}.${_p}"
+                    if git ls-remote --exit-code "$RPC_URL" "$_cand" >/dev/null 2>&1; then
+                        RPC_REF="$_cand"
+                        break
+                    fi
+                done
+                ;;
+        esac
+        if [ -z "$RPC_REF" ]; then
+            echo "[build] no rocm-${_rpc_major}.${_rpc_minor}.* ref (<= ${ROCM_VERSION}) exists in" | tee -a "$LOG"
+            echo "[build] ${RPC_URL}; cannot build rocprof-compute for ${ROCM_VERSION}."            | tee -a "$LOG"
+            echo "[build] exit 43 (soft no-op) -- no rocprof-compute overlay produced."             | tee -a "$LOG"
+            exit 43
+        fi
+        if [ "$RPC_REF" = "rocm-${ROCM_VERSION}" ]; then
+            echo "[build] cloning rocprofiler-compute @ ${RPC_REF} ..." | tee -a "$LOG"
+        else
+            echo "[build] rocprofiler-compute has no rocm-${ROCM_VERSION} ref; falling back to nearest base ${RPC_REF} ..." | tee -a "$LOG"
+        fi
+        git clone --depth 1 --branch "$RPC_REF" "$RPC_URL" 2>&1 | tail -3 | tee -a "$LOG"
         cd rocprofiler-compute
     fi
 fi
