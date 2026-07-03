@@ -2,6 +2,20 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-07-03
+
+- Default partition: 1CN192C24G1H_MI300A_Ubuntu22 → PPAC_MI300A_CPX
+- Slurm partitions:
+    + PPAC_MI300A_CPX:1
+    + PPAC_MI300A_SPX:4
+    + SH5_MI300A_CPX:3
+    + SH5_MI300A_SPX:1
+    - 1CN192C24G1H_MI300A_Ubuntu22:1
+    - 1CN192C4G1H_MI300A_Ubuntu22:4
+    - 1CN48C1G1H_MI300A_Ubuntu22:1
+    - 1CN48C6G1H_MI300A_Ubuntu22:3
+
+[Full snapshot](archive/AAC6_system_status_2026-07-03.md)
 ## 2026-06-25
 
 - ROCm versions:
