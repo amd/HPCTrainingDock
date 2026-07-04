@@ -2,6 +2,55 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-07-04
+
+- OS: Ubuntu 22.04.5 LTS → Ubuntu 24.04.4 LTS
+- Kernel: 6.5.0-45-generic → 6.8.0-100-generic
+- ROCm default: 7.2.3 → 7.13.0
+- podman: 4.6.2 → not installed
+- apptainer: 1.4.5 → 1.5.2
+- gcc: 11.4.0 → 13.3.0
+- ROCm versions:
+    - afar-22.1.0-7.1.0
+    - afar-22.2.0-7.2.0
+    - afar-23.1.0-7.12.0
+    - afar-23.2.1-7.13.0
+- User-facing modules:
+    - apptainer
+    - fp64monitor
+    - gcc
+    - hmmer
+    - miniconda3
+    - miniforge3
+    - nextflow
+    - paraview
+    - rocbudai
+    - roofline-extractor
+    - tracelens
+    - turbovnc
+    - uprof
+    - visit
+- Modules:
+    - apptainer/1.4.5
+    - fp64monitor/dev
+    - gcc/base
+    - hmmer/3.4
+    - miniconda3/25.3.1
+    - miniforge3/24.9.0
+    - nextflow/26.02.0
+    - paraview/5.13.3
+    - rocbudai/dev
+    - rocm/afar-22.1.0-7.1.0
+    - rocm/afar-22.2.0-7.2.0
+    - rocm/afar-23.1.0-7.12.0
+    - rocm/afar-23.2.1-7.13.0
+    - roofline-extractor/dev
+    - tracelens/dev
+    - turbovnc/3.0.3
+    - uprof/5.3-518
+    - visit/3.4.2
+
+[Full snapshot](archive/AAC6_system_status_2026-07-04.md)
 ## 2026-07-03
 
 - Default partition: 1CN192C24G1H_MI300A_Ubuntu22 → PPAC_MI300A_CPX
