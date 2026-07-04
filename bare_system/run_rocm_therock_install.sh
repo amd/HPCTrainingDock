@@ -17,10 +17,14 @@
 #   * The tarball expands DIRECTLY into the destination dir (no top-
 #     level wrapper segment to drop, unlike the AFAR drops where we
 #     have to rename `rocm-afar-<NUM>-drop-<REL>` -> `rocm-afar-<REL>`).
-#   * There is no `make rocm`, no rocm_package, no rocm_patches.sh;
-#     the docker pipeline that run_rocm_build.sh uses for official
-#     numeric versions does not apply. This script is the TheRock-side
-#     analogue: just curl + tar + write the GPUSDK-shaped modulefile.
+#   * There is no `make rocm` and no rocm_package; the docker pipeline
+#     that run_rocm_build.sh uses for official numeric versions does not
+#     apply. This script is the TheRock-side analogue: curl + tar + write
+#     the GPUSDK-shaped modulefile. It DOES, however, run rocm_patches.sh
+#     as an optional post-install overlay (Phase 6, gated by
+#     --skip-patches) so the rocprof-sys / rocprof-compute fixes reach
+#     TheRock-numeric installs (7.12.0 / 7.13.0 / any numeric >= 7.10.0)
+#     even when the rocmplus phase is run with --skip-patches 1.
 #
 # Phases:
 #   0. Pre-check: skip cleanly (exit 0) if ${TOP_INSTALL_PATH}/
@@ -86,6 +90,12 @@ LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$
 # instead. No tarball is needed. Use it to pick up modulefile-emitter changes
 # (e.g. SUPPRESS_MODULEPATH) without a full multi-GB re-download/extract.
 : ${MODULES_ONLY:="0"}
+# SKIP_PATCHES: 1 = skip the Phase 6 rocm_patches.sh post-install overlay
+# (operator opt-out; mirrors run_rocm_build.sh:31 and the AFAR installers).
+# Default 0 runs it -- most versions self-no-op (rc=43) so the cost is nil;
+# TheRock numerics with a vendored bundle (e.g. 7.12.0 -> rocprof-sys-1.5.0,
+# 7.13.0 -> rocprof-sys-1.6.0) build the overlay here (~30 min).
+: ${SKIP_PATCHES:="0"}
 # WORLD_READABLE: 1 = make install + module trees group/other readable (o+rX)
 # for a shared location (e.g. /shareddata); 0 = leave as-is; "auto" (default) =
 # enable iff TOP_INSTALL_PATH is NOT under $HOME.
@@ -214,6 +224,7 @@ while [[ $# -gt 0 ]]; do
       "--replace-existing")     shift; REPLACE_EXISTING=${1};     reset-last ;;
       "--keep-failed-installs") shift; KEEP_FAILED_INSTALLS=${1}; reset-last ;;
       "--modules-only")         shift; MODULES_ONLY=${1};         reset-last ;;
+      "--skip-patches")         shift; SKIP_PATCHES=${1};         reset-last ;;
       "--no-sudo")              shift; NO_SUDO=${1};              reset-last ;;
       "--cray-modules")         CRAY_SYSTEM=1;                    reset-last ;;
       "--local-tarball")        shift; LOCAL_TARBALL_INPUT=${1};  reset-last ;;
@@ -925,6 +936,72 @@ if [ "${CRAY_SYSTEM}" = "1" ]; then
       echo "  -> then:        module swap PrgEnv-cray PrgEnv-amd-new/${PE_VERSION}-${ROCM_NUMERIC}"
       echo "  -> or (CCE+ROCm): module swap PrgEnv-cray PrgEnv-cray-new/${PE_VERSION}-${ROCM_NUMERIC}"
    fi
+fi
+
+# ---------------- Phase 6: apply vendored ROCm patches ----------------
+# Run rocm/scripts/rocm_patches.sh against the just-promoted SDK tree.
+# The TheRock extract path has no docker/make step (see run_rocm_build.sh's
+# Phase 3.6), so this is where the rocprof-sys / rocprof-compute overlay
+# reaches TheRock-numeric installs. Dispatch is by ROCM_NUMERIC (e.g.
+# 7.12.0 -> rocprof-sys-1.5.0, 7.13.0 -> rocprof-sys-1.6.0; see
+# rocm_version_to_patches() in rocm_patches.sh); versions with no vendored
+# bundle exit 43 (NOOP_RC, fast no-op).
+#
+# Path conventions match the therock-afar installer (run_rocm_therock_afar_
+# install.sh:1155): --rocm-version is the .info/version NUMERIC, --rocm-path
+# the promoted SDK dir, --install-prefix auto-derived by rocm_patches.sh to
+# the sibling rocm-patches-${ROCM_NUMERIC}, and --module-file the .lua we
+# emitted in Phase 5 (so the overlay's PATH/LD_LIBRARY_PATH prepends land in
+# the right modulefile).
+#
+# Exit codes (rocm_patches.sh): 0 = applied/up-to-date, 43 = intentional
+# no-op, * = hard error. A hard error must NOT delete an otherwise-good
+# install (the tree + modulefiles are already promoted): retain it, drop a
+# .rocm-patches-pending marker, and let the operator re-apply later (on a
+# compute node, since rocm_patches.sh guards against login-node runs).
+#
+# Gated by SKIP_PATCHES (operator opt-out) and MODULES_ONLY (no tree to
+# patch when only re-emitting modulefiles).
+if [[ "${SKIP_PATCHES}" != "1" && "${MODULES_ONLY}" != "1" ]]; then
+   PATCHES_LOG="${PATCHES_LOG:-/tmp/rocm-patches-${ROCM_NUMERIC}.$$.log}"
+   echo "============================================================"
+   echo "  Phase 6: rocm_patches.sh on ${INSTALL_DIR} (-> ${PATCHES_LOG})"
+   echo "============================================================"
+   _patches_sh="$(dirname "${LEAF_SCRIPT_PATH}")/../rocm/scripts/rocm_patches.sh"
+   if [[ ! -x "${_patches_sh}" ]]; then
+      echo "[Phase 6] WARNING: rocm_patches.sh not found / not executable at ${_patches_sh}; skipping"
+   else
+      PATCHES_RC=0
+      set +e
+      "${_patches_sh}" \
+            --rocm-version "${ROCM_NUMERIC}" \
+            --rocm-path    "${INSTALL_DIR}" \
+            --module-path  "${TOP_MODULE_PATH}/base" \
+            --module-file  "${MODULE_FILE}" \
+            2>&1 | tee "${PATCHES_LOG}"
+      PATCHES_RC=${PIPESTATUS[0]}
+      set -e
+      if [[ "${PATCHES_RC}" -eq 43 ]]; then
+         echo "[Phase 6] rocm_patches.sh returned 43 (NOOP_RC) -- no vendored fix for ${ROCM_NUMERIC}; treating as success"
+      elif [[ "${PATCHES_RC}" -ne 0 ]]; then
+         echo "WARNING: rocm_patches.sh failed for ${ROCM_NUMERIC} (rc=${PATCHES_RC})" >&2
+         echo "         Install + modulefiles are RETAINED; patches DEFERRED." >&2
+         ${SUDO} touch "${INSTALL_DIR}/.rocm-patches-pending" 2>/dev/null || true
+         echo "         To apply patches later (run on a compute node, e.g. via sbatch):" >&2
+         echo "           ${_patches_sh} \\" >&2
+         echo "             --rocm-version ${ROCM_NUMERIC} --rocm-path ${INSTALL_DIR} \\" >&2
+         echo "             --module-path ${TOP_MODULE_PATH}/base --module-file ${MODULE_FILE}" >&2
+      else
+         _overlay="${TOP_INSTALL_PATH}/rocm-patches-${ROCM_NUMERIC}"
+         if [[ -d "${_overlay}" ]]; then
+            chown_root -R root:root "${_overlay}"
+            ${SUDO} find "${_overlay}" -type d -exec chmod 755 {} +
+         fi
+         unset _overlay
+         echo "[Phase 6] patches applied for ${ROCM_NUMERIC}"
+      fi
+   fi
+   unset _patches_sh
 fi
 
 # ---------------- world-readable perms (shared install locations) -----
