@@ -225,7 +225,11 @@ EOF
    exit 1
 }
 
-send-error() { usage; echo -e "\nError: ${@}" >&2; exit 1; }
+# Print the real error FIRST: usage() ends in `exit 1`, so anything echoed
+# after a usage() call is unreachable and the true cause gets masked (the
+# afar-22.x / therock-afar failures in slurm-13252 showed only a bare usage
+# block with no reason). Emit the reason before usage().
+send-error() { echo -e "Error: ${*}\n" >&2; usage; }
 reset-last() { last() { send-error "Unsupported argument :: ${1}"; }; }
 
 n=0
@@ -262,6 +266,17 @@ done
 # Tolerate `therock-afar-` prefix in the input value (e.g. operator
 # copy-pastes the full token straight in).
 THEROCK_AFAR_RELEASE="${THEROCK_AFAR_RELEASE#therock-afar-}"
+# Tolerate the canonical sweep token's informational trailing -<ROCM_NUMERIC>
+# segment (e.g. `23.2.1-7.13.0` -> `23.2.1`). resolve_kind() in the sweep only
+# strips this when auto-mapping a bare `afar-*` token; a token that is already
+# `therock-afar-<REL>-<NUMERIC>` is forwarded verbatim, so the numeric survived
+# into --therock-afar-release and failed the strict X.Y.Z check below
+# (slurm-13252 rocm-therock-afar-23.2.1-7.13.0, 2026-07-03). Only <REL> drives
+# the install dir + URL + module names, so drop the numeric here.
+if [[ "${THEROCK_AFAR_RELEASE}" =~ ^([0-9]+\.[0-9]+(\.[0-9]+)?)-[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+   echo "[therock-afar] normalizing release '${THEROCK_AFAR_RELEASE}' -> '${BASH_REMATCH[1]}' (dropped informational -<numeric>)"
+   THEROCK_AFAR_RELEASE="${BASH_REMATCH[1]}"
+fi
 # Strict X.Y or X.Y.Z form -- anything else propagates into URL + dir +
 # module names, so loose parsing here would produce confusing errors.
 if [[ ! "${THEROCK_AFAR_RELEASE}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
@@ -370,9 +385,29 @@ unset _skip_match
 
 # ---------------- Resolve sudo + Cray module flavor -------------------
 INSTALL_PARENT="${TOP_INSTALL_PATH%/*}"
+
+# no-sudo auto-detect: a $HOME install on a login node has a directly
+# user-writable install parent and needs neither sudo nor root ownership.
+#
+# Do NOT rely on `test -w` here. Over NFSv4 (e.g. the sh5 compute nodes'
+# `warewulf:/nfsapps` re-export) access(2) reports a root-owned 0755 directory
+# as writable to an unprivileged user, yet the actual mkdir is denied with
+# EACCES. That false-positive silently selected the sudo-free path, so the
+# Phase 2 staging `mkdir` (make_dir_root) failed with "Permission denied" and
+# the TheRock-AFAR install aborted after a full tarball download (slurm-13252
+# rocm-therock-afar-23.1.0, 2026-07-03). Probe with a REAL write (create+remove
+# a temp dir) so the decision matches what the filesystem will actually allow.
+# Mirrors the same fix in run_rocm_therock_install.sh.
+_therock_afar_can_write() {
+   local _d="$1" _t
+   [ -d "${_d}" ] || return 1
+   _t="$(mktemp -d "${_d}/.wtest.XXXXXX" 2>/dev/null)" || return 1
+   rmdir "${_t}" 2>/dev/null || true
+   return 0
+}
 if [ -z "${NO_SUDO}" ]; then
-   if [ -w "${INSTALL_PARENT}" ] 2>/dev/null \
-      || { [ ! -e "${INSTALL_PARENT}" ] && [ -w "$(dirname "${INSTALL_PARENT}")" ] 2>/dev/null; }; then
+   if _therock_afar_can_write "${INSTALL_PARENT}" \
+      || { [ ! -e "${INSTALL_PARENT}" ] && _therock_afar_can_write "$(dirname "${INSTALL_PARENT}")"; }; then
       NO_SUDO=1
    else
       NO_SUDO=0
@@ -393,8 +428,11 @@ echo "[therock-afar] NO_SUDO=${NO_SUDO}  CRAY_SYSTEM=${CRAY_SYSTEM}  (sudo='${SU
 # warewulf-managed fstab still mounts /nfsapps ro by default. Skipped unless
 # TOP_INSTALL_PATH lives under /nfsapps (i.e. a root-owned cluster install).
 if [ "${NO_SUDO}" = "1" ]; then
-   if [ ! -w "${INSTALL_PARENT}" ]; then
+   # Real write-probe, not `test -w` (NFSv4 false-positive; see above). Gives a
+   # clean early error if --no-sudo 1 was forced on a root-owned tree.
+   if ! _therock_afar_can_write "${INSTALL_PARENT}"; then
       echo "ERROR: ${INSTALL_PARENT} is not writable by $(id -un) on $(hostname); aborting." >&2
+      echo "       (root-owned tree? drop --no-sudo 1 so the installer uses sudo.)" >&2
       exit 1
    fi
 else
@@ -894,9 +932,11 @@ unset _cxx _d
 if [ -n "${GCC_INSTALL_DIR}" ]; then
    echo "[therock-afar] host GCC install dir for hipcc: ${GCC_INSTALL_DIR} (g++ $(g++ -dumpversion 2>/dev/null), $(g++ -dumpmachine 2>/dev/null))"
    HIPCC_TCL_LINES="setenv HIPCC_COMPILE_FLAGS_APPEND \"--gcc-install-dir=${GCC_INSTALL_DIR}\"
-setenv HIPCC_LINK_FLAGS_APPEND    \"--gcc-install-dir=${GCC_INSTALL_DIR}\""
+setenv HIPCC_LINK_FLAGS_APPEND    \"--gcc-install-dir=${GCC_INSTALL_DIR}\"
+setenv CCC_OVERRIDE_OPTIONS       \"+--gcc-install-dir=${GCC_INSTALL_DIR}\""
    HIPCC_LUA_LINES="setenv(\"HIPCC_COMPILE_FLAGS_APPEND\", \"--gcc-install-dir=${GCC_INSTALL_DIR}\")
-setenv(\"HIPCC_LINK_FLAGS_APPEND\",    \"--gcc-install-dir=${GCC_INSTALL_DIR}\")"
+setenv(\"HIPCC_LINK_FLAGS_APPEND\",    \"--gcc-install-dir=${GCC_INSTALL_DIR}\")
+setenv(\"CCC_OVERRIDE_OPTIONS\",       \"+--gcc-install-dir=${GCC_INSTALL_DIR}\")"
 else
    echo "[therock-afar] WARNING: no working host g++/GCC install dir found (g++ missing or libstdc++-devel absent);" >&2
    echo "[therock-afar]          HIPCC_*_FLAGS_APPEND will NOT be pinned -- HIP C++ builds may pick the wrong libc++." >&2

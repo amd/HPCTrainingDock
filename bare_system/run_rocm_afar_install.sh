@@ -94,7 +94,9 @@ EOF
    exit 1
 }
 
-send-error() { usage; echo -e "\nError: ${@}" >&2; exit 1; }
+# Print the real error FIRST: usage() ends in `exit 1`, so anything echoed
+# after usage() is unreachable and the true cause gets masked.
+send-error() { echo -e "Error: ${*}\n" >&2; usage; }
 reset-last() { last() { send-error "Unsupported argument :: ${1}"; }; }
 
 n=0
@@ -391,6 +393,9 @@ prepend_path("INCLUDE",            pathJoin(base, "include"))
 setenv("HSA_NO_SCRATCH_RECLAIM", "1")
 setenv("HIPCC_COMPILE_FLAGS_APPEND", "--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11")
 setenv("HIPCC_LINK_FLAGS_APPEND",    "--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11")
+-- Also pin direct amdclang/amdclang++ invocations (bypass hipcc, e.g. UCC
+-- HIP kernels) to the same gcc-install-dir; '+' appends the option.
+setenv("CCC_OVERRIDE_OPTIONS",       "+--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11")
 setenv("ROCM_PATH", base)
 prepend_path("MODULEPATH", pathJoin(mbase, "rocm-afar-${FLANG_RELEASE_NUMBER}"))
 prepend_path("MODULEPATH", pathJoin(mbase, "rocmplus-afar-${FLANG_RELEASE_NUMBER}-${ROCM_NUMERIC}"))

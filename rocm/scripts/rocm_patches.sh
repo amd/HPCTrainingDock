@@ -207,9 +207,11 @@ usage() {
 }
 
 send-error() {
+   # Print the actual error FIRST (to stderr): usage() ends with `exit 1`,
+   # so anything echoed after a usage() call is unreachable. Emitting the
+   # reason before usage() ensures the real cause is never masked.
+   echo -e "Error: ${*}\n" >&2
    usage
-   echo -e "\nError: ${@}"
-   exit 1
 }
 
 reset-last() {
@@ -357,6 +359,17 @@ rocm_version_to_patches() {
       # to the enumerated 7.2.x list rather than a 7.2.* wildcard so each
       # new tag is verified to apply before being enabled.
       7.2.4)            echo "rocprof-sys-1.3.0 rocprof-compute" ;;
+      # 7.12.0 (AFAR / TheRock RC line, e.g. rocm-afar-23.1.0-7.12.0):
+      # ships rocprof-sys 1.5.0 -- the SAME SDK 7.12.0 / rocprof-sys 1.5.0
+      # baseline as afar-23.1.0 (see the afar-23.1.0 case below), so it
+      # exhibits the same two bugs as the 7.13.0 line: the instrument-time
+      # libomp.so RUNPATH miss (bundle key `rocprof-sys-instrument-libomp`)
+      # and the once-guard init-race SIGSEGV. The v1.5.0-shaped fix lives in
+      # the `rocprof-sys-1.5.0` bundle, built from the `therock-7.12` upstream
+      # tag by build_rocprof_sys_1_5_0() (no `rocm-7.12.0` tag exists upstream;
+      # 7.12.0 was cut from the TheRock RC line). Order: slow rocprof-sys build
+      # first to fail fast; the libomp symlink is a millisecond no-op.
+      7.12.0)           echo "rocprof-sys-1.5.0 rocprof-sys-instrument-libomp" ;;
       # 7.13.0 (AFAR / TheRock RC line, e.g. rocm-afar-23.2.1-7.13.0):
       # ships rocprof-sys 1.6.0 and exhibits TWO independent bugs that
       # both need fixing:
@@ -416,12 +429,15 @@ rocm_version_to_patches() {
       # the AFAR install helpers).
       #
       # afar-23.1.0 (SDK 7.12.0, ships rocprof-sys 1.5.0): rocprof-sys
-      # init was refactored into sdk_tool_configure() in v1.5.0+, so
-      # the v1.3.0 cherry-pick stack does NOT apply textually -- there
-      # is no rocprof-sys overlay we can produce in-tree today.
-      # rocprof-sys-instrument's libomp.so resolves correctly via the
-      # binary's own RUNPATH walk on this SDK, so the libomp symlink
-      # fix is not needed either. Net: no dispatch (clean NOOP_RC).
+      # init was refactored into sdk_tool_configure() in v1.5.0+, so the
+      # v1.3.0 cherry-pick stack does not apply textually. The dedicated
+      # v1.5.0 bundle (sources/rocm-patches/rocprof-sys-1.5.0/, built from
+      # the therock-7.12 tag by build_rocprof_sys_1_5_0()) carries the
+      # v1.5.0 forms of the surviving fixes: the atomic once-guard PLUS
+      # the `&&`->`||` init-tooling guard (v1.5.0 still ships the buggy
+      # `&&`, unlike v1.6.0), the thread_data grow-reserve fix, and the
+      # timemory BFD null-check. Paired with the libomp symlink fix for
+      # parity with afar-23.2.1 (soft-skips if not applicable).
       #
       # afar-23.2.1 (SDK 7.13.0, ships rocprof-sys 1.6.0): same two
       # independent bugs as the 7.13.0 numeric release -- the
@@ -430,7 +446,7 @@ rocm_version_to_patches() {
       # together (same comment-block as 7.13.0 above).  The
       # `therock-7.13` upstream tag (= projects/rocprofiler-systems
       # VERSION 1.6.0) is the source pin used by build_rocprof_sys_1_6_0().
-      afar-23.1.0)      echo "" ;;
+      afar-23.1.0)      echo "rocprof-sys-1.5.0 rocprof-sys-instrument-libomp" ;;
       afar-23.2.1)      echo "rocprof-sys-1.6.0 rocprof-sys-instrument-libomp" ;;
       therock-23.1.0)   echo "rocprof-compute" ;;
       # therock-23.2.0 also ships rocprof-sys 1.6.0 from the same
@@ -651,6 +667,20 @@ already_installed_check() {
                   && return 1
             fi
             ;;
+         rocprof-sys-1.5.0)
+            # Same shape as the 1.3.0 / 1.2.0 / 1.6.0 cases; only the SO
+            # filename changes.
+            lib="${INSTALL_PREFIX}/lib/librocprof-sys.so.1.5.0"
+            [ -f "${lib}" ] || return 1
+            grep -qE "rocm-patches-${ROCM_VERSION}/lib" "${mf}" \
+               || return 1
+            [ -e "${INSTALL_PREFIX}/lib/libunwind.so.99" ] || return 1
+            if command -v patchelf >/dev/null 2>&1; then
+               patchelf --print-rpath "${lib}" 2>/dev/null \
+                  | grep -qE "${INSTALL_PREFIX}/build/" \
+                  && return 1
+            fi
+            ;;
          rocprof-sys-1.6.0)
             # Same shape as the 1.3.0 / 1.2.0 cases; only the SO
             # filename changes. The post-build finishing steps
@@ -743,7 +773,25 @@ _build_rocprof_sys_helper() {
    local bundle_dir="${PATCH_SOURCE_DIR}/${bundle_subdir}"
    local out_lib="${INSTALL_PREFIX}/lib/librocprof-sys.so.${so_version}"
 
-   [ -d "${bundle_dir}" ] || send-error "patch bundle missing: ${bundle_dir}"
+   # Soft-skip when the vendored .patch set for this baseline is absent.
+   # Only rocprof-sys-1.3.0 (rocm-7.2.x) is currently vendored in-tree;
+   # the 1.2.0 (AFAR-22.x) and 1.6.0 (therock/AFAR-23.2.x) baselines are
+   # mapped by version_to_bundles() but their patch trees have not been
+   # committed under sources/rocm-patches/. Historically this hit a hard
+   # send-error, which (before the send-error ordering fix) printed only a
+   # bare usage() and failed the whole AFAR extract build with rc=1
+   # (slurm-13252 rocm-afar-22.{1,2}.0, 2026-07-03). Match the existing
+   # soft-skip convention (TBB-missing / RC-tree-missing -> 43): the SDK
+   # extract, modulefile, and rocprof-compute overlay are all unaffected,
+   # so treat the un-vendored rocprof-sys overlay as success-with-no-op.
+   if [ ! -d "${bundle_dir}" ]; then
+      echo "[rocm_patches] WARNING: rocprof-sys ${so_version} patch bundle not vendored in-tree" >&2
+      echo "[rocm_patches]   (expected ${bundle_dir})." >&2
+      echo "[rocm_patches]   Only the rocprof-sys-1.3.0 (rocm-7.2.x) patch set is committed;" >&2
+      echo "[rocm_patches]   the v${so_version} baseline cannot be built by the in-tree overlay" >&2
+      echo "[rocm_patches]   builder. Skipping the rocprof-sys .so rebuild (soft no-op; rc=43)." >&2
+      return 43
+   fi
 
    # Idempotency: skip the slow build if the patched library is already
    # in place and --replace was not requested.
@@ -788,10 +836,18 @@ _build_rocprof_sys_helper() {
    # Adding it here means a compute node that lacks it picks it
    # up before the .so is even built.
    if [ "${DISTRO}" = "ubuntu" ]; then
+      # libopenmpi-dev: rocprofiler-systems' timemory Packages.cmake does an
+      # UNCONDITIONAL find_package(MPI) (via FindMPI-Headers.cmake) even with
+      # -DROCPROFSYS_USE_MPI=OFF. Without the OpenMPI dev headers, FindMPI
+      # still detects the runtime and builds an MPI::MPI_C target pointing at
+      # the (absent) /usr/lib/x86_64-linux-gnu/openmpi/include, which makes the
+      # try_compile fail with "includes non-existent path" and aborts configure
+      # (slurm-13250 rocm-7.2.0, 2026-07-03). Installing the dev headers gives
+      # find_package(MPI) a valid include dir; the old front end had it.
       ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y \
          build-essential cmake git ca-certificates pkg-config patchelf \
          libelf-dev libdw-dev libdrm-dev libnuma-dev libsqlite3-dev \
-         zlib1g-dev libzstd-dev libssl-dev || true
+         zlib1g-dev libzstd-dev libssl-dev libopenmpi-dev || true
    fi
 
    # ── rprof-sys build-dependency precheck (soft-skip when unsatisfiable) ─
@@ -888,7 +944,9 @@ _build_rocprof_sys_helper() {
    local tarball_dir="${INSTALL_PREFIX}/source/tarballs"
    local binutils_ver binutils_sha binutils_url_proto
    case "${so_version}" in
-      1.2.0|1.3.0)
+      1.2.0|1.3.0|1.5.0)
+         # therock-7.12 (v1.5.0) ships the same timemory binutils-2.42 pin
+         # as the rocm-7.{1,2}.x (v1.2.0/v1.3.0) source lines.
          binutils_ver="2.42"
          binutils_sha="5d2a6c1d49686a557869caae08b6c2e83699775efd27505e01b2f4db1a024ffc"
          binutils_url_proto="http"
@@ -991,10 +1049,10 @@ PY
    # (LAST-existing-wins) picks it on systems where it exists and
    # falls back to the original behaviour everywhere else.
    #
-   # v1.6.0 (therock-7.13) already has the oneapi/tbb/version.h entry
-   # baked into FindTBB.cmake's _version_files list -- the upstream fix
-   # finally landed before that source baseline -- so we skip this
-   # python edit on 1.6.0 entirely.
+   # v1.5.0 (therock-7.12) and v1.6.0 (therock-7.13) already have the
+   # oneapi/tbb/version.h entry baked into FindTBB.cmake's _version_files
+   # list -- the upstream fix finally landed before those source baselines
+   # -- so we skip this python edit on 1.5.0 / 1.6.0 entirely.
    if [ "${so_version}" = "1.3.0" ] || [ "${so_version}" = "1.2.0" ]; then
       local ftbb_file="${src_root}/projects/rocprofiler-systems/cmake/Modules/FindTBB.cmake"
       [ -f "${ftbb_file}" ] || { echo "[rocm_patches] ERROR: expected ${ftbb_file}" >&2; return 1; }
@@ -1091,8 +1149,8 @@ PY
    [ -f "${dboost_file}" ] || { echo "[rocm_patches] ERROR: expected ${dboost_file}" >&2; return 1; }
    local dboost_var
    case "${so_version}" in
-      1.2.0|1.3.0) dboost_var="BUILD_BOOST" ;;
-      1.6.0)       dboost_var="ROCPROFSYS_BUILD_BOOST" ;;
+      1.2.0|1.3.0)  dboost_var="BUILD_BOOST" ;;
+      1.5.0|1.6.0)  dboost_var="ROCPROFSYS_BUILD_BOOST" ;;
       *)
          echo "[rocm_patches] ERROR: unknown so_version '${so_version}' for DyninstBoost edit" >&2
          return 1
@@ -1314,6 +1372,23 @@ build_rocprof_sys_1_3_0() {
 # ─────────────────────────────────────────────────────────────────────
 build_rocprof_sys_1_2_0() {
    _build_rocprof_sys_helper "1.2.0" "rocm-7.1.0" "rocprof-sys-1.2.0"
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# build_rocprof_sys_1_5_0
+# -----------------------
+# Thin wrapper: rocprof-sys v1.5.0 baseline. Used for the AFAR-23.1.x /
+# ROCm-7.12 RC trees, which ship librocprof-sys.so.1.5.0. There is NO
+# upstream rocm-systems tag named rocm-7.12.0; the therock-7.12 tag is
+# the source pin whose projects/rocprofiler-systems/VERSION == 1.5.0
+# (verified 2026-07-04 via git ls-remote + VERSION). v1.5.0 is the
+# sdk_tool_configure()-refactored baseline (same FindTBB oneapi fix and
+# ROCPROFSYS_BUILD_BOOST option as v1.6.0) but still ships timemory's
+# binutils-2.42 pin and the buggy `&&` init-tooling guard (hence its own
+# 0001 patch differs from the v1.6.0 one).
+# ─────────────────────────────────────────────────────────────────────
+build_rocprof_sys_1_5_0() {
+   _build_rocprof_sys_helper "1.5.0" "therock-7.12" "rocprof-sys-1.5.0"
 }
 
 # ─────────────────────────────────────────────────────────────────────
@@ -1943,8 +2018,8 @@ EOF
 #     is updated in a later commit.
 # ─────────────────────────────────────────────────────────────────────
 install_rocprof_sys_run_wrapper() {
-   # The wrapper is the same shell script for v1.2.0, v1.3.0, and
-   # v1.6.0 bundles (it's an LD_PRELOAD shim that doesn't care about
+   # The wrapper is the same shell script for v1.2.0, v1.3.0, v1.5.0,
+   # and v1.6.0 bundles (it's an LD_PRELOAD shim that doesn't care about
    # the rocprof-sys VERSION); a copy ships in each bundle so the
    # wrapper installer can stay decoupled from the source-baseline
    # dispatch. Search the bundles in PATCH_BUNDLES order so we pick
@@ -1953,7 +2028,7 @@ install_rocprof_sys_run_wrapper() {
    local cand probe
    for cand in ${PATCH_BUNDLES}; do
       case "${cand}" in
-         rocprof-sys-1.6.0|rocprof-sys-1.3.0|rocprof-sys-1.2.0)
+         rocprof-sys-1.6.0|rocprof-sys-1.5.0|rocprof-sys-1.3.0|rocprof-sys-1.2.0)
             probe="${PATCH_SOURCE_DIR}/${cand}/rocprof-sys-run"
             if [ -f "${probe}" ]; then
                src="${probe}"
@@ -1967,7 +2042,7 @@ install_rocprof_sys_run_wrapper() {
    # never computed). All three copies are byte-identical by
    # construction; ordering is purely a stable-iteration choice.
    if [ -z "${src}" ]; then
-      for cand in rocprof-sys-1.6.0 rocprof-sys-1.3.0 rocprof-sys-1.2.0; do
+      for cand in rocprof-sys-1.6.0 rocprof-sys-1.5.0 rocprof-sys-1.3.0 rocprof-sys-1.2.0; do
          probe="${PATCH_SOURCE_DIR}/${cand}/rocprof-sys-run"
          if [ -f "${probe}" ]; then
             src="${probe}"
@@ -1979,7 +2054,7 @@ install_rocprof_sys_run_wrapper() {
    local dst="${dst_dir}/rocprof-sys-run"
 
    if [ -z "${src}" ] || [ ! -f "${src}" ]; then
-      echo "[rocm_patches] WARNING: vendored wrapper not found under ${PATCH_SOURCE_DIR}/rocprof-sys-{1.2.0,1.3.0,1.6.0}/"
+      echo "[rocm_patches] WARNING: vendored wrapper not found under ${PATCH_SOURCE_DIR}/rocprof-sys-{1.2.0,1.3.0,1.5.0,1.6.0}/"
       echo "[rocm_patches]          libbfd LD_PRELOAD workaround will NOT be applied;"
       echo "[rocm_patches]          rocprof-sys-instrumented MPI programs may SegFault"
       echo "[rocm_patches]          on hosts whose system libbfd is older than 2.42."
@@ -2107,7 +2182,7 @@ built_instrument_libomp=0
 
 for bundle in ${PATCH_BUNDLES}; do
    case "${bundle}" in
-      rocprof-sys-1.3.0|rocprof-sys-1.2.0|rocprof-sys-1.6.0)
+      rocprof-sys-1.3.0|rocprof-sys-1.2.0|rocprof-sys-1.5.0|rocprof-sys-1.6.0)
          # All three rprof-sys baselines share the same post-build
          # finishing-step set (patch_module_file + install_rocprof_sys_run_wrapper
          # + fix_overlay_runpath_and_libunwind + swap_sdk_lib_symlink), all keyed
@@ -2123,6 +2198,7 @@ for bundle in ${PATCH_BUNDLES}; do
          case "${bundle}" in
             rocprof-sys-1.3.0) build_rocprof_sys_1_3_0 ;;
             rocprof-sys-1.2.0) build_rocprof_sys_1_2_0 ;;
+            rocprof-sys-1.5.0) build_rocprof_sys_1_5_0 ;;
             rocprof-sys-1.6.0) build_rocprof_sys_1_6_0 ;;
          esac
          bundle_rc=$?

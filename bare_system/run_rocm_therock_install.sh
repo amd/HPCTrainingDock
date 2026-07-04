@@ -196,7 +196,9 @@ EOF
    exit 1
 }
 
-send-error() { usage; echo -e "\nError: ${@}" >&2; exit 1; }
+# Print the real error FIRST: usage() ends in `exit 1`, so anything echoed
+# after usage() is unreachable and the true cause gets masked.
+send-error() { echo -e "Error: ${*}\n" >&2; usage; }
 reset-last() { last() { send-error "Unsupported argument :: ${1}"; }; }
 
 n=0
@@ -758,9 +760,11 @@ unset _cxx _d
 if [ -n "${GCC_INSTALL_DIR}" ]; then
    echo "[therock] host GCC install dir for hipcc: ${GCC_INSTALL_DIR} (g++ $(g++ -dumpversion 2>/dev/null), $(g++ -dumpmachine 2>/dev/null))"
    HIPCC_TCL_LINES="setenv HIPCC_COMPILE_FLAGS_APPEND \"--gcc-install-dir=${GCC_INSTALL_DIR}\"
-setenv HIPCC_LINK_FLAGS_APPEND    \"--gcc-install-dir=${GCC_INSTALL_DIR}\""
+setenv HIPCC_LINK_FLAGS_APPEND    \"--gcc-install-dir=${GCC_INSTALL_DIR}\"
+setenv CCC_OVERRIDE_OPTIONS       \"+--gcc-install-dir=${GCC_INSTALL_DIR}\""
    HIPCC_LUA_LINES="setenv(\"HIPCC_COMPILE_FLAGS_APPEND\", \"--gcc-install-dir=${GCC_INSTALL_DIR}\")
-setenv(\"HIPCC_LINK_FLAGS_APPEND\",    \"--gcc-install-dir=${GCC_INSTALL_DIR}\")"
+setenv(\"HIPCC_LINK_FLAGS_APPEND\",    \"--gcc-install-dir=${GCC_INSTALL_DIR}\")
+setenv(\"CCC_OVERRIDE_OPTIONS\",       \"+--gcc-install-dir=${GCC_INSTALL_DIR}\")"
 else
    echo "[therock] WARNING: no working host g++/GCC install dir found (g++ missing or libstdc++-devel absent);" >&2
    echo "[therock]          HIPCC_*_FLAGS_APPEND will NOT be pinned -- HIP C++ builds may pick the wrong libc++." >&2

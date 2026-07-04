@@ -403,22 +403,39 @@ if true; then
              -e '/^PREFIX/s!/usr/local!'"${LIKWID_PATH}"'!' \
              config.mk
 
-      # likwid's rocmon does `#include <rocprofiler.h>`, resolved via
-      # config.mk's ROCPROFILERINCLUDE (default $(ROCM_HOME)/include/rocprofiler,
-      # the classic ROCm layout). TheRock/AFAR SDKs drop the classic header and
-      # ship it under include/rocprofiler-sdk/ instead (slurm 8170,
-      # rocm-therock-7.13.0: "rocmon_types.h:39: fatal error: rocprofiler.h: No
-      # such file or directory"). Repoint ROCPROFILERINCLUDE at whichever
-      # directory actually holds rocprofiler.h; if neither layout has it,
-      # disable the ROCm (rocmon) interface so likwid still builds its CPU
-      # perf tooling rather than hard-failing on the missing header.
-      if [ -f "${ROCM_PATH}/include/rocprofiler/rocprofiler.h" ]; then
-         echo "likwid: rocprofiler.h at include/rocprofiler (classic layout); ROCPROFILERINCLUDE unchanged"
-      elif [ -f "${ROCM_PATH}/include/rocprofiler-sdk/rocprofiler.h" ]; then
-         echo "likwid: rocprofiler.h only under include/rocprofiler-sdk (TheRock/AFAR layout); repointing ROCPROFILERINCLUDE there"
+      # likwid's rocmon backend targets the LEGACY rocprofiler *v1* API
+      # (rocprofiler_feature_t / ROCPROFILER_MODE_* / rocprofiler_open), which
+      # it reaches via #include <rocprofiler.h> under ROCPROFILERINCLUDE
+      # (default $(ROCM_HOME)/include/rocprofiler, the classic layout).
+      #
+      # ROCm 7.x TheRock/AFAR SDKs (e.g. 7.12.0, 7.13.0, rocm-afar-23.x) REMOVED
+      # the v1 API entirely and ship only rocprofiler-sdk (the v3 API) under
+      # include/rocprofiler-sdk/. That header EXISTS but does not declare any of
+      # the v1 symbols, so pointing ROCPROFILERINCLUDE at it merely converts a
+      # "rocprofiler.h: No such file" build error into a
+      # "rocprofiler_feature_t undeclared" one (slurm-13278-rocmplus-7.12.0.out
+      # ~line 3793: rocmon.c fails, openmpi-independent likwid rc=2).
+      #
+      # No TAGGED likwid release builds rocmon against rocprofiler-sdk yet: v1
+      # rocmon support is the latest tag (v5.5.1, 2025-12-23); the rocprofiler-sdk
+      # rewrite landed upstream in PR #716 (2026-01-28) on master, unreleased.
+      # NOTE (numeric ROCm 6.4.x / 7.0.x / 7.1.x / 7.2.x still ship the classic
+      # v1 header, so rocmon builds fine there -- this only disables the GPU
+      # backend on the sdk-only TheRock/AFAR trees.)
+      #
+      # Gate ROCM_INTERFACE on the actual v1 SYMBOL, not on a file merely named
+      # rocprofiler.h. When the v1 API is absent, disable rocmon and build a
+      # CPU-only likwid (module still installs; no hard failure) rather than
+      # attempting a compile that is guaranteed to fail.
+      if grep -rqs 'rocprofiler_feature_t' "${ROCM_PATH}/include/rocprofiler/rocprofiler.h" 2>/dev/null; then
+         echo "likwid: legacy rocprofiler v1 API present (include/rocprofiler/rocprofiler.h); ROCM_INTERFACE=true (rocmon enabled)"
+      elif grep -rqs 'rocprofiler_feature_t' "${ROCM_PATH}/include/rocprofiler-sdk/rocprofiler.h" 2>/dev/null; then
+         echo "likwid: legacy rocprofiler v1 API present under include/rocprofiler-sdk; repointing ROCPROFILERINCLUDE there"
          sed -i -e '/^ROCPROFILERINCLUDE/s#=.*#= $(ROCM_HOME)/include/rocprofiler-sdk#' config.mk
       else
-         echo "likwid: WARNING no rocprofiler.h under include/rocprofiler or include/rocprofiler-sdk; disabling ROCM_INTERFACE (rocmon) so likwid still builds"
+         echo "likwid: NOTE this ROCm SDK has no legacy rocprofiler v1 API (rocprofiler_feature_t not found);"
+         echo "likwid:       likwid ${LIKWID_VERSION} rocmon cannot build against rocprofiler-sdk (v3) yet"
+         echo "likwid:       (upstream PR #716 is unreleased). Disabling ROCM_INTERFACE -> CPU-only likwid."
          sed -i -e '/^ROCM_INTERFACE/s/true/false/' config.mk
       fi
 
@@ -505,6 +522,21 @@ if true; then
    fi
    unset _leaf_dir
 
+   # ── rocmon (AMD GPU backend) state for the module load banner ──────────
+   # Recompute the ROCM_INTERFACE decision (v1-symbol probe) here so the
+   # load-time message is correct on BOTH the from-source and cache-restore
+   # paths (the cache path never runs the build-section probe). See the
+   # rocprofiler v1 vs rocprofiler-sdk (v3) discussion in the build section.
+   if grep -rqs 'rocprofiler_feature_t' \
+         "${ROCM_PATH}/include/rocprofiler/rocprofiler.h" \
+         "${ROCM_PATH}/include/rocprofiler-sdk/rocprofiler.h" 2>/dev/null; then
+      LIKWID_GPU_TAG="GPU-ENABLED"
+      LIKWID_GPU_MSG="AMD GPU monitoring (rocmon) is ENABLED for ROCm ${ROCM_VERSION}."
+   else
+      LIKWID_GPU_TAG="CPU-ONLY"
+      LIKWID_GPU_MSG="CPU-ONLY build -- AMD GPU monitoring (rocmon) is DISABLED for ROCm ${ROCM_VERSION} (this SDK lacks the legacy rocprofiler v1 API that likwid ${LIKWID_VERSION} requires)."
+   fi
+
    # ── Modulefile flavor: Lua (Lmod) vs Tcl (classic Environment Modules) ─
    # Lmod consumes <ver>.lua; classic Tcl `environment-modules` consumes an
    # extensionless Tcl file. Detect Lmod via its env markers; default to Tcl
@@ -553,6 +585,16 @@ if true; then
 	${ROCM_PREREQ_LUA}
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+
+	whatis("AMD GPU support: ${LIKWID_GPU_TAG}")
+	if (mode() == "load") then
+	  LmodMessage("")
+	  LmodMessage("#####################################################################")
+	  LmodMessage("#  LIKWID ${LIKWID_VERSION}  (${LIKWID_GPU_TAG})")
+	  LmodMessage("#  ${LIKWID_GPU_MSG}")
+	  LmodMessage("#####################################################################")
+	  LmodMessage("")
+	end
 EOF
    else
       cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULEFILE}
@@ -565,6 +607,16 @@ EOF
 	prereq ${ROCM_PREREQ_TCL}
 	prepend-path PATH \$base/bin
 	prepend-path LD_LIBRARY_PATH \$base/lib
+
+	module-whatis "AMD GPU support: ${LIKWID_GPU_TAG}"
+	if { [module-info mode load] } {
+	  puts stderr ""
+	  puts stderr "#####################################################################"
+	  puts stderr "#  LIKWID ${LIKWID_VERSION}  (${LIKWID_GPU_TAG})"
+	  puts stderr "#  ${LIKWID_GPU_MSG}"
+	  puts stderr "#####################################################################"
+	  puts stderr ""
+	}
 EOF
    fi
 
