@@ -207,7 +207,7 @@ Usage: $0 [opts]
    --packages "name1 name2 ..."  whitelist (passed verbatim to main_setup.sh --packages); empty = all.
                                  Versioned form name=VERSION is supported for the subset of packages whose
                                  leaf script accepts a single --<name>-version flag (pytorch, jax, cupy,
-                                 magma, kokkos, ...; see main_setup.sh --help for the full list). Optional
+                                 magma, kokkos, emacs, ...; see main_setup.sh --help for the full list). Optional
                                  leading 'v' is stripped (cupy=v13.0.1 == cupy=13.0.1). Repeating the same
                                  name with different versions (e.g. "pytorch=2.7.1 pytorch=2.8.0") drives
                                  one build per version inside the same per-ROCm-version sbatch job; each
