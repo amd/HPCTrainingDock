@@ -623,6 +623,28 @@ if [[ "${SKIP_EXTRACT}" != "1" && "${_is_cray_host}" = "1" \
 fi
 unset _is_cray_host
 
+# ---------------- Phase 3.8: refresh the Lmod system spider cache ----
+# When the deployed module tree has a registered system spider cache
+# (a refresh_module_cache.sh sitting in the sibling moduleData/ dir --
+# currently only /nfsapps/ubuntu-24.04), rebuild it now so the modules
+# just laid down are immediately visible to cache-using clients without
+# waiting for the periodic backstop. Self-adapting + non-fatal: trees
+# with no registered cache (legacy /nfsapps, /opt, shared-apps, Cray
+# /shareddata) have no such script and are skipped silently; a build
+# failure here never fails the install (the periodic timer catches up).
+# Gated on ${LMOD_DIR}: the spider cache is an Lmod-only construct, so
+# non-Lmod hosts (Cray Tmod / classic Tcl env-modules) skip silently
+# instead of invoking the Lmod-only update_lmod_system_cache_files.
+if [[ "${SKIP_EXTRACT}" != "1" && -n "${LMOD_DIR:-}" ]]; then
+   CACHE_REFRESH="$(dirname "${TOP_MODULE_PATH}")/moduleData/refresh_module_cache.sh"
+   if [[ -x "${CACHE_REFRESH}" ]]; then
+      echo "============================================================"
+      echo "  Phase 3.8: refresh Lmod spider cache (${CACHE_REFRESH})"
+      echo "============================================================"
+      ${SUDO} "${CACHE_REFRESH}" --force || echo "WARNING: [Phase 3.8] spider-cache refresh failed (non-fatal; periodic timer will catch up)" >&2
+   fi
+fi
+
 echo "============================================================"
 echo "  Done: ROCm ${ROCM_VERSION}"
 echo "============================================================"

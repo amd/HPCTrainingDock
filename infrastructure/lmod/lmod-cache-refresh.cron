@@ -1,0 +1,20 @@
+# /etc/cron.d/lmod-cache-refresh
+#
+# Periodic backstop that rebuilds the Lmod system spider cache when the
+# module tree changes out-of-band (a manual cp, a hand-edited modulefile,
+# or any installer that does not go through the rocm/rocmplus deploy path,
+# which already refreshes the cache itself). refresh_module_cache.sh is
+# conditional-on-change: with no --force it exits early unless a modulefile
+# is newer than the current cacheDir/spiderT.lua, so most runs are a cheap
+# no-op.
+#
+# Hostname-gated to aac6-fe1: the compute/front-end fleet is stateless and
+# boots one shared Warewulf image, so this file is safe to bake into that
+# image -- only aac6-fe1 will actually do the work, avoiding N nodes racing
+# to write the same NFS cache. Runs as root because the cacheDir + timestamp
+# under /nfsapps are root-owned.
+#
+# See HPCTrainingDock infrastructure/lmod/README.md.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+*/30 * * * * root [ "$(hostname -s)" = "aac6-fe1" ] && { echo "=== $(date '+\%Y-\%m-\%d \%H:\%M:\%S') ==="; /nfsapps/ubuntu-24.04/moduleData/refresh_module_cache.sh; } >> /nfsapps/ubuntu-24.04/moduleData/refresh.log 2>&1

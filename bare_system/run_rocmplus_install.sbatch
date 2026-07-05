@@ -596,4 +596,30 @@ echo "=================================================================="
 echo " [$(date)] END main_setup.sh for rocm-${ROCM_VERSION} (rc=${rc})"
 echo "=================================================================="
 
+# ── 5. Refresh the Lmod system spider cache ──────────────────────────
+# main_setup.sh just laid down the rocmplus-<v> modulefiles under
+# ${TOP_MODULE_PATH}. When that tree has a registered system spider cache
+# (a refresh_module_cache.sh in the sibling moduleData/ dir -- currently
+# only /nfsapps/ubuntu-24.04), rebuild it now so the new modules are
+# immediately visible to cache-using clients instead of waiting for the
+# periodic backstop. This compute node has /nfsapps rw (ensured in step 1)
+# and runs the same local Lmod as the rest of the fleet, so the cache it
+# writes is valid for every client. Self-adapting + non-fatal: trees with
+# no registered cache (legacy /nfsapps, /opt, shared-apps, Cray /shareddata)
+# are skipped silently, and a refresh failure never changes the job's exit
+# status (the periodic timer catches up). Runs regardless of rc so a tree
+# with partially-installed packages still reflects on-disk reality.
+# Gated on ${LMOD_DIR}: the spider cache is an Lmod-only construct, so
+# non-Lmod hosts (Cray Tmod / classic Tcl env-modules) skip silently
+# instead of invoking the Lmod-only update_lmod_system_cache_files. Step 3
+# above sources whichever module init exists, so LMOD_DIR is set here iff
+# the node actually initialized Lmod.
+CACHE_REFRESH="$(dirname "${TOP_MODULE_PATH}")/moduleData/refresh_module_cache.sh"
+if [[ -n "${LMOD_DIR:-}" && -x "${CACHE_REFRESH}" ]]; then
+   echo "=================================================================="
+   echo " [$(date)] refresh Lmod spider cache (${CACHE_REFRESH})"
+   echo "=================================================================="
+   sudo "${CACHE_REFRESH}" --force || echo "WARNING: spider-cache refresh failed (non-fatal; periodic timer will catch up)" >&2
+fi
+
 exit ${rc}
