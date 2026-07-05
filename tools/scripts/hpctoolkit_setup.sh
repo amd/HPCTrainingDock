@@ -545,9 +545,18 @@ else
       # by the hpcviewer GUI at runtime) and meson/ninja are provided via
       # pip below, so the apt step is skipped. meson needs >=1.6.0 for this
       # hpctoolkit release.
+      #
+      # ninja-build + libxerces-c-dev are apt-installed here (previously
+      # assumed to be on the base image): without them, meson falls back to
+      # building xerces-c from source and configures that CMake subproject
+      # with `-G Ninja`; on an image lacking ninja, CMake aborts with
+      # "unable to find a build program corresponding to Ninja" and the whole
+      # hpctoolkit build fails (job 13430, ROCm 7.2.3, /nfsapps image).
+      # libxerces-c-dev lets meson use the system xerces-c and skip that
+      # from-source subproject entirely; ninja-build backs meson regardless.
       PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
       if command -v apt-get >/dev/null 2>&1; then
-         ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y pipx libboost-all-dev liblzma-dev libgtk-3-dev
+         ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y pipx libboost-all-dev liblzma-dev libgtk-3-dev ninja-build libxerces-c-dev
       else
          echo "hpctoolkit: apt-get not present (non-Debian host); relying on system boost/lzma/gtk and pip-installed meson/ninja"
       fi
