@@ -1286,13 +1286,13 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	setenv("HSA_NO_SCRATCH_RECLAIM","1")
 	setenv("HIPCC_COMPILE_FLAGS_APPEND","--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_BASE_VERSION}")
 	setenv("HIPCC_LINK_FLAGS_APPEND","--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_BASE_VERSION}")
-	-- HIPCC_*_FLAGS_APPEND only reaches compiles that go through hipcc. Builds
-	-- that call amdclang/amdclang++ directly (e.g. UCC's ec/rocm HIP kernels)
-	-- bypass it, so on a node with a newer gcc runtime dir lacking libstdc++
-	-- headers clang auto-selects that dir and fails ("cmath/cstdlib not found").
-	-- CCC_OVERRIDE_OPTIONS ('+' == append) pins the SAME gcc-install-dir for
-	-- every direct clang/amdclang driver invocation (compile AND link).
-	setenv("CCC_OVERRIDE_OPTIONS","+--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_BASE_VERSION}")
+	-- NOTE: CCC_OVERRIDE_OPTIONS is intentionally NOT set here. It pins the
+	-- gcc-install-dir for DIRECT amdclang calls (which HIPCC_*_FLAGS_APPEND
+	-- miss, e.g. UCC's ec/rocm HIP kernels), but clang UNCONDITIONALLY echoes
+	-- "### CCC_OVERRIDE_OPTIONS: ..." to stderr on every invocation, which
+	-- corrupts the compiler-output parsing of downstream configure scripts
+	-- (broke PETSc's HIP probe on every version). The pin now lives only in
+	-- the one build that needs it -- UCC, in comm/scripts/openmpi_setup.sh.
 	prepend_path("MODULEPATH", pathJoin(mbase, "rocm-${ROCM_VERSION}"))
 	prepend_path("MODULEPATH", pathJoin(mbase, "rocmplus-${ROCM_VERSION}"))
 	setenv("ROCM_PATH", base)

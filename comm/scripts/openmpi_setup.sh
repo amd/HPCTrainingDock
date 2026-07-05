@@ -1085,6 +1085,35 @@ else
       fi
       echo "ucc: ROCM_VERSION=${ROCM_VERSION}  UCC_ROCM_ARCH_ARG=${UCC_ROCM_ARCH_ARG}"
 
+      # ── Pin amdclang's GCC toolchain for UCC's DIRECT amdclang calls ────
+      # UCC's ec/rocm HIP kernels (ec_rocm_executor_kernel.cu, ec_rocm_reduce.cu)
+      # are compiled by invoking amdclang/amdclang++ DIRECTLY, bypassing hipcc,
+      # so the rocm module's HIPCC_{COMPILE,LINK}_FLAGS_APPEND pin never reaches
+      # them. On a node whose newest /usr/lib/gcc runtime dir lacks libstdc++
+      # headers, clang auto-selects that dir and the kernel compile dies
+      # ("cmath/cstdlib not found"). CCC_OVERRIDE_OPTIONS ('+' == append) pins
+      # the same gcc-install-dir on every direct clang driver call. This used
+      # to be set in the rocm modulefile, but clang UNCONDITIONALLY echoes
+      # "### CCC_OVERRIDE_OPTIONS: ..." to stderr on every invocation, which
+      # corrupted the compiler-output parsing of unrelated packages' configure
+      # (broke PETSc's HIP probe). Scoping it to just the UCC build (unset after
+      # `make install` below, before OpenMPI's own configure) keeps the fix
+      # where it is needed. Derive the dir from the module's HIPCC pin so the
+      # two always agree; fall back to the host g++'s libgcc dir.
+      _ucc_gcc_dir="$(printf '%s' "${HIPCC_COMPILE_FLAGS_APPEND:-}" | sed -n 's/.*--gcc-install-dir=\([^[:space:]]*\).*/\1/p')"
+      if [ -z "${_ucc_gcc_dir}" ] && command -v g++ >/dev/null 2>&1; then
+         _ucc_lg="$(g++ -print-libgcc-file-name 2>/dev/null)"
+         [ -n "${_ucc_lg}" ] && _ucc_gcc_dir="$(dirname "${_ucc_lg}")"
+         unset _ucc_lg
+      fi
+      if [ -n "${_ucc_gcc_dir}" ] && [ -d "${_ucc_gcc_dir}" ]; then
+         export CCC_OVERRIDE_OPTIONS="+--gcc-install-dir=${_ucc_gcc_dir}"
+         echo "ucc: pinning direct amdclang calls to gcc-install-dir=${_ucc_gcc_dir} (CCC_OVERRIDE_OPTIONS)"
+      else
+         echo "ucc: no gcc-install-dir resolved; leaving CCC_OVERRIDE_OPTIONS unset (direct amdclang uses its default)"
+      fi
+      unset _ucc_gcc_dir
+
       UCC_CONFIGURE_ARGS=(
          --prefix="${UCC_PATH}"
          --with-rocm="${ROCM_PATH}"
@@ -1111,6 +1140,11 @@ else
             make install
          fi
       fi
+
+      # Drop the direct-amdclang pin so clang's "### CCC_OVERRIDE_OPTIONS"
+      # stderr echo does not leak into (and confuse the output-parsing of)
+      # the OpenMPI configure/build that runs after this UCC block.
+      unset CCC_OVERRIDE_OPTIONS
 
       cd "${OPENMPI_DEPS_BUILD_DIR}"
       # trap handles cleanup of ucc-${UCC_VERSION} and the tarball

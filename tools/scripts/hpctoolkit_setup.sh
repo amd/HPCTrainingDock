@@ -578,12 +578,28 @@ else
       # RHEL9 host neither pipx nor ninja exist, so fall back to a pip
       # --user install of both. Both land in $HOME/.local/bin (added to PATH).
       if command -v pipx >/dev/null 2>&1; then
-         pipx install 'meson>=1.6.0'
+         pipx install 'meson>=1.6.0' || true
       else
          echo "hpctoolkit: pipx absent; pip-installing meson(>=1.6.0)+ninja to ~/.local"
          python3 -m pip install --user --upgrade 'meson>=1.6.0' ninja
       fi
       export PATH=$HOME/.local/bin:$PATH
+      # A prior run can leave a BROKEN pipx meson venv in $HOME/.local: if its
+      # interpreter was orphaned by a system python upgrade, $HOME/.local/bin/meson
+      # dies with "ModuleNotFoundError: No module named 'mesonbuild'" -- and
+      # `pipx install` reports "already installed" and does NOT repair it (this
+      # is exactly what failed hpctoolkit on every ROCm version in job 13333+).
+      # Verify the shim actually runs; if not, force-rebuild the venv (pipx) or
+      # force-reinstall to ~/.local (non-pipx hosts).
+      if ! meson --version >/dev/null 2>&1; then
+         echo "hpctoolkit: 'meson' present but not runnable (broken venv?); repairing"
+         if command -v pipx >/dev/null 2>&1; then
+            pipx install --force 'meson>=1.6.0'
+         else
+            python3 -m pip install --user --upgrade --force-reinstall 'meson>=1.6.0' ninja
+         fi
+      fi
+      meson --version >/dev/null 2>&1 || { echo "ERROR: meson still not runnable after repair attempt"; exit 1; }
       git clone -b ${HPCTOOLKIT_VERSION} https://gitlab.com/hpctoolkit/hpctoolkit.git
       cd hpctoolkit
       export CMAKE_PREFIX_PATH=$ROCM_PATH:$CMAKE_PREFIX_PATH

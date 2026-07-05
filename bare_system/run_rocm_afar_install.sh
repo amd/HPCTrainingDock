@@ -393,9 +393,10 @@ prepend_path("INCLUDE",            pathJoin(base, "include"))
 setenv("HSA_NO_SCRATCH_RECLAIM", "1")
 setenv("HIPCC_COMPILE_FLAGS_APPEND", "--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11")
 setenv("HIPCC_LINK_FLAGS_APPEND",    "--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11")
--- Also pin direct amdclang/amdclang++ invocations (bypass hipcc, e.g. UCC
--- HIP kernels) to the same gcc-install-dir; '+' appends the option.
-setenv("CCC_OVERRIDE_OPTIONS",       "+--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11")
+-- NOTE: CCC_OVERRIDE_OPTIONS deliberately NOT set (direct-amdclang pin now
+-- lives in the UCC build in comm/scripts/openmpi_setup.sh) -- clang echoes
+-- "### CCC_OVERRIDE_OPTIONS:" to stderr on every call and that corrupted
+-- downstream configure output parsing (e.g. PETSc's HIP probe).
 setenv("ROCM_PATH", base)
 prepend_path("MODULEPATH", pathJoin(mbase, "rocm-afar-${FLANG_RELEASE_NUMBER}"))
 prepend_path("MODULEPATH", pathJoin(mbase, "rocmplus-afar-${FLANG_RELEASE_NUMBER}-${ROCM_NUMERIC}"))

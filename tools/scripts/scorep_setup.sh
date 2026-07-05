@@ -284,6 +284,23 @@ if [ "${BUILD_SCOREP}" = "0" ]; then
    exit ${NOOP_RC}
 fi
 
+# ── Escalating remove ────────────────────────────────────────────────
+# Remove a path, escalating to sudo when a plain/${SUDO} rm leaves it
+# behind. _probe_writable picks "no sudo" when the PARENT (rocmplus-<ver>)
+# is user-writable, but an earlier sudo install can leave a ROOT-OWNED
+# scorep-v<ver> child that the un-sudo'd rm cannot delete -- which failed
+# scorep on 7.12.0 (job 13334: "rm: cannot remove '.../scorep-v9.4':
+# Permission denied"). Try the probe-chosen path first, then escalate.
+_rm_rf_force() {
+   local p="$1"
+   [ -e "$p" ] || return 0
+   ${SUDO} rm -rf "$p" 2>/dev/null || true
+   if [ -e "$p" ] && command -v sudo >/dev/null 2>&1; then
+      echo "scorep: '${p}' survived rm (likely a root-owned leftover); escalating to sudo"
+      sudo rm -rf "$p"
+   fi
+}
+
 # ── --replace: remove prior install + modulefile BEFORE building ─────
 # Only this version's scorep-v${SCOREP_VERSION} dir + matching .lua are
 # removed. PDT (shared with TAU, build-only dep) stays unless
@@ -292,7 +309,7 @@ if [ "${REPLACE}" = "1" ]; then
    echo "[scorep --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${SCOREP_PATH}"
    echo "  modulefile:  ${MODULE_PATH}/${SCOREP_VERSION}.lua"
-   ${SUDO} rm -rf "${SCOREP_PATH}"
+   _rm_rf_force "${SCOREP_PATH}"
    ${SUDO} rm -f  "${MODULE_PATH}/${SCOREP_VERSION}.lua"
 fi
 if [ "${REPLACE_PDT}" = "1" ]; then
@@ -325,7 +342,7 @@ _scorep_on_exit() {
    local rc=$?
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[scorep fail-cleanup] rc=${rc}: removing partial install + modulefile (PDT preserved)"
-      ${SUDO} rm -rf "${SCOREP_PATH}"
+      _rm_rf_force "${SCOREP_PATH}"
       ${SUDO} rm -f  "${MODULE_PATH}/${SCOREP_VERSION}.lua"
    elif [ ${rc} -ne 0 ]; then
       echo "[scorep fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"

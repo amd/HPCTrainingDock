@@ -932,11 +932,9 @@ unset _cxx _d
 if [ -n "${GCC_INSTALL_DIR}" ]; then
    echo "[therock-afar] host GCC install dir for hipcc: ${GCC_INSTALL_DIR} (g++ $(g++ -dumpversion 2>/dev/null), $(g++ -dumpmachine 2>/dev/null))"
    HIPCC_TCL_LINES="setenv HIPCC_COMPILE_FLAGS_APPEND \"--gcc-install-dir=${GCC_INSTALL_DIR}\"
-setenv HIPCC_LINK_FLAGS_APPEND    \"--gcc-install-dir=${GCC_INSTALL_DIR}\"
-setenv CCC_OVERRIDE_OPTIONS       \"+--gcc-install-dir=${GCC_INSTALL_DIR}\""
+setenv HIPCC_LINK_FLAGS_APPEND    \"--gcc-install-dir=${GCC_INSTALL_DIR}\""
    HIPCC_LUA_LINES="setenv(\"HIPCC_COMPILE_FLAGS_APPEND\", \"--gcc-install-dir=${GCC_INSTALL_DIR}\")
-setenv(\"HIPCC_LINK_FLAGS_APPEND\",    \"--gcc-install-dir=${GCC_INSTALL_DIR}\")
-setenv(\"CCC_OVERRIDE_OPTIONS\",       \"+--gcc-install-dir=${GCC_INSTALL_DIR}\")"
+setenv(\"HIPCC_LINK_FLAGS_APPEND\",    \"--gcc-install-dir=${GCC_INSTALL_DIR}\")"
 else
    echo "[therock-afar] WARNING: no working host g++/GCC install dir found (g++ missing or libstdc++-devel absent);" >&2
    echo "[therock-afar]          HIPCC_*_FLAGS_APPEND will NOT be pinned -- HIP C++ builds may pick the wrong libc++." >&2
