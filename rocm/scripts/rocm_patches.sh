@@ -1268,10 +1268,34 @@ PY
    #   * MPI build, Python, examples, tests, docs disabled (none of
    #     these affect the rocprof-sys-run runtime path that the fix
    #     targets, and turning them off keeps the build small).
+   # ── ccache: the vendored Dyninst/libunwind/perfetto/timemory objects are
+   #    ROCm-version-independent, so one shared cache gives near-100% hits
+   #    across every rocm-patches-<v> build. Guarded: a host without ccache
+   #    (e.g. RHEL9/Cray) silently builds without it rather than hard-failing
+   #    at first compile (CMake does not validate the launcher at configure).
+   CCACHE_ARGS=()
+   if command -v ccache >/dev/null 2>&1; then
+      # Default to a per-tree cache shared across ROCm versions (sibling of the
+      # per-version INSTALL_PREFIX, e.g. ${TOP_INSTALL_PATH}/ccache). Honor an
+      # operator-provided $CCACHE_DIR (e.g. a node-local /tmp path) if set.
+      export CCACHE_DIR="${CCACHE_DIR:-$(dirname "${INSTALL_PREFIX}")/ccache}"
+      ${SUDO} mkdir -p "${CCACHE_DIR}" 2>/dev/null || true
+      if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+         ${SUDO} chown "$(id -u):$(id -g)" "${CCACHE_DIR}" 2>/dev/null || true
+      fi
+      ccache -M "${CCACHE_MAXSIZE:-20G}" >/dev/null 2>&1 || true
+      CCACHE_ARGS+=( -DCMAKE_C_COMPILER_LAUNCHER=ccache
+                     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache )
+      echo "[rocm_patches] ccache enabled (CCACHE_DIR=${CCACHE_DIR}, $(ccache --version | head -1))"
+   else
+      echo "[rocm_patches] ccache not found on PATH; building without a compiler cache"
+   fi
+
    echo "[rocm_patches] running cmake ..."
    cmake \
       -S "${src_root}/projects/rocprofiler-systems" \
       -B "${build_dir}" \
+      "${CCACHE_ARGS[@]}" \
       -DCMAKE_BUILD_TYPE=RelWithDebInfo \
       -DBUILD_SHARED_LIBS=ON \
       -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}/install-staging" \
