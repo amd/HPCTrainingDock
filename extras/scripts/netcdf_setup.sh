@@ -1500,6 +1500,22 @@ else
    fi
    echo "netcdf: modulefile flavor = ${_MODFLAVOR} (ext='${_MODEXT}')"
 
+   # MPI load line for the MPI-linked netcdf components (pnetcdf and netcdf-c
+   # link an MPI directly). Emitted so the module pulls the matching MPI in
+   # automatically instead of erroring when it is absent: depends_on() for
+   # Lmod (ref-counted, so unloading a sibling leaf won't yank MPI out from
+   # under this one) and `module load` for the Tcl flavor (portable to old
+   # Environment Modules). Uses the resolved MPI_MODULE token (openmpi on
+   # AAC; cray-mpich / mpich-wrappers on Cray). Empty -> no line emitted.
+   NETCDF_MPI_LOAD=""
+   if [ -n "${MPI_MODULE}" ]; then
+      if [ "${_MODFLAVOR}" = "lua" ]; then
+         NETCDF_MPI_LOAD="depends_on(\"${MPI_MODULE}\")"
+      else
+         NETCDF_MPI_LOAD="module load ${MPI_MODULE}"
+      fi
+   fi
+
    # ── pnetcdf modulefile (new, 2026-05-20) ─────────────────────────
    # Emit a first-class pnetcdf/${PNETCDF_VERSION} modulefile when this
    # run actually built PnetCDF. The netcdf-c modulefile heredoc below
@@ -1515,6 +1531,7 @@ else
 	whatis("Parallel-NetCDF Library")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
+	${NETCDF_MPI_LOAD}
 	local base = "${PNETCDF_PATH}"
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("LIBRARY_PATH", pathJoin(base, "lib"))
@@ -1531,6 +1548,7 @@ EOF
 	module-whatis "Parallel-NetCDF Library"
 	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
 
+	${NETCDF_MPI_LOAD}
 	set base "${PNETCDF_PATH}"
 	prepend-path LD_LIBRARY_PATH \$base/lib
 	prepend-path LIBRARY_PATH \$base/lib
@@ -1609,6 +1627,7 @@ EOF
 	whatis("Netcdf-c Library")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
+	${NETCDF_MPI_LOAD}
 	${NETCDF_C_HDF5_LOAD}
 	${NETCDF_C_PNETCDF_LOAD}
 	local base = "${NETCDF_C_PATH}"
@@ -1628,6 +1647,7 @@ EOF
 	module-whatis "Netcdf-c Library"
 	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
 
+	${NETCDF_MPI_LOAD}
 	${NETCDF_C_HDF5_LOAD}
 	${NETCDF_C_PNETCDF_LOAD}
 	set base "${NETCDF_C_PATH}"

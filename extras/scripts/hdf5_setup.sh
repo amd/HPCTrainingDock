@@ -816,12 +816,13 @@ else
       _MODFLAVOR="tcl"
    fi
 
-   # For a parallel build, the HDF5 libs link a specific MPI; require that
-   # MPI module so a consumer cannot load a mismatched (or no) MPI. Only
-   # emitted when parallel and an MPI module name is known.
-   _EMIT_MPI_PREREQ=0
+   # For a parallel build, the HDF5 libs link a specific MPI; load that
+   # MPI module so a consumer automatically pulls in the matching MPI
+   # (instead of merely erroring when it is absent). Only emitted when
+   # parallel and an MPI module name is known.
+   _EMIT_MPI_LOAD=0
    if [ "${ENABLE_PARALLEL}" = "ON" ] && [ -n "${MPI_MODULE}" ]; then
-      _EMIT_MPI_PREREQ=1
+      _EMIT_MPI_LOAD=1
    fi
 
    _HDF5_MOD_BASE="${HDF5_PATH}/HDF_Group/HDF5/${HDF5_VERSION}"
@@ -879,8 +880,8 @@ else
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("PATH", base)
 EOF
-      if [ "${_EMIT_MPI_PREREQ}" = "1" ]; then
-         echo "prereq(\"${MPI_MODULE}\")" | ${PKG_SUDO_MOD} tee -a "${_MODFILE}" >/dev/null
+      if [ "${_EMIT_MPI_LOAD}" = "1" ]; then
+         echo "depends_on(\"${MPI_MODULE}\")" | ${PKG_SUDO_MOD} tee -a "${_MODFILE}" >/dev/null
       fi
    else
       cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
@@ -903,11 +904,11 @@ EOF
 	prepend-path PATH \$base/bin
 	prepend-path PATH \$base
 EOF
-      if [ "${_EMIT_MPI_PREREQ}" = "1" ]; then
-         echo "prereq ${MPI_MODULE}" | ${PKG_SUDO_MOD} tee -a "${_MODFILE}" >/dev/null
+      if [ "${_EMIT_MPI_LOAD}" = "1" ]; then
+         echo "module load ${MPI_MODULE}" | ${PKG_SUDO_MOD} tee -a "${_MODFILE}" >/dev/null
       fi
    fi
-   unset _MODFILE _MODFLAVOR _EMIT_MPI_PREREQ _HDF5_MOD_BASE ROCM_PREREQ_TCL ROCM_PREREQ_LUA
+   unset _MODFILE _MODFLAVOR _EMIT_MPI_LOAD _HDF5_MOD_BASE ROCM_PREREQ_TCL ROCM_PREREQ_LUA
 
 fi
 

@@ -619,12 +619,13 @@ else
       _MODFLAVOR="tcl"
    fi
 
-   # For an MPI build, libfftw3*_mpi links a specific MPI; require that MPI
-   # module so a consumer cannot load a mismatched (or no) MPI. Only emitted
-   # when MPI was enabled and an MPI module name is known.
-   _EMIT_MPI_PREREQ=0
+   # For an MPI build, libfftw3*_mpi links a specific MPI; load that MPI
+   # module so a consumer automatically pulls in the matching MPI (instead
+   # of merely erroring when it is absent). Only emitted when MPI was
+   # enabled and an MPI module name is known.
+   _EMIT_MPI_LOAD=0
    if [ -n "${ENABLE_MPI}" ] && [ -n "${MPI_MODULE}" ]; then
-      _EMIT_MPI_PREREQ=1
+      _EMIT_MPI_LOAD=1
    fi
 
    # ROCm prereq: accept rocm-new/<ver> OR rocm/<ver>. Under PrgEnv-amd-new
@@ -668,8 +669,8 @@ else
 	setenv("FFTW_MPI_MODULE", "${MPI_MODULE}")
 	prepend_path("PATH", pathJoin(base, "bin"))
 EOF
-      if [ "${_EMIT_MPI_PREREQ}" = "1" ]; then
-         echo "prereq(\"${MPI_MODULE}\")" | ${PKG_SUDO_MOD} tee -a "${_MODFILE}" >/dev/null
+      if [ "${_EMIT_MPI_LOAD}" = "1" ]; then
+         echo "depends_on(\"${MPI_MODULE}\")" | ${PKG_SUDO_MOD} tee -a "${_MODFILE}" >/dev/null
       fi
    else
       cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
@@ -687,11 +688,11 @@ EOF
 	setenv FFTW_MPI_MODULE "${MPI_MODULE}"
 	prepend-path PATH \$base/bin
 EOF
-      if [ "${_EMIT_MPI_PREREQ}" = "1" ]; then
-         echo "prereq ${MPI_MODULE}" | ${PKG_SUDO_MOD} tee -a "${_MODFILE}" >/dev/null
+      if [ "${_EMIT_MPI_LOAD}" = "1" ]; then
+         echo "module load ${MPI_MODULE}" | ${PKG_SUDO_MOD} tee -a "${_MODFILE}" >/dev/null
       fi
    fi
-   unset _MODFILE _MODFLAVOR _EMIT_MPI_PREREQ
+   unset _MODFILE _MODFLAVOR _EMIT_MPI_LOAD
 
 fi
 
