@@ -1275,7 +1275,13 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Set HIPCC_VERBOSE=7 to see what hipcc is doing for the compilation and link")
 
 	local base = "/opt/rocm-${ROCM_VERSION}"
-	local mbase = " /etc/lmod/modules/ROCm/rocm"
+	-- Self-locating module root: this file is deployed at <mroot>/base/rocm/<v>.lua,
+	-- so three dirname's of its own path yield <mroot>, which holds base/,
+	-- rocm-<v>/ and rocmplus-<v>/. Deriving mbase from myFileName() (instead of a
+	-- baked-in absolute path that Phase 3.5 must rewrite) makes this module immune
+	-- to relocation: it always points at the tree it actually lives in, so a stale
+	-- copy left on MODULEPATH can never drag in a foreign ROCm stack.
+	local mbase = myFileName():gsub("/[^/]*\$",""):gsub("/[^/]*\$",""):gsub("/[^/]*\$","")
 
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
@@ -1309,7 +1315,13 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	whatis("Set HIPCC_VERBOSE=7 to see what hipcc is doing for the compilation and link")
 
 	local base = "/opt/rocm-${ROCM_VERSION}"
-	local mbase = " /etc/lmod/modules/ROCm/rocm"
+	-- Self-locating module root: this file is deployed at <mroot>/base/rocm/<v>.lua,
+	-- so three dirname's of its own path yield <mroot>, which holds base/,
+	-- rocm-<v>/ and rocmplus-<v>/. Deriving mbase from myFileName() (instead of a
+	-- baked-in absolute path that Phase 3.5 must rewrite) makes this module immune
+	-- to relocation: it always points at the tree it actually lives in, so a stale
+	-- copy left on MODULEPATH can never drag in a foreign ROCm stack.
+	local mbase = myFileName():gsub("/[^/]*\$",""):gsub("/[^/]*\$",""):gsub("/[^/]*\$","")
 
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
