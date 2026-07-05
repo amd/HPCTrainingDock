@@ -1527,7 +1527,7 @@ echo "  --- Where things will be written ---"
 echo "    rocmplus packages -> ${TOP_INSTALL_PATH}/rocmplus-${_RPS_PREVIEW}/<pkg>-v<ver>/"
 echo "    rocmplus modules  -> ${TOP_MODULE_PATH}/rocmplus-${_RPS_PREVIEW}/<pkg>/<ver>.lua"
 echo "    rocm SDK (if rebuilt) -> ${ROCM_INSTALLPATH}/rocm-${ROCM_VERSION}/"
-echo "    LinuxPlus shared modules -> ${TOP_MODULE_PATH}/LinuxPlus/  (miniconda3, miniforge3)"
+echo "    shared modules    -> ${TOP_MODULE_PATH}/base/  (miniconda3, miniforge3)"
 echo "    Per-job log dir     -> ${LOG_DIR}"
 echo ""
 echo "  --- Knobs ---"
@@ -2032,7 +2032,17 @@ run_and_log_versioned kokkos extras/scripts/kokkos_setup.sh ${COMMON_OPTIONS} --
 # miniconda3 / miniforge3 are intentionally exempt from --replace-existing.
 # Their install paths (${TOP_INSTALL_PATH}/miniconda3-v<version>,
 # ${TOP_INSTALL_PATH}/miniforge3-v<version>) and module dirs
-# (${TOP_MODULE_PATH}/LinuxPlus/...) are SHARED across ROCm versions --
+# (${TOP_MODULE_PATH}/base/...) are SHARED across ROCm versions --
+#
+# NOTE on the module dir: we write directly to ${TOP_MODULE_PATH}/base/<pkg>
+# (NOT .../LinuxPlus/<pkg>). Only ${TOP_MODULE_PATH}/base is on MODULEPATH on
+# the deployed systems; LinuxPlus is a CONTAINER-side staging category that
+# the Docker->package->deploy path folds into base/ (deploy_module_package.sh
+# maps the LinuxPlus category to slot base/<pkg>). This direct-install branch
+# bypasses that remap, so writing to LinuxPlus here left the modulefile off
+# MODULEPATH and `module load miniconda3` / miniforge3 could not find it.
+# The leaf scripts keep their LinuxPlus default (required for the container
+# categorization); we override to base only here.
 # they don't depend on which ROCm release the orchestrator is currently
 # iterating. With multi-version sweeps invoked under --replace-existing
 # 1, calling replace_pkg here would delete the install at the start of
@@ -2065,10 +2075,10 @@ run_and_log_versioned kokkos extras/scripts/kokkos_setup.sh ${COMMON_OPTIONS} --
 # versioned subdir themselves, matching the --install-path = parent +
 # version-append convention used by the migrated leaf scripts.
 run_and_log_versioned miniconda3 extras/scripts/miniconda3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniconda3 ${BUILD_MINICONDA3} --python-version ${PYTHON_VERSION} \
-   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH} --module-path ${TOP_MODULE_PATH}/LinuxPlus/miniconda3")
+   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH} --module-path ${TOP_MODULE_PATH}/base/miniconda3")
 
 run_and_log_versioned miniforge3 extras/scripts/miniforge3_setup.sh --rocm-version ${ROCM_VERSION} --build-miniforge3 ${BUILD_MINIFORGE3} \
-   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH} --module-path ${TOP_MODULE_PATH}/LinuxPlus/miniforge3")
+   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH} --module-path ${TOP_MODULE_PATH}/base/miniforge3")
 
 # emacs: ROCm-agnostic editor module. Like miniconda3/miniforge3 it installs
 # under TOP_INSTALL_PATH (shared across ROCm versions) and is intentionally
@@ -2079,7 +2089,7 @@ run_and_log_versioned miniforge3 extras/scripts/miniforge3_setup.sh --rocm-versi
 # gcc-14 off the image/nodes (see emacs_setup.sh header). --install-path is a
 # PARENT dir; the leaf appends emacs-v${EMACS_VERSION}.
 run_and_log_versioned emacs extras/scripts/emacs_setup.sh --build-emacs ${BUILD_EMACS} --native-comp 0 \
-   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH} --module-path ${TOP_MODULE_PATH}/LinuxPlus/emacs")
+   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH} --module-path ${TOP_MODULE_PATH}/base/emacs")
 
 # hipfort: build-from-source intentionally removed. ROCm 6.3+ ships
 # hipfort natively (see <pkg>.BUNDLED markers / rocm/<v> module). The
