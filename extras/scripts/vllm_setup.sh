@@ -37,6 +37,10 @@ AMDGPU_GFXMODEL_INPUT=""
 VLLM_REPO="https://github.com/vllm-project/vllm.git"
 VLLM_REF=""
 VLLM_REF_USER_SET=0
+# Apply the TORCH_HIP_VERSION stable-ABI compile workaround (see the big
+# comment where it is applied, below). Default on; disable to re-test on a
+# newer rocm/pytorch/vLLM combo that may no longer need it.
+HIP_VERSION_PATCH=1
 # vLLM version. Empty => auto-derive from the pytorch module's torch
 # (see the "vLLM version gate" block after arg parsing). Tracked
 # separately so that block can tell "user passed --vllm-version" from
@@ -90,6 +94,7 @@ usage()
    echo "  --vllm-version [ VLLM_VERSION ] vLLM version; default autodetected from the pytorch module's torch"
    echo "  --vllm-repo [ VLLM_REPO ] git repo to build vLLM from, default $VLLM_REPO"
    echo "  --vllm-ref [ VLLM_REF ] git tag/branch/commit to build, default v\${VLLM_VERSION}"
+   echo "  --hip-version-patch [ 0|1 ] apply the TORCH_HIP_VERSION stable-ABI ROCm compile workaround, default $HIP_VERSION_PATCH (re-evaluate per rocm/torch/vLLM version)"
    echo "  --pytorch-module [ PYTORCH_MODULE ] pytorch module to load, default $PYTORCH_MODULE"
    echo "  --protect-packages [ names ] extra space-separated ABI/ROCm packages to hard-pin from the pytorch module (appended to the default set)"
    echo "  --hf-home [ HF_HOME_DEFAULT ] default HF_HOME baked into the modulefile, default $HF_HOME_DEFAULT"
@@ -157,6 +162,11 @@ do
           shift
           VLLM_REF=${1}
           VLLM_REF_USER_SET=1
+          reset-last
+          ;;
+      "--hip-version-patch")
+          shift
+          HIP_VERSION_PATCH=${1}
           reset-last
           ;;
       "--pytorch-module")
@@ -257,18 +267,26 @@ if [[ -z "${ROCM_MODULE_NAME}" ]]; then
    fi
 fi
 
-# Load ROCm + pytorch for this vLLM build. pytorch is REQUIRED: vLLM
-# imports torch at build/resolve time and we deliberately do not ship a
-# torch of our own (the pytorch module owns it).
-module load ${ROCM_MODULE_NAME}
-# Capture PYTHONPATH before loading pytorch so we can isolate EXACTLY
+# Load ROCm + pytorch for this vLLM build, HIERARCHICALLY and in order.
+# Modules here are hierarchical: `pytorch` is only exposed on MODULEPATH
+# once its matching `rocm` is loaded, so rocm MUST load first. We `module
+# purge` first so a pytorch/rocm already loaded in the caller's env cannot
+# (a) shadow the versions we intend or (b) pollute the PYTHONPATH_PRE diff
+# below (which must capture EXACTLY what THIS pytorch load contributes).
+# pytorch is REQUIRED: vLLM imports torch at build/resolve time and we
+# deliberately do not ship a torch of our own (the pytorch module owns it).
+module purge 2>/dev/null || true
+if ! module load ${ROCM_MODULE_NAME}; then
+   send-error "could not 'module load ${ROCM_MODULE_NAME}'. Check --rocm-version and that the module exists."
+fi
+# Capture PYTHONPATH AFTER rocm but BEFORE pytorch so we isolate EXACTLY
 # which site dirs the pytorch module contributes. Everything installed
 # in those dirs (torch, torchvision, torchaudio, triton, transformers,
 # deepspeed, flashattention, ...) is the authoritative set that vLLM
 # must NOT reinstall -- it has to be leveraged from `module load pytorch`.
 PYTHONPATH_PRE="${PYTHONPATH:-}"
 if ! module load ${PYTORCH_MODULE} 2>/dev/null; then
-   send-error "could not 'module load ${PYTORCH_MODULE}'. Build the pytorch module for ${ROCM_MODULE_NAME} first (pytorch_setup.sh), or pass --pytorch-module."
+   send-error "could not 'module load ${PYTORCH_MODULE}' after '${ROCM_MODULE_NAME}'. Build the pytorch module for ${ROCM_MODULE_NAME} first (pytorch_setup.sh), or pass --pytorch-module."
 fi
 # PYTHONPATH entries added by the pytorch module (newline-separated).
 PYTORCH_MODULE_PYPATHS=$(PYTHONPATH_PRE="${PYTHONPATH_PRE}" python3 - <<'PY'
@@ -424,24 +442,22 @@ else
       ${SUDO} chmod -R a+w "${VLLM_PATH}"
    fi
 
-   # ── Leverage the pytorch module; two-tier dependency handling ──────
+   # ── Leverage the pytorch module; build a constraints file ──────────
    # Discover EVERY distribution the pytorch module puts on PYTHONPATH
-   # (torch, torchvision, transformers, deepspeed, flashattention, ...),
-   # then split into two tiers:
+   # (torch, torchvision, transformers, deepspeed, flashattention, ...) and
+   # hard-pin the PROTECTED (ABI/ROCm-compiled) ones -- torch stack, flash-
+   # attn, deepspeed, ... -- to the module's EXACT version in a constraints
+   # file. That file is fed to the dependency RESOLVE (dry-run) below so the
+   # resolver can never plan a different torch/triton build: if a chosen
+   # vLLM hard-requires a different torch, the resolve fails (the correct
+   # signal to pick a matching vLLM) rather than shadowing the module.
    #
-   #   PROTECTED (ABI/ROCm-compiled: torch stack, flash-attn, deepspeed,
-   #   ...): hard-pinned to the module's EXACT version via a constraints
-   #   file, so pip can never substitute a different build; and pruned
-   #   from the target afterwards so the module is the sole provider.
-   #   If a chosen vLLM hard-requires a different torch, pip fails here
-   #   -- which is the correct signal to pick a matching vLLM.
-   #
-   #   PURE-PYTHON (everything else, e.g. transformers): NOT pinned. It
-   #   stays visible via PYTHONPATH, so pip skips it when the module's
-   #   version already satisfies vLLM. If vLLM needs a NEWER one, pip
-   #   installs that newer version into the vLLM target; at runtime the
-   #   modulefile prepends VLLM_PATH ahead of the pytorch dirs so the
-   #   newer copy wins -- and pytorch is never touched.
+   # Everything else (pure-Python, e.g. transformers) is left unpinned: if
+   # the module already satisfies vLLM it is omitted from the resolved delta
+   # (so never reinstalled); if vLLM needs a NEWER one, that newer version
+   # is installed into the vLLM prefix (via --ignore-installed, so the
+   # module copy is never uninstalled) and wins at runtime because the
+   # modulefile prepends the prefix ahead of the pytorch dirs.
    CONSTRAINTS="${VLLM_BUILD_ROOT}/constraints.txt"
    PROVIDED_LIST="${VLLM_BUILD_ROOT}/provided.txt"
    PROTECTED_PRESENT="${VLLM_BUILD_ROOT}/protected_present.txt"
@@ -480,6 +496,60 @@ PY
    git clone --depth 1 --branch "${VLLM_REF}" --recurse-submodules --shallow-submodules \
       "${VLLM_REPO}" "${VLLM_SRC}"
 
+   # ── WORKAROUND: TORCH_HIP_VERSION undefined in vLLM's stable-ABI ROCm build
+   #
+   # SYMPTOM (vLLM v0.24.0 + torch 2.11 + ROCm 7.2.4):
+   #   csrc/libtorch_stable/activation_kernels.hip:294:
+   #     error: use of undeclared identifier 'TORCH_HIP_VERSION'
+   #
+   # ROOT CAUSE: The activation-gate macros gate a CUDA-12.9/Blackwell fast
+   #   path on `CUDA_VERSION >= 12090`. hipify rewrites `CUDA_VERSION` ->
+   #   `TORCH_HIP_VERSION` for the HIP build. In the REGULAR extension (`_C`)
+   #   that symbol is provided by torch's full HIP headers, so `_C` compiles.
+   #   The STABLE-ABI extensions (`_C_stable_libtorch`, `_moe_C_stable_libtorch`)
+   #   are built with Py_LIMITED_API and include ONLY torch/csrc/stable/*
+   #   headers, which never define TORCH_HIP_VERSION -> hard compile error.
+   #   Upstream gap in vLLM's new stable-ABI-on-ROCm path (issue vllm#44641,
+   #   fix PR vllm#44648 merged 2026-06-05, AFTER the v0.24.0 tag; even main's
+   #   source still has the bare CUDA_VERSION gate here).
+   #
+   # WHY DEFINING IT TO 0 IS SAFE: on MI300A `get_device_prop()->major` is 9,
+   #   so the companion `cc_major >= 10` in the same `&&` already makes the
+   #   Blackwell branch dead code. The symbol just has to EXIST for the HIP
+   #   compile to parse; `TORCH_HIP_VERSION=0` makes every `>= NNNNN` false,
+   #   selecting the correct non-Blackwell path. Scoped to the two stable-ABI
+   #   targets only (the regular `_C` already has the real symbol).
+   #
+   # RE-EVALUATE when inputs change, e.g. the planned rocm/7.0.0 build once
+   #   its pytorch module lands, or a vLLM ref carrying vllm#44648. Re-test
+   #   with --hip-version-patch 0; if it compiles clean, drop the workaround.
+   if [ "${HIP_VERSION_PATCH}" = "1" ]; then
+      _vllm_cml="${VLLM_SRC}/CMakeLists.txt"
+      if [ -f "${_vllm_cml}" ] && ! grep -q "vllm_setup.sh TORCH_HIP_VERSION workaround" "${_vllm_cml}"; then
+         cat >> "${_vllm_cml}" <<'CMAKE_PATCH'
+
+# ===== vllm_setup.sh TORCH_HIP_VERSION workaround (appended by installer) =====
+# See vllm_setup.sh for the full rationale. hipify rewrites CUDA_VERSION ->
+# TORCH_HIP_VERSION in the stable-ABI HIP kernels, but that symbol is not
+# defined in the Py_LIMITED_API include set. Define it (to 0 -> Blackwell
+# fast path stays disabled, correct on gfx942) so the stable-ABI targets
+# compile. Appended at end-of-file, guarded by if(TARGET ...), so it is
+# order-independent and a no-op when the targets do not exist.
+if(VLLM_GPU_LANG STREQUAL "HIP")
+  foreach(_vllm_stable_tgt _C_stable_libtorch _moe_C_stable_libtorch)
+    if(TARGET ${_vllm_stable_tgt})
+      target_compile_definitions(${_vllm_stable_tgt} PRIVATE TORCH_HIP_VERSION=0)
+    endif()
+  endforeach()
+endif()
+CMAKE_PATCH
+         echo "vllm: applied TORCH_HIP_VERSION=0 stable-ABI ROCm CMake workaround (disable with --hip-version-patch 0)"
+      fi
+      unset _vllm_cml
+   else
+      echo "vllm: TORCH_HIP_VERSION workaround DISABLED (--hip-version-patch 0)"
+   fi
+
    # ── Build toolchain for --no-build-isolation ───────────────────────
    # With --no-build-isolation pip uses THIS environment's build backend
    # instead of provisioning a clean one, which is exactly what lets the
@@ -489,78 +559,129 @@ PY
    # a throwaway prefix rather than polluting the user or the target.
    BUILD_TOOLS="${VLLM_BUILD_ROOT}/buildtools"
    pip3 install --target="${BUILD_TOOLS}" \
-      "cmake>=3.26,<4" ninja "setuptools>=77,<81" setuptools-scm setuptools-rust wheel packaging
+      "cmake>=3.26,<4" ninja "setuptools>=77,<81" setuptools-scm setuptools-rust wheel packaging jinja2
    export PATH="${BUILD_TOOLS}/bin:${PATH}"
    export PYTHONPATH="${BUILD_TOOLS}:${PYTHONPATH}"
 
-   # ── Compile + install vLLM into the target ─────────────────────────
-   # PYTHONPATH keeps the pytorch module dirs visible so pip treats
-   # torch/triton/transformers/... as already installed. VLLM_TARGET_DEVICE
-   # forces the ROCm backend; PYTORCH_ROCM_ARCH selects the gfx kernels.
-   # torch is NOT a runtime dependency in v0.24.0's requirements (only a
-   # build-system requirement, which --no-build-isolation ignores), so
-   # this never tries to replace the module's torch.
+   # ── Compile the vLLM wheel (ONCE) ──────────────────────────────────
+   # Build a wheel with --no-deps so the expensive gfx942 compile triggers
+   # NO dependency resolution (no torch/nvidia pull, no uninstalls).
+   # --no-build-isolation reuses THIS env's build backend so the module's
+   # torch (not a fresh torch==2.11.0 from PyPI) drives the compile.
+   # VLLM_TARGET_DEVICE forces the ROCm backend; PYTORCH_ROCM_ARCH selects
+   # the gfx kernels.
    export VLLM_TARGET_DEVICE=rocm
    export MAX_JOBS="${MAX_JOBS:-$(nproc)}"
-   echo "vllm: compiling with PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} MAX_JOBS=${MAX_JOBS} (this is slow)"
+   WHEELHOUSE="${VLLM_BUILD_ROOT}/wheelhouse"
+   mkdir -p "${WHEELHOUSE}"
+   echo "vllm: compiling wheel with PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} MAX_JOBS=${MAX_JOBS} (this is slow)"
    PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH}" \
-   pip3 install -v \
+   pip3 wheel -v \
       --no-build-isolation \
-      --target="${VLLM_PATH}" \
-      --constraint "${CONSTRAINTS}" \
+      --no-deps \
+      --wheel-dir "${WHEELHOUSE}" \
       "${VLLM_SRC}"
+   VLLM_WHEEL="$(find "${WHEELHOUSE}" -maxdepth 1 -name 'vllm-*.whl' 2>/dev/null | head -1)"
+   [ -z "${VLLM_WHEEL}" ] && send-error "vLLM wheel build produced no wheel in ${WHEELHOUSE}; see log above."
+   echo "vllm: built $(basename "${VLLM_WHEEL}")"
 
-   # Install the ROCm-specific runtime extras (grpcio, numba, datasets,
-   # peft, tensorizer, timm, amd-quark, tilelang, fastsafetensors, ...).
-   # These live in requirements/rocm.txt (which also -r's common.txt) and
-   # are NOT captured in the wheel's runtime metadata. rocm.txt carries no
-   # torch pin, so the constraints file keeps the ABI stack from moving.
-   if [ -f "${VLLM_SRC}/requirements/rocm.txt" ]; then
-      echo "vllm: installing ROCm runtime extras from requirements/rocm.txt"
+   # ── Install vLLM + deps into the prefix WITHOUT mutating the module ──
+   # CRITICAL SAFETY: a plain `pip install` (even with --prefix/--target),
+   # when it needs a NEWER version of a dep the pytorch module already
+   # provides, UNINSTALLS the module's copy IN PLACE -- the module dirs are
+   # on PYTHONPATH and some (e.g. deepspeed/) are group/world-writable, so
+   # pip silently corrupts the shared module for every user. (Also --target
+   # ignores installed packages entirely and re-pulls the whole torch +
+   # nvidia-cuda-* stack.) To make mutation IMPOSSIBLE we split install in
+   # two phases that can only ever write inside ${VLLM_PATH}:
+   #
+   #   1. RESOLVE (dry-run, --report): let pip compute the plan for the
+   #      wheel + rocm.txt against the LIVE module env. The report's
+   #      "install" list is exactly the delta pip would add -- new deps and
+   #      version upgrades; packages the module already satisfies (torch,
+   #      transformers, ...) are omitted. The constraints file pins the
+   #      ABI/ROCm stack, so if a vLLM hard-requires a different torch the
+   #      resolve fails here (the correct signal to pick a matching vLLM),
+   #      instead of silently shadowing the module's torch.
+   #   2. INSTALL that pinned delta with --no-deps --ignore-installed.
+   #      --ignore-installed => pip never inspects or uninstalls existing
+   #      installs (so it CANNOT touch the module/system dirs); --no-deps
+   #      => no re-resolution / cascade. Upgrades land in the prefix and win
+   #      at runtime via the modulefile's PYTHONPATH prepend; the module
+   #      copies are left byte-for-byte intact.
+   REPORT="${VLLM_BUILD_ROOT}/resolve-report.json"
+   DEP_REQS="${VLLM_BUILD_ROOT}/dep-closure.txt"
+   REQ_ROCM_ARGS=()
+   [ -f "${VLLM_SRC}/requirements/rocm.txt" ] && REQ_ROCM_ARGS=(-r "${VLLM_SRC}/requirements/rocm.txt")
+   echo "vllm: resolving dependency closure (dry-run; honors the pytorch module, never writes)"
+   pip3 install --dry-run --report "${REPORT}" \
+      --constraint "${CONSTRAINTS}" \
+      "${VLLM_WHEEL}" "${REQ_ROCM_ARGS[@]}" \
+      || send-error "dependency resolution (dry-run) failed; see log above (often a real torch/ABI conflict)."
+
+   python3 - "${REPORT}" "${DEP_REQS}" <<'PY'
+import json, sys
+rep = json.load(open(sys.argv[1]))
+reqs = []
+for item in rep.get("install", []):
+    md = item.get("metadata", {})
+    name = (md.get("name") or "").strip()
+    ver = (md.get("version") or "").strip()
+    if not name or name.lower() == "vllm":
+        continue  # vllm itself is installed separately, from the local wheel
+    reqs.append(f"{name}=={ver}")
+with open(sys.argv[2], "w") as f:
+    f.write("\n".join(sorted(reqs)) + ("\n" if reqs else ""))
+print(f"vllm: dependency closure = {len(reqs)} package(s) to install into the prefix")
+PY
+
+   if [ -s "${DEP_REQS}" ]; then
+      echo "vllm: installing resolved deps into the prefix (--no-deps --ignore-installed; module untouched)"
       pip3 install \
-         --target="${VLLM_PATH}" \
-         --constraint "${CONSTRAINTS}" \
-         -r "${VLLM_SRC}/requirements/rocm.txt" || \
-         echo "vllm: WARNING some rocm.txt extras failed to install; review above (some are optional)."
+         --prefix="${VLLM_PATH}" \
+         --no-deps --ignore-installed --no-warn-script-location \
+         -r "${DEP_REQS}" \
+         || send-error "installing the resolved dependency closure failed; see log above."
    fi
 
-   # Defensive uninstall of ONLY the PROTECTED packages from the target
-   # (same pinned version), so the ABI/ROCm stack comes solely from the
-   # pytorch module. Pure-Python upgrades pip made (e.g. a newer
-   # transformers) are intentionally kept. Reads each dist's RECORD so it
-   # removes exactly the files pip wrote.
-   python3 - "${VLLM_PATH}" "${PROTECTED_PRESENT}" <<'PY'
-import os, sys, shutil
-from importlib.metadata import distributions
-target = sys.argv[1]
-protected = {l.strip().lower().replace("_", "-") for l in open(sys.argv[2]) if l.strip()}
-removed = []
-for dist in distributions(path=[target]):
-    name = (dist.metadata["Name"] or "").strip()
-    if not name or name.lower().replace("_", "-") not in protected:
-        continue
-    for f in (dist.files or []):
-        fp = os.path.join(target, str(f))
-        try:
-            if os.path.isfile(fp) or os.path.islink(fp):
-                os.remove(fp)
-        except OSError:
-            pass
-    info = getattr(dist, "_path", None)
-    if info and os.path.isdir(str(info)):
-        shutil.rmtree(str(info), ignore_errors=True)
-    removed.append(name)
-for root, _dirs, _files in os.walk(target, topdown=False):
-    if root != target and not os.listdir(root):
-        try:
-            os.rmdir(root)
-        except OSError:
-            pass
-if removed:
-    print("vllm: pruned ABI/ROCm packages from target (using the pytorch module's instead): " + ", ".join(sorted(removed)))
-else:
-    print("vllm: no ABI/ROCm packages landed in the target (pip used the pytorch module's).")
-PY
+   echo "vllm: installing the vLLM wheel into the prefix (--no-deps --ignore-installed)"
+   pip3 install \
+      --prefix="${VLLM_PATH}" \
+      --no-deps --ignore-installed --no-warn-script-location \
+      "${VLLM_WHEEL}" \
+      || send-error "installing the vLLM wheel failed; see log above."
+
+   # ── amdsmi: REQUIRED for vLLM's ROCm platform detection ────────────
+   # vLLM (>=0.24) resolves its platform via amdsmi: rocm_platform_plugin()
+   # calls amdsmi_init() + amdsmi_get_processor_handles(). If the amdsmi
+   # Python bindings are not importable, that plugin returns None and vLLM
+   # SILENTLY falls back to UnspecifiedPlatform -- it imports fine and even
+   # runs torch on the GPU, but the engine never selects the ROCm backend.
+   # (Confirmed on this cluster: without amdsmi, current_platform resolved
+   # to UnspecifiedPlatform with device_name None; with it, RocmPlatform /
+   # is_rocm True and offline generation works.) The pytorch module does
+   # NOT ship amdsmi, so install the ROCm-provided bindings -- pure-Python
+   # plus a bundled libamd_smi.so, ABI-tied to ${ROCM_MODULE_NAME} -- into
+   # the SAME prefix. --no-build-isolation reuses the BUILD_TOOLS setuptools
+   # (no network); --ignore-installed keeps it inside the prefix only.
+   AMDSMI_SRC="${ROCM_PATH:-}/share/amd_smi"
+   if [ -n "${ROCM_PATH:-}" ] && [ -f "${AMDSMI_SRC}/pyproject.toml" ]; then
+      echo "vllm: installing amdsmi bindings from ${AMDSMI_SRC} (ROCm platform detection)"
+      pip3 install \
+         --prefix="${VLLM_PATH}" \
+         --no-build-isolation --no-deps --ignore-installed --no-warn-script-location \
+         "${AMDSMI_SRC}" \
+         || send-error "installing amdsmi from ${AMDSMI_SRC} failed; without it vLLM will not detect the ROCm platform."
+   else
+      echo "vllm: WARNING amdsmi source not found at ${AMDSMI_SRC}; vLLM may fall back to UnspecifiedPlatform and never use the GPU."
+   fi
+
+   # Resolve the site dir pip created under the prefix. Ubuntu's Debian
+   # python uses the posix_local scheme (local/lib/pythonX.Y/dist-packages);
+   # a vanilla python would use lib/pythonX.Y/site-packages. Detect either.
+   VLLM_SITE="$(find "${VLLM_PATH}" -type d \( -name site-packages -o -name dist-packages \) 2>/dev/null | head -1)"
+   [ -z "${VLLM_SITE}" ] && send-error "vLLM install produced no site/dist-packages under ${VLLM_PATH}; build likely failed."
+   echo "vllm: installed into prefix ${VLLM_PATH} (site: ${VLLM_SITE})"
 
    # Normalize ownership/permissions like the sibling scripts.
    if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
@@ -571,6 +692,17 @@ PY
       ${SUDO} chmod go-w "${VLLM_PATH}"
    fi
 fi
+
+# Resolve the prefix's site dir + bin dir for the modulefile. Recomputed
+# here (not only in the build branch) so the cache-restore path has them
+# too. VLLM_BINDIR is the sibling of the scheme root that holds site/dist-
+# packages (posix_local: ${VLLM_PATH}/local/{lib,bin}; posix_prefix:
+# ${VLLM_PATH}/{lib,bin}) -- derive it by stripping /lib/... off VLLM_SITE.
+VLLM_SITE="$(find "${VLLM_PATH}" -type d \( -name site-packages -o -name dist-packages \) 2>/dev/null | head -1)"
+if [ -z "${VLLM_SITE}" ]; then
+   send-error "no site/dist-packages found under ${VLLM_PATH}; install (or cached tarball) is broken."
+fi
+VLLM_BINDIR="${VLLM_SITE%/lib/*}/bin"
 
 # Capture ROCM_PATH before any unload so the modulefile heredoc resolves
 # it correctly (see jax_setup.sh for the empty-expansion footgun).
@@ -611,8 +743,8 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${VLLM_VERSION}.lua
 	prereq("${ROCM_MODULE_NAME}")
 	load("${PYTORCH_MODULE}")
 
-	prepend_path("PYTHONPATH","${VLLM_PATH}")
-	prepend_path("PATH","${VLLM_PATH}/bin")
+	prepend_path("PYTHONPATH","${VLLM_SITE}")
+	prepend_path("PATH","${VLLM_BINDIR}")
 
 	-- MI300A APU: scratch-reclaim workaround (matches the rocm modulefile).
 	setenv("HSA_NO_SCRATCH_RECLAIM","1")
@@ -625,6 +757,27 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${VLLM_VERSION}.lua
 	-- CPU offload): "offloading" moves data within the same pool and can
 	-- OOM/HANG. Prefer --kv-cache-dtype fp8 and a lower --max-model-len.
 EOF
+
+# ── Refresh the Lmod spider cache ──────────────────────────────────────
+# A freshly-written modulefile is invisible to `module load` while a valid
+# system spider cache exists: Lmod trusts the cache and never sees the new
+# file, so `module load vllm/${VLLM_VERSION}` errors "unknown module" until
+# the cache expires (24h here) -- only `module --ignore_cache` finds it.
+# Bumping the cache TIMESTAMP file newer than the cache marks it stale, so
+# Lmod re-walks the tree live and rebuilds per-user caches immediately.
+# Best-effort: the timestamp path is parsed from `module --config`; a miss
+# just means users may need `module --ignore_cache load` until an admin
+# cache rebuild. Never fatal -- the install itself is already complete.
+LMOD_TS_FILE="$(module --config 2>&1 | awk '/Time Stamp File/{f=1; next} f && NF>=2 {print $NF; exit}')"
+if [ -n "${LMOD_TS_FILE}" ] && [ -e "${LMOD_TS_FILE}" ]; then
+   if ${PKG_SUDO_MOD} touch "${LMOD_TS_FILE}" 2>/dev/null; then
+      echo "[vllm] bumped Lmod cache timestamp (${LMOD_TS_FILE}); vllm/${VLLM_VERSION} is loadable now."
+   else
+      echo "[vllm] WARNING could not touch ${LMOD_TS_FILE}; until the next cache rebuild load with: module --ignore_cache load vllm/${VLLM_VERSION}"
+   fi
+else
+   echo "[vllm] NOTE could not locate the Lmod cache timestamp; if 'module load vllm/${VLLM_VERSION}' reports unknown, use: module --ignore_cache load vllm/${VLLM_VERSION}"
+fi
 
 echo ""
 echo "[vllm] installed. Load with:"
