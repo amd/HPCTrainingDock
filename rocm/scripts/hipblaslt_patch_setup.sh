@@ -25,7 +25,16 @@
 # (the .dat carries Equality+GridBased so a miss degrades silently to
 # a slower-but-valid GridBased pick rather than the fp16 short-circuit
 # that returns 0 solutions), so we cannot reliably tell when a patch
-# helps vs. hurts. Same for bf16 / fp64: see commit history.
+# helps vs. hurts. fp64 likewise (see commit history).
+#
+# bf16 IS patched, but only where a genuine short-circuit exists: the
+# no-bias backward BB_BB gfx942 GEMM (transA=N transB=N,
+# Ailk_Bljk_..._gfx942.dat) ships EqualityMatching-only with NO
+# GridBased catch-all, so a heuristic miss returns 0 solutions exactly
+# like fp16. We append the same small-N shape grid there (SPX side) and
+# rewrite WGMXCC 4->1 in the 3 BB_BB CU38 bias .dat (CPX side), mirroring
+# the fp16 treatment. Confirmed on 7.2.4 (SPX + CPX); other versions are
+# left bf16-untouched for lack of an on-system pytorch to verify against.
 #
 # CLI matches the sibling *_setup.sh leaves:
 #   --rocm-version <X.Y.Z>     required
@@ -43,6 +52,8 @@
 #   * 7.1.0, 7.1.1  -- family A
 #   * 7.2.0         -- family B
 #   * 7.2.2, 7.2.3  -- family C
+#   * 7.2.4         -- family C + bf16 coverage (BB_BB no-bias backward
+#                     SPX rows + BB_BB CU38 CPX WGMXCC rewrite)
 #   * 7.13.0        -- family D (per-arch lib subdir gfx942/; CPX
 #                     WGMXCC=4 defect already fixed upstream so the
 #                     CPX rewrite step is a sentinel-only no-op there)
@@ -132,7 +143,7 @@ done
 
 # ── version gate ────────────────────────────────────────────────────
 case "${ROCM_VERSION}" in
-   7.1.0|7.1.1|7.2.0|7.2.2|7.2.3|7.13.0) ;;
+   7.1.0|7.1.1|7.2.0|7.2.2|7.2.3|7.2.4|7.13.0) ;;
    *)
       echo "[hipblaslt_patch] no fix vendored for rocm/${ROCM_VERSION}; exiting NOOP (rc=${NOOP_RC})"
       exit ${NOOP_RC}
@@ -227,11 +238,21 @@ import sys
 
 import msgpack
 
-# fp16-only: HH = fp16 in / fp16 out / fp32 accumulate (the HPA path,
-# what nn.Linear(...).half() lands on). fp32 / bf16 / fp64 are not
-# patched (see header comment).
+# HH = fp16 in / fp16 out / fp32 accumulate (the HPA path, what
+# nn.Linear(...).half() lands on). BB = bf16 counterpart. fp32 / fp64
+# are not patched (see header comment).
+#
+# bf16 needs TWO prefixes because the failing families live in
+# different catalogue leaves than fp16:
+#   * "BB"    -- no-bias backward GEMM (SPX row-append target). The
+#               forward/bias BB leaf carries a GridBased catch-all so it
+#               never short-circuits; only the no-bias UA_Type leaf does.
+#   * "BB_HA" -- bias CU38 leaf (CPX WGMXCC 4->1 target), the bf16 twin
+#               of the HH CU38 files.
 DAT_PREFIXES = {
-    "HH": "TensileLibrary_HH_HH_HA_Bias_SAV_UA_Type_HH_HPA_Contraction_l_",
+    "HH":    "TensileLibrary_HH_HH_HA_Bias_SAV_UA_Type_HH_HPA_Contraction_l_",
+    "BB":    "TensileLibrary_BB_BB_UA_Type_BB_HPA_Contraction_l_",
+    "BB_HA": "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_",
 }
 
 # SPX heuristic-table rows to patch.
@@ -254,14 +275,30 @@ SPX_SHAPES = (
     +
     [("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat", 2048, 256, 1,  100),
      ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat", 2048, 100, 1,  256)]
+    +
+    # bf16 no-bias backward GEMM (transA=N transB=N): the full
+    # hidden x classes x batch grid that returned 0 solutions on BOTH
+    # SPX (228-CU) and CPX (<=48-CU) -- both fall back to this untagged
+    # gfx942 leaf since it has no CU-specific variant at those CU counts.
+    # key order [M=hidden, N=classes, batch=1, K=batch] matches the
+    # (M,N,K) the regression parser reconstructs.
+    [("BB", "Ailk_Bljk_Cijk_Dijk_gfx942.dat", hd, nc, 1, bs)
+     for hd in (512, 1024, 2048, 4096)
+     for nc in (10, 100, 256, 1000, 2048)
+     for bs in (32, 64, 128, 256, 512, 1024)]
 )
 
-# CPX WGMXCC=4 catalogue defect is in the HH_HH gfx942 38cu kernels.
-# SS_SS 38cu already ships with WGMXCC=1 across all 5 versions.
+# CPX WGMXCC=4 catalogue defect is in the HH_HH gfx942 38cu kernels
+# (and the BB_BB 38cu kernels -- same all-WGMXCC=4 distribution). SS_SS
+# 38cu already ships with WGMXCC=1 across all versions. The BB_HA rows
+# are only applied on bf16-enabled versions (see main()).
 CPX_DATS = [
     ("HH", "Alik_Bljk_Cijk_Dijk_CU38_gfx942.dat"),
     ("HH", "Ailk_Bljk_Cijk_Dijk_CU38_gfx942.dat"),
     ("HH", "Ailk_Bjlk_Cijk_Dijk_CU38_gfx942.dat"),
+    ("BB_HA", "Alik_Bljk_Cijk_Dijk_CU38_gfx942.dat"),
+    ("BB_HA", "Ailk_Bljk_Cijk_Dijk_CU38_gfx942.dat"),
+    ("BB_HA", "Ailk_Bjlk_Cijk_Dijk_CU38_gfx942.dat"),
 ]
 
 # SOLUTION_INDEX[v][(dtype_tag, suffix)] -> kernel solution index in
@@ -284,6 +321,18 @@ SOLUTION_INDEX = {
     "7.2.3": {("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       348921,
               ("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"): 340091,
               ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 336905},
+    # rocm/7.2.4: fp16 catalogue matches 7.2.3 byte-for-byte (same
+    # kernel names at the same indices), so it reuses family-C's HH
+    # indices. It ALSO gets bf16 coverage: the no-bias backward BB_BB
+    # gfx942 GEMM (transA=N transB=N) is EqualityMatching-only with no
+    # GridBased catch-all, so we route its small-N grid to a robust
+    # in-pool bf16 kernel -- index 205232, MT32x16x32/MI16x16x1/GSU1/
+    # WGMXCC1, 0 size-multiple assertions (accepts any M,N,K on any
+    # partition). Verified failing on both SPX and CPX before patching.
+    "7.2.4": {("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       348921,
+              ("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"): 340091,
+              ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 336905,
+              ("BB", "Ailk_Bljk_Cijk_Dijk_gfx942.dat"):       205232},
     # rocm/7.13.0: catalogue was substantially regenerated -- the
     # 7.2.x indices don't survive. Mapped by tile signature:
     # MT16x16x256/MI16x16x1/WGMXCC1/GSU1 for fwd, MT128x{32,16}x32
@@ -397,16 +446,25 @@ def main():
     sdir = pathlib.Path(args.src_libdir)
     ddir = pathlib.Path(args.dst_libdir)
     idx_map = SOLUTION_INDEX[args.rocm_version]
+    # bf16 (BB / BB_HA) is opt-in per version: it runs only when this
+    # version carries a BB solution index. Versions without one get the
+    # fp16-only (HH) behaviour, unchanged.
+    bf16_enabled = any(tag == "BB" for (tag, _s) in idx_map)
     # Group shapes by (dtype_tag, suffix): each file is read+written
-    # once with all matching rows applied.
+    # once with all matching rows applied. Skip any (tag, suffix) this
+    # version has no index for (auto-scopes BB rows to bf16 versions).
     by_file = {}
     for tag, suffix, M, N, B, K in SPX_SHAPES:
         by_file.setdefault((tag, suffix), []).append((M, N, B, K))
     for (tag, suffix), shapes in by_file.items():
+        if (tag, suffix) not in idx_map:
+            continue
         prefix = DAT_PREFIXES[tag]
         patch_spx(sdir / (prefix + suffix), ddir / (prefix + suffix),
                   shapes, idx_map[(tag, suffix)])
     for tag, suffix in CPX_DATS:
+        if tag.startswith("BB") and not bf16_enabled:
+            continue
         prefix = DAT_PREFIXES[tag]
         patch_cpx(sdir / (prefix + suffix), ddir / (prefix + suffix))
 
@@ -418,17 +476,23 @@ PYEOF
 # ── install into DST_LIBDIR ─────────────────────────────────────────
 ${SUDO} mkdir -p "${EFFECTIVE_DST_LIBDIR}"
 
-HH_PREFIX="TensileLibrary_HH_HH_HA_Bias_SAV_UA_Type_HH_HPA_Contraction_l_"
-PATCHED_FILES=(
-   "${HH_PREFIX}Alik_Bljk_Cijk_Dijk_gfx942.dat"           # SPX fwd      fp16
-   "${HH_PREFIX}Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"     # SPX bwd_grad fp16
-   "${HH_PREFIX}Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"     # SPX bwd_wei  fp16
-   "${HH_PREFIX}Alik_Bljk_Cijk_Dijk_CU38_gfx942.dat"      # CPX fwd      fp16 (WGMXCC rewrite)
-   "${HH_PREFIX}Ailk_Bljk_Cijk_Dijk_CU38_gfx942.dat"      # CPX bwd_grad fp16 (WGMXCC rewrite)
-   "${HH_PREFIX}Ailk_Bjlk_Cijk_Dijk_CU38_gfx942.dat"      # CPX bwd_wei  fp16 (WGMXCC rewrite)
-)
+# The set of patched .dat is whatever the inline patcher actually wrote
+# into WORKDIR. Deriving it here (rather than hard-coding) keeps this
+# section correct as coverage grows: fp16-only versions yield the 6 HH
+# files; bf16-enabled versions (7.2.4) additionally yield the BB SPX
+# leaf + 3 BB_HA CU38 leaves.
+mapfile -t PATCHED_FILES < <(cd "${WORKDIR}" && ls -1 *.dat 2>/dev/null)
+[ "${#PATCHED_FILES[@]}" -gt 0 ] \
+   || send-error "inline patcher produced no .dat files in ${WORKDIR}"
 for fname in "${PATCHED_FILES[@]}"; do
-   ${SUDO} cp -p "${WORKDIR}/${fname}" "${EFFECTIVE_DST_LIBDIR}/${fname}"
+   # --remove-destination is REQUIRED: on a --replace re-run the dst may
+   # already be a symlink into the base SDK (from a prior run's symlink
+   # farm, for files that weren't patched then but are now). A plain
+   # `cp` FOLLOWS that symlink and writes THROUGH to the base SDK,
+   # silently corrupting it. --remove-destination unlinks the dst first
+   # so we always write a real file into the overlay and never touch
+   # the base tree.
+   ${SUDO} cp -p --remove-destination "${WORKDIR}/${fname}" "${EFFECTIVE_DST_LIBDIR}/${fname}"
    ${SUDO} chmod 0644 "${EFFECTIVE_DST_LIBDIR}/${fname}"
 done
 
@@ -479,15 +543,18 @@ cat <<-EOF | ${SUDO} tee "${DST_DOCDIR}/README.md" >/dev/null
 
 	Produced by ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY}).
 
-	Two fp16 regressions on MI300A:
+	hipBLASLt heuristic regressions on MI300A (fp16 always; bf16 on
+	versions that carry a BB index -- 7.2.4):
 
-	* SPX heuristic-table hole -- adds exact-match rows to 3 CU228 .dat
-	  files routing the failing shapes to known-good 6.4.1 kernels.
+	* SPX heuristic-table hole -- appends exact-match rows to the
+	  failing .dat files, routing the shapes to known-good kernels
+	  (fp16: 6.4.1 winners; bf16: the no-bias backward BB leaf).
 	* CPX WorkGroupMappingXCC=4 predicate failure -- rewrites WGMXCC=1
-	  in every solution of 3 CU38 .dat files.
+	  in every solution of the CU38 .dat files (HH always; BB on bf16
+	  versions).
 
-	Layout: ${DST_LIBDIR}/ contains the 6 patched .dat plus symlinks
-	back into ${SRC_LIBDIR}/ for everything else.
+	Layout: ${DST_LIBDIR}/ contains ${#PATCHED_FILES[@]} patched .dat plus
+	symlinks back into ${SRC_LIBDIR}/ for everything else.
 
 	Activate:    module load rocm/${ROCM_VERSION}  (auto-loads the overlay)
 	Deactivate:  module unload hipblaslt/patched   (HIPBLASLT_TENSILE_LIBPATH
@@ -498,9 +565,10 @@ ${SUDO} mkdir -p "$(dirname "${MODULE_FILE}")"
 cat <<-EOF | ${SUDO} tee "${MODULE_FILE}" >/dev/null
 	-- ${MODULE_FILE}
 	--
-	-- Opt-in fp16 hipBLASLt overlay for rocm/${ROCM_VERSION}:
-	--   1. SPX heuristic restoration (CU228) -- 3 .dat files.
-	--   2. CPX WGMXCC: 4 -> 1 predicate fix  (CU38)  -- 3 .dat files.
+	-- Opt-in hipBLASLt overlay for rocm/${ROCM_VERSION} (fp16; bf16 on 7.2.4):
+	--   1. SPX heuristic restoration -- exact-match .dat rows.
+	--   2. CPX WGMXCC: 4 -> 1 predicate fix (CU38 .dat).
+	-- ${#PATCHED_FILES[@]} patched .dat total this version.
 	--
 	-- Selected via HIPBLASLT_TENSILE_LIBPATH; base SDK byte-for-byte
 	-- untouched. Overlay lives in ${INSTALL_PREFIX}/hipblaslt/library/.
@@ -509,13 +577,13 @@ cat <<-EOF | ${SUDO} tee "${MODULE_FILE}" >/dev/null
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("Version: patched (rocm-${ROCM_VERSION} base)")
 	whatis("Category: AMD")
-	whatis("Description: Restores perf on MI300A SPX and CPX for skinny fp16 GEMMs")
+	whatis("Description: Restores perf on MI300A SPX and CPX for skinny fp16 (and bf16 on 7.2.4) GEMMs")
 
 	-- No prereq("rocm/${ROCM_VERSION}"): structural via MODULEPATH-scoping
 	-- under rocmplus-${ROCM_VERSION}/. A real prereq() also breaks the
 	-- auto-load from inside rocm/${ROCM_VERSION}.lua.
 
-	local libpath = "${DST_LIBDIR}"
+	local libpath = "${EFFECTIVE_DST_LIBDIR}"
 	setenv("HIPBLASLT_TENSILE_LIBPATH", libpath)
 
 	-- Sentinel: \`env | grep HIPBLASLT_OVERLAY\` confirms the overlay is active.
@@ -573,7 +641,7 @@ fi
 
 echo ""
 echo "[hipblaslt_patch] done."
-echo "  overlay tree : ${DST_LIBDIR}  (6 patched .dat + ${sl_count} symlinks)"
+echo "  overlay tree : ${DST_LIBDIR}  (${#PATCHED_FILES[@]} patched .dat + ${sl_count} symlinks)"
 echo "  modulefile   : ${MODULE_FILE}"
 echo ""
 echo "[hipblaslt_patch] verify (single command, auto-loads the overlay):"
