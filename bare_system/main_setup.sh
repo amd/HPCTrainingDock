@@ -236,7 +236,7 @@ usage()
    echo "  --quick-installs [0 or 1]:  skip packages whose wall >= 20 min (measured from job 8065 sweep): pytorch (91m), tensorflow (70m), jax (34m, when policy gate allows). Also skips ftorch (transitive: needs pytorch), julia (dormant: no install wired), and intellikit (explicit always-skip in quick mode regardless of wall, e.g. so per-tool iteration does not retrigger its build and its network-heavy monorepo clone does not block the long-pole iteration loop). likwid + mdb are now BUILT in quick mode (sub-minute builds, useful by default). Threshold raised from 15 -> 20 min after job 8065 audit moved petsc (17m) and scorep (17m) under the cutoff. Default $QUICK_INSTALLS"
    echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf the versioned subdir under \${TOP_INSTALL_PATH} (the version itself lives in the leaf script). Default $REPLACE_EXISTING"
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
-   echo "  --skip-patches [0 or 1]:  operator opt-out for the rocm-patches step (rocm/scripts/rocm_patches.sh). Default 0 runs the step; for most ROCm versions the patches script self-no-ops via NOOP_RC=43 so the cost is nil. Set to 1 when targeting a tree where the patches overlay would mismatch the runtime (e.g. 7.2.0 / 7.2.1 patches built for a newer userland and running on Ubuntu 22.04 nodes). When skipped, the per-package summary records 'rocm-patches(--skip-patches)' in the DESELECTED bucket. Default $SKIP_PATCHES"
+   echo "  --skip-patches [0 or 1]:  operator opt-out for the rocm-patches step (rocm/scripts/rocm_patches.sh) AND the hipblaslt-patch step (rocm/scripts/hipblaslt_patch_setup.sh). Default 0 runs both; for most ROCm versions each script self-no-ops via NOOP_RC=43 so the cost is nil. Set to 1 when targeting a tree where the patches overlay would mismatch the runtime (e.g. 7.2.0 / 7.2.1 patches built for a newer userland and running on Ubuntu 22.04 nodes). When skipped, the per-package summary records 'rocm-patches(--skip-patches)' and 'hipblaslt-patch(--skip-patches)' in the DESELECTED bucket. Default $SKIP_PATCHES"
    echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, likwid, mdb, intellikit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre, emacs. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, hpctoolkit, likwid, mdb, intellikit, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre, emacs. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Currently supported only for pytorch; keys are aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build."
    echo "  --rocm-rc-prefix [ FAMILY ]:  release-candidate family name (e.g. 'therock', 'afar'). Auto-detected from \${ROCM_PATH} basename for rocm-{therock,afar}-* trees. Empty for regular releases. When non-empty, install/module dirs become rocmplus-\${FAMILY}-\${ROCM_VERSION}/ instead of rocmplus-\${ROCM_VERSION}/ -- EXCEPT for FAMILY='afar', where the suffix is rocmplus-afar-\${ROCM_RC_COMPILER}-\${ROCM_VERSION}/ (compiler-AND-rocm-keyed; see --rocm-rc-compiler). Default: auto-detected (empty for regular releases)."
    echo "  --rocm-rc-compiler [ COMPILER ]:  compiler/AFAR release number for AFAR trees (e.g. '22.2.0' for rocm-afar-22.2.0, '23.2.1' for rocm-afar-23.2.1 a.k.a. the TheRock-AFAR drop). Auto-detected from \${ROCM_PATH} basename when ROCM_RC_PREFIX='afar'. Empty for non-afar trees. When non-empty AND ROCM_RC_PREFIX='afar', the rocmplus suffix becomes afar-\${COMPILER}-\${ROCM_VERSION} so two AFAR drops with the same SDK numeric but different compiler releases get distinct rocmplus trees. Default: auto-detected."
@@ -1780,11 +1780,20 @@ if [ "${SKIP_ROCM_INSTALL}" == 0 ]; then
    # patches binaries built for a newer GLIBC than the target nodes).
    if [ "${SKIP_PATCHES}" == "1" ]; then
       DESELECTED_PKGS+=("rocm-patches(--skip-patches)")
+      DESELECTED_PKGS+=("hipblaslt-patch(--skip-patches)")
       echo ""
       echo "### deselected: rocm-patches (--skip-patches)"
+      echo "### deselected: hipblaslt-patch (--skip-patches)"
       echo ""
    else
       run_and_log rocm-patches rocm/scripts/rocm_patches.sh --rocm-version ${ROCM_VERSION}
+
+      # hipBLASLt heuristic-catalogue overlay (lightweight msgpack edit of
+      # the shipped Tensile .dat libraries). Version-gated: NOOP_RC=43 for
+      # any ROCm without a vendored fix, so it self-selects. Default
+      # --module-path/--rocm-path match rocm_setup.sh's install layout
+      # (/etc/lmod/modules/ROCm/rocm, /opt/rocm-${V}), so no threading here.
+      run_and_log hipblaslt-patch rocm/scripts/hipblaslt_patch_setup.sh --rocm-version ${ROCM_VERSION}
    fi
 else
    source ~/.bashrc
@@ -1810,11 +1819,20 @@ else
    # 1 reports it uniformly across all token shapes (numeric and RC).
    if [ "${SKIP_PATCHES}" == "1" ]; then
       DESELECTED_PKGS+=("rocm-patches(--skip-patches)")
+      DESELECTED_PKGS+=("hipblaslt-patch(--skip-patches)")
       echo ""
       echo "### deselected: rocm-patches (--skip-patches)"
+      echo "### deselected: hipblaslt-patch (--skip-patches)"
       echo ""
    else
       run_and_log rocm-patches rocm/scripts/rocm_patches.sh \
+         --rocm-version ${ROCM_VERSION} \
+         --rocm-path "${ROCM_PATH}"
+
+      # hipBLASLt overlay on the pre-loaded RC/module SDK. --rocm-path is
+      # threaded (mirrors rocm-patches) since the SDK is not at the default
+      # /opt/rocm-${V}; version gate NOOPs unsupported trees.
+      run_and_log hipblaslt-patch rocm/scripts/hipblaslt_patch_setup.sh \
          --rocm-version ${ROCM_VERSION} \
          --rocm-path "${ROCM_PATH}"
    fi
