@@ -2,6 +2,20 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-07-06
+
+- User-facing modules:
+    + emacs
+    + miniconda3
+    + miniforge3
+    + rocbudai
+- Modules:
+    + emacs/30.1
+    + miniconda3/25.3.1
+    + miniforge3/24.9.0
+    + rocbudai/dev
+
+[Full snapshot](archive/AAC6_system_status_2026-07-06.md)
 ## 2026-07-05
 
 - ROCm default: 7.13.0 → 7.2.4
