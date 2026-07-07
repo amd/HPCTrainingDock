@@ -1556,7 +1556,33 @@ if [ "${INCLUDE_TOOLS}" = "1" ]; then
          echo "ROCm built-in ${TOOL_NAME_MC} already installed"
       else
          if [ "${DISTRO}" == "ubuntu" ]; then
-            ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y ${TOOL_NAME}
+            # Install this built-in tool WITHOUT letting apt evict the
+            # version-suffixed ROCm dev stack. The unversioned
+            # rocprofiler-systems / rocprofiler-compute (and legacy omnitrace /
+            # omniperf) debs depend on the UNVERSIONED rocm-core / hsa-rocr /
+            # rocprofiler / roctracer / rocm-smi-lib / rocminfo, which conflict
+            # with the *${ROCM_VERSION} packages that make up this SDK. Without
+            # --no-remove, apt is free to "resolve" that conflict by REMOVING
+            # the versioned dev packages (hip-dev, rocm-hip-sdk,
+            # rocm-hip-runtime-dev, rocm-opencl-dev, migraphx/mivisionx/rpp-dev,
+            # ...) and then fail to unpack the unversioned replacements (dpkg
+            # file-overwrite errors), leaving the SDK with NO HIP headers/cmake.
+            # That is exactly what corrupted the rocm-6.3.3 SDK (apt removed
+            # hip-dev6.3.3 & co, the replacement unpack failed, and every
+            # downstream HIP/MPI build then broke). --no-remove makes apt abort
+            # BEFORE touching anything when the plan would remove packages, so
+            # the versioned dev tree is always preserved. On 6.3.2/6.3.4 apt did
+            # not need to remove anything, so this is a no-op for them.
+            #
+            # A non-zero rc is non-fatal on purpose: keeping the SDK dev tree
+            # complete matters far more than this optional built-in tool, which
+            # is also provided from source (tools/scripts/rocprof-sys_setup.sh,
+            # rocprof-compute_setup.sh). The prior unguarded call already failed
+            # with dpkg errors on 6.3.2/6.3.3/6.3.4 without aborting the build,
+            # so tolerating the rc preserves that behavior.
+            if ! ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y --no-remove ${TOOL_NAME}; then
+               echo "WARNING: skipping built-in ${TOOL_NAME_MC}: 'apt-get install ${TOOL_NAME}' would remove version-suffixed ROCm packages (blocked by --no-remove). SDK dev tree preserved; build ${TOOL_NAME_MC} from source instead." >&2
+            fi
          fi
       fi
 
@@ -1639,7 +1665,33 @@ EOF
          echo "ROCm built-in ${TOOL_NAME_MC} already installed"
       else
          if [ "${DISTRO}" == "ubuntu" ]; then
-            ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y ${TOOL_NAME}
+            # Install this built-in tool WITHOUT letting apt evict the
+            # version-suffixed ROCm dev stack. The unversioned
+            # rocprofiler-systems / rocprofiler-compute (and legacy omnitrace /
+            # omniperf) debs depend on the UNVERSIONED rocm-core / hsa-rocr /
+            # rocprofiler / roctracer / rocm-smi-lib / rocminfo, which conflict
+            # with the *${ROCM_VERSION} packages that make up this SDK. Without
+            # --no-remove, apt is free to "resolve" that conflict by REMOVING
+            # the versioned dev packages (hip-dev, rocm-hip-sdk,
+            # rocm-hip-runtime-dev, rocm-opencl-dev, migraphx/mivisionx/rpp-dev,
+            # ...) and then fail to unpack the unversioned replacements (dpkg
+            # file-overwrite errors), leaving the SDK with NO HIP headers/cmake.
+            # That is exactly what corrupted the rocm-6.3.3 SDK (apt removed
+            # hip-dev6.3.3 & co, the replacement unpack failed, and every
+            # downstream HIP/MPI build then broke). --no-remove makes apt abort
+            # BEFORE touching anything when the plan would remove packages, so
+            # the versioned dev tree is always preserved. On 6.3.2/6.3.4 apt did
+            # not need to remove anything, so this is a no-op for them.
+            #
+            # A non-zero rc is non-fatal on purpose: keeping the SDK dev tree
+            # complete matters far more than this optional built-in tool, which
+            # is also provided from source (tools/scripts/rocprof-sys_setup.sh,
+            # rocprof-compute_setup.sh). The prior unguarded call already failed
+            # with dpkg errors on 6.3.2/6.3.3/6.3.4 without aborting the build,
+            # so tolerating the rc preserves that behavior.
+            if ! ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y --no-remove ${TOOL_NAME}; then
+               echo "WARNING: skipping built-in ${TOOL_NAME_MC}: 'apt-get install ${TOOL_NAME}' would remove version-suffixed ROCm packages (blocked by --no-remove). SDK dev tree preserved; build ${TOOL_NAME_MC} from source instead." >&2
+            fi
          fi
       fi
 
