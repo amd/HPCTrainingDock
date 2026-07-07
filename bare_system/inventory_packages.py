@@ -155,6 +155,27 @@ depends on the output mode:
     defaults to `--per-table 5` if the operator did not pass one
     explicitly, since version cells are wider than glyph cells.
 
+With `--per-version-rows` (opt-in; text, markdown, and
+`--install-provenance`), any package that exhibits two or more distinct
+versions anywhere in a table is instead rendered VERSION-ALIGNED: one
+row per distinct version, labelled `<pkg>=<ver>`, where each column
+shows that version only in the row for that exact version (blank
+otherwise). This turns the positional continuation rows above into a
+matrix that reads down each version:
+
+  pytorch=2.8.0    2.8.0   2.8.0   Q       Q       Q
+  pytorch=2.9.1                                                    2.9.1   2.9.1
+  pytorch=2.11.0                   Q       Q       Q       2.11.0  2.11.0  2.11.0
+
+Non-version glyphs (`N`/`B`/`F`) and any generic (version-less /
+full-sweep) Slurm `Q`/`R` appear on a leading base `<pkg>` row (emitted
+only when non-empty); with `--slurm`, a `Q`/`R` whose job targets a
+specific version (`PACKAGES_LIST` token `pytorch=2.8.0`) lands on that
+exact `<pkg>=<ver>` row. Single-version and versionless packages are
+unaffected. In `--install-provenance` the version key is the modulefile
+basename (`<ver>.lua`); modulefiles with no parseable version stay on
+the base row.
+
 Usage:
   python3 bare_system/inventory_packages.py
   python3 bare_system/inventory_packages.py --roots /shared/apps/ubuntu/opt
@@ -167,6 +188,8 @@ Usage:
                                             --provenance-time      # date + HH:MM
   python3 bare_system/inventory_packages.py --slurm     # overlay in-flight
                                                          # (RUNNING/PENDING) installs
+  python3 bare_system/inventory_packages.py --versions --per-version-rows
+                                                         # one pkg=<ver> row per version
 """
 import argparse
 import os
@@ -706,6 +729,124 @@ _NON_INSTALL_GLYPHS = {"-", "N", "B", "F", "R", "Q"}
 # represented by jobs in both states (see collect_slurm_queue).
 QUEUE_GLYPH = {"R": "R", "PD": "Q"}
 
+# Precedence for queue states: RUNNING ('R') outranks PENDING ('PD') so a
+# running job is never masked by a pending one when both are present for
+# the same (suffix, pkg[, version]).
+_QUEUE_RANK = {"R": 2, "PD": 1}
+
+
+def _queue_collapse(state_by_ver):
+    """Collapse a {version_or_None: state} dict to a single state.
+
+    Used by the default (non --per-version-rows) overlay path, which does
+    not care WHICH version is in flight -- only whether the (suffix, pkg)
+    has any RUNNING / PENDING job. 'R' outranks 'PD'. Returns None for an
+    empty / falsy mapping.
+    """
+    best = None
+    for st in (state_by_ver or {}).values():
+        if best is None or _QUEUE_RANK.get(st, 0) > _QUEUE_RANK.get(best, 0):
+            best = st
+    return best
+
+
+def _is_version_entry(s):
+    """True iff `s` is an actual version string rather than a status glyph.
+
+    Filters out the presence/queue glyphs ('-', 'N', 'B', 'F', 'R', 'Q'),
+    the versionless-install marker 'Y', and the provenance 'unknown'
+    sentinel. Everything else (e.g. '2.9.1', but also a brief-mode
+    multi-install count like '2') is treated as a version token, so
+    callers that use this for split decisions must only do so in
+    --versions / provenance context, never in brief mode.
+    """
+    return s not in _NON_INSTALL_GLYPHS and s not in ("Y", "unknown")
+
+
+def _pkg_version_union(cells):
+    """Sorted (semver-ascending) list of distinct version strings across
+    all `cells` for one package row. `cells` entries are the list[str]
+    produced by presence_with_version() (a scalar is tolerated and
+    wrapped). Non-version glyphs are excluded via _is_version_entry.
+    """
+    vs = set()
+    for c in cells:
+        for e in (c if isinstance(c, list) else [c]):
+            if _is_version_entry(e):
+                vs.add(e)
+    return sorted(vs, key=_pkg_version_sort_key)
+
+
+def _should_split(cells):
+    """A package row is rendered as one line per version (label
+    `pkg=<ver>`) iff it exhibits >= 2 distinct version strings anywhere
+    across its columns. Single-version and versionless packages keep the
+    normal single-row rendering.
+    """
+    return len(_pkg_version_union(cells)) >= 2
+
+
+def _versioned_rows(pkg, raw_cells, versions, queue_map):
+    """Build the version-aligned emit rows for a split package.
+
+    Returns a list of (label, [str_cell_per_column]) tuples:
+
+      - An optional leading base row labelled `pkg` carrying the
+        non-version glyphs ('N'/'B'/'F') and any GENERIC (version-less /
+        full-sweep) queue glyph for columns that have no installed
+        version. Emitted only when at least one such glyph exists.
+      - One row per distinct version, labelled `pkg=<ver>`; a column
+        shows `<ver>` where that exact version is installed, the
+        version-specific queue glyph ('Q'/'R') where a Slurm job for
+        that (suffix, pkg, ver) is pending/running, else blank.
+
+    `raw_cells[ci]` is the pre-overlay list[str] cell for column
+    `versions[ci]`. `queue_map` is the nested
+    {(suffix, pkg): {ver_or_None: state}} dict from collect_slurm_queue().
+    """
+    union = _pkg_version_union(raw_cells)
+    rows = []
+
+    base_cells = []
+    any_base = False
+    for ci, suffix in enumerate(versions):
+        cell = raw_cells[ci]
+        entries = cell if isinstance(cell, list) else [cell]
+        glyph = ""
+        if entries and entries[0] in ("N", "B", "F"):
+            glyph = entries[0]
+        elif not any(_is_version_entry(e) for e in entries):
+            # No installed version in this column -> a full-sweep /
+            # version-less queued job (the None bucket) is the only thing
+            # we can attribute here, and it belongs on the base row.
+            state_by_ver = queue_map.get((suffix, pkg)) if queue_map else None
+            if state_by_ver and None in state_by_ver:
+                st = state_by_ver[None]
+                glyph = QUEUE_GLYPH.get(st, st)
+        if glyph:
+            any_base = True
+        base_cells.append(glyph)
+    if any_base:
+        rows.append((pkg, base_cells))
+
+    for pv in union:
+        vcells = []
+        for ci, suffix in enumerate(versions):
+            cell = raw_cells[ci]
+            entries = cell if isinstance(cell, list) else [cell]
+            if pv in entries:
+                vcells.append(pv)
+                continue
+            glyph = ""
+            if queue_map:
+                state_by_ver = queue_map.get((suffix, pkg))
+                if state_by_ver and pv in state_by_ver:
+                    st = state_by_ver[pv]
+                    glyph = QUEUE_GLYPH.get(st, st)
+            vcells.append(glyph)
+        rows.append((f"{pkg}={pv}", vcells))
+    return rows
+
 
 def _cell_is_installed(cell):
     """True iff `cell` represents a successful install.
@@ -736,15 +877,18 @@ def _apply_queue_overlay(cell, suffix, pkg, queue_map):
     holes. The list shape used by --versions mode is preserved so the
     fixed-width / markdown renderers keep working uniformly.
 
-    `queue_map` is the {(suffix, pkg): 'R'|'PD'} dict from
-    collect_slurm_queue(); a None / empty map is a no-op.
+    `queue_map` is the {(suffix, pkg): {ver_or_None: 'R'|'PD'}} nested
+    dict from collect_slurm_queue(); a None / empty map is a no-op.
     """
     if not queue_map:
         return cell
     is_absent = (cell == "-") or (isinstance(cell, list) and cell == ["-"])
     if not is_absent:
         return cell
-    state = queue_map.get((suffix, pkg))
+    # queue_map value is now a {version_or_None: state} dict (see
+    # collect_slurm_queue); collapse it to a single state for the
+    # default (non --per-version-rows) overlay.
+    state = _queue_collapse(queue_map.get((suffix, pkg)))
     if state is None:
         return cell
     glyph = QUEUE_GLYPH.get(state, state)
@@ -815,7 +959,7 @@ def _cell_for(roots, version, pkg, pres_regex, ver_regex, versions_mode):
 
 
 def _render_one_md_table(title, versions, roots, versions_mode=False,
-                         queue_map=None):
+                         queue_map=None, per_version_rows=False):
     """Emit a single Markdown table for the given versions. Caller is
     responsible for chunking when len(versions) is too wide for the
     intended renderer (glow auto-shrinks columns past ~7-8 entries on a
@@ -823,28 +967,43 @@ def _render_one_md_table(title, versions, roots, versions_mode=False,
     versions_mode=True, every cell that would have been 'Y' is replaced
     by the installed version string. When `queue_map` is provided, absent
     ('-') cells whose (version, pkg) has a RUNNING / PENDING Slurm job are
-    filled with the queue glyph (R / Q)."""
+    filled with the queue glyph (R / Q).
+
+    With per_version_rows=True (only meaningful with versions_mode), a
+    package exhibiting >= 2 distinct versions is emitted as one markdown
+    row per version (label `pkg=<ver>`), version-aligned across columns,
+    instead of a single ' / '-joined row. See _versioned_rows."""
     print(f"## {title}\n")
     header = ["package"] + versions
     print("| " + " | ".join(header) + " |")
     print("|" + "|".join(["---"] * len(header)) + "|")
-    # Pre-compute one full pass of cell values so we can also derive
-    # `count Y` without re-walking the filesystem.
-    rows = []
+    # Pre-compute RAW (pre-overlay) cells so we can also derive `count Y`
+    # without re-walking the filesystem.
+    raw_rows = []
     for pkg, pres_regex, ver_regex in PKG_LIST:
-        cells = [_apply_queue_overlay(
-                     _cell_for(roots, v, pkg, pres_regex, ver_regex,
-                               versions_mode),
-                     v, pkg, queue_map)
+        cells = [_cell_for(roots, v, pkg, pres_regex, ver_regex,
+                           versions_mode)
                  for v in versions]
-        rows.append((pkg, cells))
-    for pkg, cells in rows:
-        # Cells from _cell_for() under versions_mode are lists (one entry
-        # per matched install); markdown collapses them back to a single
-        # cell with the historical ' / ' join so the table stays one row
-        # per package. Brief-mode scalar cells pass through unchanged.
-        joined = [_join_cell(c) for c in cells]
-        print("| " + " | ".join([pkg] + joined) + " |")
+        raw_rows.append((pkg, cells))
+    for pkg, cells in raw_rows:
+        if per_version_rows and versions_mode and _should_split(cells):
+            # Version-aligned rows: one `pkg=<ver>` markdown row per
+            # distinct version (plus an optional base row for N/B/F /
+            # generic queue), each cell already a plain string.
+            for label, row_cells in _versioned_rows(pkg, cells, versions,
+                                                     queue_map):
+                print("| " + " | ".join([label] + row_cells) + " |")
+        else:
+            # Cells from _cell_for() under versions_mode are lists (one
+            # entry per matched install); markdown collapses them back to
+            # a single cell with the historical ' / ' join so the table
+            # stays one row per package. Brief-mode scalar cells pass
+            # through unchanged.
+            overlaid = [_apply_queue_overlay(cells[ci], versions[ci], pkg,
+                                             queue_map)
+                        for ci in range(len(versions))]
+            joined = [_join_cell(c) for c in overlaid]
+            print("| " + " | ".join([pkg] + joined) + " |")
     # AMD clang / LLVM version row -- metadata, not a package presence cell.
     # Placed below the package rows and above 'count Y' so it sits with
     # the other column-summary content.
@@ -860,18 +1019,19 @@ def _render_one_md_table(title, versions, roots, versions_mode=False,
     # version string under --versions mode); -, N, B do not count.
     counts = ["**count Y**"]
     for ci in range(len(versions)):
-        counts.append(str(sum(1 for _, cells in rows
+        counts.append(str(sum(1 for _, cells in raw_rows
                               if _cell_is_installed(cells[ci]))))
     print("| " + " | ".join(counts) + " |")
     print()
 
 
 def render_table(title, versions, roots, per_table=None, versions_mode=False,
-                 queue_map=None):
+                 queue_map=None, per_version_rows=False):
     """Markdown rendering. With per_table=N, chunk wide tables into
     sub-tables of at most N versions each (good for glow which auto-
-    shrinks any table wider than the terminal). versions_mode and
-    queue_map are threaded through to _render_one_md_table.
+    shrinks any table wider than the terminal). versions_mode,
+    queue_map and per_version_rows are threaded through to
+    _render_one_md_table.
     """
     if per_table and per_table > 0 and len(versions) > per_table:
         for i in range(0, len(versions), per_table):
@@ -881,15 +1041,17 @@ def render_table(title, versions, roots, per_table=None, versions_mode=False,
                         f"{chunk[0]} … {chunk[-1]})"
             _render_one_md_table(sub_title, chunk, roots,
                                  versions_mode=versions_mode,
-                                 queue_map=queue_map)
+                                 queue_map=queue_map,
+                                 per_version_rows=per_version_rows)
     else:
         _render_one_md_table(title, versions, roots,
                              versions_mode=versions_mode,
-                             queue_map=queue_map)
+                             queue_map=queue_map,
+                             per_version_rows=per_version_rows)
 
 
 def render_text_table(title, versions, roots, versions_mode=False,
-                      queue_map=None):
+                      queue_map=None, per_version_rows=False):
     """Fixed-width plain-text rendering (no markdown, no glow needed).
     Each cell column is exactly as wide as its header. The single-char
     presence symbols (Y/N/B/-) are right-padded so columns stay aligned
@@ -906,46 +1068,66 @@ def render_text_table(title, versions, roots, versions_mode=False,
     blank on that line. The number of continuation rows for a package
     row is `max(len(cell_list)) - 1` over its columns; rows with no
     multi-install columns emit exactly one line as before.
-    """
-    pkg_col = max(len("package"), max(len(p) for p, _, _ in PKG_LIST),
-                  len("count Y"), len("amdclang"), len("rocm_patches"))
 
-    # Pre-compute every cell so we can both size columns AND emit rows
-    # without walking the filesystem twice.  In versions_mode, cells are
-    # `list[str]` (one entry per matched install); in brief mode they
-    # are scalar strings from presence().  We normalize to lists below
-    # so column-width and row-emit logic is uniform.
-    package_rows = []
+    With per_version_rows=True (only meaningful together with
+    versions_mode), any package that exhibits >= 2 distinct versions is
+    instead rendered version-aligned: one row per distinct version,
+    labelled `pkg=<ver>`, each column showing that version only where it
+    is installed (and the version-specific Slurm 'Q'/'R' where a job
+    targets that exact version). See _versioned_rows.
+    """
+    # Pre-compute the RAW (pre-overlay) presence cells once, so we can
+    # derive both `count Y` (from raw cells) and the emitted rows without
+    # re-walking the filesystem. In versions_mode cells are list[str];
+    # in brief mode they are scalar strings from presence().
+    package_raw = []
     for pkg, pres_regex, ver_regex in PKG_LIST:
-        cells = [_apply_queue_overlay(
-                     _cell_for(roots, v, pkg, pres_regex, ver_regex,
-                               versions_mode),
-                     v, pkg, queue_map)
+        cells = [_cell_for(roots, v, pkg, pres_regex, ver_regex,
+                           versions_mode)
                  for v in versions]
-        package_rows.append((pkg, cells))
+        package_raw.append((pkg, cells))
     clang_cells = [clang_version(roots, v) for v in versions]
     rp_cells = [rocm_patches_presence(roots, v) for v in versions]
-    count_cells = [str(sum(1 for _, cells in package_rows
+    count_cells = [str(sum(1 for _, cells in package_raw
                            if _cell_is_installed(cells[ci])))
                    for ci in range(len(versions))]
 
     def _as_list(c):
         return c if isinstance(c, list) else [c]
 
-    # Per-column width: max(header, every install entry across all
-    # package cells, metadata cells, count cell).  Unconditional lower
-    # bound of 6 (matches the pre-versions behavior) so brief-mode
-    # output stays byte-identical -- brief cells are 1 char and short
-    # headers like '7.0.0' (5 chars) would otherwise shrink the column
-    # below 6 and change alignment vs prior runs.  versions_mode can
-    # still grow columns above 6 freely to fit the widest install
-    # string per column (e.g. '13.6.0', '2.10.0').
+    # Flatten every package into concrete (label, [str_cell_per_column])
+    # emit rows. Splitting is only applied in versions_mode (brief-mode
+    # count cells like '2' are not version strings). Non-split packages
+    # get the generic queue overlay + positional continuation rows,
+    # byte-identical to the pre-per-version behavior.
+    emit_rows = []
+    for pkg, cells in package_raw:
+        if per_version_rows and versions_mode and _should_split(cells):
+            emit_rows.extend(_versioned_rows(pkg, cells, versions, queue_map))
+        else:
+            overlaid = [_apply_queue_overlay(cells[ci], versions[ci], pkg,
+                                             queue_map)
+                        for ci in range(len(versions))]
+            as_lists = [_as_list(c) for c in overlaid]
+            max_rows = max(len(c) for c in as_lists) if as_lists else 1
+            for r in range(max_rows):
+                emit_rows.append(
+                    (pkg, [(cl[r] if r < len(cl) else "") for cl in as_lists]))
+
+    # pkg_col fits the widest emitted label (now includes `pkg=<ver>`),
+    # plus the fixed metadata / header labels.
+    pkg_col = max([len(lbl) for lbl, _ in emit_rows]
+                  + [len("package"), len("count Y"),
+                     len("amdclang"), len("rocm_patches")])
+
+    # Per-column width: max(header, every emitted cell in that column,
+    # metadata cells, count cell). Unconditional lower bound of 6 matches
+    # the pre-versions behavior so brief-mode output stays byte-identical.
     col_widths = []
     for ci, v in enumerate(versions):
         w = max(len(v), 6)
-        for _, cells in package_rows:
-            for entry in _as_list(cells[ci]):
-                w = max(w, len(entry))
+        for _, row_cells in emit_rows:
+            w = max(w, len(row_cells[ci]))
         w = max(w, len(clang_cells[ci]), len(rp_cells[ci]),
                 len(count_cells[ci]))
         col_widths.append(w)
@@ -957,23 +1139,12 @@ def render_text_table(title, versions, roots, versions_mode=False,
             parts.append(str(c).ljust(w))
         print(sep.join(parts).rstrip())
 
-    def emit_pkg_row(label, cells):
-        """Emit a package row, spilling multi-install cells across
-        continuation rows. The label is repeated on every continuation
-        row; columns whose install list is shorter than max_rows render
-        as blank on the continuation rows."""
-        as_lists = [_as_list(c) for c in cells]
-        max_rows = max(len(c) for c in as_lists) if as_lists else 1
-        for r in range(max_rows):
-            row_cells = [(cl[r] if r < len(cl) else "") for cl in as_lists]
-            emit_row(label, row_cells)
-
     print(f"=== {title} ===")
     emit_row("package", versions)
     # underline row matching the column widths
     emit_row("-" * pkg_col, ["-" * w for w in col_widths])
-    for pkg, cells in package_rows:
-        emit_pkg_row(pkg, cells)
+    for label, row_cells in emit_rows:
+        emit_row(label, row_cells)
     # Metadata rows (not Y/N package cells): clang ships with the SDK;
     # rocm_patches is the vendored overlay tree applied on top of the SDK.
     emit_row("amdclang", clang_cells)
@@ -1194,6 +1365,54 @@ def _scan_built_by(category_dir):
     return seen
 
 
+# Leading version token in a modulefile basename. pytorch writes
+# `<PYTORCH_VERSION>.lua` and `<PYTORCH_VERSION>_tunableop_enabled.lua`
+# (pytorch_setup.sh), and the other versioned leaves follow the same
+# `<version>[.-_<variant>].lua` shape, so the leading dotted-numeric run
+# is the version key. Basenames with no leading numeric (e.g.
+# `default.lua`) yield no match and fall into the None (version-less)
+# bucket used by the per-version-rows base row.
+_LUA_VERSION_RE = re.compile(r"^(\d+(?:\.\d+)*)")
+
+
+def _scan_built_by_versioned(category_dir):
+    """Like _scan_built_by, but keyed by the modulefile's version.
+
+    Returns {version_or_None: [(script, hash, dirty), ...]}, where the
+    version is parsed from the leading dotted-numeric run of each
+    non-backup .lua basename (`2.9.1.lua` / `2.9.1_tunableop_enabled.lua`
+    -> '2.9.1'). Modulefiles whose basename has no leading numeric map to
+    the `None` bucket. Entries are deduped per bucket, mirroring
+    _scan_built_by's dedupe within a category.
+    """
+    out = {}
+    try:
+        names = sorted(os.listdir(category_dir))
+    except OSError:
+        return out
+    for name in names:
+        if not name.endswith(".lua") or ".bak" in name:
+            continue
+        base = name[:-len(".lua")]
+        m = _LUA_VERSION_RE.match(base)
+        ver = m.group(1) if m else None
+        path = os.path.join(category_dir, name)
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        mm = _BUILT_BY_LINE_RE.search(text)
+        if not mm:
+            continue
+        entry = (mm.group("script").strip(), mm.group("hash") or "",
+                 mm.group("dirty"))
+        bucket = out.setdefault(ver, [])
+        if entry not in bucket:
+            bucket.append(entry)
+    return out
+
+
 _DIRTY_GLYPH = {"clean": "C", "dirty": "D", "unknown": "?"}
 
 
@@ -1289,6 +1508,105 @@ def collect_provenance(module_path, versions, repo=None,
     return out
 
 
+def collect_provenance_versioned(module_path, versions, repo=None,
+                                 with_dates=False, time_too=False,
+                                 roots=None):
+    """Version-aware variant of collect_provenance for --per-version-rows.
+
+    Returns {(version, pkg): {ver_or_None: [formatted_cell_str, ...]}}:
+    the outer key is the (rocmplus column, package); the inner dict is
+    keyed by the modulefile's own version (from _scan_built_by_versioned),
+    so the renderer can emit one `pkg=<ver>` row per modulefile version.
+    Modulefiles with no parseable version land in the `None` bucket
+    (rendered on the package's base row). rocm_patches is stored under
+    its own `None` bucket, same as collect_provenance.
+    """
+    out = {}
+    for v in versions:
+        for pkg, _pres, _ver in PKG_LIST:
+            cat = _category_dir_for(module_path, v, pkg)
+            if cat is None:
+                continue
+            byver = _scan_built_by_versioned(cat)
+            formatted = {}
+            for ver, entries in byver.items():
+                formatted[ver] = _format_provenance_cell(
+                    entries, pkg, repo=repo,
+                    with_dates=with_dates, time_too=time_too)
+            out[(v, pkg)] = formatted
+        sdk_suffix = (_sdk_suffix_for_rocmplus(roots, v)
+                      if roots else v)
+        if sdk_suffix is None:
+            continue
+        entries = _scan_built_by_in_file(
+            os.path.join(module_path, "base", "rocm",
+                         sdk_suffix + ".lua"),
+            script_filter=("rocm_patches.sh", "rocm_patches"))
+        if entries:
+            out[(v, "rocm_patches")] = {None: _format_provenance_cell(
+                entries, "rocm_patches", repo=repo,
+                with_dates=with_dates, time_too=time_too)}
+    return out
+
+
+def _prov_version_union(pvcache, versions, pkg):
+    """Sorted (semver-ascending) list of the distinct non-None version
+    keys for `pkg` across all `versions` columns in a versioned
+    provenance cache (from collect_provenance_versioned)."""
+    vs = set()
+    for v in versions:
+        d = pvcache.get((v, pkg))
+        if d:
+            vs.update(k for k in d if k is not None)
+    return sorted(vs, key=_pkg_version_sort_key)
+
+
+def _prov_flat_cell(pvcache, v, pkg):
+    """Flatten all version buckets of a versioned provenance cell into a
+    single list[str] (dedup, version-sorted with the None bucket last).
+    Used for packages that are NOT split (< 2 distinct versions) so they
+    render as one row, matching the non-versioned provenance output."""
+    d = pvcache.get((v, pkg))
+    if not d:
+        return ["-"]
+    ordered = sorted(d.keys(),
+                     key=lambda k: (k is None,
+                                    _pkg_version_sort_key(k) if k else []))
+    out = []
+    for ver in ordered:
+        for s in d[ver]:
+            if s not in out:
+                out.append(s)
+    return out or ["-"]
+
+
+def _prov_versioned_rows(pvcache, versions, pkg):
+    """Build version-aligned (label, [str_cell_per_column]) rows for a
+    split package in the provenance matrix. Optional leading base row
+    `pkg` carries the None-bucket entries (modulefiles with no parseable
+    version); then one `pkg=<ver>` row per distinct version, each column
+    showing that version's `<payload> <C|D>` provenance or blank."""
+    union = _prov_version_union(pvcache, versions, pkg)
+    rows = []
+    base_cells = []
+    any_base = False
+    for v in versions:
+        d = pvcache.get((v, pkg)) or {}
+        cell = _join_cell(d[None]) if d.get(None) else ""
+        if cell:
+            any_base = True
+        base_cells.append(cell)
+    if any_base:
+        rows.append((pkg, base_cells))
+    for pv in union:
+        cells = []
+        for v in versions:
+            d = pvcache.get((v, pkg)) or {}
+            cells.append(_join_cell(d[pv]) if d.get(pv) else "")
+        rows.append((f"{pkg}={pv}", cells))
+    return rows
+
+
 def _scan_built_by_in_file(lua_path, script_filter=None):
     """Like _scan_built_by but for a single .lua path, returning EVERY
     matching Built-by line (uses re.finditer, not re.search).
@@ -1333,7 +1651,8 @@ def _provenance_cell(module_path, version, pkg, scan_cache):
     return ["-"]
 
 
-def render_provenance_text(title, versions, module_path, scan_cache):
+def render_provenance_text(title, versions, module_path, scan_cache,
+                           per_version_rows=False, pvcache=None):
     """Fixed-width plain-text rendering of the provenance matrix.
 
     Cells in scan_cache are `list[str]` (one entry per matching
@@ -1342,29 +1661,53 @@ def render_provenance_text(title, versions, module_path, scan_cache):
     repeated, the multi-install column shows the next entry, and every
     other column is blank on that line. Column widths fit the widest
     install entry per column.
+
+    With per_version_rows=True (pvcache from collect_provenance_versioned)
+    a package with >= 2 distinct modulefile versions is instead rendered
+    version-aligned: one `pkg=<ver>` row per version. See
+    _prov_versioned_rows.
     """
     print(f"=== {title} ===")
-    pkg_col = max(len("package"), max(len(p) for p, _, _ in PKG_LIST),
-                  len("rocm_patches"))
-    cell_rows = []
-    for pkg, _pres, _ver in PKG_LIST:
-        cells = [_provenance_cell(module_path, v, pkg, scan_cache)
-                 for v in versions]
-        cell_rows.append((pkg, cells))
-    rp_cells = [_provenance_cell(module_path, v, "rocm_patches", scan_cache)
-                for v in versions]
 
     def _as_list(c):
         return c if isinstance(c, list) else [c]
 
+    # Flatten into concrete (label, [str_cell_per_column]) emit rows.
+    emit_rows = []
+    for pkg, _pres, _ver in PKG_LIST:
+        if per_version_rows and _prov_version_union(pvcache, versions, pkg) \
+                and len(_prov_version_union(pvcache, versions, pkg)) >= 2:
+            emit_rows.extend(_prov_versioned_rows(pvcache, versions, pkg))
+        else:
+            if per_version_rows:
+                cells = [_prov_flat_cell(pvcache, v, pkg) for v in versions]
+            else:
+                cells = [_provenance_cell(module_path, v, pkg, scan_cache)
+                         for v in versions]
+            as_lists = [_as_list(c) for c in cells]
+            max_rows = max(len(c) for c in as_lists) if as_lists else 1
+            for r in range(max_rows):
+                emit_rows.append(
+                    (pkg, [(cl[r] if r < len(cl) else "") for cl in as_lists]))
+    if per_version_rows:
+        rp_lists = [_as_list(_prov_flat_cell(pvcache, v, "rocm_patches"))
+                    for v in versions]
+    else:
+        rp_lists = [_as_list(_provenance_cell(module_path, v, "rocm_patches",
+                                              scan_cache))
+                    for v in versions]
+    rp_max = max((len(c) for c in rp_lists), default=1)
+    for r in range(rp_max):
+        emit_rows.append(("rocm_patches",
+                          [(cl[r] if r < len(cl) else "") for cl in rp_lists]))
+
+    pkg_col = max([len(lbl) for lbl, _ in emit_rows]
+                  + [len("package"), len("rocm_patches")])
     col_widths = []
     for ci, v in enumerate(versions):
         w = max(len(v), 6)
-        for _, cells in cell_rows:
-            for entry in _as_list(cells[ci]):
-                w = max(w, len(entry))
-        for entry in _as_list(rp_cells[ci]):
-            w = max(w, len(entry))
+        for _, row_cells in emit_rows:
+            w = max(w, len(row_cells[ci]))
         col_widths.append(w)
     sep = "  "
 
@@ -1374,22 +1717,15 @@ def render_provenance_text(title, versions, module_path, scan_cache):
             parts.append(str(c).ljust(w))
         print(sep.join(parts).rstrip())
 
-    def emit_pkg_row(label, cells):
-        as_lists = [_as_list(c) for c in cells]
-        max_rows = max(len(c) for c in as_lists) if as_lists else 1
-        for r in range(max_rows):
-            row_cells = [(cl[r] if r < len(cl) else "") for cl in as_lists]
-            emit(label, row_cells)
-
     emit("package", list(versions))
     emit("-" * pkg_col, ["-" * w for w in col_widths])
-    for pkg, cells in cell_rows:
-        emit_pkg_row(pkg, cells)
-    emit_pkg_row("rocm_patches", rp_cells)
+    for label, row_cells in emit_rows:
+        emit(label, row_cells)
     print()
 
 
-def _render_provenance_md_one(title, versions, module_path, scan_cache):
+def _render_provenance_md_one(title, versions, module_path, scan_cache,
+                              per_version_rows=False, pvcache=None):
     print(f"## {title}\n")
     header = ["package"] + list(versions)
     print("| " + " | ".join(header) + " |")
@@ -1397,22 +1733,39 @@ def _render_provenance_md_one(title, versions, module_path, scan_cache):
     # scan_cache values are list[str] (one entry per matching Built-by
     # writer); markdown collapses them back to a single cell with the
     # historical ' / ' join so the table stays one row per package.
+    # Under per_version_rows a split package emits one `pkg=<ver>` row
+    # per distinct modulefile version instead.
     for pkg, _pres, _ver in PKG_LIST:
-        cells = [_join_cell(_provenance_cell(module_path, v, pkg, scan_cache))
-                 for v in versions]
+        if per_version_rows and \
+                len(_prov_version_union(pvcache, versions, pkg)) >= 2:
+            for label, row_cells in _prov_versioned_rows(pvcache, versions,
+                                                         pkg):
+                print("| " + " | ".join([label] + row_cells) + " |")
+            continue
+        if per_version_rows:
+            cells = [_join_cell(_prov_flat_cell(pvcache, v, pkg))
+                     for v in versions]
+        else:
+            cells = [_join_cell(_provenance_cell(module_path, v, pkg,
+                                                 scan_cache))
+                     for v in versions]
         print("| " + " | ".join([pkg] + cells) + " |")
     # rocm_patches metadata row: same cache as the PKG_LIST rows; the
     # cache is populated from base/rocm/<v>.lua's `Built by:
     # rocm_patches.sh@...` whatis line (see collect_provenance).
-    rp_cells = [_join_cell(_provenance_cell(module_path, v, "rocm_patches",
-                                            scan_cache))
-                for v in versions]
+    if per_version_rows:
+        rp_cells = [_join_cell(_prov_flat_cell(pvcache, v, "rocm_patches"))
+                    for v in versions]
+    else:
+        rp_cells = [_join_cell(_provenance_cell(module_path, v, "rocm_patches",
+                                                scan_cache))
+                    for v in versions]
     print("| " + " | ".join(["**rocm_patches**"] + rp_cells) + " |")
     print()
 
 
 def render_provenance_md(title, versions, module_path, scan_cache,
-                         per_table=None):
+                         per_table=None, per_version_rows=False, pvcache=None):
     if per_table and per_table > 0 and len(versions) > per_table:
         for i in range(0, len(versions), per_table):
             chunk = versions[i:i + per_table]
@@ -1420,9 +1773,13 @@ def render_provenance_md(title, versions, module_path, scan_cache,
                          f"{(len(versions) + per_table - 1) // per_table}: "
                          f"{chunk[0]} … {chunk[-1]})")
             _render_provenance_md_one(sub_title, chunk, module_path,
-                                      scan_cache)
+                                      scan_cache,
+                                      per_version_rows=per_version_rows,
+                                      pvcache=pvcache)
     else:
-        _render_provenance_md_one(title, versions, module_path, scan_cache)
+        _render_provenance_md_one(title, versions, module_path, scan_cache,
+                                  per_version_rows=per_version_rows,
+                                  pvcache=pvcache)
 
 
 # ── Slurm queue overlay (--slurm) ────────────────────────────────────
@@ -1510,8 +1867,16 @@ def _run_cmd(cmd):
 
 
 def collect_slurm_queue(roots):
-    """Return {(suffix, pkg): 'R'|'PD'} for every rocm-plus install job
-    that is RUNNING or PENDING in Slurm and targets one of `roots`.
+    """Return {(suffix, pkg): {ver_or_None: 'R'|'PD'}} for every rocm-plus
+    install job that is RUNNING or PENDING in Slurm and targets one of
+    `roots`.
+
+    The inner dict is keyed by the TARGET VERSION recovered from the
+    PACKAGES_LIST token (`pytorch=2.8.0` -> '2.8.0'); a bare token
+    (`pytorch`) or a full-sweep job (empty PACKAGES_LIST) maps to the
+    `None` (version-less / generic) bucket. This lets --per-version-rows
+    place 'Q'/'R' on the exact `pkg=<ver>` row; the default overlay path
+    collapses the inner dict via _queue_collapse().
 
     - Job discovery: `squeue` for RUNNING+PENDING, filtered to names
       matching `rocmplus_*` (all users). The job label after the
@@ -1565,8 +1930,6 @@ def collect_slurm_queue(roots):
     all_pkg_names = [p for p, _, _ in PKG_LIST]
     norm_roots = {os.path.normpath(r) for r in roots}
 
-    # 'R' outranks 'PD' so a running job is never masked by a pending one.
-    _rank = {"R": 2, "PD": 1}
     overlay = {}
     for jobid, (suffix, state) in jobs.items():
         sline = submitlines.get(jobid)
@@ -1578,22 +1941,29 @@ def collect_slurm_queue(roots):
             install_path = _site_to_install_path(_export_var(sline, "SITE"))
         if not install_path or os.path.normpath(install_path) not in norm_roots:
             continue
-        # Effective package set.
+        # Effective package set as (pkg, version_or_None) pairs. For a
+        # full sweep the version is unknown -> None (generic bucket);
+        # for explicit tokens `name[=VER[:ov=...]]` we keep VER so the
+        # per-version overlay can target the exact `pkg=<ver>` row.
         pkgs_raw = _parse_packages_list(sline)
         if not pkgs_raw:  # None or '' -> full sweep
             names = set(all_pkg_names)
             if _export_var(sline, "QUICK_INSTALLS") == "1":
                 names -= QUICK_INSTALLS_PKGS
+            pkg_ver_pairs = [(n, None) for n in names]
         else:
-            names = {tok.split("=", 1)[0].split(":", 1)[0]
-                     for tok in pkgs_raw.split()}
-        for pkg in names:
+            pkg_ver_pairs = []
+            for tok in pkgs_raw.split():
+                name, _, rest = tok.partition("=")
+                ver = rest.split(":", 1)[0] if rest else ""
+                pkg_ver_pairs.append((name, ver or None))
+        for pkg, ver in pkg_ver_pairs:
             if pkg not in all_pkg_names:
                 continue  # bare version tokens / non-tracked names
-            key = (suffix, pkg)
-            prev = overlay.get(key)
-            if prev is None or _rank.get(state, 0) > _rank.get(prev, 0):
-                overlay[key] = state
+            bucket = overlay.setdefault((suffix, pkg), {})
+            prev = bucket.get(ver)
+            if prev is None or _QUEUE_RANK.get(state, 0) > _QUEUE_RANK.get(prev, 0):
+                bucket[ver] = state
     return overlay
 
 
@@ -1631,7 +2001,8 @@ def main():
              "the row onto continuation lines (label repeated, blanks "
              "in other columns), while markdown joins them with ' / ' "
              "in semver-ascending order ('2.7.1 / 2.9.1'). 'N'/'B'/'-' "
-             "glyphs and the amdclang / count Y rows are unchanged.")
+             "glyphs and the amdclang / count Y rows are unchanged. See "
+             "--per-version-rows for a one-row-per-version layout instead.")
     ap.add_argument("--install-provenance", action="store_true",
         help="emit ONLY the install-script provenance matrix (no Y/N/B/-, "
              "no amdclang, no count Y, no reasons). Cells contain "
@@ -1677,6 +2048,18 @@ def main():
              "overwritten, and R/Q are not counted in 'count Y'. No-op "
              "(no overlay) if squeue/sacct are unavailable. Ignored under "
              "--install-provenance.")
+    ap.add_argument("--per-version-rows", action="store_true",
+        help="render each package that has >= 2 distinct versions as ONE "
+             "ROW PER VERSION (label 'pkg=<ver>'), version-aligned across "
+             "columns, instead of the default single row with continuation "
+             "lines / ' / '-joins. Each column shows that version only "
+             "where it is installed; with --slurm, the 'Q'/'R' queue glyph "
+             "is placed on the exact 'pkg=<ver>' row when the job targets "
+             "that version (a full-sweep job with no version token, and any "
+             "N/B/F marker, appears on a leading base 'pkg' row). Only "
+             "meaningful with --versions (presence matrix) or "
+             "--install-provenance; single-version and versionless packages "
+             "are unaffected.")
     args = ap.parse_args()
 
     # --provenance-time implies --with-dates.
@@ -1732,6 +2115,14 @@ def main():
             with_dates=args.with_dates,
             time_too=args.provenance_time,
             roots=args.roots)
+        # Version-aware cache only needed for the per-version-rows layout.
+        pvcache = (collect_provenance_versioned(
+                       module_path, all_versions,
+                       repo=git_repo if args.with_dates else None,
+                       with_dates=args.with_dates,
+                       time_too=args.provenance_time,
+                       roots=args.roots)
+                   if args.per_version_rows else None)
         # Auto-chunk markdown. Cells widen with date+time, so step
         # --per-table down by one when --provenance-time is on.
         if args.per_table:
@@ -1767,13 +2158,19 @@ def main():
             print()
             if v7:
                 render_provenance_text("ROCm 7.x.x", v7,
-                                       module_path, scan_cache)
+                                       module_path, scan_cache,
+                                       per_version_rows=args.per_version_rows,
+                                       pvcache=pvcache)
             if vrc:
                 render_provenance_text("ROCm RC trees (therock + afar)",
-                                       vrc, module_path, scan_cache)
+                                       vrc, module_path, scan_cache,
+                                       per_version_rows=args.per_version_rows,
+                                       pvcache=pvcache)
             if v6:
                 render_provenance_text("ROCm 6.x.x", v6,
-                                       module_path, scan_cache)
+                                       module_path, scan_cache,
+                                       per_version_rows=args.per_version_rows,
+                                       pvcache=pvcache)
         else:
             print(f"Module path: `{module_path}`  ")
             print("Install roots (column source): "
@@ -1796,15 +2193,21 @@ def main():
             if v7:
                 render_provenance_md("ROCm 7.x.x", v7,
                                      module_path, scan_cache,
-                                     per_table=prov_per_table)
+                                     per_table=prov_per_table,
+                                     per_version_rows=args.per_version_rows,
+                                     pvcache=pvcache)
             if vrc:
                 render_provenance_md("ROCm RC trees (therock + afar)", vrc,
                                      module_path, scan_cache,
-                                     per_table=prov_per_table)
+                                     per_table=prov_per_table,
+                                     per_version_rows=args.per_version_rows,
+                                     pvcache=pvcache)
             if v6:
                 render_provenance_md("ROCm 6.x.x", v6, module_path,
                                      scan_cache,
-                                     per_table=prov_per_table)
+                                     per_table=prov_per_table,
+                                     per_version_rows=args.per_version_rows,
+                                     pvcache=pvcache)
         return 0
 
     versions_note_text = (
@@ -1819,6 +2222,16 @@ def main():
         "in semver order)." if args.versions
         else " Multi-install cells show the install count (e.g. **`2`**) "
         "instead of **Y**.")
+    pvr_note_text = (
+        "  --per-version-rows: packages with >= 2 distinct versions are "
+        "split into one 'pkg=<ver>' row each, version-aligned across columns."
+        if (args.per_version_rows and args.versions) else "")
+    pvr_note_md = (
+        " With `--per-version-rows`, packages with >= 2 distinct versions are "
+        "split into one **`pkg=<ver>`** row each, version-aligned across "
+        "columns." if (args.per_version_rows and args.versions) else "")
+    versions_note_text += pvr_note_text
+    versions_note_md += pvr_note_md
 
     # Slurm queue overlay: {(suffix, pkg): 'R'|'PD'} for in-flight installs
     # that target one of --roots. Empty (no overlay) unless --slurm was
@@ -1847,13 +2260,16 @@ def main():
         print()
         if v7:  render_text_table("ROCm 7.x.x", v7, args.roots,
                                   versions_mode=args.versions,
-                                  queue_map=queue_map)
+                                  queue_map=queue_map,
+                                  per_version_rows=args.per_version_rows)
         if vrc: render_text_table("ROCm RC trees (therock + afar)", vrc,
                                   args.roots, versions_mode=args.versions,
-                                  queue_map=queue_map)
+                                  queue_map=queue_map,
+                                  per_version_rows=args.per_version_rows)
         if v6:  render_text_table("ROCm 6.x.x", v6, args.roots,
                                   versions_mode=args.versions,
-                                  queue_map=queue_map)
+                                  queue_map=queue_map,
+                                  per_version_rows=args.per_version_rows)
     else:
         print(f"Sources: {', '.join('`' + r + '`' for r in args.roots)}")
         print(f"Generated: "
@@ -1869,13 +2285,16 @@ def main():
               + versions_note_md + queue_note_md + "\n")
         if v7:  render_table("ROCm 7.x.x", v7,
                              args.roots, per_table=md_per_table,
-                             versions_mode=args.versions, queue_map=queue_map)
+                             versions_mode=args.versions, queue_map=queue_map,
+                             per_version_rows=args.per_version_rows)
         if vrc: render_table("ROCm RC trees (therock + afar)", vrc,
                              args.roots, per_table=md_per_table,
-                             versions_mode=args.versions, queue_map=queue_map)
+                             versions_mode=args.versions, queue_map=queue_map,
+                             per_version_rows=args.per_version_rows)
         if v6:  render_table("ROCm 6.x.x", v6,
                              args.roots, per_table=md_per_table,
-                             versions_mode=args.versions, queue_map=queue_map)
+                             versions_mode=args.versions, queue_map=queue_map,
+                             per_version_rows=args.per_version_rows)
 
     if args.reasons:
         reasons = collect_marker_reasons(args.roots, all_versions)
