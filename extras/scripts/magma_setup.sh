@@ -414,6 +414,36 @@ _magma_on_exit() {
    # spurious sudo password prompt at end-of-run when SUDO was probed empty
    # (a user-writable install tree on a no-passwordless-sudo Cray).
    [ -n "${MAGMA_BUILD_ROOT:-}" ] && rm -rf "${MAGMA_BUILD_ROOT}"
+   # attempted-but-failed markers (inventory 'F' glyph): persistent siblings
+   # of the install dirs that survive the rm -rf below; cleared on success.
+   # openblas gets a marker only when this run actually built it
+   # (_OPENBLAS_BUILT=1), mirroring the openblas fail-cleanup gating.
+   _magma_fail_marker="$(dirname "${MAGMA_PATH}")/magma.FAILED"
+   _openblas_fail_marker="$(dirname "${_MAGMA_OPENBLAS_INSTALL_DIR}")/openblas.FAILED"
+   if [ ${rc} -ne 0 ]; then
+      ${SUDO} mkdir -p "$(dirname "${MAGMA_PATH}")" 2>/dev/null || true
+      ${SUDO} tee "${_magma_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: magma
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    magma_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_magma_*.txt).
+MARKER_EOF
+      if [ "${_OPENBLAS_BUILT}" = "1" ]; then
+         ${SUDO} tee "${_openblas_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: openblas
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    magma_setup.sh (EXIT-trap fail marker; openblas built in this run)
+Reason:          magma build exited rc=${rc}; partial openblas install wiped (see log_magma_*.txt).
+MARKER_EOF
+      fi
+   else
+      ${SUDO} rm -f "${_magma_fail_marker}"
+      [ "${_OPENBLAS_BUILT}" = "1" ] && ${SUDO} rm -f "${_openblas_fail_marker}"
+   fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[magma fail-cleanup] rc=${rc}: removing partial magma install + modulefile"
       ${SUDO} rm -rf "${MAGMA_PATH}"

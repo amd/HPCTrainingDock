@@ -235,6 +235,22 @@ _hip_python_on_exit() {
    # WITHOUT sudo (else an empty value resurrects a failing password prompt
    # on every exit). SUDO is always set (default "sudo" at top of script).
    [ -n "${HIP_PYTHON_BUILD_DIR:-}" ] && ${SUDO} rm -rf "${HIP_PYTHON_BUILD_DIR}"
+   # attempted-but-failed marker (inventory 'F' glyph): persistent sibling
+   # of the install dir that survives the rm -rf below; cleared on success.
+   _fail_marker="$(dirname "${HIP_PYTHON_PATH}")/hip-python.FAILED"
+   if [ ${rc} -ne 0 ]; then
+      ${SUDO} mkdir -p "$(dirname "${HIP_PYTHON_PATH}")" 2>/dev/null || true
+      ${SUDO} tee "${_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: hip-python
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    hip-python_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_hip-python_*.txt).
+MARKER_EOF
+   else
+      ${SUDO} rm -f "${_fail_marker}"
+   fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[hip-python fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO} rm -rf "${HIP_PYTHON_PATH}"

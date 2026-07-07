@@ -725,6 +725,40 @@ _openmpi_on_exit() {
    local rc=$?
    [ -n "${OPENMPI_DEPS_BUILD_DIR:-}" ] && ${SUDO:-sudo} rm -rf "${OPENMPI_DEPS_BUILD_DIR}"
    [ -n "${OPENMPI_BUILD_DIR:-}" ]      && ${SUDO:-sudo} rm -rf "${OPENMPI_BUILD_DIR}"
+   # attempted-but-failed markers (inventory 'F' glyph): persistent siblings
+   # of the install dirs that survive the rm -rf below; cleared on success.
+   # Inventory tracks openmpi/ucx/ucc/xpmem as separate rows. openmpi/ucx/ucc
+   # are always built once we reach the trap (the BUILD_OPENMPI=0 opt-out
+   # exits before this trap is registered); xpmem only when BUILD_XPMEM=1.
+   _ompi_marker_dir="$(dirname "${OPENMPI_PATH}")"
+   if [ ${rc} -ne 0 ]; then
+      ${SUDO:-sudo} mkdir -p "${_ompi_marker_dir}" 2>/dev/null || true
+      for _ompi_pkg in openmpi ucx ucc; do
+         ${SUDO:-sudo} tee "${_ompi_marker_dir}/${_ompi_pkg}.FAILED" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: ${_ompi_pkg}
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    openmpi_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_openmpi_*.txt).
+MARKER_EOF
+      done
+      if [ "${BUILD_XPMEM}" = "1" ]; then
+         ${SUDO:-sudo} tee "${_ompi_marker_dir}/xpmem.FAILED" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: xpmem
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    openmpi_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_openmpi_*.txt).
+MARKER_EOF
+      fi
+   else
+      ${SUDO:-sudo} rm -f "${_ompi_marker_dir}/openmpi.FAILED" \
+                          "${_ompi_marker_dir}/ucx.FAILED" \
+                          "${_ompi_marker_dir}/ucc.FAILED" \
+                          "${_ompi_marker_dir}/xpmem.FAILED"
+   fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[openmpi fail-cleanup] rc=${rc}: removing partial xpmem/ucx/ucc/openmpi installs + modulefile"
       ${SUDO:-sudo} rm -rf "${XPMEM_PATH}" "${UCX_PATH}" "${UCC_PATH}" "${OPENMPI_PATH}"

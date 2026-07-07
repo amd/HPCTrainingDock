@@ -46,12 +46,38 @@ For each canonical package family it reports:
       No separate install needed; users get the package via the rocm/<v>
       module. (Historically hipfort was the canonical example, bundled
       from ROCm 6.3+; it's no longer tracked as a separate row here.)
-  -   absent / missing: no install dir AND no marker. Distinct from N.
+  F   build was ATTEMPTED but FAILED (`<pkg>.FAILED`): the setup script
+      exited non-zero and its EXIT trap wiped the partial install +
+      modulefile but dropped a persistent .FAILED marker so the failure
+      is not confused with "-" (never attempted). The marker is cleared
+      automatically on the next successful build of that package.
+  -   absent / missing: no install dir AND no marker. Distinct from N/F.
       Could mean (a) the package was never attempted on this SDK
-      (operator-skipped via PACKAGES_LIST or QUICK_INSTALLS), (b) the
-      build failed and was cleaned up by the EXIT trap, or (c) the
-      package is awaiting a future sweep. Inspect the setup logs to
-      tell these apart.
+      (operator-skipped via PACKAGES_LIST or QUICK_INSTALLS), or (b) the
+      package is awaiting a future sweep. (A build that failed now drops
+      an F marker rather than leaving a bare '-'.) Inspect the setup
+      logs to tell these apart.
+
+With `--slurm`, the in-flight state of the install queues is overlaid on
+top of the on-disk matrix. Two additional glyphs appear, and ONLY in
+cells that are otherwise `-` (a real install / N / B marker is never
+masked):
+
+  R   install IN PROCESS -- a Slurm job for this (version, package) is
+      RUNNING right now. The package is either building or queued to
+      build inside that job.
+  Q   install QUEUED -- a Slurm job for this (version, package) is
+      PENDING (waiting on a node / dependency).
+
+Both glyphs are informational only: they are excluded from the `count Y`
+tally the same way `-` is. Discovery scans every `rocmplus_*` job (all
+users) via `squeue`; the exact per-package intent + target tree are
+recovered from each job's submit command via
+`sacct --format=SubmitLine` (which carries the sbatch `--export` list --
+PACKAGES_LIST, TOP_INSTALL_PATH / SITE, QUICK_INSTALLS), so PENDING jobs
+resolve to individual package cells too, not just whole columns. Jobs
+whose target tree does not match `--roots` are ignored, and the overlay
+is a silent no-op on hosts without `squeue` / `sacct`.
 
 In addition to the per-package presence rows, two metadata rows are
 emitted below the table:
@@ -89,8 +115,12 @@ Lmod prereq / jax blocked on Python vs ROCm). See:
   tools/scripts/tau_setup.sh
 
 The marker file lives as a sibling of the install dir (i.e. directly
-under rocmplus-${VERSION}/), is named ${pkg}.SKIPPED or ${pkg}.BUNDLED,
-and contains a short human-readable explanation.
+under rocmplus-${VERSION}/), is named ${pkg}.SKIPPED, ${pkg}.BUNDLED,
+or ${pkg}.FAILED, and contains a short human-readable explanation. The
+.FAILED marker is written by each setup script's EXIT trap on a
+non-zero exit (and removed again on the next successful build); it
+survives the trap's rm -rf of the partial install because it is a
+separate sibling file, not part of the install dir.
 
 With `--versions`, every cell that would have been `Y` (or a multi-
 install count like `2`) is replaced by the installed version string
@@ -135,6 +165,8 @@ Usage:
                                                                   # date instead of hash
   python3 bare_system/inventory_packages.py --install-provenance --with-dates \\
                                             --provenance-time      # date + HH:MM
+  python3 bare_system/inventory_packages.py --slurm     # overlay in-flight
+                                                         # (RUNNING/PENDING) installs
 """
 import argparse
 import os
@@ -144,7 +176,7 @@ import sys
 from datetime import datetime
 from functools import lru_cache
 
-DEFAULT_ROOTS = ["/shared/apps/ubuntu/opt"]
+DEFAULT_ROOTS = ["/nfsapps/ubuntu-24.04/opt"]
 
 # (canonical_name,
 #  presence_regex,                  -- matches install dir basename for Y/N/B/-
@@ -216,6 +248,19 @@ PKG_LIST = [
     # onto continuation rows in --text, the same as pytorch.
     ("tensorflow", r"^tensorflow(?:|-v.*)$",               r"^tensorflow-v(.+)$"),
 ]
+
+# Packages disabled by --quick-installs (QUICK_INSTALLS=1). Mirrors the
+# QUICK_INSTALLS_PKGS array in bare_system/main_setup.sh (search for
+# "QUICK_INSTALLS_PKGS="): the long-pole builds (>= 20 min wall) plus the
+# explicit always-skip set (julia, intellikit). Only the names that also
+# appear as PKG_LIST rows (pytorch/tensorflow/jax/ftorch) actually affect
+# the queue overlay; julia/intellikit are not tracked rows. Used by
+# collect_slurm_queue() to subtract these when a queued job set
+# QUICK_INSTALLS=1 with an empty PACKAGES_LIST (= "all packages except
+# the quick-installs gate").
+QUICK_INSTALLS_PKGS = {
+    "pytorch", "tensorflow", "jax", "ftorch", "julia", "intellikit",
+}
 
 
 def discover_versions(roots):
@@ -526,13 +571,14 @@ def _sdk_suffix_for_rocmplus(roots, version):
 
 
 def presence(roots, version, pkg, regex):
-    """Return one of 'Y', '<count>', 'N', 'B', '-' for the (version, pkg) cell.
+    """Return one of 'Y', '<count>', 'N', 'B', 'F', '-' for the (version, pkg) cell.
 
     Order: install dir wins (Y / count), then SKIPPED marker (N = Not
-    possible to build), then BUNDLED marker (B), then absent (-). If
-    both an install dir AND a marker are present (transition state
-    during a re-run), the install wins because that is what actually
-    loads.
+    possible to build), then BUNDLED marker (B), then FAILED marker
+    (F = build was attempted but failed and its partial install was
+    auto-removed), then absent (-). If both an install dir AND a marker
+    are present (transition state during a re-run), the install wins
+    because that is what actually loads.
 
     When MORE THAN ONE matching install dir is present for the same
     (version, pkg) -- e.g. `pytorch-v2.7.1/` next to `pytorch-v2.9.1/`
@@ -550,6 +596,7 @@ def presence(roots, version, pkg, regex):
     matched = set()
     has_notbuildable = False
     has_bundled = False
+    has_failed = False
     for r in roots:
         entries = list_pkgs(r, version)
         for b in entries:
@@ -560,10 +607,13 @@ def presence(roots, version, pkg, regex):
             has_notbuildable = True
         if (pkg + ".BUNDLED") in entries:
             has_bundled = True
+        if (pkg + ".FAILED") in entries:
+            has_failed = True
     if matched:
         return "Y" if len(matched) == 1 else str(len(matched))
     if has_notbuildable: return "N"
     if has_bundled: return "B"
+    if has_failed: return "F"
     return "-"
 
 
@@ -599,8 +649,10 @@ def presence_with_version(roots, version, pkg, presence_regex, version_regex):
                                      matching basename (e.g. a legacy unversioned
                                      ftorch / tensorflow dir still on disk after the
                                      versioning migration)
-      - ['N'] / ['B'] / ['-']     -- same semantics as presence(): SKIPPED marker /
-                                     BUNDLED marker / absent. Cells unaffected by
+      - ['N'] / ['B'] / ['F'] / ['-']
+                                  -- same semantics as presence(): SKIPPED marker /
+                                     BUNDLED marker / FAILED marker (attempted but
+                                     failed) / absent. Cells unaffected by
                                      --versions mode.
     """
     pres_rgx = re.compile(presence_regex)
@@ -608,6 +660,7 @@ def presence_with_version(roots, version, pkg, presence_regex, version_regex):
     matched_basenames = []
     has_notbuildable = False
     has_bundled = False
+    has_failed = False
     for r in roots:
         entries = list_pkgs(r, version)
         for b in entries:
@@ -617,6 +670,8 @@ def presence_with_version(roots, version, pkg, presence_regex, version_regex):
             has_notbuildable = True
         if (pkg + ".BUNDLED") in entries:
             has_bundled = True
+        if (pkg + ".FAILED") in entries:
+            has_failed = True
     if matched_basenames:
         if ver_rgx is None:
             return ["Y"]
@@ -634,24 +689,66 @@ def presence_with_version(roots, version, pkg, presence_regex, version_regex):
         return sorted(set(captured), key=_pkg_version_sort_key)
     if has_notbuildable: return ["N"]
     if has_bundled: return ["B"]
+    if has_failed: return ["F"]
     return ["-"]
+
+
+# Non-install glyphs that must NOT be counted by `count Y`: the truly-
+# absent '-', the NOT-buildable 'N', the BUNDLED 'B', the FAILED 'F'
+# (attempted but failed; partial install auto-removed), and the two
+# Slurm queue-overlay glyphs 'R' (install in process) / 'Q' (install
+# queued). Queue glyphs sit only in cells that were '-' on disk (see
+# _apply_queue_overlay), so they represent work not-yet-on-disk and are
+# excluded from the installed count for the same reason '-' is.
+_NON_INSTALL_GLYPHS = {"-", "N", "B", "F", "R", "Q"}
+
+# Slurm queue-overlay glyphs. RUNNING wins over PENDING when a version is
+# represented by jobs in both states (see collect_slurm_queue).
+QUEUE_GLYPH = {"R": "R", "PD": "Q"}
 
 
 def _cell_is_installed(cell):
     """True iff `cell` represents a successful install.
 
     Accepts either a scalar (brief-mode `presence()` result -- 'Y',
-    a numeric count string like '2', or one of '-'/'N'/'B'), or a
-    `list[str]` (versions-mode `presence_with_version()` result and
-    provenance scan_cache values, where any non-{'-','N','B'} first
+    a numeric count string like '2', or one of '-'/'N'/'B'/'R'/'Q'), or
+    a `list[str]` (versions-mode `presence_with_version()` result and
+    provenance scan_cache values, where any non-{non-install-glyph} first
     entry counts as installed). Used by `count Y` to count both glyph
-    and version cells uniformly.
+    and version cells uniformly. The Slurm queue glyphs 'R'/'Q' never
+    count (they mark work not yet on disk).
     """
     if isinstance(cell, list):
         if not cell:
             return False
-        return cell[0] not in {"-", "N", "B"}
-    return cell not in {"-", "N", "B"}
+        return cell[0] not in _NON_INSTALL_GLYPHS
+    return cell not in _NON_INSTALL_GLYPHS
+
+
+def _apply_queue_overlay(cell, suffix, pkg, queue_map):
+    """Overlay Slurm queue state onto an absent cell.
+
+    If the on-disk `cell` is absent (scalar '-' or the list ['-']) AND a
+    Slurm job for (suffix, pkg) is RUNNING / PENDING, replace it with the
+    queue glyph ('R' = in process, 'Q' = queued). Any cell that already
+    reflects a real on-disk state (Y / version string / count / N / B) is
+    returned UNCHANGED -- the overlay never masks reality, it only fills
+    holes. The list shape used by --versions mode is preserved so the
+    fixed-width / markdown renderers keep working uniformly.
+
+    `queue_map` is the {(suffix, pkg): 'R'|'PD'} dict from
+    collect_slurm_queue(); a None / empty map is a no-op.
+    """
+    if not queue_map:
+        return cell
+    is_absent = (cell == "-") or (isinstance(cell, list) and cell == ["-"])
+    if not is_absent:
+        return cell
+    state = queue_map.get((suffix, pkg))
+    if state is None:
+        return cell
+    glyph = QUEUE_GLYPH.get(state, state)
+    return [glyph] if isinstance(cell, list) else glyph
 
 
 def _join_cell(cell):
@@ -668,8 +765,8 @@ def collect_marker_reasons(roots, versions):
     """Return [(version, pkg, kind, first_reason_line, marker_path), ...] sorted.
 
     `kind` matches the in-table glyph ('N' for .SKIPPED markers, 'B'
-    for .BUNDLED markers) so the reasons table reads as a key to the
-    main matrix.
+    for .BUNDLED markers, 'F' for .FAILED markers) so the reasons table
+    reads as a key to the main matrix.
     """
     reasons = []
     for v in versions:
@@ -688,6 +785,9 @@ def collect_marker_reasons(roots, versions):
                 elif entry.endswith(".BUNDLED"):
                     kind = "B (bundled)"
                     pkg = entry[:-len(".BUNDLED")]
+                elif entry.endswith(".FAILED"):
+                    kind = "F (build failed)"
+                    pkg = entry[:-len(".FAILED")]
                 else:
                     continue
                 marker_path = os.path.join(tree, entry)
@@ -714,13 +814,16 @@ def _cell_for(roots, version, pkg, pres_regex, ver_regex, versions_mode):
     return presence(roots, version, pkg, pres_regex)
 
 
-def _render_one_md_table(title, versions, roots, versions_mode=False):
+def _render_one_md_table(title, versions, roots, versions_mode=False,
+                         queue_map=None):
     """Emit a single Markdown table for the given versions. Caller is
     responsible for chunking when len(versions) is too wide for the
     intended renderer (glow auto-shrinks columns past ~7-8 entries on a
     standard 100-col terminal, mangling header text). With
     versions_mode=True, every cell that would have been 'Y' is replaced
-    by the installed version string."""
+    by the installed version string. When `queue_map` is provided, absent
+    ('-') cells whose (version, pkg) has a RUNNING / PENDING Slurm job are
+    filled with the queue glyph (R / Q)."""
     print(f"## {title}\n")
     header = ["package"] + versions
     print("| " + " | ".join(header) + " |")
@@ -729,7 +832,10 @@ def _render_one_md_table(title, versions, roots, versions_mode=False):
     # `count Y` without re-walking the filesystem.
     rows = []
     for pkg, pres_regex, ver_regex in PKG_LIST:
-        cells = [_cell_for(roots, v, pkg, pres_regex, ver_regex, versions_mode)
+        cells = [_apply_queue_overlay(
+                     _cell_for(roots, v, pkg, pres_regex, ver_regex,
+                               versions_mode),
+                     v, pkg, queue_map)
                  for v in versions]
         rows.append((pkg, cells))
     for pkg, cells in rows:
@@ -760,11 +866,12 @@ def _render_one_md_table(title, versions, roots, versions_mode=False):
     print()
 
 
-def render_table(title, versions, roots, per_table=None, versions_mode=False):
+def render_table(title, versions, roots, per_table=None, versions_mode=False,
+                 queue_map=None):
     """Markdown rendering. With per_table=N, chunk wide tables into
     sub-tables of at most N versions each (good for glow which auto-
-    shrinks any table wider than the terminal). versions_mode is
-    threaded through to _render_one_md_table.
+    shrinks any table wider than the terminal). versions_mode and
+    queue_map are threaded through to _render_one_md_table.
     """
     if per_table and per_table > 0 and len(versions) > per_table:
         for i in range(0, len(versions), per_table):
@@ -773,13 +880,16 @@ def render_table(title, versions, roots, per_table=None, versions_mode=False):
                         f"{(len(versions) + per_table - 1) // per_table}: " \
                         f"{chunk[0]} … {chunk[-1]})"
             _render_one_md_table(sub_title, chunk, roots,
-                                 versions_mode=versions_mode)
+                                 versions_mode=versions_mode,
+                                 queue_map=queue_map)
     else:
         _render_one_md_table(title, versions, roots,
-                             versions_mode=versions_mode)
+                             versions_mode=versions_mode,
+                             queue_map=queue_map)
 
 
-def render_text_table(title, versions, roots, versions_mode=False):
+def render_text_table(title, versions, roots, versions_mode=False,
+                      queue_map=None):
     """Fixed-width plain-text rendering (no markdown, no glow needed).
     Each cell column is exactly as wide as its header. The single-char
     presence symbols (Y/N/B/-) are right-padded so columns stay aligned
@@ -807,7 +917,10 @@ def render_text_table(title, versions, roots, versions_mode=False):
     # so column-width and row-emit logic is uniform.
     package_rows = []
     for pkg, pres_regex, ver_regex in PKG_LIST:
-        cells = [_cell_for(roots, v, pkg, pres_regex, ver_regex, versions_mode)
+        cells = [_apply_queue_overlay(
+                     _cell_for(roots, v, pkg, pres_regex, ver_regex,
+                               versions_mode),
+                     v, pkg, queue_map)
                  for v in versions]
         package_rows.append((pkg, cells))
     clang_cells = [clang_version(roots, v) for v in versions]
@@ -1312,6 +1425,178 @@ def render_provenance_md(title, versions, module_path, scan_cache,
         _render_provenance_md_one(title, versions, module_path, scan_cache)
 
 
+# ── Slurm queue overlay (--slurm) ────────────────────────────────────
+#
+# Overlays the rocm-plus installs currently RUNNING ("in process") or
+# PENDING ("queued") in the Slurm queues onto the presence matrix. The
+# submitter (bare_system/run_rocmplus_install_sweep.sh) names each job
+# `rocmplus_<label>`, where <label> is exactly the inventory column
+# suffix (7.2.0, afar-23.2.1-7.13.0, cray-7.2.3, ...). The per-job
+# package whitelist + target tree live in the sbatch `--export` list,
+# which Slurm records verbatim in the job's SubmitLine -- retrievable
+# for PENDING jobs too via `sacct --format=SubmitLine`. We parse
+# PACKAGES_LIST (exact per-package intent; empty = full sweep),
+# TOP_INSTALL_PATH / SITE (to match the inventory --roots), and
+# QUICK_INSTALLS (to subtract the long-pole gate when PACKAGES_LIST is
+# empty).
+
+# --site preset -> TOP_INSTALL_PATH, mirroring the resolution table in
+# run_rocmplus_install_sweep.sh (search "--site preset application").
+_SITE_INSTALL_PRESETS = {
+    "opt":         "/opt",
+    "nfsapps":     "/nfsapps/opt",
+    "shared-apps": "/shared/apps/ubuntu/opt",
+    "shareddata":  "/shareddata/opt",
+}
+
+
+def _site_to_install_path(site):
+    """Resolve a --site value (named preset OR absolute PREFIX path) to
+    the TOP_INSTALL_PATH it implies, matching the sweep submitter. Named
+    presets map via _SITE_INSTALL_PRESETS; an absolute path PREFIX maps
+    to PREFIX/opt. Returns None for anything unrecognized."""
+    if not site:
+        return None
+    if site in _SITE_INSTALL_PRESETS:
+        return _SITE_INSTALL_PRESETS[site]
+    if site.startswith("/"):
+        return site.rstrip("/") + "/opt"
+    return None
+
+
+def _export_var(submitline, key):
+    """Extract a single `KEY=VALUE` from an sbatch --export list embedded
+    in `submitline`. Values run to the next comma (paths / scalars never
+    contain commas here). Returns '' if the key is present but empty,
+    None if absent."""
+    m = re.search(r"(?:^|[,=])" + re.escape(key) + r"=([^,]*)", submitline)
+    return m.group(1) if m else None
+
+
+def _parse_packages_list(submitline):
+    """Extract the PACKAGES_LIST value from a SubmitLine.
+
+    PACKAGES_LIST is always the LAST --export var the sweep appends (see
+    run_rocmplus_install_sweep.sh), so its value -- which may contain
+    spaces (e.g. `jax tensorflow pytorch`, `pytorch=2.8.0 2.7.1`) -- runs
+    from `PACKAGES_LIST=` up to the next sbatch flag (` --dependency` /
+    ` --<flag>`) or, when there is no trailing flag, up to the batch
+    script path (`.../run_rocmplus_install.sbatch`). Returns the raw
+    whitespace-joined value ('' for a full sweep), or None if the token
+    is absent entirely.
+    """
+    if "PACKAGES_LIST=" not in submitline:
+        return None
+    tail = submitline.split("PACKAGES_LIST=", 1)[1]
+    # Stop at the next sbatch flag (handles the --dependency case).
+    tail = tail.split(" --", 1)[0]
+    # Strip a trailing batch-script path (first-wave jobs have no
+    # --dependency, so the script path directly follows the value).
+    tail = re.sub(r"\s+\S*run_rocmplus_install\.sbatch\s*$", "", tail)
+    return tail.strip()
+
+
+def _run_cmd(cmd):
+    """Run `cmd`, return stdout (str) or None on any failure / missing
+    binary / timeout. Mirrors _probe_clang's defensive posture so a host
+    without Slurm degrades to "no overlay" instead of crashing."""
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0:
+        return None
+    return out.stdout or ""
+
+
+def collect_slurm_queue(roots):
+    """Return {(suffix, pkg): 'R'|'PD'} for every rocm-plus install job
+    that is RUNNING or PENDING in Slurm and targets one of `roots`.
+
+    - Job discovery: `squeue` for RUNNING+PENDING, filtered to names
+      matching `rocmplus_*` (all users). The job label after the
+      `rocmplus_` prefix is the inventory column suffix.
+    - Per-job detail: batched `sacct -X ... --format=JobIDRaw,SubmitLine`
+      gives the exact submitted command; we parse PACKAGES_LIST (package
+      intent), TOP_INSTALL_PATH / SITE (tree filter), QUICK_INSTALLS
+      (long-pole gate).
+    - Tree filter: only jobs whose effective TOP_INSTALL_PATH resolves to
+      one of `roots` contribute cells, so the overlay matches the tree
+      being surveyed. Jobs with no resolvable install path are skipped.
+    - Package expansion: empty PACKAGES_LIST -> all PKG_LIST rows (minus
+      QUICK_INSTALLS_PKGS when QUICK_INSTALLS=1); otherwise the leading
+      package name of each token (`name`, `name=VER`, `name=VER:ov=...`).
+    - State precedence: RUNNING ('R') wins over PENDING ('PD') when a
+      version is represented by jobs in both states.
+
+    Returns {} on any Slurm-tooling failure (graceful no-op).
+    """
+    squeue_out = _run_cmd(["squeue", "-h", "-o", "%i|%j|%t",
+                           "--states=PENDING,RUNNING"])
+    if squeue_out is None:
+        return {}
+    # jobid -> (suffix, state) for rocmplus_* jobs.
+    jobs = {}
+    for line in squeue_out.splitlines():
+        parts = line.split("|")
+        if len(parts) < 3:
+            continue
+        jobid, name, state = parts[0].strip(), parts[1].strip(), parts[2].strip()
+        if not name.startswith("rocmplus_"):
+            continue
+        suffix = name[len("rocmplus_"):]
+        jobs[jobid] = (suffix, state)
+    if not jobs:
+        return {}
+
+    # Batched SubmitLine lookup (SubmitLine is last so a stray '|' in the
+    # command -- unlikely here -- is preserved by split with maxsplit=1).
+    sacct_out = _run_cmd(["sacct", "-X", "-j", ",".join(jobs.keys()),
+                          "--noheader", "--parsable2",
+                          "--format=JobIDRaw,SubmitLine"])
+    submitlines = {}
+    if sacct_out:
+        for line in sacct_out.splitlines():
+            if "|" not in line:
+                continue
+            jid, sline = line.split("|", 1)
+            submitlines[jid.strip()] = sline
+
+    all_pkg_names = [p for p, _, _ in PKG_LIST]
+    norm_roots = {os.path.normpath(r) for r in roots}
+
+    # 'R' outranks 'PD' so a running job is never masked by a pending one.
+    _rank = {"R": 2, "PD": 1}
+    overlay = {}
+    for jobid, (suffix, state) in jobs.items():
+        sline = submitlines.get(jobid)
+        if sline is None:
+            continue
+        # Tree filter: effective install path must be one of `roots`.
+        install_path = _export_var(sline, "TOP_INSTALL_PATH")
+        if not install_path:
+            install_path = _site_to_install_path(_export_var(sline, "SITE"))
+        if not install_path or os.path.normpath(install_path) not in norm_roots:
+            continue
+        # Effective package set.
+        pkgs_raw = _parse_packages_list(sline)
+        if not pkgs_raw:  # None or '' -> full sweep
+            names = set(all_pkg_names)
+            if _export_var(sline, "QUICK_INSTALLS") == "1":
+                names -= QUICK_INSTALLS_PKGS
+        else:
+            names = {tok.split("=", 1)[0].split(":", 1)[0]
+                     for tok in pkgs_raw.split()}
+        for pkg in names:
+            if pkg not in all_pkg_names:
+                continue  # bare version tokens / non-tracked names
+            key = (suffix, pkg)
+            prev = overlay.get(key)
+            if prev is None or _rank.get(state, 0) > _rank.get(prev, 0):
+                overlay[key] = state
+    return overlay
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1378,6 +1663,20 @@ def main():
         help="git checkout to query for commit dates (used by "
              "--with-dates). Default: walk up from this script's path to "
              "the first ancestor containing .git.")
+    ap.add_argument("--slurm", action="store_true",
+        help="overlay in-flight installs from the Slurm queues onto the "
+             "matrix. Scans ALL 'rocmplus_*' jobs (every user) via squeue "
+             "for RUNNING / PENDING state, then reads each job's exact "
+             "submit command (sacct --format=SubmitLine) to recover the "
+             "per-package intent (PACKAGES_LIST; empty = full sweep, minus "
+             "the --quick-installs long-poles) and the target tree "
+             "(TOP_INSTALL_PATH / --site, matched against --roots). Cells "
+             "that are absent ('-') on disk are filled with 'R' (install "
+             "in process / Slurm RUNNING) or 'Q' (install queued / Slurm "
+             "PENDING); real installs and N/B markers are never "
+             "overwritten, and R/Q are not counted in 'count Y'. No-op "
+             "(no overlay) if squeue/sacct are unavailable. Ignored under "
+             "--install-provenance.")
     args = ap.parse_args()
 
     # --provenance-time implies --with-dates.
@@ -1521,20 +1820,40 @@ def main():
         else " Multi-install cells show the install count (e.g. **`2`**) "
         "instead of **Y**.")
 
+    # Slurm queue overlay: {(suffix, pkg): 'R'|'PD'} for in-flight installs
+    # that target one of --roots. Empty (no overlay) unless --slurm was
+    # passed AND squeue/sacct produced matching jobs. Legend lines are
+    # only emitted when there is something to explain.
+    queue_map = collect_slurm_queue(args.roots) if args.slurm else {}
+    queue_note_text = (
+        "  R = install IN PROCESS (Slurm RUNNING),  "
+        "Q = install QUEUED (Slurm PENDING); both fill only '-' cells "
+        "and are not counted in 'count Y'." if queue_map else "")
+    queue_note_md = (
+        " **R** = install IN PROCESS (Slurm RUNNING), **Q** = install "
+        "QUEUED (Slurm PENDING); both fill only **-** cells and are not "
+        "counted in **count Y**." if queue_map else "")
+
     if args.text:
         print(f"Sources: {', '.join(args.roots)}")
         print(f"Generated: {datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')}")
         print("Legend: Y = installed,  "
               "N = NOT POSSIBLE to build on this SDK (see <pkg>.SKIPPED marker),  "
               "B = BUNDLED in the ROCm SDK (see <pkg>.BUNDLED marker),  "
-              "- = absent / missing (no install, no marker)." + versions_note_text)
+              "F = build ATTEMPTED but FAILED (see <pkg>.FAILED marker; "
+              "partial install auto-removed),  "
+              "- = absent / missing (no install, no marker)."
+              + versions_note_text + queue_note_text)
         print()
         if v7:  render_text_table("ROCm 7.x.x", v7, args.roots,
-                                  versions_mode=args.versions)
+                                  versions_mode=args.versions,
+                                  queue_map=queue_map)
         if vrc: render_text_table("ROCm RC trees (therock + afar)", vrc,
-                                  args.roots, versions_mode=args.versions)
+                                  args.roots, versions_mode=args.versions,
+                                  queue_map=queue_map)
         if v6:  render_text_table("ROCm 6.x.x", v6, args.roots,
-                                  versions_mode=args.versions)
+                                  versions_mode=args.versions,
+                                  queue_map=queue_map)
     else:
         print(f"Sources: {', '.join('`' + r + '`' for r in args.roots)}")
         print(f"Generated: "
@@ -1544,17 +1863,19 @@ def main():
               "(see `<pkg>.SKIPPED` marker), "
               "**B** = BUNDLED in the ROCm SDK "
               "(see `<pkg>.BUNDLED` marker), "
+              "**F** = build ATTEMPTED but FAILED "
+              "(see `<pkg>.FAILED` marker; partial install auto-removed), "
               "**-** = absent / missing (no install, no marker)."
-              + versions_note_md + "\n")
+              + versions_note_md + queue_note_md + "\n")
         if v7:  render_table("ROCm 7.x.x", v7,
                              args.roots, per_table=md_per_table,
-                             versions_mode=args.versions)
+                             versions_mode=args.versions, queue_map=queue_map)
         if vrc: render_table("ROCm RC trees (therock + afar)", vrc,
                              args.roots, per_table=md_per_table,
-                             versions_mode=args.versions)
+                             versions_mode=args.versions, queue_map=queue_map)
         if v6:  render_table("ROCm 6.x.x", v6,
                              args.roots, per_table=md_per_table,
-                             versions_mode=args.versions)
+                             versions_mode=args.versions, queue_map=queue_map)
 
     if args.reasons:
         reasons = collect_marker_reasons(args.roots, all_versions)

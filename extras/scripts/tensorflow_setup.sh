@@ -293,6 +293,22 @@ fi
 _tensorflow_on_exit() {
    local rc=$?
    [ -n "${TF_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${TF_BUILD_ROOT}"
+   # attempted-but-failed marker (inventory 'F' glyph): persistent sibling
+   # of the install dir that survives the rm -rf below; cleared on success.
+   _fail_marker="$(dirname "${TF_PATH}")/tensorflow.FAILED"
+   if [ ${rc} -ne 0 ]; then
+      ${SUDO:-sudo} mkdir -p "$(dirname "${TF_PATH}")" 2>/dev/null || true
+      ${SUDO:-sudo} tee "${_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: tensorflow
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    tensorflow_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_tensorflow_*.txt).
+MARKER_EOF
+   else
+      ${SUDO:-sudo} rm -f "${_fail_marker}"
+   fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[tensorflow fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO:-sudo} rm -rf "${TF_PATH}"

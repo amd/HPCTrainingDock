@@ -245,6 +245,22 @@ fi
 # install side uses, so they cannot drift. See hypre_setup.sh.
 _likwid_on_exit() {
    local rc=$?
+   # attempted-but-failed marker (inventory 'F' glyph): persistent sibling
+   # of the install dir that survives the rm -rf below; cleared on success.
+   _fail_marker="$(dirname "${LIKWID_PATH}")/likwid.FAILED"
+   if [ ${rc} -ne 0 ]; then
+      ${SUDO:-sudo} mkdir -p "$(dirname "${LIKWID_PATH}")" 2>/dev/null || true
+      ${SUDO:-sudo} tee "${_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: likwid
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    likwid_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_likwid_*.txt).
+MARKER_EOF
+   else
+      ${SUDO:-sudo} rm -f "${_fail_marker}"
+   fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[likwid fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO:-sudo} rm -rf "${LIKWID_PATH}"

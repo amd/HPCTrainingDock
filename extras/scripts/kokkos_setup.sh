@@ -318,6 +318,22 @@ fi
 
 _kokkos_on_exit() {
    local rc=$?
+   # attempted-but-failed marker (inventory 'F' glyph): persistent sibling
+   # of the install dir that survives the rm -rf below; cleared on success.
+   _fail_marker="$(dirname "${KOKKOS_PATH}")/kokkos.FAILED"
+   if [ ${rc} -ne 0 ]; then
+      ${SUDO} mkdir -p "$(dirname "${KOKKOS_PATH}")" 2>/dev/null || true
+      ${SUDO} tee "${_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: kokkos
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    kokkos_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_kokkos_*.txt).
+MARKER_EOF
+   else
+      ${SUDO} rm -f "${_fail_marker}"
+   fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[kokkos fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO} rm -rf "${KOKKOS_PATH}"

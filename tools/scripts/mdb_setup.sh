@@ -256,6 +256,22 @@ fi
 _mdb_on_exit() {
    local rc=$?
    [ -n "${MDB_BUILD_ROOT:-}" ] && ${SUDO} rm -rf "${MDB_BUILD_ROOT}"
+   # attempted-but-failed marker (inventory 'F' glyph): persistent sibling
+   # of the install dir that survives the rm -rf below; cleared on success.
+   _fail_marker="$(dirname "${MDB_PATH}")/mdb.FAILED"
+   if [ ${rc} -ne 0 ]; then
+      ${SUDO} mkdir -p "$(dirname "${MDB_PATH}")" 2>/dev/null || true
+      ${SUDO} tee "${_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: mdb
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    mdb_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_mdb_*.txt).
+MARKER_EOF
+   else
+      ${SUDO} rm -f "${_fail_marker}"
+   fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[mdb fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO} rm -rf "${MDB_PATH}"

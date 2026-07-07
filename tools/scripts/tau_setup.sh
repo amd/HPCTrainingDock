@@ -356,6 +356,24 @@ fi
 
 _tau_on_exit() {
    local rc=$?
+   # attempted-but-failed marker (inventory 'F' glyph): persistent sibling
+   # of the install dir that survives the rm -rf below; cleared on success.
+   # Only 'tau' is marked -- PDT is preserved by this trap (its install dir,
+   # if built, stays on disk and renders on its own pdt row).
+   _fail_marker="$(dirname "${TAU_PATH}")/tau.FAILED"
+   if [ ${rc} -ne 0 ]; then
+      ${SUDO} mkdir -p "$(dirname "${TAU_PATH}")" 2>/dev/null || true
+      ${SUDO} tee "${_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: tau
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    tau_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_tau_*.txt).
+MARKER_EOF
+   else
+      ${SUDO} rm -f "${_fail_marker}"
+   fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[tau fail-cleanup] rc=${rc}: removing partial tau install + modulefile (PDT preserved)"
       # Use the probed ${SUDO} (NOT ${SUDO:-sudo}): on a user-writable install

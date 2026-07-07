@@ -379,6 +379,26 @@ fi
 # install side uses, so they cannot drift.
 _hypre_on_exit() {
    local rc=$?
+   # ── attempted-but-failed marker (inventory 'F' glyph) ─────────────
+   # On failure, drop a persistent <pkg>.FAILED sibling of the install
+   # dir so inventory_packages.py can tell "build attempted but failed"
+   # (F) apart from "never attempted" (-). It survives the rm -rf below
+   # because it lives in the rocmplus root, not inside HYPRE_PATH. On a
+   # clean exit we remove any stale marker from a prior failed run.
+   local _fail_marker="$(dirname "${HYPRE_PATH}")/hypre.FAILED"
+   if [ ${rc} -ne 0 ]; then
+      ${SUDO:-sudo} mkdir -p "$(dirname "${HYPRE_PATH}")" 2>/dev/null || true
+      ${SUDO:-sudo} tee "${_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: hypre
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    hypre_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_hypre_*.txt).
+MARKER_EOF
+   else
+      ${SUDO:-sudo} rm -f "${_fail_marker}"
+   fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[hypre fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO:-sudo} rm -rf "${HYPRE_PATH}"

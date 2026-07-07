@@ -508,6 +508,40 @@ _pre_existed_pnetcdf=0
 # --keep-failed-installs 1.
 _netcdf_on_exit() {
    local rc=$?
+   # attempted-but-failed markers (inventory 'F' glyph): persistent siblings
+   # of the install dirs that survive the rm -rf below; cleared on success.
+   # Inventory tracks 'netcdf' (via netcdf-c) and 'pnetcdf' as separate
+   # rows, so drop one marker per tracked component -- but only for a
+   # component that did NOT pre-exist at entry (same gating as the
+   # per-component cleanup below), so a still-present sibling keeps its Y.
+   _netcdf_fail_marker="$(dirname "${NETCDF_C_PATH}")/netcdf.FAILED"
+   _pnetcdf_fail_marker="$(dirname "${PNETCDF_PATH}")/pnetcdf.FAILED"
+   if [ ${rc} -ne 0 ]; then
+      if [ "${_pre_existed_netcdf_c:-0}" != "1" ]; then
+         ${SUDO} mkdir -p "$(dirname "${NETCDF_C_PATH}")" 2>/dev/null || true
+         ${SUDO} tee "${_netcdf_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: netcdf
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    netcdf_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_netcdf_*.txt).
+MARKER_EOF
+      fi
+      if [ "${_pre_existed_pnetcdf:-0}" != "1" ]; then
+         ${SUDO} mkdir -p "$(dirname "${PNETCDF_PATH}")" 2>/dev/null || true
+         ${SUDO} tee "${_pnetcdf_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: pnetcdf
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    netcdf_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_netcdf_*.txt).
+MARKER_EOF
+      fi
+   else
+      ${SUDO} rm -f "${_netcdf_fail_marker}" "${_pnetcdf_fail_marker}"
+   fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[netcdf fail-cleanup] rc=${rc}: removing partial installs + modulefiles for components this run created"
       # Only nuke components that did NOT pre-exist at script entry.

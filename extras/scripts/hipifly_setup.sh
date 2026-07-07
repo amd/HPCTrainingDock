@@ -204,6 +204,22 @@ _hipifly_on_exit() {
    # then run WITHOUT sudo (else an empty value resurrects a failing
    # password prompt on every exit). SUDO is always set (default "sudo").
    [ -n "${HIPIFLY_BUILD_DIR:-}" ] && ${SUDO} rm -rf "${HIPIFLY_BUILD_DIR}"
+   # attempted-but-failed marker (inventory 'F' glyph): persistent sibling
+   # of the install dir that survives the rm -rf below; cleared on success.
+   _fail_marker="$(dirname "${HIPIFLY_PATH}")/hipifly.FAILED"
+   if [ ${rc} -ne 0 ]; then
+      ${SUDO} mkdir -p "$(dirname "${HIPIFLY_PATH}")" 2>/dev/null || true
+      ${SUDO} tee "${_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: hipifly
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    hipifly_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_hipifly_*.txt).
+MARKER_EOF
+   else
+      ${SUDO} rm -f "${_fail_marker}"
+   fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[hipifly fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO} rm -rf "${HIPIFLY_PATH}"

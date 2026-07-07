@@ -418,6 +418,34 @@ fi
 _jax_on_exit() {
    local rc=$?
    [ -n "${JAX_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${JAX_BUILD_ROOT}"
+   # attempted-but-failed markers (inventory 'F' glyph): persistent siblings
+   # of the install dirs that survive the rm -rf below; cleared on success.
+   # Inventory tracks 'jax' and 'jaxlib' as separate rows, so drop one
+   # marker each (this script builds the pair together).
+   _jax_fail_marker="$(dirname "${JAX_PATH}")/jax.FAILED"
+   _jaxlib_fail_marker="$(dirname "${JAXLIB_PATH}")/jaxlib.FAILED"
+   if [ ${rc} -ne 0 ]; then
+      ${SUDO:-sudo} mkdir -p "$(dirname "${JAX_PATH}")" 2>/dev/null || true
+      ${SUDO:-sudo} tee "${_jax_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: jax
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    jax_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_jax_*.txt).
+MARKER_EOF
+      ${SUDO:-sudo} mkdir -p "$(dirname "${JAXLIB_PATH}")" 2>/dev/null || true
+      ${SUDO:-sudo} tee "${_jaxlib_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: jaxlib
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    jax_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_jax_*.txt).
+MARKER_EOF
+   else
+      ${SUDO:-sudo} rm -f "${_jax_fail_marker}" "${_jaxlib_fail_marker}"
+   fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[jax fail-cleanup] rc=${rc}: removing partial jax + jaxlib installs + modulefile"
       ${SUDO:-sudo} rm -rf "${JAX_PATH}" "${JAXLIB_PATH}"

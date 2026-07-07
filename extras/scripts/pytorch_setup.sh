@@ -1483,6 +1483,22 @@ _pytorch_on_exit() {
    local rc=$?
    [ -n "${TRITON_BUILD_ROOT:-}" ]  && ${SUDO:-sudo} rm -rf "${TRITON_BUILD_ROOT}"
    [ -n "${PYTORCH_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${PYTORCH_BUILD_ROOT}"
+   # attempted-but-failed marker (inventory 'F' glyph): persistent sibling
+   # of the install dir that survives the rm -rf below; cleared on success.
+   _fail_marker="$(dirname "${INSTALL_PATH}")/pytorch.FAILED"
+   if [ ${rc} -ne 0 ]; then
+      ${SUDO:-sudo} mkdir -p "$(dirname "${INSTALL_PATH}")" 2>/dev/null || true
+      ${SUDO:-sudo} tee "${_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: pytorch
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    pytorch_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_pytorch_*.txt).
+MARKER_EOF
+   else
+      ${SUDO:-sudo} rm -f "${_fail_marker}"
+   fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[pytorch fail-cleanup] rc=${rc}: removing partial install + modulefiles"
       ${SUDO:-sudo} rm -rf "${INSTALL_PATH}"

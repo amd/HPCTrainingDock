@@ -291,6 +291,22 @@ _mpi4py_on_exit() {
    # always set (default "sudo" at the top of this script), so a bare
    # ${SUDO} is safe even on an early-exit before the writability probe.
    [ -n "${MPI4PY_BUILD_DIR:-}" ] && ${SUDO} rm -rf "${MPI4PY_BUILD_DIR}"
+   # attempted-but-failed marker (inventory 'F' glyph): persistent sibling
+   # of the install dir that survives the rm -rf below; cleared on success.
+   _fail_marker="$(dirname "${MPI4PY_PATH}")/mpi4py.FAILED"
+   if [ ${rc} -ne 0 ]; then
+      ${SUDO} mkdir -p "$(dirname "${MPI4PY_PATH}")" 2>/dev/null || true
+      ${SUDO} tee "${_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: mpi4py
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    mpi4py_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_mpi4py_*.txt).
+MARKER_EOF
+   else
+      ${SUDO} rm -f "${_fail_marker}"
+   fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[mpi4py fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO} rm -rf "${MPI4PY_PATH}"

@@ -406,6 +406,25 @@ fi
 _ftorch_on_exit() {
    local rc=$?
    [ -n "${FTORCH_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${FTORCH_BUILD_ROOT}"
+   # attempted-but-failed marker (inventory 'F' glyph): persistent sibling
+   # of the install dir that survives the rm -rf below; cleared on success.
+   # Inventory tracks a single 'ftorch' row (the ftorch_amdflang flavor is
+   # not a separate presence row), so one ftorch.FAILED marker suffices
+   # regardless of which flavor FTORCH_PATH points at this run.
+   _fail_marker="$(dirname "${FTORCH_PATH}")/ftorch.FAILED"
+   if [ ${rc} -ne 0 ]; then
+      ${SUDO:-sudo} mkdir -p "$(dirname "${FTORCH_PATH}")" 2>/dev/null || true
+      ${SUDO:-sudo} tee "${_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: ftorch
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    ftorch_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_ftorch_*.txt).
+MARKER_EOF
+   else
+      ${SUDO:-sudo} rm -f "${_fail_marker}"
+   fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[ftorch fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO:-sudo} rm -rf "${FTORCH_PATH}"

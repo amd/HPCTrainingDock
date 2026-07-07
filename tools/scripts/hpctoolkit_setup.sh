@@ -354,6 +354,27 @@ fi
 # no-op when a section never reached its mktemp).
 _hpctoolkit_on_exit() {
    local rc=$?
+   # attempted-but-failed markers (inventory 'F' glyph): persistent siblings
+   # of the install dirs that survive the rm -rf below; cleared on success.
+   # Inventory tracks 'hpctoolkit' and 'hpcviewer' as separate rows and this
+   # trap wipes both installs on failure, so mark both.
+   _hpctk_marker_dir="$(dirname "${HPCTOOLKIT_PATH}")"
+   if [ ${rc} -ne 0 ]; then
+      ${SUDO} mkdir -p "${_hpctk_marker_dir}" 2>/dev/null || true
+      for _hpctk_pkg in hpctoolkit hpcviewer; do
+         ${SUDO} tee "${_hpctk_marker_dir}/${_hpctk_pkg}.FAILED" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: ${_hpctk_pkg}
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    hpctoolkit_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_hpctoolkit_*.txt).
+MARKER_EOF
+      done
+   else
+      ${SUDO} rm -f "${_hpctk_marker_dir}/hpctoolkit.FAILED" \
+                    "${_hpctk_marker_dir}/hpcviewer.FAILED"
+   fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[hpctoolkit fail-cleanup] rc=${rc}: removing partial hpctoolkit + hpcviewer installs + modulefile"
       # Use the probed ${SUDO} (NOT ${SUDO:-sudo}): on a user-writable install

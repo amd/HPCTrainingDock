@@ -379,6 +379,22 @@ _cupy_on_exit() {
    # WITHOUT sudo (else an empty value resurrects a failing password prompt
    # on every exit). SUDO is always set (default "sudo" at top of script).
    [ -n "${CUPY_BUILD_ROOT:-}" ] && ${SUDO} rm -rf "${CUPY_BUILD_ROOT}"
+   # attempted-but-failed marker (inventory 'F' glyph): persistent sibling
+   # of the install dir that survives the rm -rf below; cleared on success.
+   _fail_marker="$(dirname "${CUPY_PATH}")/cupy.FAILED"
+   if [ ${rc} -ne 0 ]; then
+      ${SUDO} mkdir -p "$(dirname "${CUPY_PATH}")" 2>/dev/null || true
+      ${SUDO} tee "${_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: cupy
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    cupy_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_cupy_*.txt).
+MARKER_EOF
+   else
+      ${SUDO} rm -f "${_fail_marker}"
+   fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[cupy fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO} rm -rf "${CUPY_PATH}"
