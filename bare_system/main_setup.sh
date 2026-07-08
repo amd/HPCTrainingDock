@@ -2268,7 +2268,7 @@ if [ -n "${MPICH_DIR:-}" ] && [ -d "${MPICH_DIR}/bin" ]; then
    fi
 fi
 run_and_log_versioned elpa extras/scripts/elpa_setup.sh  ${COMMON_OPTIONS} --build-elpa ${BUILD_ELPA} ${REPLACE_OPTS} ${ELPA_MPI_OPTS} \
-   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX})
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/elpa)
 
 # MPI selection for hypre: same Cray-PE rationale as hdf5/netcdf/fftw/petsc
 # above. hypre builds with MPI (find_package(MPI)) and, with Fortran drivers
