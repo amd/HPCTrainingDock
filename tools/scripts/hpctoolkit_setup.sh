@@ -575,9 +575,16 @@ else
       # hpctoolkit build fails (job 13430, ROCm 7.2.3, /nfsapps image).
       # libxerces-c-dev lets meson use the system xerces-c and skip that
       # from-source subproject entirely; ninja-build backs meson regardless.
+      #
+      # patchelf is apt-installed too so the post-install Boost-bundling
+      # step below can stamp an $ORIGIN RPATH on the Dyninst libs (makes
+      # the install resolve its bundled Boost even without the module's
+      # LD_LIBRARY_PATH). On a non-apt host patchelf may be absent; the
+      # bundling step degrades gracefully to the modulefile LD_LIBRARY_PATH
+      # prepend of $base/lib (see the bundling block after `meson install`).
       PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
       if command -v apt-get >/dev/null 2>&1; then
-         ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y pipx libboost-all-dev liblzma-dev libgtk-3-dev ninja-build libxerces-c-dev
+         ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y pipx libboost-all-dev liblzma-dev libgtk-3-dev ninja-build libxerces-c-dev patchelf
       else
          echo "hpctoolkit: apt-get not present (non-Debian host); relying on system boost/lzma/gtk and pip-installed meson/ninja"
       fi
@@ -681,6 +688,83 @@ else
       cd build
       meson compile || { echo "ERROR: meson compile failed"; exit 1; }
       meson install
+
+      # ── Bundle Boost so the install is self-contained ────────────────
+      # Dyninst's libcommon.so.* (and siblings) link libboost_{filesystem,
+      # thread} *by soname* from the system -- hpcstruct/hpcprof themselves
+      # carry no direct Boost NEED and no RPATH to a private Boost. When the
+      # distro Boost soname later differs from the one THIS build linked
+      # against (e.g. build linked 1.83 but the node only has 1.74, or vice
+      # versa), the tool dies at load with
+      #   "libboost_filesystem.so.<ver>: cannot open shared object file".
+      # This actually happened on the fleet (noble ships 1.83 in
+      # noble-updates/main but 1.74 in noble/universe), so which soname a
+      # node satisfies is a coin-flip unless BOTH distro runtimes are
+      # hand-installed everywhere -- brittle.
+      #
+      # Fix: copy the exact Boost runtime this build linked against into the
+      # install's own lib dir (the versioned Boost is present now because it
+      # was just apt-installed via libboost-all-dev above and is what the
+      # libs linked to), and stamp an $ORIGIN RPATH on the boost-consuming
+      # libs. Resolution then never depends on the system Boost matching.
+      # The modulefile also prepends $base/lib to LD_LIBRARY_PATH, so module
+      # users are covered even on hosts where patchelf is unavailable.
+      _hpctk_libdir="${HPCTOOLKIT_PATH}/lib"
+      # ELF files under the install that we care about: shared objects +
+      # executables. readelf on a non-ELF (e.g. wrapper script) just prints
+      # nothing, so the grep below simply yields no match for those.
+      mapfile -t _hpctk_elf < <(find "${HPCTOOLKIT_PATH}" -type f \
+         \( -name '*.so' -o -name '*.so.*' -o -perm -u+x \) 2>/dev/null)
+      mapfile -t _boost_sonames < <(
+         printf '%s\0' "${_hpctk_elf[@]}" \
+         | xargs -0 -r readelf -d 2>/dev/null \
+         | grep -oE 'libboost_[a-z_]+\.so\.[0-9.]+' | sort -u)
+      if [ "${#_boost_sonames[@]}" -gt 0 ]; then
+         echo "hpctoolkit: bundling Boost runtime into ${_hpctk_libdir}: ${_boost_sonames[*]}"
+         for _sn in "${_boost_sonames[@]}"; do
+            # Resolve the real file the loader would pick for this soname.
+            _src="$(ldconfig -p 2>/dev/null | awk -v s="${_sn}" '$1==s {print $NF; exit}')"
+            if [ -z "${_src}" ]; then
+               for _d in /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib /lib; do
+                  [ -e "${_d}/${_sn}" ] && { _src="${_d}/${_sn}"; break; }
+               done
+            fi
+            if [ -n "${_src}" ] && [ -e "${_src}" ]; then
+               _real="$(readlink -f "${_src}")"
+               ${SUDO} cp -aL "${_real}" "${_hpctk_libdir}/${_sn}"
+               echo "  bundled ${_sn} <- ${_real}"
+            else
+               echo "  WARNING: could not locate ${_sn} to bundle; this install will fall back to the system Boost (the soname-mismatch failure mode remains for this lib)."
+            fi
+         done
+         # Stamp $ORIGIN so the boost-consuming libs find the copies next to
+         # themselves regardless of LD_LIBRARY_PATH. Only files that directly
+         # NEED Boost are touched, and every such file lives in lib/ alongside
+         # the bundled Boost, so $ORIGIN (== the file's own dir) is correct.
+         if command -v patchelf >/dev/null 2>&1; then
+            # $ORIGIN covers a consumer that lives in lib/ (all known Boost
+            # consumers do); $ORIGIN/../lib additionally covers one that
+            # lives in bin/ -- so the bundled Boost is found either way.
+            _want='$ORIGIN:$ORIGIN/../lib'
+            for _f in "${_hpctk_elf[@]}"; do
+               readelf -d "${_f}" 2>/dev/null | grep -q 'libboost_' || continue
+               _rp="$(patchelf --print-rpath "${_f}" 2>/dev/null || true)"
+               case ":${_rp}:" in
+                  *'$ORIGIN'*) _new="${_rp}" ;;                 # already self-relative
+                  ::)          _new="${_want}" ;;               # no prior rpath
+                  *)           _new="${_want}:${_rp}" ;;        # keep prior, prepend ours
+               esac
+               ${SUDO} patchelf --set-rpath "${_new}" "${_f}" 2>/dev/null \
+                  && echo "  rpath -> $(basename "${_f}") [${_new}]" \
+                  || echo "  WARNING: patchelf failed on $(basename "${_f}")"
+            done
+         else
+            echo "hpctoolkit: patchelf not present; relying on the modulefile LD_LIBRARY_PATH prepend of \$base/lib for bundled-Boost resolution"
+         fi
+      else
+         echo "hpctoolkit: no libboost_* NEEDED by installed libs -- nothing to bundle"
+      fi
+      unset _hpctk_libdir _hpctk_elf _boost_sonames _sn _src _real _f _rp _d _want _new
 
       # chown to root only when we installed with elevation (SUDO non-empty).
       # On a user-owned tree (SUDO="") files are already correctly owned and
