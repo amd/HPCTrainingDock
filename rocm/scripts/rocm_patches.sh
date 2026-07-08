@@ -369,7 +369,11 @@ rocm_version_to_patches() {
       # tag by build_rocprof_sys_1_5_0() (no `rocm-7.12.0` tag exists upstream;
       # 7.12.0 was cut from the TheRock RC line). Order: slow rocprof-sys build
       # first to fail fast; the libomp symlink is a millisecond no-op.
-      7.12.0)           echo "rocprof-sys-1.5.0 rocprof-sys-instrument-libomp" ;;
+      # rocprof-compute (VERSION 3.5.0) is appended so build_rocprof_compute()
+      # produces the self-contained nuitka onefile overlay and prepends its
+      # bin/ to the modulefile PATH.  build.sh maps 7.12.0 -> rocm-systems tag
+      # `therock-7.12` (no rocm-7.12.0 tag exists upstream).
+      7.12.0)           echo "rocprof-sys-1.5.0 rocprof-sys-instrument-libomp rocprof-compute" ;;
       # 7.13.0 (AFAR / TheRock RC line, e.g. rocm-afar-23.2.1-7.13.0):
       # ships rocprof-sys 1.6.0 and exhibits TWO independent bugs that
       # both need fixing:
@@ -398,10 +402,19 @@ rocm_version_to_patches() {
       #      upstream tag `therock-7.13` (no `rocm-7.13.0` tag
       #      exists -- 7.13.0 was cut from the TheRock RC line).
       #
+      #   3. The in-distribution rocprof-compute is only a Python wrapper
+      #      whose deps (numpy/pandas/dash/...) are installed nowhere on
+      #      PYTHONPATH, so it fails at runtime.  The `rocprof-compute`
+      #      bundle (VERSION 3.6.0) builds the self-contained nuitka onefile
+      #      overlay and prepends its bin/ to the modulefile PATH -- no
+      #      PYTHONPATH, no dep collisions.  build.sh maps 7.13.0 ->
+      #      rocm-systems tag `therock-7.13` (no rocm-7.13.0 tag exists).
+      #
       # Order matters: the rocprof-sys-1.6.0 build is the slow step
       # (~30 min) so we list it first to fail fast on a misconfigured
-      # cluster; the libomp symlink is a few-millisecond no-op.
-      7.13.0)           echo "rocprof-sys-1.6.0 rocprof-sys-instrument-libomp" ;;
+      # cluster; the libomp symlink is a few-millisecond no-op; the
+      # rocprof-compute nuitka build (~10-30 min) runs last.
+      7.13.0)           echo "rocprof-sys-1.6.0 rocprof-sys-instrument-libomp rocprof-compute" ;;
       6.3.*)            echo "rocprof-compute" ;;
       6.4.*)            echo "rocprof-compute" ;;
       7.0.*)            echo "rocprof-compute" ;;

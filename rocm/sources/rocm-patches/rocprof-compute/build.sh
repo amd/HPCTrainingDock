@@ -156,12 +156,29 @@ else
     # tree into the rocm-systems monorepo at `projects/rocprofiler-compute`.
     # rocm-7.0.x and older still live in the standalone repo.
     if [ "$(printf '%s\n' "7.1.0" "$ROCM_VERSION" | sort -V | head -n1)" = "7.1.0" ]; then
-        echo "[build] cloning rocm-systems @ rocm-${ROCM_VERSION} (sparse subtree projects/rocprofiler-compute) ..." | tee -a "$LOG"
+        # Source ref resolution.  Most official releases publish a
+        # `rocm-X.Y.Z` tag in the rocm-systems monorepo.  A few numeric
+        # versions were cut from the TheRock RC line and have NO
+        # `rocm-X.Y.Z` tag -- their 3.x rocprofiler-compute source lives
+        # under the `therock-<maj>.<min>` tag instead (verified:
+        # rocm-systems @ therock-7.13 ships projects/rocprofiler-compute
+        # VERSION 3.6.0, matching the 7.13.0 install tree; therock-7.12
+        # ships 3.5.0, matching 7.12.0).  This mirrors the source pin the
+        # sibling rocprof-sys-1.6.0 / 1.5.0 bundles already use in
+        # rocm_patches.sh (_build_rocprof_sys_helper "1.6.0" "therock-7.13").
+        # A tag pin is preferred over VERSION.sha here: these preview .debs
+        # ship an empty VERSION.sha, and a public tag is reproducible.
+        case "$ROCM_VERSION" in
+            7.13.0) RPC_MONO_REF="therock-7.13" ;;
+            7.12.0) RPC_MONO_REF="therock-7.12" ;;
+            *)      RPC_MONO_REF="rocm-${ROCM_VERSION}" ;;
+        esac
+        echo "[build] cloning rocm-systems @ ${RPC_MONO_REF} (sparse subtree projects/rocprofiler-compute) ..." | tee -a "$LOG"
         git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git 2>&1 | tail -3 | tee -a "$LOG"
         cd rocm-systems
         git sparse-checkout init --cone
         git sparse-checkout set projects/rocprofiler-compute
-        git -c advice.detachedHead=false checkout "rocm-${ROCM_VERSION}" 2>&1 | tail -3 | tee -a "$LOG"
+        git -c advice.detachedHead=false checkout "${RPC_MONO_REF}" 2>&1 | tail -3 | tee -a "$LOG"
         cd projects/rocprofiler-compute
     else
         # Official standalone rocprofiler-compute repo (rocm-7.0.x and older).
@@ -330,8 +347,22 @@ fi
 # for RC trees (afar-*/therock-*): they pin to arbitrary historical
 # commits with their own requirements -- let upstream's req file win
 # there.
+#
+# The numeric versions that resolve to a therock-<maj>.<min> tag above
+# (7.12.0 -> 3.5.0, 7.13.0 -> 3.6.0) are ALSO excluded from the repin:
+# the locked list below was validated against the v3.4.0 (rocm-7.2.x)
+# dep closure, and the 3.5.x/3.6.x sources ship their own matching
+# requirements.txt.  Let upstream's version-matched file win, same as
+# the afar-*/therock-* RC trees.
+REPIN_REQS=0
 if [ -z "$RC_FLAVOUR" ] \
    && [ "$(printf '%s\n' "7.1.0" "$ROCM_VERSION" | sort -V | head -n1)" = "7.1.0" ]; then
+    REPIN_REQS=1
+    case "$ROCM_VERSION" in
+        7.12.0|7.13.0) REPIN_REQS=0 ;;
+    esac
+fi
+if [ "$REPIN_REQS" = "1" ]; then
     DISTRO_ID="$(. /etc/os-release && echo "${ID:-unknown}")"
     if [ "$DISTRO_ID" = "ubuntu" ]; then
         echo "[build] pinning requirements.txt for ubuntu / ROCm $ROCM_VERSION" | tee -a "$LOG"
@@ -478,7 +509,12 @@ EOF
     fi
 fi
 
-python3 -m pip install "nuitka==${NUITKA_VERSION}" patchelf 2>&1 | tail -3 | tee -a "$LOG"
+# zstandard is a BUILD-time dep of nuitka's onefile compressor (it is not
+# an app requirement, so it is not in upstream's requirements.txt).  Without
+# it nuitka warns "Onefile mode cannot compress" and ships a larger,
+# uncompressed payload.  Install it alongside nuitka so every build (pinned
+# or upstream-requirements) gets a compressed onefile.
+python3 -m pip install "nuitka==${NUITKA_VERSION}" patchelf zstandard 2>&1 | tail -3 | tee -a "$LOG"
 python3 -m pip install -r requirements.txt 2>&1 | tail -10 | tee -a "$LOG"
 
 UPSTREAM_VERSION=$(cat VERSION)
@@ -503,6 +539,20 @@ if [ -d "rocprof_compute_tui" ]; then
                --include-package-data=rocprof_compute_tui)
 fi
 
+# Optional: kaleido (plotly static image export) is an APP dep that upstream
+# carried in requirements.txt through v3.4.0 (rocm-7.2.x) but DROPPED in the
+# v3.5.0/v3.6.0 tree (rocm-7.12/7.13).  --include-package=kaleido is FATAL if
+# the package is not installed, so gate it on actual importability -- same
+# auto-detect approach as TUI_FLAGS above.  When absent, the onefile simply
+# omits static-image export, which the CLI/analysis paths do not use.
+KALEIDO_FLAGS=()
+if python3 -c "import kaleido" >/dev/null 2>&1; then
+    KALEIDO_FLAGS=(--include-package=kaleido --include-package-data=kaleido)
+    echo "[build] kaleido present -- including in onefile" | tee -a "$LOG"
+else
+    echo "[build] kaleido not installed (dropped upstream >=v3.5.0) -- skipping include" | tee -a "$LOG"
+fi
+
 echo "[build] running nuitka (~10-30 min) ..." | tee -a "$LOG"
 python3 -m nuitka --mode=onefile --no-deployment-flag=self-execution \
     --include-data-files=${PROJECT_SOURCE_DIR}/VERSION*=./ \
@@ -512,7 +562,7 @@ python3 -m nuitka --mode=onefile --no-deployment-flag=self-execution \
     --include-package-data=dash_bootstrap_components \
     --include-package=plotly --include-package-data=plotly \
     --noinclude-data-files=plotly/datasets/* \
-    --include-package=kaleido --include-package-data=kaleido \
+    "${KALEIDO_FLAGS[@]}" \
     --include-package=rocprof_compute_analyze \
     --include-package-data=rocprof_compute_analyze \
     --include-package=rocprof_compute_profile \
