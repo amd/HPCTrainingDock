@@ -180,6 +180,20 @@ else
         git sparse-checkout set projects/rocprofiler-compute
         git -c advice.detachedHead=false checkout "${RPC_MONO_REF}" 2>&1 | tail -3 | tee -a "$LOG"
         cd projects/rocprofiler-compute
+        # v3.5.0+ (rocm-7.12/7.13) vendors pyyaml as a git submodule at
+        # src/vendored/pyyaml (a PEP 420 namespace package that the
+        # rocprof-compute wrapper imports via `from vendored import yaml`).
+        # The blobless sparse clone above does NOT populate submodules, so
+        # without this init the onefile builds but crashes at startup with
+        # "ModuleNotFoundError: No module named 'vendored.pyyaml.lib'".
+        # Guard on the submodule actually being registered so older releases
+        # (7.2.x etc., which have no vendored/ tree) stay a clean no-op.
+        if git config --file ../../.gitmodules --get-regexp path 2>/dev/null \
+             | grep -q 'rocprofiler-compute/src/vendored'; then
+            echo "[build] initializing vendored/pyyaml submodule ..." | tee -a "$LOG"
+            git -C ../.. submodule update --init --recursive \
+                projects/rocprofiler-compute/src/vendored/pyyaml 2>&1 | tail -3 | tee -a "$LOG"
+        fi
     else
         # Official standalone rocprofiler-compute repo (rocm-7.0.x and older).
         # rocprofiler-compute is tagged `rocm-<ver>` for only a subset of ROCm
@@ -553,6 +567,18 @@ else
     echo "[build] kaleido not installed (dropped upstream >=v3.5.0) -- skipping include" | tee -a "$LOG"
 fi
 
+# Optional: the `vendored` package (v3.5.0+, rocm-7.12/7.13) bundles pyyaml
+# in-tree as a PEP 420 namespace package (src/vendored/pyyaml, populated by
+# the submodule init above).  --include-package=vendored pulls in the
+# namespace subpackages (vendored.pyyaml.lib.yaml) and its 594 data files;
+# without it the onefile crashes at startup ("Vendored dependencies not
+# found.").  Gated on the dir existing so pre-3.5.0 releases skip it.
+VENDORED_FLAGS=()
+if [ -d "vendored" ]; then
+    VENDORED_FLAGS=(--include-package=vendored --include-package-data=vendored)
+    echo "[build] vendored/ present -- including in onefile" | tee -a "$LOG"
+fi
+
 echo "[build] running nuitka (~10-30 min) ..." | tee -a "$LOG"
 python3 -m nuitka --mode=onefile --no-deployment-flag=self-execution \
     --include-data-files=${PROJECT_SOURCE_DIR}/VERSION*=./ \
@@ -563,6 +589,7 @@ python3 -m nuitka --mode=onefile --no-deployment-flag=self-execution \
     --include-package=plotly --include-package-data=plotly \
     --noinclude-data-files=plotly/datasets/* \
     "${KALEIDO_FLAGS[@]}" \
+    "${VENDORED_FLAGS[@]}" \
     --include-package=rocprof_compute_analyze \
     --include-package-data=rocprof_compute_analyze \
     --include-package=rocprof_compute_profile \
