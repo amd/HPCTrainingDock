@@ -46,6 +46,11 @@ AMDGPU_GFXMODEL="${AMDGPU_GFXMODEL:-gfx942;gfx90a}"
 TOP_INSTALL_PATH="${TOP_INSTALL_PATH:-/nfsapps/opt}"
 TOP_MODULE_PATH="${TOP_MODULE_PATH:-/nfsapps/modules}"
 THEROCK_AMDGPU_FAMILY="${THEROCK_AMDGPU_FAMILY:-gfx94X-dcgpu}"
+# Optional tarball url-base forwarded to the leaf therock installer's --url-base
+# (therock-* tokens only; the therock-afar-* channel is repo.radeon.com and is
+# left untouched). Empty => leaf default (stable repo.amd.com). Set by the
+# submitter's --therock-url-base for nightlies/prereleases.
+THEROCK_URL_BASE="${THEROCK_URL_BASE:-}"
 SITE="${SITE:-}"
 # AAC7 high-level interface (see run_rocm_build_sweep.sh --program-environments).
 # When PROGRAM_ENVIRONMENTS is non-empty the sweep runs the Cray PrgEnv flow
@@ -229,6 +234,7 @@ SUMMARY="sweep_summary_$(date +%Y%m%d_%H%M%S)_job${SLURM_JOB_ID}.out"
    echo " TOP_MODULE_PATH:  ${TOP_MODULE_PATH}"
    echo " NFSAPPS_REMOUNT:  ${NEED_NFSAPPS_RW}  (1 = at least one path is under /nfsapps)"
    echo " THEROCK_FAMILY:   ${THEROCK_AMDGPU_FAMILY}"
+   echo " THEROCK_URLBASE:  ${THEROCK_URL_BASE:-<default: stable repo.amd.com>}"
    echo " DELTA_CONF:       ${DELTA_CONF}"
    for _v in "${VERSIONS[@]}"; do
       if _b=$(delta_base_for "${_v}"); then
@@ -873,16 +879,21 @@ for v in "${VERSIONS[@]}"; do
    # ${v#therock-} yields the numeric either way.
    if [[ "${v}" == therock-* ]] || _is_therock_numeric "${v}"; then
       THEROCK_REL="${v#therock-}"
+      # Forward the optional nightly/prerelease tarball url-base to the leaf's
+      # --url-base only when set; unset preserves the leaf's stable default.
+      _therock_url_args=()
+      [[ -n "${THEROCK_URL_BASE}" ]] && _therock_url_args=( --url-base "${THEROCK_URL_BASE}" )
       {
          echo ""
          echo "=================================================================="
-         echo " [$(date)] BEGIN rocm-${v}  [TheRock extract-only, family=${THEROCK_AMDGPU_FAMILY}]"
+         echo " [$(date)] BEGIN rocm-${v}  [TheRock extract-only, family=${THEROCK_AMDGPU_FAMILY}, url-base=${THEROCK_URL_BASE:-<default>}]"
          echo "=================================================================="
       } | tee -a "${SUMMARY}"
 
       if bare_system/run_rocm_therock_install.sh \
             --therock-release "${THEROCK_REL}" \
             --amdgpu-family   "${THEROCK_AMDGPU_FAMILY}" \
+            "${_therock_url_args[@]}" \
             --distro "${DISTRO}" --distro-version "${DISTRO_VERSION}" \
             --top-install-path "${TOP_INSTALL_PATH}" \
             --top-module-path  "${TOP_MODULE_PATH}" \

@@ -101,6 +101,16 @@ LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$
 # enable iff TOP_INSTALL_PATH is NOT under $HOME.
 : ${WORLD_READABLE:="auto"}
 : ${URL_BASE:="https://repo.amd.com/rocm/tarball"}
+# NIGHTLY_GROUP: the unix group that owns a nightly install/module tree. Nightly
+# mode is AUTO-DETECTED from URL_BASE (see the NIGHTLY_MODE block after arg
+# parsing): when the tarball url-base points at the nightlies channel
+# (*nightlies*), the install + module trees are owned root:${NIGHTLY_GROUP} with
+# group-rw / no-other perms (instead of the world-readable default), and the
+# install/module names carry the datestamped version from the tarball filename
+# (e.g. 7.14.0a20260612) instead of the .info/version base (7.14.0). The group
+# must already exist on the install host; a missing group aborts early with a
+# clear message (it is an admin prerequisite, not auto-created).
+: ${NIGHTLY_GROUP:="nightlies"}
 # LOCAL_TARBALL_INPUT: when set to an existing therock-dist-linux-*.tar.gz
 # path, Phase 1 URL discovery + the Phase 2 curl are skipped and this file is
 # extracted directly. This is the AAC6-build -> transfer -> AAC7-extract path:
@@ -171,6 +181,13 @@ Usage: $0 [opts]
                                  for nightlies, https://rocm.prereleases.amd.com/tarball
                                  for prereleases, etc. See
                                  https://github.com/ROCm/TheRock/blob/main/dockerfiles/install_rocm_tarball.sh)
+                                 NIGHTLY AUTO-BEHAVIOR: when this URL points at
+                                 the nightlies channel (matches *nightlies*), the
+                                 install/module names use the datestamped tarball
+                                 version (e.g. 7.14.0a20260612, not the base
+                                 7.14.0) and the trees are owned root:${NIGHTLY_GROUP}
+                                 with group-rw / no-other perms. The ${NIGHTLY_GROUP}
+                                 group must already exist (admin prerequisite).
   --replace-existing 0|1        overwrite existing rocm-<numeric>
                                 install + modulefile (default ${REPLACE_EXISTING})
   --keep-failed-installs 0|1    on failure, keep partial install + modulefile
@@ -261,6 +278,30 @@ if [[ "${MODULES_ONLY}" == "1" ]]; then
    [[ -n "${LOCAL_TARBALL_INPUT}" ]] && \
       echo "[therock] NOTE: --modules-only set; ignoring --local-tarball '${LOCAL_TARBALL_INPUT}'"
    LOCAL_TARBALL_INPUT=""
+fi
+
+# ---------------- Nightly mode auto-detection + group prerequisite ----
+# Nightly mode is inferred from the tarball url-base: the nightlies channel
+# (https://rocm.nightlies.amd.com/tarball) yields a *nightlies* URL. In this
+# mode we (a) name the install/module after the datestamped tarball version
+# (ACTUAL_VERSION, e.g. 7.14.0a20260612) rather than the .info/version base
+# (7.14.0), so successive nightlies of the same base coexist, and (b) own the
+# trees root:${NIGHTLY_GROUP} with group-rw / no-other perms instead of the
+# world-readable default. The group must exist already (admin prerequisite);
+# we fail fast BEFORE the multi-GB download if it is missing. Skipped in
+# --stage-only mode (that path only downloads a tarball; it writes no install
+# or module tree whose ownership would matter).
+NIGHTLY_MODE=0
+case "${URL_BASE}" in *nightlies*) NIGHTLY_MODE=1 ;; esac
+if [ "${NIGHTLY_MODE}" = "1" ]; then
+   echo "[therock] NIGHTLY_MODE=1 (url-base '${URL_BASE}'): timestamped version naming + root:${NIGHTLY_GROUP} group perms"
+   if [ -z "${STAGE_ONLY_DIR}" ] && ! getent group "${NIGHTLY_GROUP}" >/dev/null 2>&1; then
+      echo "ERROR: nightly install requires the '${NIGHTLY_GROUP}' group, but it does not" >&2
+      echo "       exist on $(hostname). This is an admin prerequisite; create it first:" >&2
+      echo "         sudo groupadd ${NIGHTLY_GROUP}" >&2
+      echo "       (add the intended users to it), then re-run." >&2
+      exit 1
+   fi
 fi
 
 MODULE_DIR="${TOP_MODULE_PATH}/base/rocm"
@@ -422,7 +463,15 @@ if [[ "${MODULES_ONLY}" == "1" ]]; then
       exit 1
    fi
    ROCM_NUMERIC=""
-   if ${SUDO} test -f "${INSTALL_DIR}/.info/version" 2>/dev/null; then
+   # In nightly mode the install dir carries the datestamped version
+   # (rocm-7.14.0a20260612); .info/version holds only the base (7.14.0), so the
+   # dir basename -- not .info/version -- is authoritative for re-emitting the
+   # matching modulefiles. Off nightly, keep the .info/version-first behaviour.
+   if [ "${NIGHTLY_MODE}" = "1" ]; then
+      ROCM_NUMERIC="$(basename "${INSTALL_DIR}")"
+      ROCM_NUMERIC="${ROCM_NUMERIC#rocm-}"
+   fi
+   if [[ -z "${ROCM_NUMERIC}" ]] && ${SUDO} test -f "${INSTALL_DIR}/.info/version" 2>/dev/null; then
       ROCM_NUMERIC="$(${SUDO} cut -f1 -d- "${INSTALL_DIR}/.info/version" 2>/dev/null || true)"
    fi
    # Fallback: derive from the install dir basename (rocm-<numeric>).
@@ -670,6 +719,18 @@ if [[ -z "${ROCM_NUMERIC}" ]]; then
    exit 1
 fi
 echo "ROCM_NUMERIC (from .info/version): ${ROCM_NUMERIC}"
+
+# NIGHTLY MODE: name the install/module after the datestamped tarball version
+# (ACTUAL_VERSION, e.g. 7.14.0a20260612) instead of the .info/version base
+# (7.14.0). Nightlies re-use the same base version across many daily builds, so
+# the datestamp is what keeps them distinct on disk (rocm-7.14.0a20260612) and
+# in the module tree (rocm/7.14.0a20260612). Everything downstream keys off
+# ROCM_NUMERIC (install dir, modulefile, per-package + rocmplus trees, .pc), so
+# a single reassignment here retags the whole install consistently.
+if [ "${NIGHTLY_MODE}" = "1" ] && [ -n "${ACTUAL_VERSION}" ]; then
+   echo "[therock] NIGHTLY_MODE: using timestamped version '${ACTUAL_VERSION}' for install/module naming (base .info/version was '${ROCM_NUMERIC}')"
+   ROCM_NUMERIC="${ACTUAL_VERSION}"
+fi
 
 # Sanity: ACTUAL_VERSION (from the tarball filename) should agree with
 # ROCM_NUMERIC (.info/version inside the tarball). They CAN differ for
@@ -1002,26 +1063,41 @@ if [[ "${SKIP_PATCHES}" != "1" && "${MODULES_ONLY}" != "1" ]]; then
    unset _patches_sh
 fi
 
-# ---------------- world-readable perms (shared install locations) -----
-_world_ro=0
-case "${WORLD_READABLE}" in
-   1) _world_ro=1 ;;
-   auto)
-      if [ -n "${HOME}" ]; then
-         case "${TOP_INSTALL_PATH}" in "${HOME}"/*|"${HOME}") _world_ro=0 ;; *) _world_ro=1 ;; esac
-      else
-         _world_ro=1
-      fi ;;
-esac
-if [ "${_world_ro}" = "1" ]; then
-   make_world_readable \
+# ---------------- shared-location perms --------------------------------
+# NIGHTLY MODE: the rolling test tree is owned root:${NIGHTLY_GROUP} with
+# group-rw / no-other perms (setgid dirs) -- NOT world-readable -- so only the
+# nightlies group can read/write it. The rocm-patches-<ver> overlay is included
+# when present (make_group_rw skips missing paths). Off nightly, keep the
+# world-readable default (auto-enabled outside $HOME).
+if [ "${NIGHTLY_MODE}" = "1" ]; then
+   make_group_rw "${NIGHTLY_GROUP}" \
       "${INSTALL_DIR}" \
       "${TOP_MODULE_PATH}/base" \
       "${TOP_MODULE_PATH}/rocm-${ROCM_NUMERIC}" \
       "${TOP_MODULE_PATH}/rocmplus-${ROCM_NUMERIC}" \
+      "${TOP_INSTALL_PATH}/rocm-patches-${ROCM_NUMERIC}" \
       "${MODULE_FILE}"
+else
+   _world_ro=0
+   case "${WORLD_READABLE}" in
+      1) _world_ro=1 ;;
+      auto)
+         if [ -n "${HOME}" ]; then
+            case "${TOP_INSTALL_PATH}" in "${HOME}"/*|"${HOME}") _world_ro=0 ;; *) _world_ro=1 ;; esac
+         else
+            _world_ro=1
+         fi ;;
+   esac
+   if [ "${_world_ro}" = "1" ]; then
+      make_world_readable \
+         "${INSTALL_DIR}" \
+         "${TOP_MODULE_PATH}/base" \
+         "${TOP_MODULE_PATH}/rocm-${ROCM_NUMERIC}" \
+         "${TOP_MODULE_PATH}/rocmplus-${ROCM_NUMERIC}" \
+         "${MODULE_FILE}"
+   fi
+   unset _world_ro
 fi
-unset _world_ro
 
 echo ""
 echo "============================================================"

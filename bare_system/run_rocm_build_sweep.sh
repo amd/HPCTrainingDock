@@ -104,6 +104,18 @@ SITE=""
                                           # Override for other families (gfx908, gfx110X-all,
                                           # gfx120X-all, gfx1150/51/52, ...). See
                                           # https://repo.amd.com/rocm/tarball/ for the full list.
+# THEROCK_URL_BASE: tarball listing/download base forwarded to the leaf
+# run_rocm_therock_install.sh --url-base. Empty => leaf default (stable
+# repo.amd.com). Set to https://rocm.nightlies.amd.com/tarball for nightlies,
+# https://rocm.prereleases.amd.com/tarball for prereleases, etc. Applies to
+# therock-X.Y[.Z] tokens only (the therock-afar-* channel is repo.radeon.com
+# and is intentionally unaffected). Nightly tarballs carry a datestamp suffix
+# (e.g. 7.14.0a20260612); pass a bare `therock-X.Y` token and the leaf's
+# listing-grep discovery resolves it to the latest matching nightly. Since a
+# nightly's .info/version changes daily, pair this with --replace-existing 1
+# to always refresh to the newest build (the leaf's skip-if-installed glob
+# would otherwise treat a prior day's rocm-X.Y* as already installed).
+: ${THEROCK_URL_BASE:=""}
 
 ROCM_VERSIONS_RAW=""
 
@@ -233,6 +245,16 @@ Usage: $0 [opts]
    --therock-min-per-version N   estimated minutes per TheRock token (default $THEROCK_MIN_PER_VERSION)
    --therock-amdgpu-family FAM   gfx-family token in the TheRock tarball filename
                                  (default $THEROCK_AMDGPU_FAMILY -- covers gfx942/gfx90a)
+   --therock-url-base URL        tarball listing/download base forwarded to the leaf
+                                 TheRock installer's --url-base (therock-* tokens only).
+                                 Default: unset -> leaf default (stable repo.amd.com).
+                                 For nightlies use https://rocm.nightlies.amd.com/tarball
+                                 (prereleases: https://rocm.prereleases.amd.com/tarball).
+                                 Pass a bare therock-X.Y token; discovery resolves it to
+                                 the latest datestamped nightly (e.g. 7.14.0a20260612).
+                                 Pair with --replace-existing 1 to always pull the newest
+                                 nightly, and e.g. --site /nfsapps/ubuntu-24.04-nightlies
+                                 to deploy into a dedicated test tree.
    --margin-min N                margin minutes added to total (default $MARGIN_MIN)
    --replace-existing 0|1        overwrite existing \${TOP_INSTALL_PATH}/rocm-<v> (default $REPLACE_EXISTING)
                                  (alias: --force-extract -- deprecated, kept for backward compat)
@@ -273,6 +295,7 @@ while [[ $# -gt 0 ]]; do
       --afar-min-per-version) shift; AFAR_MIN_PER_VERSION=${1} ;;
       --therock-min-per-version) shift; THEROCK_MIN_PER_VERSION=${1} ;;
       --therock-amdgpu-family)   shift; THEROCK_AMDGPU_FAMILY=${1} ;;
+      --therock-url-base) shift; THEROCK_URL_BASE=${1} ;;
       --margin-min)       shift; MARGIN_MIN=${1} ;;
       --replace-existing) shift; REPLACE_EXISTING=${1} ;;
       --force-extract)    shift; REPLACE_EXISTING=${1}
@@ -586,6 +609,7 @@ cat <<EOF
  TOP_INSTALL_PATH: ${TOP_INSTALL_PATH}   [source: ${TOP_INSTALL_PATH_SOURCE}]
  TOP_MODULE_PATH:  ${TOP_MODULE_PATH}   [source: ${TOP_MODULE_PATH_SOURCE}]
  TheRock family:   ${THEROCK_AMDGPU_FAMILY}
+ TheRock url-base: ${THEROCK_URL_BASE:-<default: stable repo.amd.com>}
  Delta registry:   ${DELTA_CONF}
  ProgEnv tokens:   ${PROGRAM_ENVIRONMENTS_NORM:-<none>}
  PE version:       ${PE_VERSION:-<none, auto-detect on node>}
@@ -614,6 +638,10 @@ fi
 # child installers (e.g. mpich-wrappers' wget). no_proxy is carried via ALL.
 [[ -n "${HTTPS_PROXY_URL}" ]] && EXPORT_VARS="${EXPORT_VARS},HTTPS_PROXY_URL=${HTTPS_PROXY_URL}"
 [[ -n "${HTTP_PROXY_URL}"  ]] && EXPORT_VARS="${EXPORT_VARS},HTTP_PROXY_URL=${HTTP_PROXY_URL}"
+# Forward the TheRock tarball url-base only when set (a single URL, no commas ->
+# safe in --export). The sbatch passes it to the leaf therock installer's
+# --url-base for therock-* tokens (nightlies/prereleases); unset -> stable default.
+[[ -n "${THEROCK_URL_BASE}" ]] && EXPORT_VARS="${EXPORT_VARS},THEROCK_URL_BASE=${THEROCK_URL_BASE}"
 
 CMD=( sbatch
       --time="${TIME_STR}"

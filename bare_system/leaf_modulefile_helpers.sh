@@ -1027,6 +1027,32 @@ make_world_readable() {
    done
 }
 
+# make_group_rw -- set a shared-group ownership + permission model on the given
+# paths (the nightlies rolling test tree). Owner root, group $1 (first arg),
+# remaining args are the paths. The group gets read/write; "other" gets nothing;
+# directories are made setgid so files created later inherit the group.
+#
+# We deliberately use the capital-X idiom (`g+rwX`) rather than a fixed numeric
+# mode: a literal `chmod 0660` on files would strip the execute bit from the
+# ROCm binaries (rocminfo, hipcc, amdclang, ...) and break the install. `g+rwX`
+# adds group execute only where a file is a directory or ALREADY executable, so
+# the net modes come out as: directories 2770 (setgid), non-executable data
+# files 0660, and executables/scripts 0770 -- honouring "group rw, no other"
+# while keeping the tree runnable.
+make_group_rw() {
+   local _sudo="${SUDO-sudo}"
+   local _grp="$1"; shift
+   local _p
+   for _p in "$@"; do
+      [ -e "${_p}" ] || continue
+      echo "[group-rw] chown -R root:${_grp} + chmod g+rwX,o-rwx (+setgid dirs) ${_p}"
+      ${_sudo} chown -R "root:${_grp}" "${_p}" 2>/dev/null || true
+      ${_sudo} chmod -R o-rwx,g+rwX "${_p}" 2>/dev/null || true
+      # Setgid on directories so files added later inherit the nightlies group.
+      ${_sudo} find "${_p}" -type d -exec chmod g+s {} + 2>/dev/null || true
+   done
+}
+
 # ----------------------------------------------------------------------------
 # build_and_emit_mpich_wrappers -- build a from-source MPICH (ch4:ofi over
 # libfabric) with the AMD LLVM compiler (amdclang/amdclang++/amdflang) taken
