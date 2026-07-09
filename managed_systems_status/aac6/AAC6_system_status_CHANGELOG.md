@@ -2,6 +2,14 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-07-09
+
+- User-facing modules:
+    + turbovnc
+- Modules:
+    + turbovnc/3.0.3
+
+[Full snapshot](archive/AAC6_system_status_2026-07-09.md)
 ## 2026-07-06
 
 - User-facing modules:
