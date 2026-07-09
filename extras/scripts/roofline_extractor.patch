@@ -1,0 +1,93 @@
+--- a/profile_app.py	2026-07-09 18:00:59.789471140 -0500
++++ b/profile_app.py	2026-07-09 18:00:37.886850995 -0500
+@@ -283,8 +283,29 @@
+ 
+ def main():
+     parser = argparse.ArgumentParser(
+-        description='Run rocprofv3 with counter collection and kernel tracing',
+-        usage='%(prog)s [-o OUTPUT_DIR] [--arch ARCH] [--proj-arch PROJ_ARCH] -- run_command [args...]'
++        prog='roofline-extractor-profile',
++        description=(
++            'Automated end-to-end roofline profiling for an application. '
++            'Auto-detects the GPU architecture, runs rocprofv3 to collect '
++            'hardware counters (four runs) and a kernel trace (one run), '
++            'post-processes the data, and runs rooflineExtractor to produce '
++            'a guided analysis, an interactive HTML roofline plot, and CSV '
++            'dumps. All outputs are written under --output-dir.'
++        ),
++        usage='%(prog)s [-o OUTPUT_DIR] [--arch ARCH] [--proj-arch PROJ_ARCH] -- <run_command> [args...]',
++        epilog=(
++            'Example:\n'
++            '  roofline-extractor-profile -o my_results --proj-arch MI355X -- ./my_app arg1\n'
++            '\n'
++            'Notes:\n'
++            '  * The "--" separator before <run_command> is required so flags meant\n'
++            '    for the profiled application are not consumed by this script.\n'
++            '  * rocprofv3 -f csv requires ROCm 7+; on older ROCm the flag is\n'
++            '    auto-detected and dropped on retry.\n'
++            '\n'
++            'See README.md for the full workflow.'
++        ),
++        formatter_class=argparse.RawDescriptionHelpFormatter,
+     )
+     parser.add_argument(
+         '-o', '--output-dir',
+@@ -341,10 +362,6 @@
+             f"Supported: {', '.join(sorted(supported_proj_arch))}"
+         )
+ 
+-    # Prepend ./data/ to output_dir if it's not already there and not an absolute path
+-    if not os.path.isabs(output_dir) and not output_dir.startswith('data/') and not output_dir.startswith('./data/'):
+-        output_dir = os.path.join('data', output_dir)
+-    
+     # Remove the '--' separator if present
+     if run_command and run_command[0] == '--':
+         run_command = run_command[1:]
+@@ -385,9 +402,9 @@
+     # Save original working directory
+     original_dir = os.getcwd()
+     
+-    # Convert output_dir to absolute path
+-    output_path = Path(__file__).parent / output_dir
+-    output_dir = os.path.abspath(output_path)
++    # Resolve relative --output-dir against the user's CWD (not the install dir)
++    # so unprivileged users don't hit PermissionError under /shared/apps/...
++    output_dir = os.path.abspath(output_dir)
+     
+     # Convert input counter file to absolute path (use detected architecture)
+     roof_path = Path(__file__).parent / f'roof-counters-{gfx_arch}.txt'
+--- a/rooflineExtractor.py	2026-07-09 18:01:12.242823740 -0500
++++ b/rooflineExtractor.py	2026-07-09 18:00:37.918851901 -0500
+@@ -2798,7 +2798,31 @@
+ def main():
+ 
+     # Get filenames from input args
+-    parser = argparse.ArgumentParser()
++    parser = argparse.ArgumentParser(
++        prog='roofline-extractor-extract',
++        description=(
++            'Roofline Extractor: compute per-kernel arithmetic intensity and '
++            'percent of empirical peak performance from rocprofv3 hardware-counter '
++            'and kernel-trace CSVs. Produces a guided terminal analysis, an optional '
++            'interactive HTML roofline plot (--plot), and optional CSV dumps (--dump). '
++            'Use -c/-r for a single application, or -D/--directory for a bundle of apps '
++            'where each immediate subdirectory contains counters.csv and '
++            'trace_kernel_trace.csv.'
++        ),
++        epilog=(
++            'Examples:\n'
++            '  # Single application\n'
++            '  roofline-extractor-extract -c counters.csv -r trace_kernel_trace.csv \\\n'
++            '                             --plot --dump --arch MI300X\n'
++            '\n'
++            '  # Multi-app bundle (subdirs of my_bundle/ are merged)\n'
++            '  roofline-extractor-extract -D my_bundle --plot --dump --arch MI300X\n'
++            '\n'
++            'See README.md for the full workflow and METRICS_SUMMARY.md /\n'
++            'METRICS_DETAILED.md for metric definitions.'
++        ),
++        formatter_class=argparse.RawDescriptionHelpFormatter,
++    )
+     parser.add_argument('-c', '--counter', required=False, help='Provide roof_counters.csv filename from rocprof -i (required unless --directory)')
+     parser.add_argument('-r', '--results', required=False, help='Provide results.csv / trace filename from rocprof --stats (required unless --directory)')
+     parser.add_argument('-D', '--directory', required=False, metavar='DIR', help='Directory of subdirs, each with counters.csv and trace_kernel_trace.csv; plot/CSV outputs are written here')
