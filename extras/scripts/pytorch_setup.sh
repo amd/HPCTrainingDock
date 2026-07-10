@@ -57,16 +57,16 @@ else
    AMDGPU_GFXMODEL=$(rocminfo 2>/dev/null | grep gfx | sed -e 's/Name://' | head -1 | sed 's/ //g' || true)
 fi
 BUILD_PYTORCH=0
-# PYTORCH_VERSION's role: this 2.9.1 default is only the LAST-RESORT
+# PYTORCH_VERSION's role: this 2.12.0 default is only the LAST-RESORT
 # fallback. The runtime default is auto-derived by
 # default_pytorch_version_for_rocm() (defined further below) from the
 # loaded/--rocm-version ROCm major.minor — e.g. ROCm 6.2 -> 2.6.0,
-# ROCm 7.1 -> 2.10.0, ROCm 7.3+ -> 2.12.0. The auto-derive runs inside
-# resolve_pytorch_stack_versions when PYTORCH_VERSION_USER_SET=0.
-# Passing --pytorch-version flips the sentinel to 1 and bypasses the
-# auto-derive. The 2.9.1 here is what sticks if the resolver runs with
-# an unrecognised ROCm.
-PYTORCH_VERSION=2.9.1
+# ROCm 7.1 -> 2.10.0, ROCm 7.3+ (incl. the 7.1x nightlies, e.g. 7.14)
+# -> 2.12.0. The auto-derive runs inside resolve_pytorch_stack_versions
+# when PYTORCH_VERSION_USER_SET=0. Passing --pytorch-version flips the
+# sentinel to 1 and bypasses the auto-derive. The 2.12.0 here is what
+# sticks if the resolver runs with an unrecognised ROCm (newest known).
+PYTORCH_VERSION=2.12.0
 PYTORCH_VERSION_USER_SET=0
 # PYTHON_VERSION: the python3 minor release used both to build the wheels
 # and to lay out every .../lib/python3.${PYTHON_VERSION}/site-packages
@@ -363,10 +363,15 @@ resolve_aotriton_for_pt_only() {
 # at this time": 2.6.0, 2.7.1, 2.8.0, 2.9.1, 2.10.0, 2.11.0, 2.12.0.
 # 2.5.0 / 2.4.0 / 2.3.0 use .0 since no patch was specified.
 #
-# Off-table ROCm: rocm < 5.7 -> 2.3.0 (oldest known); rocm > 7.x not
-# explicitly listed -> 2.12.0 (newest known). Both branches print the
-# normal "Manifest cell missing" warning further downstream so the user
-# is reminded to validate.
+# Two-digit 7-minors (7.10..7.99) -> 2.12.0 (newest known). This is the
+# range the TheRock nightly sweep occupies today (REL 7.14 resolves to a
+# ROCM_MAJOR_MINOR of "7.14"), so the nightly builds PyTorch 2.12.0 by
+# default without needing an explicit --pytorch-version.
+#
+# Off-table ROCm not matched by any row -> empty stdout, and the resolver
+# keeps the file-default constant (PYTORCH_VERSION=2.12.0, newest known).
+# Off-table combos print the normal "Manifest cell missing" warning
+# further downstream so the user is reminded to validate.
 default_pytorch_version_for_rocm() {
    local rocm_mm="$1"
    case "${rocm_mm}" in
@@ -378,8 +383,14 @@ default_pytorch_version_for_rocm() {
       7.1)                                  echo "2.10.0" ;;
       7.2)                                  echo "2.11.0" ;;
       7.3|7.4|7.5|7.6|7.7|7.8|7.9)          echo "2.12.0" ;;
+      # Two-digit 7-minors (7.10..7.99), which is where the TheRock
+      # nightly line lands today (REL 7.14 -> ROCM_MAJOR_MINOR "7.14").
+      # Newest known PyTorch. Keep this AFTER the single-digit 7.x rows
+      # so 7.1/7.2 keep their pinned 2.10/2.11 defaults.
+      7.[1-9][0-9])                         echo "2.12.0" ;;
       # Off-table guards: too-old / too-new ROCm. Empty stdout means
-      # "I don't know" and the resolver keeps the file-default (2.9.1).
+      # "I don't know" and the resolver keeps the file-default (now
+      # 2.12.0, newest known).
       *)                                    echo ""       ;;
    esac
 }

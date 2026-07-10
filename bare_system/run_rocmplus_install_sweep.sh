@@ -124,6 +124,20 @@ PROGRAM_ENVIRONMENTS_RAW=""
 # those two parents finishes first.
 START_AFTER=""
 START_AFTER_ANY=""
+# START_AFTER_OK: optional single jobid used as an afterok dependency for the
+# first wave (the first MAX_PARALLEL jobs). Unlike START_AFTER / START_AFTER_ANY
+# (afterany), afterok holds the dependent job until the parent completes
+# SUCCESSFULLY -- used by the nightly orchestrator so the rocm-plus install runs
+# only if the ROCm SDK build job succeeded. When combined with the afterany
+# flags the tokens are OR-joined ('?'); for the nightly (single afterok jobid,
+# no afterany) the resulting dep is simply afterok:<jobid>.
+START_AFTER_OK=""
+# SKIP_MODULE_PREFLIGHT: when 1, the login-side check that every --rocm-versions
+# token already has a modulefile (in the site or system tree) is downgraded from
+# a hard error to a warning. Required when the rocm modulefile is produced by an
+# upstream job this sweep depends on (e.g. the nightly build job via
+# --start-after-ok) and therefore does not exist yet at submission time.
+SKIP_MODULE_PREFLIGHT=0
 DRY_RUN=0
 
 # Outbound proxy for compute-node fetches. Leave EMPTY by default: the sbatch
@@ -244,6 +258,17 @@ Usage: $0 [opts]
                                  want this sweep to start on whichever one finishes first. Space- or
                                  comma-separated. May be combined with --start-after (the lists are
                                  OR-merged into a single afterany:J1?afterany:J2?... dep string).
+   --start-after-ok JOBID        chain the first wave after JOBID completes SUCCESSFULLY
+                                 (afterok, not afterany). Used by the nightly orchestrator so the
+                                 rocm-plus install runs only if the ROCm SDK build job succeeded.
+                                 If combined with --start-after / --start-after-any the tokens are
+                                 OR-joined ('?'); alone it yields --dependency=afterok:JOBID.
+   --skip-module-preflight       downgrade the login-side "rocm modulefile must already exist"
+                                 pre-flight from a hard error to a warning. Use when the rocm
+                                 modulefile is produced by an upstream job this sweep depends on
+                                 (e.g. via --start-after-ok) and so does not exist yet at submit
+                                 time. The compute-side sbatch still module-loads rocm/<v>, so a
+                                 genuinely missing modulefile still fails there.
    --dry-run                     print sbatch commands without submitting
    --help
 
@@ -281,6 +306,8 @@ while [[ $# -gt 0 ]]; do
       --max-parallel)      shift; MAX_PARALLEL=${1} ;;
       --start-after)       shift; START_AFTER=${1} ;;
       --start-after-any)   shift; START_AFTER_ANY=${1} ;;
+      --start-after-ok)    shift; START_AFTER_OK=${1} ;;
+      --skip-module-preflight) SKIP_MODULE_PREFLIGHT=1 ;;
       --dry-run)           DRY_RUN=1 ;;
       --help|-h)           usage ;;
       *)                   echo "Unknown arg: ${1}" >&2; usage ;;
@@ -465,6 +492,18 @@ for v in "${VERSIONS_ARR[@]}"; do
    fi
 done
 unset _found _dir
+# --skip-module-preflight: the modulefile(s) are expected to be produced by an
+# upstream dependency (e.g. the nightly build job named via --start-after-ok)
+# and do not exist yet at submission time. Downgrade the hard error to a warning
+# and clear MISSING so the exit-1 block below is skipped; the compute-side sbatch
+# still `module load rocm/<v>` after the dependency satisfies, so a genuinely
+# absent modulefile surfaces there instead.
+if (( ${#MISSING[@]} > 0 )) && [[ "${SKIP_MODULE_PREFLIGHT}" == 1 ]]; then
+   echo "NOTE: --skip-module-preflight set; the following rocm modulefiles do not" >&2
+   echo "      exist yet (expected from an upstream dependency before this job runs):" >&2
+   for v in "${MISSING[@]}"; do echo "    rocm/${v}" >&2; done
+   MISSING=()
+fi
 if (( ${#MISSING[@]} > 0 )); then
    echo "ERROR: the following rocm versions have no module in either" >&2
    echo "       ${SITE_ROCM_MODDIR} (site tree)" >&2
@@ -589,6 +628,8 @@ cat <<EOF
  Dry run:           ${DRY_RUN}
  Start after:       ${START_AFTER:-<none>}
  Start after any:   ${START_AFTER_ANY:-<none>}
+ Start after ok:    ${START_AFTER_OK:-<none>}
+ Skip mod preflight:${SKIP_MODULE_PREFLIGHT}
 ==================================================================
 EOF
 
@@ -683,10 +724,18 @@ for v in "${VERSIONS_ARR[@]}"; do
 
    # Compute this job's dependency string (already includes "afterany:" tokens
    # and OR-separator '?' joins; empty string means no --dependency flag).
-   #   i  < MAX_PARALLEL : OR-merge of START_AFTER + START_AFTER_ANY
+   #   i  < MAX_PARALLEL : afterok:START_AFTER_OK (if set) OR-merged with
+   #                       afterany:START_AFTER + afterany:START_AFTER_ANY
    #   i >= MAX_PARALLEL : OR over the previous MAX_PARALLEL jobids
    if (( i < MAX_PARALLEL )); then
       DEP=$(join_or_deps "${START_AFTER}" "${START_AFTER_ANY_ARR[@]}")
+      if [[ -n "${START_AFTER_OK}" ]]; then
+         if [[ -n "${DEP}" ]]; then
+            DEP="afterok:${START_AFTER_OK}?${DEP}"
+         else
+            DEP="afterok:${START_AFTER_OK}"
+         fi
+      fi
    else
       WINDOW=( "${JOBIDS_ONLY[@]:i - MAX_PARALLEL:MAX_PARALLEL}" )
       DEP=$(join_or_deps "${WINDOW[@]}")
