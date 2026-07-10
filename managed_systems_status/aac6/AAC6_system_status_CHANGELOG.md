@@ -2,6 +2,18 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-07-10
+
+- User-facing modules:
+    + roofline-extractor
+    + tracelens
+- Modules:
+    + roofline-extractor/dev
+    + tracelens/dev
+- /shared/apps/ubuntu/opt:
+    - rooflineExtractor
+
+[Full snapshot](archive/AAC6_system_status_2026-07-10.md)
 ## 2026-07-09
 
 - User-facing modules:
