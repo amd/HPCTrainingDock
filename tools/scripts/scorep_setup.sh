@@ -60,7 +60,39 @@ SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 MPI_MODULE="openmpi"
 MPI_CONFIG=""
+# ── Score-P version / source selection ───────────────────────────────
+# Default: the stable tagged release (SCOREP_VERSION=9.4 + empty
+# SCOREP_BRANCH -> tags/scorep-9.4/scorep-9.4.tar.gz).
+#
+# Ubuntu-24.04 exception (applied by the gate right after the distro
+# autodetect below): ROCm >=7.2 regressed the OMPT device-tracing
+# interface so that async data-copy records can come back with
+# reversed/absent timestamps (ROCm/ROCm#6006 and #6005). Under
+# scorep-amdflang the Fortran OpenMP-target Jacobi then prints
+#   AMDGPU message: "unknown or internal error" WARNING Could not
+#   retrieve data-copy timestamps: HSA_STATUS_ERROR
+# and Score-P 9.4 SEGFAULTS while feeding the bad record into the
+# timeline (nightly Score-P_CPU_Profile red on every ROCm 7.2.x / 7.12
+# / 7.13 build; green on <=7.1.1, which predate the ROCm regression).
+# Score-P MR704 fixes the crash by ignoring records whose
+# end_time < start_time
+# (src/adapters/ompt/scorep_ompt_events_device_data_op.inc.c). MR704 is
+# merged on the development branch (package version 11.0-dev) but is NOT
+# in any tagged release yet -- 9.4 is the newest tag and still crashes.
+#
+# SCOREP_BRANCH selects the source:
+#   non-empty -> branches/<branch>/latest.tar.gz. A MOVING snapshot
+#                whose top-level dir is sources.<git-short-sha> (not
+#                scorep-<ver>), handled at extraction time via
+#                tar --strip-components=1 below.
+#   empty     -> the tagged tags/scorep-<ver>/scorep-<ver>.tar.gz.
+# SCOREP_VERSION is the install/module LABEL (drives scorep-v<ver>, the
+# modulefile name, and the build-cache key). The 24.04 gate sets it to
+# the snapshot's real package version 11.0-dev so it neither collides
+# with nor restores the buggy 9.4 install/cache. Override either value
+# on any distro with --scorep-version / --scorep-branch.
 SCOREP_VERSION=9.4
+SCOREP_BRANCH=
 SCOREP_PATH=/opt/rocmplus-${ROCM_VERSION}/scorep-v${SCOREP_VERSION}
 PDT_PATH=/opt/rocmplus-${ROCM_VERSION}/pdt
 SCOREP_PATH_INPUT=""
@@ -90,12 +122,26 @@ fi
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_VERSION=`cat /etc/os-release | grep '^VERSION_ID' | sed -e 's/VERSION_ID="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 
+# ── Ubuntu 24.04: build the MR704 dev snapshot (see the Score-P version
+# comment above) ─────────────────────────────────────────────────────
+# Gate the less-stable moving 11.0-dev/master snapshot to Ubuntu 24.04
+# only -- the OS where the nightly Score-P_CPU_Profile regression is red
+# on ROCm >=7.2 -- and leave every other distro/version on the stable
+# 9.4 tag. This sets DEFAULTS only; --scorep-version / --scorep-branch
+# parsed below still win (set them together for a coherent override).
+if [ "${DISTRO}" = "ubuntu" ] && [ "${DISTRO_VERSION}" = "24.04" ]; then
+   SCOREP_VERSION=11.0-dev
+   SCOREP_BRANCH=master
+   SCOREP_PATH=/opt/rocmplus-${ROCM_VERSION}/scorep-v${SCOREP_VERSION}
+fi
+
 usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --scorep-install-path-no-version, --pdt-install-path-no-version  and --module-path, the directories have to already exist because the script checks for write permissions"
    echo "  --build-scorep: set to 1 to build Score-P, default is 0"
-   echo "  --scorep-version [SCOREP_VERSION] default is $SCOREP_VERSION "
+   echo "  --scorep-version [SCOREP_VERSION] install/module label, default is $SCOREP_VERSION "
+   echo "  --scorep-branch [ SCOREP_BRANCH ] build from branches/<branch>/latest.tar.gz snapshot; empty builds the tagged scorep-<version>, default is '$SCOREP_BRANCH' "
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH "
    echo "  --scorep-install-path-no-version [ SCOREP_PATH_INPUT ] default $SCOREP_PATH "
    echo "  --pdt-install-path-no-version [ PDT_PATH_INPUT ] default $PDT_PATH "
@@ -140,6 +186,11 @@ do
       "--scorep-version")
           shift
           SCOREP_VERSION=${1}
+          reset-last
+          ;;
+      "--scorep-branch")
+          shift
+          SCOREP_BRANCH=${1}
           reset-last
           ;;
       "--help")
@@ -587,15 +638,32 @@ else
       # the PDT install path; cd back to the top of the build dir.
       cd "${SCOREP_BUILD_DIR}"
 
-      # S6.E: -q to drop ~440 lines of dot-progress noise for a 21MB
-      # / 3s download. Audited as S6.E in slurm-7934-rocmplus-7.0.2.out
+      # Resolve the source tarball URL: a moving branch snapshot when
+      # SCOREP_BRANCH is set (default 'master', carries the MR704 ROCm
+      # >=7.2 OMPT crash fix -- see the SCOREP_BRANCH comment at the top),
+      # otherwise the tagged release. The branch snapshot's top-level dir
+      # is sources.<git-short-sha> rather than scorep-<ver>, so we strip
+      # it uniformly below instead of assuming a directory name.
+      SCOREP_BASE_URL=https://perftools.pages.jsc.fz-juelich.de/cicd/scorep
+      if [ -n "${SCOREP_BRANCH}" ]; then
+         SCOREP_TARBALL_URL="${SCOREP_BASE_URL}/branches/${SCOREP_BRANCH}/latest.tar.gz"
+      else
+         SCOREP_TARBALL_URL="${SCOREP_BASE_URL}/tags/scorep-${SCOREP_VERSION}/scorep-${SCOREP_VERSION}.tar.gz"
+      fi
+      echo "scorep: fetching source from ${SCOREP_TARBALL_URL}"
+      # S6.E: -q to drop ~440 lines of dot-progress noise for a ~21MB
+      # download. Audited as S6.E in slurm-7934-rocmplus-7.0.2.out
       # (lines 48-493 of log_scorep_04_30_2026.txt).
-      wget -q https://perftools.pages.jsc.fz-juelich.de/cicd/scorep/tags/scorep-${SCOREP_VERSION}/scorep-${SCOREP_VERSION}.tar.gz
-      # tar -xf (not -xvf): the verbose flag dumps ~4500 file lines into
-      # the per-package log, making it harder to grep for real signal.
-      # Audited as S6.D in slurm-7934-rocmplus-7.0.2.out.
-      tar -xf scorep-${SCOREP_VERSION}.tar.gz
-      cd scorep-${SCOREP_VERSION}
+      wget -q "${SCOREP_TARBALL_URL}" -O scorep-src.tar.gz
+      # Extract into a fixed dir with --strip-components=1 so the single
+      # top-level directory (scorep-<ver> for a tag, sources.<sha> for a
+      # branch snapshot) is peeled off and the build path is stable and
+      # name-agnostic. tar -xf (not -xvf): the verbose flag dumps ~4500
+      # file lines into the per-package log (audited S6.D in
+      # slurm-7934-rocmplus-7.0.2.out).
+      mkdir scorep-src
+      tar -xf scorep-src.tar.gz -C scorep-src --strip-components=1
+      cd scorep-src
       mkdir build
       cd build
 
