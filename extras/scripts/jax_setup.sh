@@ -707,6 +707,29 @@ else
          echo "jax: sanitized include env for bazel (dropped \$ROCM_PATH include dirs): CPATH='${CPATH:-}'"
       }
 
+      # ── Ubuntu 24.04 / ROCm-clang C runtime fix (compiler-rt crtbegin) ───
+      # AMD's clang ($ROCM_PATH/llvm/bin/clang) links shared objects with the
+      # LLVM compiler-rt crtbegin and defaults its unwinder to LLVM libunwind.
+      # That crtbegin's constructor eagerly calls __register_frame_info(...),
+      # whose object layout is ABI-incompatible with Ubuntu 24.04's GCC-14
+      # libgcc_s.so.1 frame registry. The result: dlopen of the plugin kernel
+      # objects (jax_rocm7_plugin/_solver.so, _linalg.so, _prng.so, _rnn.so,
+      # _hybrid.so, _triton.so, rocm_plugin_extension.so) segfaults inside
+      # __register_frame_info_bases during `import jax` (job: 24.04 nightly).
+      # Verified on the node: a default AMD-clang `-shared` link emits a local
+      # `__do_init` + weak `__register_frame_info` (exactly the crashing
+      # _solver.so signature), whereas adding --rtlib=libgcc --unwindlib=libgcc
+      # switches it to GCC's `frame_dummy` crtbegin that matches the system
+      # libgcc_s.so.1. Force GCC's runtime + unwinder on every clang *link*
+      # action (linkopt, not copt -- these are link-time driver flags) so the
+      # plugin objects load on 24.04. This also makes the libunwind LD_PRELOAD
+      # in the modulefile redundant. Applied to the plugin-based clang builds
+      # (JAX 5.0/6.0/7.1/8.0); the gcc build path (--nouse_clang) is unaffected.
+      JAX_CLANG_RUNTIME_BAZELOPTS=(
+         --bazel_options=--linkopt=--rtlib=libgcc
+         --bazel_options=--linkopt=--unwindlib=libgcc
+      )
+
       AMDGPU_GFXMODEL=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/,/g'`
 
       git clone --depth 1 --branch rocm-jaxlib-v0.${JAX_VERSION} https://github.com/ROCm/xla.git
@@ -761,6 +784,7 @@ else
                                          --clang_path=$ROCM_PATH/llvm/bin/clang \
                                          --rocm_version=$ROCM_VERSION_BAZEL \
                                          --use_clang=true \
+                                         "${JAX_CLANG_RUNTIME_BAZELOPTS[@]}" \
                                          --wheels=jaxlib \
                                          --bazel_options=--jobs=128 \
                                          --bazel_options=--noexperimental_check_external_repository_files \
@@ -788,6 +812,7 @@ else
                                          --clang_path=$ROCM_PATH/llvm/bin/clang \
                                          --rocm_version=$ROCM_VERSION_BAZEL \
                                          --use_clang=true \
+                                         "${JAX_CLANG_RUNTIME_BAZELOPTS[@]}" \
                                          --wheels=jax-rocm-plugin,jax-rocm-pjrt \
                                          --bazel_options=--jobs=128 \
                                          --bazel_options=--noexperimental_check_external_repository_files \
@@ -853,6 +878,7 @@ else
                                             --clang_path=$ROCM_PATH/llvm/bin/clang \
                                             --rocm_version=$ROCM_VERSION_BAZEL \
                                             --use_clang=true \
+                                            "${JAX_CLANG_RUNTIME_BAZELOPTS[@]}" \
                                             --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
                                             --bazel_options=--jobs=128 \
                                             --bazel_options=--noexperimental_check_external_repository_files \
@@ -895,6 +921,7 @@ else
                                             --clang_path=$ROCM_PATH/llvm/bin/clang \
                                             --rocm_version=$ROCM_VERSION_BAZEL \
                                             --use_clang=true \
+                                            "${JAX_CLANG_RUNTIME_BAZELOPTS[@]}" \
                                             --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
                                             --bazel_options=--jobs=128 \
                                             --bazel_options=--noexperimental_check_external_repository_files \
@@ -968,6 +995,81 @@ else
       module unload ${ROCM_MODULE_NAME}
    fi
    : "${ROCM_PATH_FOR_MODULE:=${ROCM_PATH}}"
+
+   # ── Post-install smoke test ──────────────────────────────────────────
+   # Catch broken installs at BUILD time instead of in the nightly. Guards
+   # the two failure modes observed on Ubuntu 24.04 + ROCm 7.x:
+   #   (1) `import jax` segfaults because the plugin kernel objects cannot be
+   #       dlopen'd (compiler-rt-crtbegin vs libgcc frame registry -- the very
+   #       thing JAX_CLANG_RUNTIME_BAZELOPTS above is meant to fix);
+   #   (2) the ROCm PJRT plugin silently did not get installed, so jax imports
+   #       but only exposes CPU ("Backend 'rocm' is not in the list of known
+   #       backends"), seen when the plugin wheel step produced nothing.
+   # Runs in a fresh env mirroring what the jax modulefile provides (PYTHONPATH
+   # + JAX_PLATFORMS + libunwind LD_PRELOAD), so it does not depend on the
+   # modulefile being written yet. On failure we `exit 1`, which triggers the
+   # _jax_on_exit trap: it wipes the partial jax + jaxlib installs, removes the
+   # (not-yet-written) modulefile, and drops the jax/jaxlib .FAILED markers.
+   _jax_smoke_test() {
+      echo ""
+      echo "===== JAX post-install smoke test ====="
+      local _rc _out
+      # from-source branch unloaded rocm above; reload so the ROCm math libs
+      # the plugin dlopens are on LD_LIBRARY_PATH (no-op if still loaded).
+      module load ${ROCM_MODULE_NAME} 2>/dev/null || true
+      local _env=( "PYTHONPATH=${JAXLIB_PATH}:${JAX_PATH}${PYTHONPATH:+:${PYTHONPATH}}" "JAX_PLATFORMS=rocm,cpu" )
+      if [ -f "${ROCM_PATH_FOR_MODULE}/lib/llvm/lib/libunwind.so.1" ]; then
+         _env+=( "LD_PRELOAD=${ROCM_PATH_FOR_MODULE}/lib/llvm/lib/libunwind.so.1${LD_PRELOAD:+:${LD_PRELOAD}}" )
+      fi
+
+      # (1) import must not crash. This exercises the plugin dlopen path
+      #     (jax -> jaxlib/gpu_solver -> jax_rocm*_plugin/_solver.so).
+      env "${_env[@]}" python3 -c 'import jax; print("jax", jax.__version__, "import OK")'
+      _rc=$?
+      if [ ${_rc} -ne 0 ]; then
+         echo "[jax smoke test] FATAL: 'import jax' failed/segfaulted (rc=${_rc})." >&2
+         echo "  The ROCm plugin objects likely cannot be dlopen'd on this distro" >&2
+         echo "  (Ubuntu 24.04 compiler-rt-crtbegin vs libgcc frame registry -- see" >&2
+         echo "  the JAX_CLANG_RUNTIME_BAZELOPTS toolchain note in this script)." >&2
+         return 1
+      fi
+
+      # (2) the ROCm PJRT plugin must actually be installed for the plugin-based
+      #     JAX lines (5.0/6.0/7.1/8.0). The pre-plugin lines build GPU support
+      #     into jaxlib itself (no separate jax_rocm*_plugin dir), so skip them.
+      case "${JAX_VERSION}" in
+         5.0|6.0|7.1|8.0)
+            if ! ls -d ${JAXLIB_PATH}/jax_rocm*_plugin >/dev/null 2>&1; then
+               echo "[jax smoke test] FATAL: no jax_rocm*_plugin found under ${JAXLIB_PATH};" >&2
+               echo "  the ROCm PJRT plugin did not get installed -- jax would only see CPU." >&2
+               return 1
+            fi
+            ;;
+      esac
+
+      # (3) if a GPU is visible on the build node, try to enumerate a ROCm
+      #     device. Treated as a WARNING (not fatal): transient GPU/driver
+      #     state on a build node shouldn't fail an otherwise-good build, and
+      #     checks (1)+(2) already prove the rocm backend is loadable.
+      if rocminfo 2>/dev/null | grep -q gfx; then
+         _out=$(env "${_env[@]}" python3 -c 'import jax; print(jax.devices())' 2>&1); _rc=$?
+         echo "${_out}"
+         if [ ${_rc} -eq 0 ] && echo "${_out}" | grep -qiE 'rocm|gfx'; then
+            echo "[jax smoke test] PASS: import + ROCm device enumeration OK."
+         else
+            echo "[jax smoke test] WARNING: jax.devices() did not enumerate a ROCm device (rc=${_rc})." >&2
+            echo "  import + plugin checks passed; verify GPU availability on the build node." >&2
+         fi
+      else
+         echo "[jax smoke test] PASS (partial): import OK + plugin present; no GPU visible on build node, skipped device check."
+      fi
+      echo "======================================="
+      return 0
+   }
+   if ! _jax_smoke_test; then
+      echo "[jax] post-install smoke test FAILED; failing the build so the EXIT trap cleans up the broken install." >&2
+      exit 1
+   fi
 
    # Create a module file for jax
    #
