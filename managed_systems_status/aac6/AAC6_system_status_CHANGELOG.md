@@ -2,6 +2,14 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-07-11
+
+- Down/drained nodes:
+    + ppac-pl1-s24-30:down
+- /shared/apps/ubuntu/opt:
+    - tracelens
+
+[Full snapshot](archive/AAC6_system_status_2026-07-11.md)
 ## 2026-07-10
 
 - User-facing modules:
