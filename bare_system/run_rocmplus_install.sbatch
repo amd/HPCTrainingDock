@@ -532,15 +532,37 @@ elif [[ ! "${_sx}" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
 fi
 unset _bn _sx
 
-# Compose the rocmplus install/module suffix:
+# Compose the rocmplus install/module suffix PREVIEW.
 #   * afar trees:    afar-<compiler>-<rocm_numeric>   (e.g. afar-22.2.0-7.2.0)
 #   * other RC:      <prefix>-<rocm_numeric>          (legacy shape)
 #   * regular:       <rocm_numeric>                   (legacy shape)
-if [[ "${ROCM_RC_PREFIX}" == "afar" && -n "${ROCM_RC_COMPILER}" ]]; then
-   ROCMPLUS_SUFFIX_PREVIEW="afar-${ROCM_RC_COMPILER}-${ROCM_NUMERIC}"
-else
-   ROCMPLUS_SUFFIX_PREVIEW="${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCM_NUMERIC}"
+#   * datestamped:   <datestamped_sdk_version>        (nightly, e.g. 7.14.0a20260612)
+#
+# This value is INFORMATIONAL only: the canonical suffix is (re)computed in
+# main_setup.sh from the --rocm-rc-prefix / --rocm-version we pass below.
+# Mirror main_setup.sh's "datestamped nightly guard" here so the printed
+# preview matches what actually gets built. A version-shaped ROCM_RC_PREFIX
+# (starts with a digit -- no real family name does) is a datestamped regular
+# release, so the tree is keyed on the datestamped SDK version
+# (rocmplus-7.14.0a20260612) with an EMPTY family prefix, NOT the doubled
+# <datestamp>-<numeric> shape. We deliberately compute this on preview-only
+# temporaries and do NOT mutate ROCM_RC_PREFIX / ROCM_NUMERIC: those are
+# passed to main_setup.sh unchanged, and main_setup.sh does the
+# authoritative reclassification.
+_prev_prefix="${ROCM_RC_PREFIX}"
+_prev_version="${ROCM_NUMERIC}"
+if [[ "${_prev_prefix}" =~ ^[0-9] ]]; then
+   _prev_iv="${ROCM_PATH##*/}"; _prev_iv="${_prev_iv#rocm-}"
+   if [[ "${_prev_iv}" =~ ^[0-9] ]]; then _prev_version="${_prev_iv}"; else _prev_version="${_prev_prefix}"; fi
+   _prev_prefix=""
+   unset _prev_iv
 fi
+if [[ "${_prev_prefix}" == "afar" && -n "${ROCM_RC_COMPILER}" ]]; then
+   ROCMPLUS_SUFFIX_PREVIEW="afar-${ROCM_RC_COMPILER}-${_prev_version}"
+else
+   ROCMPLUS_SUFFIX_PREVIEW="${_prev_prefix:+${_prev_prefix}-}${_prev_version}"
+fi
+unset _prev_prefix _prev_version
 echo "  ROCM_VERSION (token):    ${ROCM_VERSION}"
 echo "  ROCM_NUMERIC:            ${ROCM_NUMERIC}"
 echo "  ROCM_RC_PREFIX:          '${ROCM_RC_PREFIX}'"

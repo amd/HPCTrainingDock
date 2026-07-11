@@ -655,6 +655,41 @@ if [ -z "${ROCM_VERSION}" ]; then
    fi
 fi
 
+# ── Datestamped nightly guard (regular release, NOT an RC family) ─────
+# A legitimate release-candidate FAMILY prefix is an alphabetic family
+# name (therock / afar / cray / ...) and never starts with a digit.
+# Datestamped nightly SDK trees (e.g. rocm-7.14.0a20260612) are *regular*
+# releases whose numeric simply carries a build/date suffix. Both the
+# RC-prefix auto-detect above AND run_rocm_plus_install.sbatch (which
+# passes --rocm-rc-prefix, bypassing that auto-detect) classify with a
+# plain-numeric regex that rejects the 'a20260612' tail, so they
+# mis-capture the whole datestamped version as ROCM_RC_PREFIX. Combined
+# with ROCM_VERSION=<.info/version numeric> (7.14.0) this yields a doubled
+# rocmplus-7.14.0a20260612-7.14.0 tree, but the rocm modulefile keys the
+# rocmplus MODULEPATH on the datestamped SDK version (rocmplus-7.14.0a20260612),
+# so `module load openmpi` (and every other rocmplus tool) then fails and
+# the nightly regression falls back to the system MPI.
+#
+# Detect a version-shaped "prefix", reclassify as a regular release, and
+# key the rocmplus tree on the datestamped SDK install version (taken from
+# the ROCM_PATH basename, the authoritative source). ROCM_VERSION is left
+# as the .info/version numeric so downstream numeric version comparisons
+# and leaf --rocm-version handling are unaffected.
+ROCMPLUS_VERSION="${ROCM_VERSION}"
+if [[ "${ROCM_RC_PREFIX}" =~ ^[0-9] ]]; then
+   _sdk_install_ver="${ROCM_PATH##*/}"; _sdk_install_ver="${_sdk_install_ver#rocm-}"
+   if [[ "${_sdk_install_ver}" =~ ^[0-9] ]]; then
+      ROCMPLUS_VERSION="${_sdk_install_ver}"
+   else
+      ROCMPLUS_VERSION="${ROCM_RC_PREFIX}"
+   fi
+   echo "Reclassifying version-shaped ROCM_RC_PREFIX='${ROCM_RC_PREFIX}' as a datestamped regular release" \
+        "(rocmplus tree key='${ROCMPLUS_VERSION}', empty family prefix)"
+   ROCM_RC_PREFIX=""
+   ROCM_RC_COMPILER=""
+   unset _sdk_install_ver
+fi
+
 # ── GPU architecture detection ───────────────────────────────────────
 # If --amdgpu-gfxmodel was provided, use it; otherwise try rocminfo.
 if [ -n "${AMDGPU_GFXMODEL_INPUT}" ]; then
@@ -1496,9 +1531,9 @@ trap final_summary EXIT
 # falls back to the legacy <prefix>-<numeric> shape (numeric alone for
 # regular releases).
 if [ "${ROCM_RC_PREFIX}" = "afar" ] && [ -n "${ROCM_RC_COMPILER}" ]; then
-   _RPS_PREVIEW="afar-${ROCM_RC_COMPILER}-${ROCM_VERSION}"
+   _RPS_PREVIEW="afar-${ROCM_RC_COMPILER}-${ROCMPLUS_VERSION}"
 else
-   _RPS_PREVIEW="${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCM_VERSION}"
+   _RPS_PREVIEW="${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCMPLUS_VERSION}"
 fi
 # cray flavor lands in the separate rocmplus-cray-<suffix> tree (see
 # ROCMPLUS_FLAVOR note above + the canonical assignment below).
@@ -1562,26 +1597,31 @@ fi
 
 # ── Derived paths ────────────────────────────────────────────────────
 # ROCMPLUS_SUFFIX is the suffix used after `rocmplus-` for both install
-# dirs and module category dirs. Three shapes:
+# dirs and module category dirs. ROCMPLUS_VERSION is normally the same as
+# ROCM_VERSION (.info/version numeric), EXCEPT for datestamped nightly
+# regular releases where it is the datestamped SDK install version (e.g.
+# 7.14.0a20260612) so the tree matches the rocm modulefile's rocmplus
+# MODULEPATH entry -- see the "Datestamped nightly guard" above. Shapes:
 #   * Regular release:   ROCM_RC_PREFIX='' + ROCM_RC_COMPILER=''
-#                        -> ROCMPLUS_SUFFIX=${ROCM_VERSION}
-#                        (byte-identical to prior behavior)
+#                        -> ROCMPLUS_SUFFIX=${ROCMPLUS_VERSION}
+#                        (byte-identical to prior behavior for non-nightly
+#                        releases, where ROCMPLUS_VERSION==ROCM_VERSION)
 #   * AFAR family:       ROCM_RC_PREFIX='afar' + ROCM_RC_COMPILER non-empty
-#                        -> ROCMPLUS_SUFFIX=afar-${COMPILER}-${ROCM_VERSION}
+#                        -> ROCMPLUS_SUFFIX=afar-${COMPILER}-${ROCMPLUS_VERSION}
 #                        (compiler-AND-rocm-keyed; two AFAR drops with the
 #                        same SDK numeric but different compiler releases
 #                        can't collide on the rocmplus side)
 #   * Other RC trees:    ROCM_RC_PREFIX non-empty + ROCM_RC_COMPILER=''
 #                        (e.g. ROCM_RC_PREFIX='therock')
-#                        -> ROCMPLUS_SUFFIX=${PREFIX}-${ROCM_VERSION}
+#                        -> ROCMPLUS_SUFFIX=${PREFIX}-${ROCMPLUS_VERSION}
 # In all three cases the family-prefix in the suffix guarantees that a
 # release-candidate install can't collide with a future official rocm
 # release of the same numeric version (no upstream release has a
 # 'therock-' or 'afar-' family prefix).
 if [ "${ROCM_RC_PREFIX}" = "afar" ] && [ -n "${ROCM_RC_COMPILER}" ]; then
-   ROCMPLUS_SUFFIX="afar-${ROCM_RC_COMPILER}-${ROCM_VERSION}"
+   ROCMPLUS_SUFFIX="afar-${ROCM_RC_COMPILER}-${ROCMPLUS_VERSION}"
 else
-   ROCMPLUS_SUFFIX="${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCM_VERSION}"
+   ROCMPLUS_SUFFIX="${ROCM_RC_PREFIX:+${ROCM_RC_PREFIX}-}${ROCMPLUS_VERSION}"
 fi
 # PrgEnv-cray-new ecosystem: prepend "cray-" so the install + module
 # category dirs become rocmplus-cray-<suffix>, matching the tree
