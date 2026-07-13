@@ -119,6 +119,7 @@ SITE_CLI=0
 # rocshmem) still PROBE for the resulting module under
 # rocmplus-<ver>/mpich-wrappers/<ver> and use it when present.
 : ${BUILD_ROCSHMEM:="1"}
+: ${BUILD_RCCL_TESTS:="1"}
 : ${BUILD_ROCPROF_SYS:="1"}
 : ${BUILD_ROCPROF_COMPUTE:="1"}
 : ${BUILD_HIPIFLY:="1"}
@@ -855,6 +856,7 @@ declare -A PKG_FLAG=(
    [mpi4py]=BUILD_MPI4PY
    [mvapich]=BUILD_MVAPICH
    [rocshmem]=BUILD_ROCSHMEM
+   [rccl-tests]=BUILD_RCCL_TESTS
    [rocprof-sys]=BUILD_ROCPROF_SYS
    [rocprof-compute]=BUILD_ROCPROF_COMPUTE
    [hpctoolkit]=BUILD_HPCTOOLKIT
@@ -898,6 +900,7 @@ declare -A PKG_VER_FLAG=(
    [openmpi]="--openmpi-version"
    [mpi4py]="--mpi4py-version"
    [rocshmem]="--rocshmem-version"
+   [rccl-tests]="--rccl-tests-version"
    [hpctoolkit]="--hpctoolkit-version"
    [likwid]="--likwid-version"
    [mdb]="--mdb-version"
@@ -1973,6 +1976,12 @@ if [ -n "${MPICH_DIR:-}" ] && [ -d "${MPICH_DIR}/bin" ]; then
 fi
 run_and_log_versioned rocshmem comm/scripts/rocshmem_setup.sh ${COMMON_OPTIONS} --build-rocshmem ${BUILD_ROCSHMEM} --mpi-module ${ROCSHMEM_MPI_MODULE} ${REPLACE_OPTS} \
    $(path_args " " rocmplus-${ROCMPLUS_SUFFIX}/rocshmem)
+
+# rccl-tests (RCCL collective benchmarks: all_reduce_perf, ...). librccl ships
+# inside the loaded rocm module; the MPI build links the openmpi built above.
+# BUILD_RCCL_TESTS=0 opt-out + existence check live in rccl-tests_setup.sh.
+run_and_log_versioned rccl-tests comm/scripts/rccl-tests_setup.sh ${COMMON_OPTIONS} --build-rccl-tests ${BUILD_RCCL_TESTS} --mpi-module openmpi ${REPLACE_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/rccl-tests)
 
 if [[ "${BUILD_MVAPICH}" == "1" ]] && [[ ! -d ${ROCMPLUS}/mvapich ]]; then
    run_and_log mvapich comm/scripts/mvapich_setup.sh ${COMMON_OPTIONS} ${REPLACE_OPTS} \
