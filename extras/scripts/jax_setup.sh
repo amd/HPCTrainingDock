@@ -1101,13 +1101,26 @@ else
    fi
    unset _leaf_dir
 
+   # ── XLA_FLAGS for the modulefile ─────────────────────────────────────
+   # Triton GEMM is now left ENABLED (XLA's own default for supported
+   # gfx targets). The historical `--xla_gpu_enable_triton_gemm=False`
+   # (carried since commit fd96ac2, no recorded rationale) forces the
+   # non-Triton hipBLASLt GEMM path, which SEGFAULTS on ROCm 7.2.4 /
+   # MI300A (gfx942) when executing the compiled fused kernel of a plain
+   # MLP -- reproduced with the jax examples/mnist_classifier.py nightly
+   # test (1024-1024-10 layers): eager grad works, jit(grad) crashes with
+   # triton off at any autotune level, and passes with triton on. Setting
+   # it True (validated end-to-end: 10/10 epochs, ~94% test acc) restores
+   # the working path. autotune_level=3 is retained unchanged.
+   JAX_XLA_FLAGS="--xla_gpu_enable_triton_gemm=True --xla_gpu_autotune_level=3"
+
    # The - option suppresses tabs
    cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/0.${JAX_VERSION}.lua
 	whatis("JAX version ${JAX_VERSION} with ROCm support")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
 	prereq("${ROCM_MODULE_NAME}")
-	setenv("XLA_FLAGS","--xla_gpu_enable_triton_gemm=False --xla_gpu_autotune_level=3")
+	setenv("XLA_FLAGS","${JAX_XLA_FLAGS}")
 	setenv("JAX_PLATFORMS","rocm,cpu")
 	prepend_path("LD_PRELOAD","${ROCM_PATH_FOR_MODULE}/lib/llvm/lib/libunwind.so.1")
 	prepend_path("PYTHONPATH","${JAX_PATH}")
