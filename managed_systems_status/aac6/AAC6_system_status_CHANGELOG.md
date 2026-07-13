@@ -2,6 +2,32 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-07-13
+
+- User-facing modules:
+    + rccl-tests
+- Modules:
+    + rccl-tests/6.3.0
+    + rccl-tests/6.3.1
+    + rccl-tests/6.3.2
+    + rccl-tests/6.3.3
+    + rccl-tests/6.3.4
+    + rccl-tests/6.4.0
+    + rccl-tests/6.4.1
+    + rccl-tests/6.4.2
+    + rccl-tests/6.4.3
+    + rccl-tests/7.0.0
+    + rccl-tests/7.0.1
+    + rccl-tests/7.0.2
+    + rccl-tests/7.1.0
+    + rccl-tests/7.1.1
+    + rccl-tests/7.2.0
+    + rccl-tests/7.2.1
+    + rccl-tests/7.2.2
+    + rccl-tests/7.2.3
+    + rccl-tests/7.2.4
+
+[Full snapshot](archive/AAC6_system_status_2026-07-13.md)
 ## 2026-07-12
 
 - Down/drained nodes:
