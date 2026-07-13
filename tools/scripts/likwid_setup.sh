@@ -401,6 +401,44 @@ if true; then
          ${SUDO} chmod -R a+rwX ${LIKWID_PATH}
       fi
 
+      # ── Pick likwid source + rocmon (AMD GPU) backend for this ROCm SDK ──
+      # likwid has TWO rocmon implementations keyed to different rocprofiler
+      # APIs, and no single tag covers every ROCm we install:
+      #
+      #   * v1 (legacy) rocprofiler API -- rocprofiler_feature_t /
+      #     ROCPROFILER_MODE_* / rocprofiler_open, reached via
+      #     #include <rocprofiler.h> under ROCPROFILERINCLUDE (default
+      #     $(ROCM_HOME)/include/rocprofiler). This is what the latest TAGGED
+      #     release (v5.5.1, 2025-12-23) builds. Numeric ROCm 6.4.x / 7.0.x /
+      #     7.1.x / 7.2.x still ship this classic v1 header, so the v5.5.1 tag
+      #     builds rocmon fine there.
+      #
+      #   * v3 rocprofiler-sdk API -- #include <rocprofiler-sdk/...>. ROCm 7.x
+      #     TheRock/AFAR SDKs (e.g. 7.12.0, 7.13.0, rocm-afar-23.x) REMOVED the
+      #     v1 API entirely and ship ONLY rocprofiler-sdk. The v1 rocmon cannot
+      #     compile there (rocprofiler_feature_t undeclared), which is why this
+      #     script used to drop to CPU-only. likwid replaced rocmon with a
+      #     rocprofiler-sdk backend in PR #716 (merged 2026-01-28, master only
+      #     -- NOT in any tag yet) and PR #764 fixes its ROCm 7.x errors/warnings.
+      #     We build that fix from its pinned commit for sdk-only trees so GPU
+      #     monitoring works instead of silently dropping to CPU-only.
+      #
+      # Decision is on the ROCm HEADERS present (module already loaded above):
+      #   1. v1 symbol in include/rocprofiler/rocprofiler.h  -> v5.5.1 tag, GPU
+      #   2. v1 symbol under include/rocprofiler-sdk/         -> v5.5.1 tag, GPU (repoint include)
+      #   3. rocprofiler-sdk (v3) present                     -> PR #764 commit, GPU
+      #   4. no rocprofiler at all                            -> v5.5.1 tag, CPU-only
+      LIKWID_V3_COMMIT=748f67830e7d187c584d3f30bf7bfb5bb9344f05   # RRZE-HPC/likwid PR #764 head (rocm_7_fixes)
+      if grep -rqs 'rocprofiler_feature_t' "${ROCM_PATH}/include/rocprofiler/rocprofiler.h" 2>/dev/null; then
+         LIKWID_ROCMON=v1-classic
+      elif grep -rqs 'rocprofiler_feature_t' "${ROCM_PATH}/include/rocprofiler-sdk/rocprofiler.h" 2>/dev/null; then
+         LIKWID_ROCMON=v1-sdkpath
+      elif [ -f "${ROCM_PATH}/include/rocprofiler-sdk/registration.h" ]; then
+         LIKWID_ROCMON=v3
+      else
+         LIKWID_ROCMON=cpu-only
+      fi
+
       # Per-job throwaway build dir; replaces a fixed `cd /tmp; rm -rf
       # likwid*` pattern that would race with -- and clobber -- any
       # other concurrent likwid build on the same node (different
@@ -412,48 +450,42 @@ if true; then
       # _likwid_on_exit, which reads ${LIKWID_BUILD_ROOT} lazily.
       LIKWID_BUILD_ROOT=$(mktemp -d -t likwid-build.XXXXXX)
       cd "${LIKWID_BUILD_ROOT}"
-      wget -q https://github.com/RRZE-HPC/likwid/archive/refs/tags/v${LIKWID_VERSION}.tar.gz
-      tar -xzf v${LIKWID_VERSION}.tar.gz
-      cd likwid-${LIKWID_VERSION}
-      sed -i -e '/^ROCM_INTERFACE/s/false/true/' \
-             -e '/^PREFIX/s!/usr/local!'"${LIKWID_PATH}"'!' \
-             config.mk
-
-      # likwid's rocmon backend targets the LEGACY rocprofiler *v1* API
-      # (rocprofiler_feature_t / ROCPROFILER_MODE_* / rocprofiler_open), which
-      # it reaches via #include <rocprofiler.h> under ROCPROFILERINCLUDE
-      # (default $(ROCM_HOME)/include/rocprofiler, the classic layout).
-      #
-      # ROCm 7.x TheRock/AFAR SDKs (e.g. 7.12.0, 7.13.0, rocm-afar-23.x) REMOVED
-      # the v1 API entirely and ship only rocprofiler-sdk (the v3 API) under
-      # include/rocprofiler-sdk/. That header EXISTS but does not declare any of
-      # the v1 symbols, so pointing ROCPROFILERINCLUDE at it merely converts a
-      # "rocprofiler.h: No such file" build error into a
-      # "rocprofiler_feature_t undeclared" one (slurm-13278-rocmplus-7.12.0.out
-      # ~line 3793: rocmon.c fails, openmpi-independent likwid rc=2).
-      #
-      # No TAGGED likwid release builds rocmon against rocprofiler-sdk yet: v1
-      # rocmon support is the latest tag (v5.5.1, 2025-12-23); the rocprofiler-sdk
-      # rewrite landed upstream in PR #716 (2026-01-28) on master, unreleased.
-      # NOTE (numeric ROCm 6.4.x / 7.0.x / 7.1.x / 7.2.x still ship the classic
-      # v1 header, so rocmon builds fine there -- this only disables the GPU
-      # backend on the sdk-only TheRock/AFAR trees.)
-      #
-      # Gate ROCM_INTERFACE on the actual v1 SYMBOL, not on a file merely named
-      # rocprofiler.h. When the v1 API is absent, disable rocmon and build a
-      # CPU-only likwid (module still installs; no hard failure) rather than
-      # attempting a compile that is guaranteed to fail.
-      if grep -rqs 'rocprofiler_feature_t' "${ROCM_PATH}/include/rocprofiler/rocprofiler.h" 2>/dev/null; then
-         echo "likwid: legacy rocprofiler v1 API present (include/rocprofiler/rocprofiler.h); ROCM_INTERFACE=true (rocmon enabled)"
-      elif grep -rqs 'rocprofiler_feature_t' "${ROCM_PATH}/include/rocprofiler-sdk/rocprofiler.h" 2>/dev/null; then
-         echo "likwid: legacy rocprofiler v1 API present under include/rocprofiler-sdk; repointing ROCPROFILERINCLUDE there"
-         sed -i -e '/^ROCPROFILERINCLUDE/s#=.*#= $(ROCM_HOME)/include/rocprofiler-sdk#' config.mk
+      if [ "${LIKWID_ROCMON}" = "v3" ]; then
+         echo "likwid: ROCm SDK ships only rocprofiler-sdk (v3); building likwid PR #764 commit ${LIKWID_V3_COMMIT:0:12} (rocmon on rocprofiler-sdk)"
+         wget -q -O likwid-src.tar.gz https://github.com/RRZE-HPC/likwid/archive/${LIKWID_V3_COMMIT}.tar.gz
+         tar -xzf likwid-src.tar.gz
+         cd likwid-${LIKWID_V3_COMMIT}
       else
-         echo "likwid: NOTE this ROCm SDK has no legacy rocprofiler v1 API (rocprofiler_feature_t not found);"
-         echo "likwid:       likwid ${LIKWID_VERSION} rocmon cannot build against rocprofiler-sdk (v3) yet"
-         echo "likwid:       (upstream PR #716 is unreleased). Disabling ROCM_INTERFACE -> CPU-only likwid."
-         sed -i -e '/^ROCM_INTERFACE/s/true/false/' config.mk
+         wget -q -O likwid-src.tar.gz https://github.com/RRZE-HPC/likwid/archive/refs/tags/v${LIKWID_VERSION}.tar.gz
+         tar -xzf likwid-src.tar.gz
+         cd likwid-${LIKWID_VERSION}
       fi
+
+      sed -i -e '/^PREFIX/s!/usr/local!'"${LIKWID_PATH}"'!' config.mk
+
+      # Enable/point the rocmon backend per the detection above. config.mk
+      # ships ROCM_INTERFACE=false by default; flip to true only for the GPU
+      # cases. The v3 source already uses ROCMINCLUDE=$(ROCM_HOME)/include and
+      # #include <rocprofiler-sdk/...>, so no include repointing is needed there.
+      case "${LIKWID_ROCMON}" in
+         v1-classic)
+            echo "likwid: legacy rocprofiler v1 API present (include/rocprofiler/rocprofiler.h); ROCM_INTERFACE=true (rocmon enabled)"
+            sed -i -e '/^ROCM_INTERFACE/s/false/true/' config.mk
+            ;;
+         v1-sdkpath)
+            echo "likwid: legacy rocprofiler v1 API present under include/rocprofiler-sdk; ROCM_INTERFACE=true, repointing ROCPROFILERINCLUDE there"
+            sed -i -e '/^ROCM_INTERFACE/s/false/true/' \
+                   -e '/^ROCPROFILERINCLUDE/s#=.*#= $(ROCM_HOME)/include/rocprofiler-sdk#' config.mk
+            ;;
+         v3)
+            echo "likwid: rocprofiler-sdk (v3) API present; ROCM_INTERFACE=true (rocmon via rocprofiler-sdk, PR #764)"
+            sed -i -e '/^ROCM_INTERFACE/s/false/true/' config.mk
+            ;;
+         *)
+            echo "likwid: NOTE this ROCm SDK has no rocprofiler API (neither v1 nor rocprofiler-sdk);"
+            echo "likwid:       leaving ROCM_INTERFACE=false -> CPU-only likwid."
+            ;;
+      esac
 
       # Access mode: likwid's default `accessdaemon` builds a setuid-root
       # helper (likwid-accessD) and `make install` chowns it to root +
@@ -539,18 +571,21 @@ if true; then
    unset _leaf_dir
 
    # ── rocmon (AMD GPU backend) state for the module load banner ──────────
-   # Recompute the ROCM_INTERFACE decision (v1-symbol probe) here so the
-   # load-time message is correct on BOTH the from-source and cache-restore
-   # paths (the cache path never runs the build-section probe). See the
-   # rocprofiler v1 vs rocprofiler-sdk (v3) discussion in the build section.
+   # Recompute the ROCM_INTERFACE decision (rocprofiler v1 OR rocprofiler-sdk
+   # v3 probe) here so the load-time message is correct on BOTH the from-source
+   # and cache-restore paths (the cache path never runs the build-section
+   # probe). See the rocprofiler v1 vs rocprofiler-sdk (v3) discussion in the
+   # build section. GPU is enabled when EITHER the legacy v1 symbol is present
+   # (v5.5.1 tag path) OR rocprofiler-sdk is present (PR #764 commit path).
    if grep -rqs 'rocprofiler_feature_t' \
          "${ROCM_PATH}/include/rocprofiler/rocprofiler.h" \
-         "${ROCM_PATH}/include/rocprofiler-sdk/rocprofiler.h" 2>/dev/null; then
+         "${ROCM_PATH}/include/rocprofiler-sdk/rocprofiler.h" 2>/dev/null \
+      || [ -f "${ROCM_PATH}/include/rocprofiler-sdk/registration.h" ]; then
       LIKWID_GPU_TAG="GPU-ENABLED"
       LIKWID_GPU_MSG="AMD GPU monitoring (rocmon) is ENABLED for ROCm ${ROCM_VERSION}."
    else
       LIKWID_GPU_TAG="CPU-ONLY"
-      LIKWID_GPU_MSG="CPU-ONLY build -- AMD GPU monitoring (rocmon) is DISABLED for ROCm ${ROCM_VERSION} (this SDK lacks the legacy rocprofiler v1 API that likwid ${LIKWID_VERSION} requires)."
+      LIKWID_GPU_MSG="CPU-ONLY build -- AMD GPU monitoring (rocmon) is DISABLED for ROCm ${ROCM_VERSION} (this SDK ships neither the legacy rocprofiler v1 API nor rocprofiler-sdk)."
    fi
 
    # ── Modulefile flavor: Lua (Lmod) vs Tcl (classic Environment Modules) ─
