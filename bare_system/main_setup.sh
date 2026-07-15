@@ -120,6 +120,7 @@ SITE_CLI=0
 # rocmplus-<ver>/mpich-wrappers/<ver> and use it when present.
 : ${BUILD_ROCSHMEM:="1"}
 : ${BUILD_RCCL_TESTS:="1"}
+: ${BUILD_MPITRACE:="1"}
 : ${BUILD_ROCPROF_SYS:="1"}
 : ${BUILD_ROCPROF_COMPUTE:="1"}
 : ${BUILD_HIPIFLY:="1"}
@@ -857,6 +858,7 @@ declare -A PKG_FLAG=(
    [mvapich]=BUILD_MVAPICH
    [rocshmem]=BUILD_ROCSHMEM
    [rccl-tests]=BUILD_RCCL_TESTS
+   [mpitrace]=BUILD_MPITRACE
    [rocprof-sys]=BUILD_ROCPROF_SYS
    [rocprof-compute]=BUILD_ROCPROF_COMPUTE
    [hpctoolkit]=BUILD_HPCTOOLKIT
@@ -1982,6 +1984,15 @@ run_and_log_versioned rocshmem comm/scripts/rocshmem_setup.sh ${COMMON_OPTIONS} 
 # BUILD_RCCL_TESTS=0 opt-out + existence check live in rccl-tests_setup.sh.
 run_and_log_versioned rccl-tests comm/scripts/rccl-tests_setup.sh ${COMMON_OPTIONS} --build-rccl-tests ${BUILD_RCCL_TESTS} --mpi-module openmpi ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/rccl-tests)
+
+# mpitrace (IBM libmpitrace.so: lightweight MPI profiling via LD_PRELOAD).
+# Builds against the openmpi built above (the .so carries an rpath into that
+# rocmplus-<ver>/openmpi tree). Keyed on the rocm version like rccl-tests:
+# --install-path is the parent dir, the leaf appends mpitrace-${ROCM_VERSION}
+# and writes a ${ROCM_VERSION}.lua modulefile. BUILD_MPITRACE=0 opt-out +
+# existence check live in mpitrace_setup.sh.
+run_and_log mpitrace extras/scripts/mpitrace_setup.sh ${COMMON_OPTIONS} --build-mpitrace ${BUILD_MPITRACE} ${REPLACE_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/mpitrace)
 
 if [[ "${BUILD_MVAPICH}" == "1" ]] && [[ ! -d ${ROCMPLUS}/mvapich ]]; then
    run_and_log mvapich comm/scripts/mvapich_setup.sh ${COMMON_OPTIONS} ${REPLACE_OPTS} \
