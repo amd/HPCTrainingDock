@@ -82,6 +82,13 @@ SITE_CLI=0
 # both communities from one sweep -- see ftorch_setup.sh for the .mod
 # format diff (gfortran = gzip; amdflang = LLVM Flang text format).
 : ${FTORCH_FC_COMPILER:="both"}
+# Sweep-wide default for FTorch's OWN upstream git ref (tag/branch/commit
+# the FTorch source is checked out at). Empty -> repo HEAD. This is the
+# fallback used for any `ftorch` / `ftorch=<pytorch-ver>` token that does
+# not carry its own per-token `:ref=<git-ref>` override. Independent of
+# the bound pytorch version (which keys the install dir + module).
+# Overridable via the --ftorch-ref CLI flag below.
+: ${FTORCH_REF:=""}
 : ${BUILD_JULIA:="1"}
 : ${BUILD_MAGMA:="1"}
 : ${BUILD_ELPA:="1"}
@@ -239,11 +246,12 @@ usage()
    echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf the versioned subdir under \${TOP_INSTALL_PATH} (the version itself lives in the leaf script). Default $REPLACE_EXISTING"
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
    echo "  --skip-patches [0 or 1]:  operator opt-out for the rocm-patches step (rocm/scripts/rocm_patches.sh) AND the hipblaslt-patch step (rocm/scripts/hipblaslt_patch_setup.sh). Default 0 runs both; for most ROCm versions each script self-no-ops via NOOP_RC=43 so the cost is nil. Set to 1 when targeting a tree where the patches overlay would mismatch the runtime (e.g. 7.2.0 / 7.2.1 patches built for a newer userland and running on Ubuntu 22.04 nodes). When skipped, the per-package summary records 'rocm-patches(--skip-patches)' and 'hipblaslt-patch(--skip-patches)' in the DESELECTED bucket. Default $SKIP_PATCHES"
-   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, likwid, mdb, intellikit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre, emacs. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, hpctoolkit, likwid, mdb, intellikit, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre, emacs. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Currently supported only for pytorch; keys are aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build."
+   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, likwid, mdb, intellikit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre, emacs. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, hpctoolkit, likwid, mdb, intellikit, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre, emacs. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Supported for pytorch (keys: aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds)) and ftorch (key: ref (alias ftorch-ref)). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build. NOTE: for ftorch, the VERSION is the BOUND PYTORCH version (install dir + module are keyed on it, and the bind pytorch must already exist -- ftorch=<ver> does NOT build pytorch), while ftorch's OWN upstream git ref is a separate axis set per-token via :ref=<git-ref> (e.g. \"ftorch=2.12.0:ref=0.7\") or sweep-wide via --ftorch-ref; a bare \"ftorch\" binds to the latest existing pytorch module."
    echo "  --rocm-rc-prefix [ FAMILY ]:  release-candidate family name (e.g. 'therock', 'afar'). Auto-detected from \${ROCM_PATH} basename for rocm-{therock,afar}-* trees. Empty for regular releases. When non-empty, install/module dirs become rocmplus-\${FAMILY}-\${ROCM_VERSION}/ instead of rocmplus-\${ROCM_VERSION}/ -- EXCEPT for FAMILY='afar', where the suffix is rocmplus-afar-\${ROCM_RC_COMPILER}-\${ROCM_VERSION}/ (compiler-AND-rocm-keyed; see --rocm-rc-compiler). Default: auto-detected (empty for regular releases)."
    echo "  --rocm-rc-compiler [ COMPILER ]:  compiler/AFAR release number for AFAR trees (e.g. '22.2.0' for rocm-afar-22.2.0, '23.2.1' for rocm-afar-23.2.1 a.k.a. the TheRock-AFAR drop). Auto-detected from \${ROCM_PATH} basename when ROCM_RC_PREFIX='afar'. Empty for non-afar trees. When non-empty AND ROCM_RC_PREFIX='afar', the rocmplus suffix becomes afar-\${COMPILER}-\${ROCM_VERSION} so two AFAR drops with the same SDK numeric but different compiler releases get distinct rocmplus trees. Default: auto-detected."
    echo "  --rocmplus-flavor [ amd|cray ]:  programming-environment whose downstream tree this build populates. 'amd' (default) -> rocmplus-\${SUFFIX} (PrgEnv-amd-new: AMD compiler + from-source mpich-wrappers). 'cray' -> rocmplus-cray-\${SUFFIX} (PrgEnv-cray-new: CCE + cray-mpich), the separate tree PrgEnv-cray-new modulefiles point at, so a cray build never clobbers the amd-new tree for the same ROCm numeric. Default: amd (byte-identical legacy behavior)."
    echo "  --pnetcdf-version [ PNETCDF_VERSION ]:  PnetCDF version threaded through to extras/scripts/netcdf_setup.sh --pnetcdf-version. Empty (default) -> leaf script's internal default. Install lands at rocmplus-<v>/pnetcdf-v\$PNETCDF_VERSION/ with a pnetcdf/\$PNETCDF_VERSION modulefile."
+   echo "  --ftorch-ref [ GIT_REF ]:  sweep-wide default for FTorch's OWN upstream git ref (tag/branch/commit the FTorch source is checked out at), threaded to ftorch_setup.sh --ftorch-version. Empty (default) -> FTorch repo HEAD. Independent of the bound pytorch version (which keys the install dir + module). A per-token \"ftorch=<pytorch-ver>:ref=<git-ref>\" override wins over this default for that one build."
    echo "  --help: prints this message"
    exit 1
 }
@@ -345,6 +353,11 @@ do
       "--packages")
           shift
           PACKAGES_INPUT=${1}
+          reset-last
+          ;;
+      "--ftorch-ref")
+          shift
+          FTORCH_REF=${1}
           reset-last
           ;;
       "--pnetcdf-version")
@@ -912,7 +925,14 @@ declare -A PKG_VER_FLAG=(
    [hip-python]="--hip-python-version"
    [tensorflow]="--tensorflow-version"
    [jax]="--jax-version"
-   [ftorch]="--ftorch-version"
+   # ftorch=<X>: X is the BOUND PYTORCH version (the install dir + module
+   # are keyed on it), NOT FTorch's own upstream ref. The FTorch git ref
+   # is a separate axis, set per-token via `:ref=<git-ref>` or sweep-wide
+   # via --ftorch-ref. This value is only used to GATE version-token
+   # validation (ftorch's custom dispatch below does not consume it --
+   # it reads PKG_VERSIONS_REQ[ftorch] directly); the string mirrors the
+   # leaf flag the bind version is ultimately passed as.
+   [ftorch]="--pytorch-version"
    [pytorch]="--pytorch-version"
    [magma]="--magma-version"
    [elpa]="--elpa-version"
@@ -987,6 +1007,14 @@ get_override_flag() {
             pillow)               flag="--pillow-version" ;;
             sageattention|sage)   flag="--sageattention-version" ;;
             deepspeed|ds)         flag="--deepspeed-version" ;;
+         esac
+         ;;
+      ftorch|ftorch_amdflang)
+         # ftorch=<pytorch-ver>:ref=<git-ref> -- the ':ref=' override
+         # pins FTorch's OWN upstream git ref (independent of the bound
+         # pytorch version), routed to the leaf's --ftorch-version flag.
+         case "${key}" in
+            ref|ftorch-ref) flag="--ftorch-version" ;;
          esac
          ;;
    esac
@@ -1089,10 +1117,11 @@ if (( ${#PACKAGES_ARR[@]} > 0 )); then
          for _err in "${UNKNOWN_OVERRIDES[@]}"; do
             echo "       ${_err}" >&2
          done
-         echo "       Override keys are recognized only for: pytorch" >&2
+         echo "       Override keys are recognized for: pytorch, ftorch" >&2
          echo "       Pytorch keys: aotriton, torchvision (alias tv), torchaudio (alias ta)," >&2
          echo "                     triton, flashattention (alias flash), pillow," >&2
          echo "                     sageattention (alias sage), deepspeed (alias ds)" >&2
+         echo "       Ftorch keys:  ref (alias ftorch-ref) -- FTorch upstream git ref" >&2
       fi
       exit 1
    fi
@@ -1304,6 +1333,20 @@ run_and_log() {
    local rc=${PIPESTATUS[0]}
    if [ "${rc}" -eq 0 ]; then
       SUCCESS_PKGS+=("${log_name}")
+      # Make this package's freshly-written modulefile visible to later
+      # same-job `module load` calls (e.g. ftorch's preflight loading the
+      # pytorch just built). A registered spider cache otherwise hides it
+      # until the end-of-job rebuild, so dependents SKIP(missing-prereq).
+      # Bumping the timestamp marks the cache stale -> Lmod re-walks live
+      # on the next load. Best-effort; never fatal (the && ... || ...
+      # form returns 0 so the explicit `return ${rc}` below is unaffected).
+      if [ -n "${LMOD_TS_FILE:-}" ] && [ -e "${LMOD_TS_FILE}" ]; then
+         _ts_sudo=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+         ${_ts_sudo} touch "${LMOD_TS_FILE}" 2>/dev/null \
+            && echo "### ${log_name}: bumped Lmod cache timestamp; module now loadable by later same-job builds." \
+            || echo "### ${log_name}: WARNING could not bump ${LMOD_TS_FILE}; dependents may SKIP(missing-prereq) until end-of-job cache rebuild."
+         unset _ts_sudo
+      fi
    elif [ "${rc}" -eq "${MISSING_PREREQ_RC}" ]; then
       # The sub-script's preflight_modules call failed: a required
       # module wasn't available. Treat as SKIPPED, not FAILED.
@@ -1688,6 +1731,28 @@ if [[ "${TOP_INSTALL_PATH}" != "/opt" || "${TOP_MODULE_PATH}" != "/etc/lmod/modu
    fi
    unset _rocmplus_moddir
 fi
+
+# ── Lmod spider-cache timestamp (same-job module visibility) ─────────
+# When a system spider cache is registered (LMOD_CACHED_LOADS=yes; see
+# infrastructure/lmod/zz-lmod-cache.sh) `module load` trusts the cache
+# and cannot see a modulefile written earlier in THIS job until the
+# cache is rebuilt at end-of-job. That silently breaks same-job
+# dependency chains on first-time / version-bumped builds -- e.g.
+# pytorch 2.12.0 -> ftorch, which recorded SKIPPED(missing-prereq)
+# because ftorch's preflight `module load pytorch/2.12.0` hit the stale
+# cache (job 13646, 2026-07-07). run_and_log bumps this file after every
+# successful install so Lmod marks the cache stale and re-walks the tree
+# live on the next `module load`. Path derived the same way the deploy
+# path does (run_rocm_build.sh Phase 3.8, refresh_module_cache.sh:TS).
+# Left empty when no cache is registered (dev / /opt runs) so those are
+# unaffected.
+LMOD_TS_FILE=""
+_ts_candidate="$(dirname "${TOP_MODULE_PATH}")/moduleData/timestamp"
+if [ -e "${_ts_candidate}" ]; then
+   LMOD_TS_FILE="${_ts_candidate}"
+   echo "main_setup: Lmod cache timestamp -> ${LMOD_TS_FILE} (bumped after each install for same-job module visibility)"
+fi
+unset _ts_candidate
 
 # ── --replace-existing + --keep-failed-installs ──────────────────────
 #
@@ -2367,90 +2432,115 @@ run_and_log_versioned tensorflow extras/scripts/tensorflow_setup.sh ${COMMON_OPT
 run_and_log_versioned pytorch extras/scripts/pytorch_setup.sh ${COMMON_OPTIONS} --build-pytorch ${BUILD_PYTORCH} --python-version ${PYTHON_VERSION} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/pytorch)
 
-# FTorch: dispatched along TWO orthogonal axes:
+# FTorch: dispatched along THREE orthogonal axes:
 #
 #   1. Fortran toolchain (FTORCH_FC_COMPILER): gfortran | amdflang | both.
 #      Each toolchain goes to a different install dir / Lmod module
 #      (ftorch-v* vs ftorch_amdflang-v* -- the leaf script appends
 #      _amdflang to the basename internally) so they coexist.
 #
-#   2. Bound PyTorch version (PKG_VERSIONS_REQ[pytorch]): one ftorch
-#      build per pytorch version. FTorch's .so + .mod artifacts embed
-#      libtorch's C++ ABI, so a single ftorch install can only serve
-#      ONE pytorch version. When the operator asks for multi-pytorch
-#      (e.g. --packages "pytorch=2.7.1 pytorch=2.9.1"), each pytorch
-#      version gets its own ftorch install at
+#   2. Bound PyTorch version (the `ftorch=<pytorch-ver>` tokens, stored
+#      in PKG_VERSIONS_REQ[ftorch]): one ftorch build per bound pytorch
+#      version. FTorch's .so + .mod artifacts embed libtorch's C++ ABI,
+#      so a single ftorch install can only serve ONE pytorch version.
+#      Each bind version gets its own ftorch install at
 #         ${ROCMPLUS}/ftorch-v${PYTV}/             (gfortran)
 #         ${ROCMPLUS}/ftorch_amdflang-v${PYTV}/    (amdflang)
 #      with modulefile ${MODULE_PATH}/${PYTV}.lua so consumers say
-#      `module load ftorch/${PYTV}` instead of the legacy
-#      `module load ftorch/dev`.
+#      `module load ftorch/${PYTV}`. Multiple tokens
+#      (`ftorch=2.11.0 ftorch=2.12.0`) build one ftorch each, giving
+#      per-version coverage against already-installed pytorch WITHOUT
+#      re-requesting the (expensive) pytorch build.
 #
-# When no --packages tokens for pytorch are present, the loop runs
-# once with NO --pytorch-version flag; the leaf script's auto-derive
-# resolves the bound pytorch version from the loaded pytorch module
-# (see ftorch_setup.sh's PYTORCH_VERSION resolution block). This
-# preserves byte-identical behavior for the common single-pytorch
-# operator workflow.
+#      A bare `ftorch` token (or no ftorch token at all, when ftorch is
+#      not deselected) binds to the LATEST pytorch modulefile that
+#      actually exists in THIS rocm tree -- each ROCm version ships a
+#      different default pytorch, and we want ftorch to track whatever
+#      pytorch was just built / is newest on disk. Scanned from the
+#      filesystem (see _ftorch_latest_existing_pytorch below), NOT from
+#      `module avail`, so it is immune to Lmod spider-cache staleness
+#      that would hide a freshly-built pytorch module within the job.
+#
+#      NOTE: `ftorch=<pytorch-ver>` does NOT trigger a pytorch build; the
+#      bind version must already exist (or be built earlier in the same
+#      run via a `pytorch=<ver>` token) or ftorch SKIPs(missing-prereq).
+#
+#   3. FTorch's OWN upstream git ref (tag/branch/commit the FTorch source
+#      is checked out at) -- INDEPENDENT of the bound pytorch version.
+#      Resolved per bind version in priority order:
+#        a. per-token `ftorch=<pytorch-ver>:ref=<git-ref>` override
+#           (stored in PKG_VERSION_OVERRIDES as `--ftorch-version=<ref>`),
+#        b. sweep-wide --ftorch-ref (FTORCH_REF),
+#        c. none -> FTorch repo HEAD (leaf default).
+#      The ref is recorded only in the modulefile whatis(); the install
+#      dir / module name stay keyed on the pytorch bind version, so two
+#      refs against the SAME pytorch version would collide -- the parser
+#      dedups on (name,version) with last-`ref=`-wins, preventing that.
 #
 # Why an inline loop here (rather than run_and_log_versioned ftorch):
-# run_and_log_versioned iterates over PKG_VERSIONS_REQ[<pkg_name>],
-# which for `ftorch` would be FTorch's OWN upstream version axis
-# (--ftorch-version <ref>, the git checkout). The "version the
-# install dir by pytorch version" axis is keyed on a DIFFERENT
-# package's version (pytorch's), so we drive that axis here.
-#
-# The FTorch upstream axis is collapsed: if --packages contains a
-# `ftorch=<REF>` token, we pick the first entry from
-# PKG_VERSIONS_REQ[ftorch] and pass --ftorch-version <REF> uniformly
-# across every pytorch iteration. Multiple ftorch upstream tokens
-# (e.g. `ftorch=0.7 ftorch=main`) are not supported as separate
-# concurrent installs in this orchestrator -- the install dir is
-# version-keyed by pytorch only, so two FTorch refs against the
-# same pytorch would collide. If you need that, switch the dir
-# naming scheme to ftorch-vpyt<PYTV>-vft<FTV>/ and re-introduce
-# a nested loop here.
-_ftorch_upstream_ref=""
-if [[ -n "${PKG_VERSIONS_REQ[ftorch]:-}" ]]; then
-   # Take the first non-empty entry. mapfile -t preserves the empty
-   # entry that the parser uses for "bare ftorch token, repo HEAD";
-   # we want to skip past those to the first concrete ref.
-   while IFS= read -r _line; do
-      if [[ -n "${_line}" ]]; then
-         _ftorch_upstream_ref="${_line}"
-         break
-      fi
-   done <<< "${PKG_VERSIONS_REQ[ftorch]}"
-   unset _line
-   # Count concrete entries; warn if there's more than one (we only
-   # use the first per the design note above).
-   _ftorch_ref_count=0
-   while IFS= read -r _line; do
-      [[ -n "${_line}" ]] && _ftorch_ref_count=$((_ftorch_ref_count + 1))
-   done <<< "${PKG_VERSIONS_REQ[ftorch]}"
-   unset _line
-   if (( _ftorch_ref_count > 1 )); then
-      echo "WARNING: --packages contains ${_ftorch_ref_count} ftorch=<REF> tokens; only the first ('${_ftorch_upstream_ref}') will be used."
-      echo "         The ftorch install dir is version-keyed by pytorch (not by FTorch upstream ref), so multiple FTorch refs against the same pytorch would collide."
-      echo "         To build multiple FTorch refs against the same pytorch, run separate sweeps with different --packages selections."
-   fi
-   unset _ftorch_ref_count
-fi
-_ftorch_upstream_args=()
-[[ -n "${_ftorch_upstream_ref}" ]] && _ftorch_upstream_args=( --ftorch-version "${_ftorch_upstream_ref}" )
+# run_and_log_versioned would treat PKG_VERSIONS_REQ[ftorch] as the
+# leaf's --ftorch-version axis. Here that array is the pytorch BIND
+# axis instead (a different package's version), and the FTorch ref is a
+# separate per-token override, so we drive both axes explicitly.
 
-_ftorch_pyt_versions=()
-if [[ -z "${PKG_VERSIONS_REQ[pytorch]+SET}" ]]; then
-   # No --packages whitelist (or it didn't include pytorch): single
-   # iteration, no version flag, leaf auto-derive picks up whichever
-   # pytorch module is the Lmod default at build time.
-   _ftorch_pyt_versions=("")
+# ── Resolve the "latest existing pytorch" default for ftorch ─────────
+# FTorch is ABI-locked to exactly one pytorch version (its .so + .mod
+# embed libtorch's C++ ABI), so every ftorch build must target a
+# concrete pytorch version. When the operator did NOT pin one (bare
+# `ftorch`, or a bare `pytorch` token with no =VERSION), we bind to the
+# LATEST pytorch modulefile that actually exists in THIS rocm tree --
+# each ROCm version ships a different default pytorch, and we want
+# ftorch to track whatever pytorch was just built / is newest on disk.
+# Scan the filesystem directly (NOT `module avail`) so this is immune to
+# the Lmod spider-cache staleness that hides a freshly-built pytorch
+# module within the same job. Returns empty if no pytorch module exists
+# (ftorch then falls back to the leaf's own auto-derive, and will
+# SKIP(missing-prereq) if there is genuinely no pytorch to bind to).
+_ftorch_latest_existing_pytorch() {
+   local _pyt_mod_dir
+   if [ "${USE_CUSTOM_PATHS}" == 1 ]; then
+      _pyt_mod_dir="${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/pytorch"
+   else
+      # Leaf default when no custom paths (pytorch_setup.sh MODULE_PATH).
+      _pyt_mod_dir="/etc/lmod/modules/ROCmPlus-AI/pytorch"
+   fi
+   [ -d "${_pyt_mod_dir}" ] || return 0
+   local _f _ver
+   local -a _vers=()
+   for _f in "${_pyt_mod_dir}"/*.lua; do
+      [ -e "${_f}" ] || continue          # nullglob-safe (no matches)
+      _ver="$(basename "${_f}" .lua)"
+      # Skip Lmod bookkeeping files (e.g. a `default`/`.version` symlink)
+      case "${_ver}" in ""|default|.version) continue ;; esac
+      _vers+=("${_ver}")
+   done
+   [ "${#_vers[@]}" -gt 0 ] || return 0
+   printf '%s\n' "${_vers[@]}" | sort -V | tail -n1
+}
+
+# The pytorch BIND axis comes from the `ftorch=<pytorch-ver>` tokens
+# (PKG_VERSIONS_REQ[ftorch]). We keep the ORIGINAL requested strings
+# (empties included) in _ftorch_req_versions: an empty entry means a
+# bare `ftorch` token (bind to latest-existing), and the per-token ref
+# override is keyed on this original string ("ftorch|" for a bare token,
+# "ftorch|<ver>" for a pinned one). When ftorch was never mentioned in
+# --packages (whole array unset) we still run one iteration with an
+# empty entry so the default single-ftorch workflow keeps working
+# (unless BUILD_FTORCH=0, in which case run_and_log's NOOP branch marks
+# it DESELECTED).
+_ftorch_req_versions=()
+if [[ -z "${PKG_VERSIONS_REQ[ftorch]+SET}" ]]; then
+   _ftorch_req_versions=("")
 else
    # mapfile -t preserves the empty-entry semantics that the parser
-   # uses for "bare pytorch token, leaf default". An empty entry here
-   # drives the same auto-derive path as the no-PKG_VERSIONS_REQ case.
-   mapfile -t _ftorch_pyt_versions <<< "${PKG_VERSIONS_REQ[pytorch]}"
+   # uses for a bare `ftorch` token (bind to latest-existing).
+   mapfile -t _ftorch_req_versions <<< "${PKG_VERSIONS_REQ[ftorch]}"
 fi
+
+# Latest existing pytorch module for this tree, used to resolve any
+# empty (bare-token) bind entry to a concrete version.
+_ftorch_default_pyt="$(_ftorch_latest_existing_pytorch)"
+[[ -n "${_ftorch_default_pyt}" ]] && echo "main_setup: ftorch default pytorch (latest existing) -> ${_ftorch_default_pyt}"
 
 case "${FTORCH_FC_COMPILER}" in
    gfortran|amdflang|both) ;;
@@ -2460,7 +2550,38 @@ case "${FTORCH_FC_COMPILER}" in
       ;;
 esac
 
-for _pyt_ver in "${_ftorch_pyt_versions[@]}"; do
+for _req_ver in "${_ftorch_req_versions[@]}"; do
+   # Axis 2 -- resolve the pytorch bind version: the token value if
+   # pinned, else the latest existing pytorch module (may still be empty
+   # if no pytorch module exists at all, in which case we defer to the
+   # leaf's own auto-derive and it SKIPs if there is no pytorch to bind).
+   if [[ -n "${_req_ver}" ]]; then
+      _pyt_ver="${_req_ver}"
+   else
+      _pyt_ver="${_ftorch_default_pyt}"
+   fi
+
+   # Axis 3 -- resolve FTorch's own upstream git ref for this build:
+   #   1. per-token `:ref=<git-ref>` override, stored (by the parser +
+   #      get_override_flag) as `--ftorch-version=<ref>` keyed on the
+   #      ORIGINAL token version (_req_ver, possibly empty),
+   #   2. else the sweep-wide --ftorch-ref (FTORCH_REF),
+   #   3. else none -> FTorch repo HEAD (leaf default).
+   _ftorch_ref=""
+   _ovr_rec="${PKG_VERSION_OVERRIDES["ftorch|${_req_ver}"]:-}"
+   if [[ -n "${_ovr_rec}" ]]; then
+      while IFS= read -r _rec; do
+         [[ -z "${_rec}" ]] && continue
+         case "${_rec%%=*}" in
+            --ftorch-version) _ftorch_ref="${_rec#*=}" ;;
+         esac
+      done <<< "${_ovr_rec}"
+      unset _rec
+   fi
+   [[ -z "${_ftorch_ref}" ]] && _ftorch_ref="${FTORCH_REF}"
+   _ftorch_ref_args=()
+   [[ -n "${_ftorch_ref}" ]] && _ftorch_ref_args=( --ftorch-version "${_ftorch_ref}" )
+
    if [[ -z "${_pyt_ver}" ]]; then
       _pyt_args=()
       _label_suffix=""
@@ -2496,7 +2617,7 @@ for _pyt_ver in "${_ftorch_pyt_versions[@]}"; do
          run_and_log "${_label}" extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} \
             --build-ftorch ${BUILD_FTORCH} --fc-compiler gfortran ${REPLACE_OPTS} \
             "${_pyt_args[@]}" \
-            "${_ftorch_upstream_args[@]}" \
+            "${_ftorch_ref_args[@]}" \
             $(path_args ftorch rocmplus-${ROCMPLUS_SUFFIX}/ftorch)
          ;;
    esac
@@ -2509,12 +2630,13 @@ for _pyt_ver in "${_ftorch_pyt_versions[@]}"; do
          run_and_log "${_label}" extras/scripts/ftorch_setup.sh ${COMMON_OPTIONS} \
             --build-ftorch ${BUILD_FTORCH} --fc-compiler amdflang ${REPLACE_OPTS} \
             "${_pyt_args[@]}" \
-            "${_ftorch_upstream_args[@]}" \
+            "${_ftorch_ref_args[@]}" \
             $(path_args ftorch rocmplus-${ROCMPLUS_SUFFIX}/ftorch)
          ;;
    esac
 done
-unset _ftorch_pyt_versions _pyt_ver _pyt_args _label _label_suffix _ftorch_upstream_ref _ftorch_upstream_args
+unset _ftorch_req_versions _req_ver _pyt_ver _pyt_args _label _label_suffix \
+   _ftorch_default_pyt _ftorch_ref _ftorch_ref_args _ovr_rec
 
 #If ROCm should be installed in a different location
 #if [ "${ROCM_INSTALLPATH}" != "/opt/" ]; then

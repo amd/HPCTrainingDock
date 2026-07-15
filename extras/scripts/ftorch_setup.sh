@@ -304,11 +304,17 @@ fi
 #      module token directly. main_setup.sh ALSO passes this so that
 #      the leaf's preflight `module load` pins the same version Lmod
 #      will expose to the build's cmake.
-#   3. Lmod probe: query `module -t avail ${PYTORCH_MODULE}` and read
-#      back the default version. Used only for standalone invocation
-#      where neither flag was passed (e.g. an operator running
-#      ftorch_setup.sh by hand against an existing rocmplus tree).
-#      Best-effort; failures fall through to the explicit error below.
+#   3. Lmod probe: query `module -t avail ${PYTORCH_MODULE}` and pick the
+#      LATEST existing pytorch module (highest version). Used only for
+#      standalone invocation where neither flag was passed (e.g. an
+#      operator running ftorch_setup.sh by hand against an existing
+#      rocmplus tree). We deliberately track the newest install rather
+#      than the Lmod (D) default: each ROCm version ships a different
+#      default pytorch, and the (D) marker is not guaranteed to point at
+#      the newest one. Best-effort; failures fall through to the error
+#      below. (In sweeps main_setup.sh resolves this and passes
+#      --pytorch-version explicitly, so this path is the manual-run
+#      equivalent of that same "latest existing" rule.)
 if [[ -z "${PYTORCH_VERSION}" ]]; then
    case "${PYTORCH_MODULE}" in
       pytorch/*) PYTORCH_VERSION="${PYTORCH_MODULE#pytorch/}" ;;
@@ -322,41 +328,30 @@ if [[ -z "${PYTORCH_VERSION}" ]]; then
    if type module >/dev/null 2>&1; then
       # `module -t avail` prints one modulefile per line in machine-
       # parseable form; the default version is suffixed with `(D)`.
+      # Collect every pytorch/<ver> candidate, strip the trailing
+      # columns and the (D) marker, then pick the highest by version
+      # sort (sort -V) so ftorch binds to the latest existing pytorch.
       _ML_AVAIL=$(module -t avail "${PYTORCH_MODULE}" 2>&1 || true)
-      # First pass: a `(D)` line wins outright.
+      _candidates=()
       while IFS= read -r _line; do
          case "${_line}" in
-            "${PYTORCH_MODULE}/"*"(D)"*)
+            "${PYTORCH_MODULE}/"*)
                _ver="${_line#${PYTORCH_MODULE}/}"
-               PYTORCH_VERSION="${_ver%%[[:space:]]*}"
-               break
+               _ver="${_ver%%[[:space:]]*}"   # drop trailing columns
+               _ver="${_ver%%(D)*}"           # drop Lmod default marker
+               _ver="${_ver%/}"               # drop any trailing slash
+               [[ -n "${_ver}" ]] && _candidates+=("${_ver}")
                ;;
          esac
       done <<< "${_ML_AVAIL}"
-      # Fallback: only one version available -> take it. Keeps the
-      # standalone path working even when Lmod did not mark a default
-      # (single-version trees).
-      if [[ -z "${PYTORCH_VERSION}" ]]; then
-         _candidates=()
-         while IFS= read -r _line; do
-            case "${_line}" in
-               "${PYTORCH_MODULE}/"*)
-                  _ver="${_line#${PYTORCH_MODULE}/}"
-                  _ver="${_ver%%[[:space:]]*}"
-                  [[ -n "${_ver}" ]] && _candidates+=("${_ver}")
-                  ;;
-            esac
-         done <<< "${_ML_AVAIL}"
-         if [[ "${#_candidates[@]}" -eq 1 ]]; then
-            PYTORCH_VERSION="${_candidates[0]}"
-         fi
-         unset _candidates
+      if [[ "${#_candidates[@]}" -gt 0 ]]; then
+         PYTORCH_VERSION=$(printf '%s\n' "${_candidates[@]}" | sort -V | tail -n1)
       fi
-      unset _ML_AVAIL _line _ver
+      unset _ML_AVAIL _line _ver _candidates
    fi
 fi
 if [[ -z "${PYTORCH_VERSION}" ]]; then
-   send-error "Could not resolve PYTORCH_VERSION. Pass --pytorch-version <VER>, or --pytorch-module pytorch/<VER>, or ensure '${PYTORCH_MODULE}' resolves to a single Lmod modulefile (or has a (D) default-marked version) so the install dir + modulefile name can be versioned by it."
+   send-error "Could not resolve PYTORCH_VERSION. Pass --pytorch-version <VER>, or --pytorch-module pytorch/<VER>, or ensure at least one '${PYTORCH_MODULE}/<VER>' Lmod modulefile exists so the install dir + modulefile name can be versioned by the latest one."
 fi
 
 # ── Final FTORCH_PATH + modulefile name (now version-keyed) ─────────

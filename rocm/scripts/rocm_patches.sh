@@ -1304,6 +1304,15 @@ PY
       echo "[rocm_patches] ccache not found on PATH; building without a compiler cache"
    fi
 
+   # ── ROCPROFSYS_MAX_THREADS: most thread data lives in a static
+   #    std::array<..., ROCPROFSYS_MAX_THREADS>, a compile-time constant for
+   #    release builds. The upstream default is 128 (nproc < 8) else
+   #    pow2_ceil(16 * nproc), and threads created beyond the limit fall back to
+   #    thread-local storage with profiling skipped. The nightly
+   #    Pytorch_Profile_Rocprof-sys_ROCm regression hangs because PyTorch spawns
+   #    threads unbounded and blows past that cap. Bumping the cap to 4096
+   #    (a power of 2, as CMake enforces) extends the static thread-data array
+   #    so the profiled run no longer hangs. Overridable via $ROCPROFSYS_MAX_THREADS.
    echo "[rocm_patches] running cmake ..."
    cmake \
       -S "${src_root}/projects/rocprofiler-systems" \
@@ -1323,6 +1332,7 @@ PY
       -DROCPROFSYS_BUILD_EXAMPLES=OFF \
       -DROCPROFSYS_BUILD_TESTING=OFF \
       -DROCPROFSYS_BUILD_DOCS=OFF \
+      -DROCPROFSYS_MAX_THREADS="${ROCPROFSYS_MAX_THREADS:-4096}" \
       -DCMAKE_PREFIX_PATH="${ROCM_PATH}" \
       -DAMDDeviceLibs_DIR="${ROCM_PATH}/lib/cmake/AMDDeviceLibs" \
       || return 1
