@@ -377,6 +377,32 @@ echo "Effective MODULEPATH: ${MODULEPATH}"
 # Load the rocm module. Lmod resolves it from the first MODULEPATH
 # entry that contains the matching modulefile.
 module load "rocm/${ROCM_VERSION}"
+
+# ── Stale-spider-cache / NFS-propagation fallback ────────────────────
+# The site runs Lmod with LMOD_CACHED_LOADS=yes and a registered system
+# spider cache (/etc/profile.d/zz-lmod-cache.sh -> LMOD_RC). A brand-new
+# rocm modulefile -- e.g. a nightly rocm/<date> that run_rocm_therock_install.sh
+# wrote only seconds/minutes before this job started -- may not be in the
+# cache yet, so the cached `module load` above resolves it as "unknown"
+# and leaves ROCM_PATH unset. That aborted every first-run nightly build
+# (observed on the first 7.15 nightlies: the whole rocmplus install --
+# and therefore the regression suite -- skipped because ROCM_PATH was
+# empty). When the load did not populate ROCM_PATH, retry with
+# --ignore_cache (the exact remedy Lmod's own error message suggests),
+# with a short backoff that also absorbs NFS dir-attribute propagation
+# of the freshly written .lua. The fast cached path is unchanged for the
+# common case where the module is already cached.
+if [[ -z "${ROCM_PATH:-}" ]]; then
+   echo "rocm/${ROCM_VERSION} did not resolve via the Lmod cache (ROCM_PATH unset)."
+   echo "Likely a freshly written modulefile not yet in the spider cache; retrying with --ignore_cache."
+   for _rocm_try in 1 2 3; do
+      module --ignore_cache load "rocm/${ROCM_VERSION}" 2>/dev/null || true
+      [[ -n "${ROCM_PATH:-}" ]] && { echo "Resolved rocm/${ROCM_VERSION} via --ignore_cache (attempt ${_rocm_try})."; break; }
+      echo "  attempt ${_rocm_try}: still unresolved; sleeping 10s before retry"
+      sleep 10
+   done
+   unset _rocm_try
+fi
 echo "Loaded module rocm/${ROCM_VERSION}; ROCM_PATH=${ROCM_PATH:-<unset>}"
 
 # ── Cray PrgEnv: load the full programming-environment module so the MPI

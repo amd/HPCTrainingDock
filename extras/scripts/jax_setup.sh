@@ -725,9 +725,22 @@ else
       # plugin objects load on 24.04. This also makes the libunwind LD_PRELOAD
       # in the modulefile redundant. Applied to the plugin-based clang builds
       # (JAX 5.0/6.0/7.1/8.0); the gcc build path (--nouse_clang) is unaffected.
+      #
+      # The SAME crtbegin/libgcc mismatch also crashes the build's HOST/exec
+      # tools (protoc_stage0, llvm-min-tblgen, ...) -- these are compiled with
+      # the ROCm clang in the exec configuration and segfault at process
+      # startup inside libgcc_s __register_frame_info_bases (during .init_array
+      # / __do_init), which manifested as the rocm-jax GPU-kernels wheel build
+      # failing with "(Segmentation fault): llvm-min-tblgen failed" on ROCm
+      # 7.12+ (reproduced + verified: adding the --host_linkopt variants below
+      # makes protoc_stage0/llvm-min-tblgen run cleanly and the wheels build).
+      # --linkopt only reaches the target config, so we MUST also pass the
+      # --host_linkopt variants to fix the exec-config host tools.
       JAX_CLANG_RUNTIME_BAZELOPTS=(
          --bazel_options=--linkopt=--rtlib=libgcc
          --bazel_options=--linkopt=--unwindlib=libgcc
+         --bazel_options=--host_linkopt=--rtlib=libgcc
+         --bazel_options=--host_linkopt=--unwindlib=libgcc
       )
 
       AMDGPU_GFXMODEL=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/,/g'`

@@ -340,6 +340,14 @@ if [[ -z "${PYTORCH_VERSION}" ]]; then
                _ver="${_ver%%[[:space:]]*}"   # drop trailing columns
                _ver="${_ver%%(D)*}"           # drop Lmod default marker
                _ver="${_ver%/}"               # drop any trailing slash
+               # Skip the tunableop variant modulefile. pytorch_setup.sh
+               # publishes BOTH `pytorch/<VER>` and
+               # `pytorch/<VER>_tunableop_enabled` (same install; the
+               # tunableop one only flips a runtime env var). `sort -V`
+               # ranks `<VER>_tunableop_enabled` ABOVE the plain `<VER>`,
+               # so without this filter ftorch would bind to the tunableop
+               # module. FTorch must bind to the regular pytorch module.
+               case "${_ver}" in *_tunableop_enabled) continue ;; esac
                [[ -n "${_ver}" ]] && _candidates+=("${_ver}")
                ;;
          esac

@@ -2512,6 +2512,13 @@ _ftorch_latest_existing_pytorch() {
       _ver="$(basename "${_f}" .lua)"
       # Skip Lmod bookkeeping files (e.g. a `default`/`.version` symlink)
       case "${_ver}" in ""|default|.version) continue ;; esac
+      # Skip the tunableop variant modulefile. pytorch_setup.sh writes
+      # BOTH `<VER>.lua` and `<VER>_tunableop_enabled.lua` (same install,
+      # the tunableop one just flips a runtime env var). `sort -V` ranks
+      # `<VER>_tunableop_enabled` ABOVE the plain `<VER>`, so without this
+      # filter ftorch would bind to the tunableop modulefile. FTorch must
+      # bind to the regular pytorch module.
+      case "${_ver}" in *_tunableop_enabled) continue ;; esac
       _vers+=("${_ver}")
    done
    [ "${#_vers[@]}" -gt 0 ] || return 0

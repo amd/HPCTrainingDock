@@ -1099,6 +1099,67 @@ else
    unset _world_ro
 fi
 
+# ---------------- Phase 7: refresh Lmod spider cache -----------------
+# The fleet runs Lmod with LMOD_CACHED_LOADS=yes against a registered system
+# spider cache (see infrastructure/lmod/README.md). A brand-new
+# rocm/${ROCM_NUMERIC} modulefile written above is invisible to cache-using
+# clients until a registered cache is rebuilt and its timestamp bumped -- the
+# timestamp bump is what invalidates client caches built before it. That gap
+# stranded the first 7.15 nightly rocmplus build: its
+# `module load rocm/7.15.0a...` resolved "unknown" from a stale cache and the
+# whole install (and therefore the regression suite) aborted with ROCM_PATH
+# unset. Rebuild + bump now so consumers see this modulefile immediately
+# instead of waiting for the periodic backstop.
+#
+# Refresh BOTH:
+#   1. the tree we just wrote to (${TOP_MODULE_PATH}) -- gives the nightlies
+#      tree its own registered cache + timestamp under the sibling moduleData/;
+#   2. any already-registered cache at the sibling-of-stable moduleData path
+#      whose deployed refresh_module_cache.sh exists -- bumping that timestamp
+#      is what invalidates fleet-wide cached loads (LMOD_RC points there).
+# Self-adapting + non-fatal: gated on ${LMOD_DIR} (Lmod-only construct; Cray
+# Tmod / classic Tcl hosts skip silently), and a refresh failure never changes
+# this install's exit status (the periodic timer catches up).
+if [[ -n "${LMOD_DIR:-}" ]]; then
+   echo ""
+   echo "============================================================"
+   echo "  Phase 7: refresh Lmod spider cache so rocm/${ROCM_NUMERIC} is visible"
+   echo "============================================================"
+   _repo_refresh="$(cd "$(dirname "${LEAF_SCRIPT_PATH}")/.." 2>/dev/null && pwd -P)/infrastructure/lmod/refresh_module_cache.sh"
+   # (1) Refresh THIS tree's own cache. The generalized script targets
+   #     ${TOP_MODULE_PATH} and derives cache-dir + timestamp from the tree's
+   #     sibling moduleData/, giving the nightlies tree its own registered
+   #     cache + timestamp (previously only the stable tree had one). Prefer
+   #     the repo copy (always current); fall back to a copy already deployed
+   #     alongside this tree's moduleData/.
+   _tree_refresh="$(dirname "${TOP_MODULE_PATH}")/moduleData/refresh_module_cache.sh"
+   if [[ -x "${_repo_refresh}" ]]; then
+      ${SUDO} "${_repo_refresh}" --force --module-root "${TOP_MODULE_PATH}" \
+         || echo "WARNING: spider-cache refresh for ${TOP_MODULE_PATH} failed (non-fatal; periodic timer will catch up)" >&2
+   elif [[ -x "${_tree_refresh}" ]]; then
+      ${SUDO} "${_tree_refresh}" --force \
+         || echo "WARNING: spider-cache refresh (${_tree_refresh}) failed (non-fatal)" >&2
+   else
+      echo "  no refresh_module_cache.sh found for ${TOP_MODULE_PATH}; skipping tree-local refresh"
+   fi
+   # (2) Bump the FLEET-registered cache/timestamp that cache-using clients
+   #     actually consult (LMOD_RC -> lmodrc.lua; its sibling
+   #     refresh_module_cache.sh rebuilds that cache and bumps its timestamp,
+   #     which invalidates every client cache built before it -- the lever
+   #     that makes a new modulefile visible to LMOD_CACHED_LOADS=yes clients
+   #     without waiting for the periodic backstop). Skipped when it resolves
+   #     to the same script already run in (1).
+   if [[ -n "${LMOD_RC:-}" && -f "${LMOD_RC}" ]]; then
+      _reg_refresh="$(dirname "${LMOD_RC}")/refresh_module_cache.sh"
+      if [[ -x "${_reg_refresh}" && "${_reg_refresh}" != "${_tree_refresh}" ]]; then
+         ${SUDO} "${_reg_refresh}" --force \
+            || echo "WARNING: registered spider-cache refresh (${_reg_refresh}) failed (non-fatal)" >&2
+      fi
+      unset _reg_refresh
+   fi
+   unset _repo_refresh _tree_refresh
+fi
+
 echo ""
 echo "============================================================"
 echo "  Done: ROCm ${ROCM_NUMERIC} (TheRock source, release therock-${THEROCK_RELEASE})"
