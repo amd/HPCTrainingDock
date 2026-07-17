@@ -64,6 +64,13 @@ ROCM_INSTALLPATH_CLI=0
 ROCM_PATH_CLI=0
 SITE_CLI=0
 : ${BUILD_PYTORCH:="1"}
+# vLLM layers on the pytorch module (torch/triton/transformers), so it is
+# built AFTER pytorch (see the run_and_log_versioned call near the ftorch
+# block) and, like the other long-pole ML builds, is gated out under
+# --quick-installs (QUICK_INSTALLS_PKGS below) so it is skipped together
+# with pytorch -- a vllm build with BUILD_PYTORCH=0 would have no torch to
+# layer on.
+: ${BUILD_VLLM:="1"}
 : ${BUILD_CUPY:="1"}
 : ${BUILD_HIP_PYTHON:="1"}
 : ${BUILD_TENSORFLOW:="1"}
@@ -137,6 +144,12 @@ SITE_CLI=0
 # Built --native-comp 0 (byte-compiled) so it pulls NO gcc-14 packages onto
 # the image/nodes -- see the header note in emacs_setup.sh.
 : ${BUILD_EMACS:="1"}
+# uProf: AMD's CPU/GPU profiler. ROCm-agnostic base tool (installs under
+# TOP_INSTALL_PATH, shared across ROCm versions, existence-skips on later
+# sweep versions -- like emacs/miniconda3). Its .tar.bz2 is EULA-gated;
+# the leaf degrades a blocked/failed download to SKIPPED(missing-prereq)
+# so it can never turn the sweep red (pre-stage a tarball to guarantee it).
+: ${BUILD_UPROF:="1"}
 : ${PACKAGES_INPUT:=""}      # comma- or space-separated whitelist; empty = all (subject to other flags)
 # PnetCDF version (build-time dep of netcdf, also a first-class
 # versioned rocmplus module after 2026-05-20). Empty = leaf default
@@ -242,11 +255,11 @@ usage()
    echo "  --install-rocprof-compute-from-source [0 or 1]:  default is $INSTALL_ROCPROF_COMPUTE_FROM_SOURCE (false)"
    echo "  --install-rocprof-sys-from-source [0 or 1]:  default is $INSTALL_ROCPROF_SYS_FROM_SOURCE (false)"
    echo "  --use-makefile [0 or 1]:  default is 0 (false)"
-   echo "  --quick-installs [0 or 1]:  skip packages whose wall >= 20 min (measured from job 8065 sweep): pytorch (91m), tensorflow (70m), jax (34m, when policy gate allows). Also skips ftorch (transitive: needs pytorch), julia (dormant: no install wired), and intellikit (explicit always-skip in quick mode regardless of wall, e.g. so per-tool iteration does not retrigger its build and its network-heavy monorepo clone does not block the long-pole iteration loop). likwid + mdb are now BUILT in quick mode (sub-minute builds, useful by default). Threshold raised from 15 -> 20 min after job 8065 audit moved petsc (17m) and scorep (17m) under the cutoff. Default $QUICK_INSTALLS"
+   echo "  --quick-installs [0 or 1]:  skip packages whose wall >= 20 min (measured from job 8065 sweep): pytorch (91m), tensorflow (70m), jax (34m, when policy gate allows). Also skips ftorch (transitive: needs pytorch), vllm (transitive: builds from source against the pytorch module), julia (dormant: no install wired), and intellikit (explicit always-skip in quick mode regardless of wall, e.g. so per-tool iteration does not retrigger its build and its network-heavy monorepo clone does not block the long-pole iteration loop). likwid + mdb are now BUILT in quick mode (sub-minute builds, useful by default). Threshold raised from 15 -> 20 min after job 8065 audit moved petsc (17m) and scorep (17m) under the cutoff. Default $QUICK_INSTALLS"
    echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf the versioned subdir under \${TOP_INSTALL_PATH} (the version itself lives in the leaf script). Default $REPLACE_EXISTING"
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
    echo "  --skip-patches [0 or 1]:  operator opt-out for the rocm-patches step (rocm/scripts/rocm_patches.sh) AND the hipblaslt-patch step (rocm/scripts/hipblaslt_patch_setup.sh). Default 0 runs both; for most ROCm versions each script self-no-ops via NOOP_RC=43 so the cost is nil. Set to 1 when targeting a tree where the patches overlay would mismatch the runtime (e.g. 7.2.0 / 7.2.1 patches built for a newer userland and running on Ubuntu 22.04 nodes). When skipped, the per-package summary records 'rocm-patches(--skip-patches)' and 'hipblaslt-patch(--skip-patches)' in the DESELECTED bucket. Default $SKIP_PATCHES"
-   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocprof-sys, rocprof-compute, hpctoolkit, likwid, mdb, intellikit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre, emacs. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, hpctoolkit, likwid, mdb, intellikit, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, magma, elpa, kokkos, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre, emacs. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Supported for pytorch (keys: aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds)) and ftorch (key: ref (alias ftorch-ref)). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build. NOTE: for ftorch, the VERSION is the BOUND PYTORCH version (install dir + module are keyed on it, and the bind pytorch must already exist -- ftorch=<ver> does NOT build pytorch), while ftorch's OWN upstream git ref is a separate axis set per-token via :ref=<git-ref> (e.g. \"ftorch=2.12.0:ref=0.7\") or sweep-wide via --ftorch-ref; a bare \"ftorch\" binds to the latest existing pytorch module."
+   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocshmem, rocprof-sys, rocprof-compute, hpctoolkit, uprof, likwid, mdb, intellikit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, vllm, magma, elpa, kokkos, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre, emacs. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, rocshmem, hpctoolkit, uprof, likwid, mdb, intellikit, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, vllm, magma, elpa, kokkos, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre, emacs. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Supported for pytorch (keys: aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds)) and ftorch (key: ref (alias ftorch-ref)). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build. NOTE: for ftorch, the VERSION is the BOUND PYTORCH version (install dir + module are keyed on it, and the bind pytorch must already exist -- ftorch=<ver> does NOT build pytorch), while ftorch's OWN upstream git ref is a separate axis set per-token via :ref=<git-ref> (e.g. \"ftorch=2.12.0:ref=0.7\") or sweep-wide via --ftorch-ref; a bare \"ftorch\" binds to the latest existing pytorch module. Similarly for vllm: VERSION is the BOUND PYTORCH version (install/module keyed as vllm-v<vllm-ver>-pt<pytorch-ver>; vLLM's OWN version auto-derives from the bound torch), and a bare \"vllm\" binds to the latest existing pytorch module (vllm=<ver> does NOT build pytorch -- the bind pytorch must already exist)."
    echo "  --rocm-rc-prefix [ FAMILY ]:  release-candidate family name (e.g. 'therock', 'afar'). Auto-detected from \${ROCM_PATH} basename for rocm-{therock,afar}-* trees. Empty for regular releases. When non-empty, install/module dirs become rocmplus-\${FAMILY}-\${ROCM_VERSION}/ instead of rocmplus-\${ROCM_VERSION}/ -- EXCEPT for FAMILY='afar', where the suffix is rocmplus-afar-\${ROCM_RC_COMPILER}-\${ROCM_VERSION}/ (compiler-AND-rocm-keyed; see --rocm-rc-compiler). Default: auto-detected (empty for regular releases)."
    echo "  --rocm-rc-compiler [ COMPILER ]:  compiler/AFAR release number for AFAR trees (e.g. '22.2.0' for rocm-afar-22.2.0, '23.2.1' for rocm-afar-23.2.1 a.k.a. the TheRock-AFAR drop). Auto-detected from \${ROCM_PATH} basename when ROCM_RC_PREFIX='afar'. Empty for non-afar trees. When non-empty AND ROCM_RC_PREFIX='afar', the rocmplus suffix becomes afar-\${COMPILER}-\${ROCM_VERSION} so two AFAR drops with the same SDK numeric but different compiler releases get distinct rocmplus trees. Default: auto-detected."
    echo "  --rocmplus-flavor [ amd|cray ]:  programming-environment whose downstream tree this build populates. 'amd' (default) -> rocmplus-\${SUFFIX} (PrgEnv-amd-new: AMD compiler + from-source mpich-wrappers). 'cray' -> rocmplus-cray-\${SUFFIX} (PrgEnv-cray-new: CCE + cray-mpich), the separate tree PrgEnv-cray-new modulefiles point at, so a cray build never clobbers the amd-new tree for the same ROCm numeric. Default: amd (byte-identical legacy behavior)."
@@ -795,6 +808,11 @@ declare -A DESELECTED_BY=()
 #   ftorch        0:49        <1m         <1m          SKIP  (transitive: preflight
 #                                                              requires pytorch which
 #                                                              is itself SKIP-ed)
+#   vllm          long        n/a         n/a          SKIP  (transitive: builds from
+#                                                              source against the pytorch
+#                                                              module which is itself
+#                                                              SKIP-ed; slow gfx942 wheel
+#                                                              compile)
 #   hipfort     bundled     bundled      bundled      SKIP  (rocm-bundled since 6.3+;
 #                                                              build-from-source removed
 #                                                              from this orchestrator)
@@ -812,7 +830,7 @@ declare -A DESELECTED_BY=()
 # package by exporting BUILD_<name>=1 between this point and sub-script
 # invocation; we don't expose per-package CLI flags here on purpose.
 QUICK_INSTALLS_PKGS=( BUILD_PYTORCH BUILD_TENSORFLOW BUILD_JAX BUILD_FTORCH \
-                     BUILD_JULIA BUILD_INTELLIKIT )
+                     BUILD_VLLM BUILD_JULIA BUILD_INTELLIKIT )
 QUICK_INSTALLS_THRESHOLD_MIN=20
 if [[ "${QUICK_INSTALLS}" == "1" ]]; then
    echo ""
@@ -840,6 +858,7 @@ if [[ "${QUICK_INSTALLS}" == "1" ]]; then
                            # 3-line "skipped" banner for ftorch_amdflang.
                            DESELECTED_BY[ftorch_amdflang]="quick-installs" ;;
          BUILD_INTELLIKIT) DESELECTED_BY[intellikit]="quick-installs" ;;
+         BUILD_VLLM)       DESELECTED_BY[vllm]="quick-installs" ;;
          BUILD_JULIA)      ;;  # dormant: no run_and_log call exists
       esac
    done
@@ -875,6 +894,7 @@ declare -A PKG_FLAG=(
    [rocprof-sys]=BUILD_ROCPROF_SYS
    [rocprof-compute]=BUILD_ROCPROF_COMPUTE
    [hpctoolkit]=BUILD_HPCTOOLKIT
+   [uprof]=BUILD_UPROF
    [likwid]=BUILD_LIKWID
    [mdb]=BUILD_MDB
    [intellikit]=BUILD_INTELLIKIT
@@ -886,6 +906,7 @@ declare -A PKG_FLAG=(
    [jax]=BUILD_JAX
    [ftorch]=BUILD_FTORCH
    [pytorch]=BUILD_PYTORCH
+   [vllm]=BUILD_VLLM
    [magma]=BUILD_MAGMA
    [elpa]=BUILD_ELPA
    [kokkos]=BUILD_KOKKOS
@@ -917,6 +938,7 @@ declare -A PKG_VER_FLAG=(
    [rocshmem]="--rocshmem-version"
    [rccl-tests]="--rccl-tests-version"
    [hpctoolkit]="--hpctoolkit-version"
+   [uprof]="--uprof-version"
    [likwid]="--likwid-version"
    [mdb]="--mdb-version"
    [intellikit]="--intellikit-version"
@@ -934,6 +956,13 @@ declare -A PKG_VER_FLAG=(
    # leaf flag the bind version is ultimately passed as.
    [ftorch]="--pytorch-version"
    [pytorch]="--pytorch-version"
+   # vllm=<X>: like ftorch, X is the BOUND PYTORCH version (the install dir
+   # + module are keyed on it), NOT vLLM's own version -- that auto-derives
+   # from the bound torch inside the leaf (see vllm_setup.sh compat table).
+   # This entry exists only to GATE version-token validation; the custom
+   # vllm dispatch below reads PKG_VERSIONS_REQ[vllm] directly and passes
+   # --pytorch-version / --pytorch-module.
+   [vllm]="--pytorch-version"
    [magma]="--magma-version"
    [elpa]="--elpa-version"
    [kokkos]="--kokkos-version"
@@ -2234,6 +2263,19 @@ run_and_log_versioned miniforge3 extras/scripts/miniforge3_setup.sh --rocm-versi
 run_and_log_versioned emacs extras/scripts/emacs_setup.sh --build-emacs ${BUILD_EMACS} --native-comp 0 \
    $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH} --module-path ${TOP_MODULE_PATH}/base/emacs")
 
+# uprof: AMD uProf profiler -- ROCm-agnostic base tool, installs under
+# TOP_INSTALL_PATH (shared across ROCm versions, existence-skips on later
+# sweep versions like emacs/miniconda3). The leaf does NOT accept
+# --rocm-version/--amdgpu-gfxmodel so COMMON_OPTIONS is deliberately not
+# threaded, and it is NOT given ${REPLACE_OPTS} (a shared tool should not be
+# wiped per ROCm version). --install-path-parent is a PARENT dir; the leaf
+# appends AMDuProf_<ver>. The .tar.bz2 download is EULA-gated and may be
+# blocked on locked-down compute nodes; the leaf degrades a failed download
+# to SKIPPED(missing-prereq) so a blocked CDN never turns the sweep red --
+# pre-stage the tarball (uprof_setup.sh --tarball-file) to guarantee it.
+run_and_log_versioned uprof tools/scripts/uprof_setup.sh --build-uprof ${BUILD_UPROF} \
+   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path-parent ${TOP_INSTALL_PATH} --module-path ${TOP_MODULE_PATH}/base/uprof")
+
 # hipfort: build-from-source intentionally removed. ROCm 6.3+ ships
 # hipfort natively (see <pkg>.BUNDLED markers / rocm/<v> module). The
 # legacy run_and_log call previously invoked extras/scripts/hipfort_setup.sh
@@ -2644,6 +2686,56 @@ for _req_ver in "${_ftorch_req_versions[@]}"; do
 done
 unset _ftorch_req_versions _req_ver _pyt_ver _pyt_args _label _label_suffix \
    _ftorch_default_pyt _ftorch_ref _ftorch_ref_args _ovr_rec
+
+# vLLM: layers on the pytorch module (torch/triton/transformers/deepspeed)
+# and BUILDS FROM SOURCE against the module's torch, so it MUST run AFTER
+# the pytorch build above and is BOUND to a concrete pytorch version (its
+# compiled ROCm kernels are ABI-locked to that torch) -- exactly like
+# ftorch. Dispatch mirrors ftorch's:
+#   * `vllm=<pytorch-ver>` tokens (PKG_VERSIONS_REQ[vllm]) pin the BOUND
+#     pytorch version -- NOT vLLM's own version, which the leaf auto-derives
+#     from the bound torch (vllm_setup.sh compat table).
+#   * a bare `vllm` (or no --packages) binds to the LATEST existing pytorch
+#     module in this tree (reusing _ftorch_latest_existing_pytorch, defined
+#     just above and still in scope -- only its result var was unset).
+# The leaf keys the install dir + module on BOTH versions
+# (vllm-v<vllm-ver>-pt<pytorch-ver>), so multiple coexist; --pytorch-module
+# pins the exact pytorch the leaf loads AND bakes into the generated
+# modulefile's load(), so a later default-pytorch change can't ABI-mismatch
+# it. No --python-version: the leaf inherits python from the pytorch module.
+_vllm_req_versions=()
+if [[ -z "${PKG_VERSIONS_REQ[vllm]+SET}" ]]; then
+   _vllm_req_versions=("")
+else
+   mapfile -t _vllm_req_versions <<< "${PKG_VERSIONS_REQ[vllm]}"
+fi
+_vllm_default_pyt="$(_ftorch_latest_existing_pytorch)"
+[[ -n "${_vllm_default_pyt}" ]] && echo "main_setup: vllm default pytorch (latest existing) -> ${_vllm_default_pyt}"
+for _req_ver in "${_vllm_req_versions[@]}"; do
+   # Bind version: the token value if pinned, else the latest existing
+   # pytorch module (may be empty if none exists at all, in which case we
+   # defer to the leaf's own resolve, which SKIPs(missing-prereq) when
+   # there is genuinely no pytorch to bind to).
+   _pyt_ver="${_req_ver:-${_vllm_default_pyt}}"
+   _pyt_args=()
+   _label_suffix=""
+   if [[ -n "${_pyt_ver}" ]]; then
+      _pyt_args=( --pytorch-version "${_pyt_ver}" --pytorch-module "pytorch/${_pyt_ver}" )
+      _label_suffix="_pt${_pyt_ver}"
+   fi
+   _label="vllm${_label_suffix}"
+   # Mirror the deselection marker so a deselected vllm (BUILD_VLLM=0 via
+   # --quick-installs / --packages-excluded) gets the one-line marker for
+   # this labeled iteration instead of the verbose SKIP banner.
+   if [[ -n "${DESELECTED_BY[vllm]:-}" ]]; then
+      DESELECTED_BY[${_label}]="${DESELECTED_BY[vllm]}"
+   fi
+   run_and_log "${_label}" extras/scripts/vllm_setup.sh ${COMMON_OPTIONS} \
+      --build-vllm ${BUILD_VLLM} ${REPLACE_OPTS} \
+      "${_pyt_args[@]}" \
+      $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/vllm)
+done
+unset _vllm_req_versions _req_ver _pyt_ver _pyt_args _label _label_suffix _vllm_default_pyt
 
 #If ROCm should be installed in a different location
 #if [ "${ROCM_INSTALLPATH}" != "/opt/" ]; then

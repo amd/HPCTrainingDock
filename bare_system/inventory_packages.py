@@ -247,14 +247,25 @@ PKG_LIST = [
     ("magma",      r"^magma(-v.*)?$",                     r"^magma-v(.+)$"),
     ("hypre",      r"^hypre(-v.*)?$",                     r"^hypre-v(.+)$"),
     ("petsc",      r"^petsc(-v.*)?$",                     r"^petsc-v(.+)$"),
+    # elpa installs to elpa-v<ELPA_VERSION>/ (extras/scripts/elpa_setup.sh).
+    ("elpa",       r"^elpa(-v.*)?$",                      r"^elpa-v(.+)$"),
     ("scorep",     r"^scorep(-v.*)?$",                    r"^scorep-v(.+)$"),
     ("tau",        r"^tau$",                              None),
     ("pdt",        r"^pdt$",                              None),
     ("likwid",     r"^likwid(-v.*)?$",                    r"^likwid-v(.+)$"),
     ("mdb",        r"^mdb(-v.*)?$",                       r"^mdb-v(.+)$"),
+    # intellikit installs to intellikit-<INTELLIKIT_VERSION>/ (no 'v'
+    # prefix; tools/scripts/intellikit_setup.sh).
+    ("intellikit", r"^intellikit(-.*)?$",                 r"^intellikit-(.+)$"),
     ("hpctoolkit", r"^hpctoolkit(-v.*)?$",                r"^hpctoolkit-v(.+)$"),
     ("hpcviewer",  r"^hpcviewer(-v.*)?$",                 r"^hpcviewer-v(.+)$"),
     ("mpi4py",     r"^mpi4py(-v.*)?$",                    r"^mpi4py-v(.+)$"),
+    # rocshmem installs to rocshmem-<ROCSHMEM_VERSION>-<BACKEND_CONFIG>/
+    # (comm/scripts/rocshmem_setup.sh); BACKEND_CONFIG is one of ro_ipc,
+    # ipc_single, all_backends (underscores only, no '-'), so the version
+    # capture greedily grabs everything up to the trailing -<backend>.
+    ("rocshmem",   r"^rocshmem-.*",
+                   r"^rocshmem-(.+)-(?:ro_ipc|ipc_single|all_backends)$"),
     ("cupy",       r"^cupy(-v.*)?$",                      r"^cupy-v(.+)$"),
     ("pytorch",    r"^pytorch-v.*$",                      r"^pytorch-v(.+)$"),
     ("jax",        r"^jax(-v.*)?$",                       r"^jax-v(.+)$"),
@@ -270,19 +281,24 @@ PKG_LIST = [
     # versions on one rocmplus tree slash-join in markdown / spill
     # onto continuation rows in --text, the same as pytorch.
     ("tensorflow", r"^tensorflow(?:|-v.*)$",               r"^tensorflow-v(.+)$"),
+    # vLLM installs to vllm-v<VLLM_VERSION>/ (extras/scripts/vllm_setup.sh),
+    # layered on the matching pytorch module. Multiple vLLM versions on one
+    # rocmplus tree slash-join in markdown / spill onto continuation rows in
+    # --text, the same as pytorch/tensorflow.
+    ("vllm",       r"^vllm(-v.*)?$",                       r"^vllm-v(.+)$"),
 ]
 
 # Packages disabled by --quick-installs (QUICK_INSTALLS=1). Mirrors the
 # QUICK_INSTALLS_PKGS array in bare_system/main_setup.sh (search for
 # "QUICK_INSTALLS_PKGS="): the long-pole builds (>= 20 min wall) plus the
-# explicit always-skip set (julia, intellikit). Only the names that also
-# appear as PKG_LIST rows (pytorch/tensorflow/jax/ftorch) actually affect
-# the queue overlay; julia/intellikit are not tracked rows. Used by
-# collect_slurm_queue() to subtract these when a queued job set
-# QUICK_INSTALLS=1 with an empty PACKAGES_LIST (= "all packages except
-# the quick-installs gate").
+# transitive/explicit always-skip set (vllm, julia, intellikit). Only the
+# names that also appear as PKG_LIST rows (pytorch/tensorflow/jax/ftorch/
+# vllm/intellikit) actually affect the queue overlay; julia is not a
+# tracked row. Used by collect_slurm_queue() to subtract these when a
+# queued job set QUICK_INSTALLS=1 with an empty PACKAGES_LIST (= "all
+# packages except the quick-installs gate").
 QUICK_INSTALLS_PKGS = {
-    "pytorch", "tensorflow", "jax", "ftorch", "julia", "intellikit",
+    "pytorch", "tensorflow", "jax", "ftorch", "vllm", "julia", "intellikit",
 }
 
 

@@ -66,6 +66,12 @@ TARBALL_FILE_INPUT=""
 # Ubuntu 22.04 nodes (and /nfsapps/opt/AMDuProf_<ver> after the 24.04
 # migration); pass it via --install-path.
 INSTALL_PATH_INPUT=""
+# INSTALL_PATH_PARENT_INPUT: parent-dir form (used by main_setup.sh, which
+# stays version-agnostic). When set (and --install-path is not), the script
+# appends the versioned dir -> <parent>/AMDuProf_<MAJOR.MINOR>-<BUILD>,
+# matching the emacs/miniconda "install-path = parent, leaf appends version"
+# convention so the orchestrator does not need to know UPROF_VERSION.
+INSTALL_PATH_PARENT_INPUT=""
 # Published MD5 for AMDuProf_Linux_x64_5.3.518.tar.bz2. Only meaningful
 # for the default version; for any other --uprof-version pass a matching
 # --md5checksum or "skip".
@@ -145,6 +151,8 @@ usage()
     echo "  --install-path [ INSTALL_PATH ] full install dir; default /opt/AMDuProf_<MAJOR.MINOR-BUILD>"
     echo "                                  (shared tree: /shared/apps/ubuntu/opt/AMDuProf_<ver>)"
     echo "                                  module then -> --module-path .../lmodfiles/base/uprof"
+    echo "  --install-path-parent [ DIR ] parent dir; the script appends AMDuProf_<MAJOR.MINOR-BUILD>"
+    echo "                                  (version-agnostic form used by main_setup.sh; --install-path wins if both set)"
     echo "  --install-power-driver [ 0|1 ] OPT-IN: build+load the AMDPowerProfiler DKMS kernel"
     echo "                                  module (only needed for live power profiling), default $INSTALL_POWER_DRIVER"
     echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
@@ -194,6 +202,11 @@ do
       "--install-path")
           shift
           INSTALL_PATH_INPUT=${1}
+          reset-last
+          ;;
+      "--install-path-parent")
+          shift
+          INSTALL_PATH_PARENT_INPUT=${1}
           reset-last
           ;;
       "--md5checksum")
@@ -268,6 +281,10 @@ fi
 # --install-path overrides the full dir (e.g. a shared/NFS tree).
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH="${INSTALL_PATH_INPUT}"
+elif [ "${INSTALL_PATH_PARENT_INPUT}" != "" ]; then
+   # Parent-dir form: append the versioned dir so the tool lands at
+   # <parent>/AMDuProf_<MAJOR.MINOR>-<BUILD>/ (see INSTALL_PATH_PARENT_INPUT).
+   INSTALL_PATH="${INSTALL_PATH_PARENT_INPUT%/}/AMDuProf_${MAJOR_MINOR}-${BUILD}"
 else
    INSTALL_PATH="/opt/AMDuProf_${MAJOR_MINOR}-${BUILD}"
 fi
@@ -283,6 +300,13 @@ DRIVER_SCRIPT="${INSTALL_PATH}/bin/AMDPowerProfilerDriver.sh"
 POWER_DRIVER_INSTALLED=0
 
 NOOP_RC=43
+# MISSING_PREREQ_RC=42: a required external input was not obtainable (here,
+# the EULA-gated .tar.bz2 could not be downloaded and none was pre-staged).
+# The orchestrator (main_setup.sh run_and_log) buckets this as SKIPPED
+# (missing-prereq) rather than FAILED, so a blocked CDN on a locked-down
+# compute node never turns the whole sweep red -- pre-stage the archive
+# (--tarball-file) to guarantee the install.
+MISSING_PREREQ_RC=42
 
 # ── BUILD_UPROF=0 short-circuit: operator opt-out ────────────────────
 if [ "${BUILD_UPROF}" = "0" ]; then
@@ -411,20 +435,23 @@ else
    if [ "${_bad_download}" == "1" ]; then
       echo ""
       echo "=================================================================="
-      echo "[uprof] FATAL: the download did not return a valid .tar.bz2 archive."
+      echo "[uprof] SKIP: the download did not return a valid .tar.bz2 archive."
       echo "        URL: ${TARBALL_URL}"
       echo ""
       echo "  The AMD uProf download is gated behind an EULA accept page and"
-      echo "  the CDN path/convention may have changed. Download the archive"
-      echo "  manually:"
+      echo "  the CDN path/convention may have changed (or this node cannot"
+      echo "  reach the CDN). Download the archive manually:"
       echo "    1. Visit https://www.amd.com/en/developer/uprof.html"
       echo "    2. Accept the EULA and download ${TARBALL_FILE}"
       echo "    3. Re-run: ${LEAF_SCRIPT_PATH} --tarball-file /path/to/${TARBALL_FILE}"
       echo ""
       echo "  Or pass the resolved direct URL with --tarball-url <url>."
+      echo ""
+      echo "  Treating as a missing prerequisite (SKIPPED, not FAILED) so an"
+      echo "  automated sweep is not turned red by a blocked/changed CDN."
       echo "=================================================================="
       echo ""
-      exit 1
+      exit ${MISSING_PREREQ_RC}
    fi
 fi
 

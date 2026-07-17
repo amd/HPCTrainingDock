@@ -16,9 +16,10 @@ LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$
 # loaded pytorch module's torch and freezes the whole torch stack with a
 # pip constraints file so pip cannot replace the module's torch.
 #
-# Install layout mirrors jax_setup.sh / pytorch_setup.sh:
-#   install dir : /opt/rocmplus-${ROCM_VERSION}/vllm-v${VLLM_VERSION}
-#   modulefile  : ${MODULE_PATH}/${VLLM_VERSION}.lua  (module vllm/<ver>)
+# Install layout mirrors ftorch_setup.sh (keyed on the BOUND pytorch too):
+#   install dir : /opt/rocmplus-${ROCM_VERSION}/vllm-v${VLLM_VERSION}-pt${PYTORCH_VERSION}
+#   modulefile  : ${MODULE_PATH}/${VLLM_VERSION}-pt${PYTORCH_VERSION}.lua
+#                 (module vllm/<vllm-ver>-pt<pytorch-ver>)
 # The modulefile lands in the rocmplus-<rocm> overlay the rocm module
 # adds to MODULEPATH, so vllm/<ver> is only visible once the matching
 # rocm is loaded.
@@ -50,6 +51,16 @@ VLLM_VERSION_USER_SET=0
 # Pytorch module to load (bare name like smartsim_setup.sh; the overlay
 # resolves the concrete pytorch/<ver> built for this rocm).
 PYTORCH_MODULE="pytorch"
+# Bound pytorch version. vLLM's compiled kernels are ABI-locked to the
+# torch they build against, so -- exactly like ftorch_setup.sh -- the
+# install dir + modulefile are keyed on BOTH the vLLM version AND this
+# bound pytorch version (vllm-v${VLLM_VERSION}-pt${PYTORCH_VERSION}), and
+# the generated modulefile loads this EXACT pytorch (never the bare
+# `pytorch` alias, which Lmod would later resolve to whatever default is
+# current -> ABI mismatch at runtime). Empty => resolved after the pytorch
+# module loads, from the LOADEDMODULES token (or a pytorch/<VER> passed via
+# --pytorch-module).
+PYTORCH_VERSION=""
 # Default HF cache/weights location: co-located with the team's ollama
 # models on /shareddata (sibling of /shareddata/Ollama_Models).
 HF_HOME_DEFAULT=/shareddata/HF_Models
@@ -96,9 +107,10 @@ usage()
    echo "  --vllm-ref [ VLLM_REF ] git tag/branch/commit to build, default v\${VLLM_VERSION}"
    echo "  --hip-version-patch [ 0|1 ] apply the TORCH_HIP_VERSION stable-ABI ROCm compile workaround, default $HIP_VERSION_PATCH (re-evaluate per rocm/torch/vLLM version)"
    echo "  --pytorch-module [ PYTORCH_MODULE ] pytorch module to load, default $PYTORCH_MODULE"
+   echo "  --pytorch-version [ PYTORCH_VERSION ] bound pytorch version; keys the install dir + modulefile (vllm-v\${VLLM_VERSION}-pt\${PYTORCH_VERSION}) so multiple (vllm,pytorch) pairs coexist. Empty (default) -> resolved from the loaded pytorch module token."
    echo "  --protect-packages [ names ] extra space-separated ABI/ROCm packages to hard-pin from the pytorch module (appended to the default set)"
    echo "  --hf-home [ HF_HOME_DEFAULT ] default HF_HOME baked into the modulefile, default $HF_HOME_DEFAULT"
-   echo "  --install-path [ ROCMPLUS_PATH_INPUT ] parent dir; if set, install goes to \${ROCMPLUS_PATH}/vllm-v\${VLLM_VERSION}"
+   echo "  --install-path [ ROCMPLUS_PATH_INPUT ] parent dir; if set, install goes to \${ROCMPLUS_PATH}/vllm-v\${VLLM_VERSION}-pt\${PYTORCH_VERSION}"
    echo "  --install-path-no-version [ VLLM_PATH ] full leaf install dir (wins over --install-path)"
    echo "  --module-path [ MODULE_PATH ] default $MODULE_PATH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
@@ -174,6 +186,11 @@ do
           PYTORCH_MODULE=${1}
           reset-last
           ;;
+      "--pytorch-version")
+          shift
+          PYTORCH_VERSION=${1}
+          reset-last
+          ;;
       "--protect-packages")
           shift
           PROTECTED_PACKAGES="${PROTECTED_PACKAGES} ${1}"
@@ -230,6 +247,10 @@ do
 done
 
 # ── BUILD_VLLM=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
+# MISSING_PREREQ_RC=42: a required module (pytorch) was not loadable; the
+# orchestrator (main_setup.sh run_and_log) buckets this as SKIPPED(missing-
+# prereq) rather than FAILED -- mirrors ftorch_setup.sh.
+MISSING_PREREQ_RC=42
 NOOP_RC=43
 if [ "${BUILD_VLLM}" = "0" ]; then
    echo "[vllm BUILD_VLLM=0] operator opt-out; skipping (no vllm build, no cache restore)."
@@ -286,7 +307,42 @@ fi
 # must NOT reinstall -- it has to be leveraged from `module load pytorch`.
 PYTHONPATH_PRE="${PYTHONPATH:-}"
 if ! module load ${PYTORCH_MODULE} 2>/dev/null; then
-   send-error "could not 'module load ${PYTORCH_MODULE}' after '${ROCM_MODULE_NAME}'. Build the pytorch module for ${ROCM_MODULE_NAME} first (pytorch_setup.sh), or pass --pytorch-module."
+   echo ""
+   echo "[vllm missing-prereq] could not 'module load ${PYTORCH_MODULE}' after"
+   echo "  '${ROCM_MODULE_NAME}'. Build the pytorch module for ${ROCM_MODULE_NAME}"
+   echo "  first (pytorch_setup.sh) or pass --pytorch-module. Skipping vLLM."
+   exit ${MISSING_PREREQ_RC}
+fi
+# ── Resolve the EXACT pytorch module token that got loaded ────────────
+# vLLM is ABI-locked to the torch it compiles against, so both the install
+# dir/modulefile keying AND the generated modulefile's pytorch load must
+# name the CONCRETE pytorch version -- not the bare `pytorch` alias, which
+# Lmod would later resolve to whatever default is current (-> ABI mismatch
+# when a newer pytorch becomes the default). Priority: explicit
+# --pytorch-version > the loaded LOADEDMODULES token > a pytorch/<VER>
+# passed via --pytorch-module. Mirrors ftorch_setup.sh's PYTORCH_VERSION
+# resolution.
+PYTORCH_MODULE_RESOLVED=""
+if [[ -n "${LOADEDMODULES:-}" ]]; then
+   _OLD_IFS="${IFS}"; IFS=":"
+   for _m in ${LOADEDMODULES}; do
+      case "${_m}" in
+         pytorch/*) PYTORCH_MODULE_RESOLVED="${_m}" ;;   # last match wins
+      esac
+   done
+   IFS="${_OLD_IFS}"; unset _OLD_IFS _m
+fi
+case "${PYTORCH_MODULE}" in
+   pytorch/*) [[ -z "${PYTORCH_MODULE_RESOLVED}" ]] && PYTORCH_MODULE_RESOLVED="${PYTORCH_MODULE}" ;;
+esac
+[[ -z "${PYTORCH_MODULE_RESOLVED}" ]] && PYTORCH_MODULE_RESOLVED="${PYTORCH_MODULE}"
+if [[ -z "${PYTORCH_VERSION}" ]]; then
+   case "${PYTORCH_MODULE_RESOLVED}" in
+      pytorch/*) PYTORCH_VERSION="${PYTORCH_MODULE_RESOLVED#pytorch/}" ;;
+   esac
+fi
+if [[ -z "${PYTORCH_VERSION}" ]]; then
+   send-error "could not resolve the bound pytorch version from module '${PYTORCH_MODULE}' (resolved token '${PYTORCH_MODULE_RESOLVED}'). Pass --pytorch-version <VER> or --pytorch-module pytorch/<VER>."
 fi
 # PYTHONPATH entries added by the pytorch module (newline-separated).
 PYTORCH_MODULE_PYPATHS=$(PYTHONPATH_PRE="${PYTHONPATH_PRE}" python3 - <<'PY'
@@ -344,22 +400,28 @@ fi
 # Default the git ref to the release tag matching the resolved version.
 [ "${VLLM_REF_USER_SET}" != "1" ] && VLLM_REF="v${VLLM_VERSION}"
 
-# Finalize install path now that VLLM_VERSION is known.
+# Finalize install path now that VLLM_VERSION + PYTORCH_VERSION are known.
+# Install dir + modulefile are keyed on BOTH the vLLM version AND the bound
+# pytorch version so multiple (vllm,pytorch) pairs coexist and never collide
+# when two torch patch releases in one minor derive the same vLLM version
+# (mirrors ftorch's -v${PYTORCH_VERSION} keying).
+VLLM_DIRNAME="vllm-v${VLLM_VERSION}-pt${PYTORCH_VERSION}"
+VLLM_MODULE_TOKEN="${VLLM_VERSION}-pt${PYTORCH_VERSION}"
 if [ -n "${VLLM_PATH_INPUT}" ]; then
    VLLM_PATH="${VLLM_PATH_INPUT}"
 elif [ -n "${ROCMPLUS_PATH_INPUT}" ]; then
-   VLLM_PATH="${ROCMPLUS_PATH_INPUT}/vllm-v${VLLM_VERSION}"
+   VLLM_PATH="${ROCMPLUS_PATH_INPUT}/${VLLM_DIRNAME}"
 else
-   VLLM_PATH="/opt/rocmplus-${ROCM_VERSION}/vllm-v${VLLM_VERSION}"
+   VLLM_PATH="/opt/rocmplus-${ROCM_VERSION}/${VLLM_DIRNAME}"
 fi
 
 # ── --replace + existence guard ──────────────────────────────────────
 if [ "${REPLACE}" = "1" ]; then
    echo "[vllm --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${VLLM_PATH}"
-   echo "  modulefile:  ${MODULE_PATH}/${VLLM_VERSION}.lua"
+   echo "  modulefile:  ${MODULE_PATH}/${VLLM_MODULE_TOKEN}.lua"
    ${SUDO} rm -rf "${VLLM_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/${VLLM_VERSION}.lua"
+   ${SUDO} rm -f  "${MODULE_PATH}/${VLLM_MODULE_TOKEN}.lua"
 fi
 if [ -d "${VLLM_PATH}" ]; then
    echo ""
@@ -378,7 +440,7 @@ _vllm_on_exit() {
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[vllm fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO:-sudo} rm -rf "${VLLM_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${VLLM_VERSION}.lua"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${VLLM_MODULE_TOKEN}.lua"
    elif [ ${rc} -ne 0 ]; then
       echo "[vllm fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -392,8 +454,9 @@ echo " Installing vLLM"
 echo " vLLM version:     $VLLM_VERSION"
 echo " Install directory: $VLLM_PATH"
 echo " Module directory:  $MODULE_PATH"
+echo " Module name:       vllm/$VLLM_MODULE_TOKEN"
 echo " ROCm module:       $ROCM_MODULE_NAME"
-echo " Pytorch module:    $PYTORCH_MODULE (torch $TORCH_VERSION)"
+echo " Pytorch module:    $PYTORCH_MODULE_RESOLVED (bound; torch $TORCH_VERSION)"
 echo " Build source:      $VLLM_REPO @ $VLLM_REF"
 echo " gfx / build arch:  $AMDGPU_GFXMODEL / $PYTORCH_ROCM_ARCH"
 echo "====================================="
@@ -406,7 +469,7 @@ cd "${VLLM_BUILD_ROOT}"
 
 AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
 CACHE_FILES=/CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}
-CACHE_TARBALL="${CACHE_FILES}/vllm-v${VLLM_VERSION}.tgz"
+CACHE_TARBALL="${CACHE_FILES}/${VLLM_DIRNAME}.tgz"
 
 if [ -f "${CACHE_TARBALL}" ]; then
    echo ""
@@ -415,7 +478,7 @@ if [ -f "${CACHE_TARBALL}" ]; then
    echo "==================================="
    echo ""
 
-   # Tarball top-level dir is vllm-v${VLLM_VERSION}/ -- matches VLLM_PATH.
+   # Tarball top-level dir is ${VLLM_DIRNAME}/ -- matches VLLM_PATH.
    ${SUDO} mkdir -p "$(dirname "${VLLM_PATH}")"
    cd "$(dirname "${VLLM_PATH}")"
    ${SUDO} tar -xzpf "${CACHE_TARBALL}"
@@ -735,13 +798,16 @@ fi
 unset _leaf_dir
 
 # The - option suppresses leading tabs in the heredoc body.
-cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${VLLM_VERSION}.lua
-	whatis("vLLM ${VLLM_VERSION} with ROCm support (torch ${TORCH_VERSION}, ${AMDGPU_GFXMODEL})")
+cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${VLLM_MODULE_TOKEN}.lua
+	whatis("vLLM ${VLLM_VERSION} with ROCm support (bound to ${PYTORCH_MODULE_RESOLVED}, torch ${TORCH_VERSION}, ${AMDGPU_GFXMODEL})")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
 	-- vLLM builds on the pytorch module (torch/triton/transformers/deepspeed).
+	-- Load the EXACT pytorch it was compiled against: vLLM's ROCm kernels are
+	-- ABI-locked to that torch, so loading the bare 'pytorch' alias (which
+	-- could resolve to a newer default) would risk a runtime ABI mismatch.
 	prereq("${ROCM_MODULE_NAME}")
-	load("${PYTORCH_MODULE}")
+	load("${PYTORCH_MODULE_RESOLVED}")
 
 	prepend_path("PYTHONPATH","${VLLM_SITE}")
 	prepend_path("PATH","${VLLM_BINDIR}")
@@ -761,8 +827,8 @@ EOF
 # ── Refresh the Lmod spider cache ──────────────────────────────────────
 # A freshly-written modulefile is invisible to `module load` while a valid
 # system spider cache exists: Lmod trusts the cache and never sees the new
-# file, so `module load vllm/${VLLM_VERSION}` errors "unknown module" until
-# the cache expires (24h here) -- only `module --ignore_cache` finds it.
+# file, so `module load vllm/${VLLM_MODULE_TOKEN}` errors "unknown module"
+# until the cache expires (24h here) -- only `module --ignore_cache` finds it.
 # Bumping the cache TIMESTAMP file newer than the cache marks it stale, so
 # Lmod re-walks the tree live and rebuilds per-user caches immediately.
 # Best-effort: the timestamp path is parsed from `module --config`; a miss
@@ -771,15 +837,15 @@ EOF
 LMOD_TS_FILE="$(module --config 2>&1 | awk '/Time Stamp File/{f=1; next} f && NF>=2 {print $NF; exit}')"
 if [ -n "${LMOD_TS_FILE}" ] && [ -e "${LMOD_TS_FILE}" ]; then
    if ${PKG_SUDO_MOD} touch "${LMOD_TS_FILE}" 2>/dev/null; then
-      echo "[vllm] bumped Lmod cache timestamp (${LMOD_TS_FILE}); vllm/${VLLM_VERSION} is loadable now."
+      echo "[vllm] bumped Lmod cache timestamp (${LMOD_TS_FILE}); vllm/${VLLM_MODULE_TOKEN} is loadable now."
    else
-      echo "[vllm] WARNING could not touch ${LMOD_TS_FILE}; until the next cache rebuild load with: module --ignore_cache load vllm/${VLLM_VERSION}"
+      echo "[vllm] WARNING could not touch ${LMOD_TS_FILE}; until the next cache rebuild load with: module --ignore_cache load vllm/${VLLM_MODULE_TOKEN}"
    fi
 else
-   echo "[vllm] NOTE could not locate the Lmod cache timestamp; if 'module load vllm/${VLLM_VERSION}' reports unknown, use: module --ignore_cache load vllm/${VLLM_VERSION}"
+   echo "[vllm] NOTE could not locate the Lmod cache timestamp; if 'module load vllm/${VLLM_MODULE_TOKEN}' reports unknown, use: module --ignore_cache load vllm/${VLLM_MODULE_TOKEN}"
 fi
 
 echo ""
 echo "[vllm] installed. Load with:"
-echo "  module load ${ROCM_MODULE_NAME} ${PYTORCH_MODULE} vllm/${VLLM_VERSION}"
+echo "  module load ${ROCM_MODULE_NAME} ${PYTORCH_MODULE_RESOLVED} vllm/${VLLM_MODULE_TOKEN}"
 echo ""
