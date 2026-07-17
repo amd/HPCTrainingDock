@@ -78,8 +78,12 @@ AMDGPU_GFXMODEL=
 #     the repo root. This is where the rocm-7.1.x and rocm-7.2.x releases
 #     live (tags rocm-<ROCM_VERSION>).
 # ROCSHMEM_VERSION_INPUT / GITHUB_BRANCH_INPUT capture explicit operator
-# overrides; when empty, per-source defaults are filled in after
-# ROCM_VERSION is known.
+# overrides. When ROCSHMEM_VERSION_INPUT is empty, the install dir +
+# modulefile are labelled by the REAL rocSHMEM library version parsed from
+# the selected source (e.g. 3.2.0 for the legacy rocm-7.2.x tags, 3.4.0
+# for the monorepo) -- not the ROCm release number. The per-source
+# fallbacks below are used only when that parse is impossible (offline /
+# non-GitHub mirror / renamed source layout).
 ROCSHMEM_VERSION_INPUT=""
 GITHUB_BRANCH_INPUT=""
 ROCSHMEM_MONOREPO_URL=https://github.com/ROCm/rocm-systems.git
@@ -166,7 +170,7 @@ usage()
     echo "  --replace [ 0|1 ] remove prior install + modulefile before building, default $REPLACE"
     echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
     echo "  --rocm-path [ ROCM_PATH ] default none"
-    echo "  --rocshmem-version [ ROCSHMEM_VERSION ] label for the install dir + modulefile; default ${ROCSHMEM_MONOREPO_DEFAULT_VERSION} (monorepo) or <ROCM_VERSION> (legacy 7.1.x/7.2.x)"
+    echo "  --rocshmem-version [ ROCSHMEM_VERSION ] label for the install dir + modulefile; default is the real rocSHMEM library version parsed from source (e.g. 3.4.0 monorepo, 3.0.0/3.1.0/3.2.0 for legacy 7.1.x/7.2.x), falling back to ${ROCSHMEM_MONOREPO_DEFAULT_VERSION} (monorepo) or <ROCM_VERSION> (legacy) if source parsing fails"
     echo "  --help: print this usage information"
     exit 1
 }
@@ -359,6 +363,70 @@ if [ "${ROCM_VERSION}" != "${MIN_ROCM_VERSION}" ] && [ "${_lowest_rocm}" = "${RO
 fi
 unset _lowest_rocm
 
+# ── rocSHMEM version detection ───────────────────────────────────────
+# The library's canonical version has two upstream homes depending on the
+# source layout:
+#   * legacy standalone repo (ROCm/rocSHMEM, rocm-7.1.x/7.2.x tags):
+#       include/rocshmem/rocshmem.hpp -> constexpr char VERSION[] = "X.Y.Z";
+#   * rocm-systems monorepo (projects/rocshmem, therock-X.Y / develop):
+#       projects/rocshmem/CMakeLists.txt -> set(VERSION_STRING X.Y.Z)
+#     (the monorepo header uses `= ROCSHMEM_VERSION`, a macro substituted
+#      at configure time, so it carries no literal to parse there.)
+# We fetch just the relevant file over the GitHub raw endpoint and parse
+# the version, so NO clone is needed -- this works for cache-only installs
+# too. Only github.com URLs support the raw endpoint; a non-GitHub mirror
+# or any fetch/parse failure yields an empty result so the caller falls
+# back to the per-source default. This replaces the old behaviour of
+# labelling legacy installs by the ROCm release number: the rocSHMEM
+# library version (e.g. 3.2.0) is far more informative than "which ROCm
+# this was cut for", and it is what the module/dir names should carry.
+_rocshmem_raw_fetch() {
+   # <owner/repo> <ref> <relpath>  -> file contents on stdout (or nothing)
+   local slug="$1" ref="$2" relpath="$3"
+   local url="https://raw.githubusercontent.com/${slug}/${ref}/${relpath}"
+   if command -v curl >/dev/null 2>&1; then
+      curl -fsSL "${url}" 2>/dev/null
+   elif command -v wget >/dev/null 2>&1; then
+      wget -qO- "${url}" 2>/dev/null
+   fi
+}
+
+_rocshmem_parse_version() {
+   # reads text on stdin, echoes the first X.Y.Z found via either the
+   # header `constexpr char VERSION[] = "X.Y.Z"` scheme or the CMake
+   # `set(VERSION_STRING X.Y.Z)` scheme.
+   sed -n \
+      -e 's/.*constexpr[[:space:]]\+char[[:space:]]\+VERSION\[\][[:space:]]*=[[:space:]]*"\([0-9]\+\.[0-9]\+\.[0-9]\+\)".*/\1/p' \
+      -e 's/.*set(VERSION_STRING[[:space:]]\+\([0-9]\+\.[0-9]\+\.[0-9]\+\).*/\1/p' \
+      | head -n1
+}
+
+detect_rocshmem_version() {
+   # <source_type> <git_url> <ref>  -> parsed X.Y.Z on stdout (or nothing)
+   local source_type="$1" git_url="$2" ref="$3"
+   case "${git_url}" in
+      *github.com*) : ;;
+      *) return 0 ;;   # non-GitHub mirror: cannot use the raw endpoint
+   esac
+   local slug="${git_url#*github.com[:/]}"   # handles https + ssh forms
+   slug="${slug%.git}"
+
+   local candidates f ver
+   if [ "${source_type}" = "monorepo" ]; then
+      candidates="projects/rocshmem/CMakeLists.txt projects/rocshmem/include/rocshmem/rocshmem.hpp"
+   else
+      candidates="include/rocshmem/rocshmem.hpp CMakeLists.txt"
+   fi
+   for f in ${candidates}; do
+      ver="$(_rocshmem_raw_fetch "${slug}" "${ref}" "${f}" | _rocshmem_parse_version)"
+      if [ -n "${ver}" ]; then
+         printf '%s\n' "${ver}"
+         return 0
+      fi
+   done
+   return 0
+}
+
 # ── Source selection ─────────────────────────────────────────────────
 # rocSHMEM for ROCm 7.1.x and 7.2.x must be pulled from the legacy
 # standalone ROCm/rocSHMEM repository: those releases predate the
@@ -367,25 +435,46 @@ unset _lowest_rocm
 # repo has matching rocm-<ROCM_VERSION> tags with the sources at the
 # repo root. All other ROCm versions use the rocm-systems monorepo
 # (projects/rocshmem) at the default therock-X.Y release tag.
-# Per-source default ref + version label are applied here, honoring any
-# explicit --github-branch / --rocshmem-version override.
+# Per-source default ref is applied here, honoring any explicit
+# --github-branch override. ROCSHMEM_VERSION_FALLBACK is the value used
+# only when the real library version cannot be parsed from source (see
+# the version-resolution block just below).
 case "${ROCM_VERSION}" in
    7.1.*|7.2.*)
       ROCSHMEM_SOURCE=legacy
       ROCSHMEM_REPO_URL="${ROCSHMEM_LEGACY_URL}"
       GITHUB_BRANCH="${GITHUB_BRANCH_INPUT:-rocm-${ROCM_VERSION}}"
-      # No static VERSION_STRING literal in the legacy tags (it is
-      # derived at configure time), so label the install by the ROCm
-      # release it was cut for unless the operator overrides it.
-      ROCSHMEM_VERSION="${ROCSHMEM_VERSION_INPUT:-${ROCM_VERSION}}"
+      # Fallback only: the ROCm release the legacy tag was cut for.
+      ROCSHMEM_VERSION_FALLBACK="${ROCM_VERSION}"
       ;;
    *)
       ROCSHMEM_SOURCE=monorepo
       ROCSHMEM_REPO_URL="${ROCSHMEM_MONOREPO_URL}"
       GITHUB_BRANCH="${GITHUB_BRANCH_INPUT:-${ROCSHMEM_MONOREPO_DEFAULT_REF}}"
-      ROCSHMEM_VERSION="${ROCSHMEM_VERSION_INPUT:-${ROCSHMEM_MONOREPO_DEFAULT_VERSION}}"
+      # Fallback only: the pinned monorepo library version.
+      ROCSHMEM_VERSION_FALLBACK="${ROCSHMEM_MONOREPO_DEFAULT_VERSION}"
       ;;
 esac
+
+# ── Resolve the version label ────────────────────────────────────────
+# Priority:
+#   1. explicit --rocshmem-version operator override
+#   2. the real rocSHMEM library version parsed from the source at the
+#      selected ref (the SAME value upstream CMake bakes into the library)
+#   3. the per-source fallback set above (used when offline / a non-GitHub
+#      mirror / a renamed source layout makes parsing impossible)
+if [ -n "${ROCSHMEM_VERSION_INPUT}" ]; then
+   ROCSHMEM_VERSION="${ROCSHMEM_VERSION_INPUT}"
+   echo "rocshmem: using operator-specified version ${ROCSHMEM_VERSION}"
+else
+   ROCSHMEM_VERSION="$(detect_rocshmem_version "${ROCSHMEM_SOURCE}" "${ROCSHMEM_REPO_URL}" "${GITHUB_BRANCH}")"
+   if [ -n "${ROCSHMEM_VERSION}" ]; then
+      echo "rocshmem: parsed library version ${ROCSHMEM_VERSION} from ${ROCSHMEM_SOURCE} source @ ${GITHUB_BRANCH}"
+   else
+      ROCSHMEM_VERSION="${ROCSHMEM_VERSION_FALLBACK}"
+      echo "rocshmem: WARNING: could not parse the rocSHMEM library version from source; falling back to '${ROCSHMEM_VERSION}'"
+   fi
+fi
 
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    INSTALL_PATH="${INSTALL_PATH_INPUT}"
