@@ -2,6 +2,55 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-07-20
+
+- User-facing modules:
+    - mpitrace
+    - rccl-tests
+- Modules:
+    - mpitrace/6.3.0
+    - mpitrace/6.3.1
+    - mpitrace/6.3.2
+    - mpitrace/6.3.3
+    - mpitrace/6.3.4
+    - mpitrace/6.4.0
+    - mpitrace/6.4.1
+    - mpitrace/6.4.2
+    - mpitrace/6.4.3
+    - mpitrace/7.0.0
+    - mpitrace/7.0.1
+    - mpitrace/7.0.2
+    - mpitrace/7.1.0
+    - mpitrace/7.1.1
+    - mpitrace/7.12.0
+    - mpitrace/7.13.0
+    - mpitrace/7.2.0
+    - mpitrace/7.2.2
+    - mpitrace/7.2.3
+    - mpitrace/7.2.4
+    - mpitrace/afar-23.1.0-7.12.0
+    - mpitrace/afar-23.2.1-7.13.0
+    - rccl-tests/6.3.0
+    - rccl-tests/6.3.1
+    - rccl-tests/6.3.2
+    - rccl-tests/6.3.3
+    - rccl-tests/6.3.4
+    - rccl-tests/6.4.0
+    - rccl-tests/6.4.1
+    - rccl-tests/6.4.2
+    - rccl-tests/6.4.3
+    - rccl-tests/7.0.0
+    - rccl-tests/7.0.1
+    - rccl-tests/7.0.2
+    - rccl-tests/7.1.0
+    - rccl-tests/7.1.1
+    - rccl-tests/7.2.0
+    - rccl-tests/7.2.1
+    - rccl-tests/7.2.2
+    - rccl-tests/7.2.3
+    - rccl-tests/7.2.4
+
+[Full snapshot](archive/AAC6_system_status_2026-07-20.md)
 ## 2026-07-18
 
 - ROCm versions:
