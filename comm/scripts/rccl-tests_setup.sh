@@ -55,7 +55,14 @@ else
 fi
 RCCL_TESTS_REPO_URL=https://github.com/ROCm/rccl-tests.git
 GITHUB_BRANCH_INPUT=""
-GITHUB_BRANCH_DEFAULT=develop
+# Pinned to a specific commit rather than tracking develop: develop carries a
+# regression (rocm-systems#3588, 2026-03-05, "ROCM-3816 Out of Memory fix")
+# that leaves the send/recv buffers unallocated in the default
+# (non-parallel-init) run path, so every default *_perf run crashes on the
+# first collective with a HIP illegal memory access. a52452e is the last
+# develop commit before that regression. Bump this once upstream fixes it.
+# --github-branch still accepts a branch, tag, or commit SHA.
+GITHUB_BRANCH_DEFAULT=a52452e891d5dc07c83cf4edaea01ae4ab684b3a
 RCCL_TESTS_VERSION_INPUT=""
 BUILD_MPI=1
 MPI_MODULE=openmpi
@@ -267,8 +274,15 @@ echo ""
 # to the (possibly NFS) install path.
 RCCL_TESTS_BUILD_DIR=$(mktemp -d -t rccl-tests-build.XXXXXX)
 cd "${RCCL_TESTS_BUILD_DIR}"
-git clone --depth 1 --branch "${GITHUB_BRANCH}" "${RCCL_TESTS_REPO_URL}" rccl-tests-source
+# Full clone (not --depth 1 --branch): GITHUB_BRANCH may be a branch, tag, OR
+# a commit SHA, and a shallow --branch clone cannot check out an arbitrary
+# commit. The rccl-tests repo is small, so the extra history is cheap.
+git clone "${RCCL_TESTS_REPO_URL}" rccl-tests-source
 cd rccl-tests-source
+git checkout --detach "${GITHUB_BRANCH}"
+# Resolved rccl-tests source commit, recorded in the modulefile whatis so the
+# pinned upstream commit is traceable from `module whatis rccl-tests/<ver>`.
+RCCL_TESTS_SRC_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
 # RCCL lives inside ROCm, so NCCL_HOME=HIP_HOME=ROCM_PATH. GPU_TARGETS is
 # passed only when known (empty -> Makefile builds all supported archs).
@@ -322,7 +336,7 @@ if [[ "${DRY_RUN}" == "0" ]]; then
    cat <<-EOF | ${SUDO_MOD} tee ${MODULEFILE}
 	whatis("Name: rccl-tests")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
-	whatis("Version: rccl-tests-${RCCL_TESTS_VERSION} (MPI build: ${BUILD_MPI})")
+	whatis("Version: rccl-tests-${RCCL_TESTS_VERSION} (source: ${RCCL_TESTS_SRC_COMMIT}, MPI build: ${BUILD_MPI})")
 	whatis("Description: RCCL performance and correctness benchmarks (all_reduce_perf, ...)")
 	whatis("URL: https://github.com/ROCm/rccl-tests")
 	
