@@ -61,6 +61,50 @@ UPDATER="${LMOD_DIR:-/usr/share/lmod/lmod/libexec}/update_lmod_system_cache_file
 
 mkdir -p "${CACHE_DIR}"
 
+# ── root-vs-group-writable spider safeguard ──────────────────────────
+# update_lmod_system_cache_files, run AS ROOT, silently refuses to cache any
+# module tree that is group- or other-writable (an Lmod privilege-escalation
+# safeguard: a non-root user could otherwise inject a modulefile that root's
+# shared cache would then serve). The result is a valid-but-EMPTY spiderT.lua,
+# which is worse than no cache -- cache-using clients then resolve every module
+# as "unknown". The nightlies tree is intentionally group-writable
+# (root:nightlies, chmod g+rwX by the build), so when we are root we must run
+# the spider as a NON-root member of the tree's group instead. World-readable,
+# not-group-writable trees (e.g. the stable /nfsapps/ubuntu-24.04 tree,
+# drwxr-xr-x root:root) are spidered by root exactly as before.
+#   CACHE_BUILD_USER: optional explicit account to drop to (must be in the
+#   tree's group). Empty -> auto-detect the first non-root member of the group.
+SPIDER_PREFIX=()
+# Group- or other-writable? Test the actual mode bits (022): `find -perm /022`
+# is unusable here because its EXIT status is 0 whether or not the path matches
+# (it is a filter, not a test), so it would fire for every tree when root and
+# make even a root:root world-readable tree take the privilege-drop path.
+# `stat -c %a` yields 3- or 4-digit octal (e.g. 755 or 2770); the leading 0
+# forces octal in the arithmetic.
+_base_mode="$(stat -c %a "${MODULE_BASE}" 2>/dev/null || echo 0)"
+if [ "$(id -u)" -eq 0 ] && [ "$(( 0${_base_mode} & 022 ))" -ne 0 ]; then
+   _tree_grp="$(stat -c %G "${MODULE_BASE}" 2>/dev/null)"
+   _cache_user="${CACHE_BUILD_USER:-}"
+   if [ -z "${_cache_user}" ] && [ -n "${_tree_grp}" ]; then
+      _cache_user="$(getent group "${_tree_grp}" 2>/dev/null | awk -F: '{print $4}' \
+                     | tr ',' '\n' | grep -vE '^(root)?$' | head -n1)"
+   fi
+   if [ -n "${_cache_user}" ] && id "${_cache_user}" >/dev/null 2>&1; then
+      echo "[refresh] tree ${MODULE_BASE} is group-writable; running spider as '${_cache_user}' (group '${_tree_grp}') because root would produce an empty cache"
+      SPIDER_PREFIX=(runuser -u "${_cache_user}" -g "${_tree_grp}" --)
+   else
+      # Running the spider as root here would silently emit an EMPTY cache and
+      # then mv it over the live spiderT.lua, stranding every cache-using client
+      # (the exact failure that made the 7.15 nightlies skip every test). Refuse
+      # rather than clobber: leave the existing cache in place for clients and
+      # let the operator supply CACHE_BUILD_USER / a group member.
+      echo "[refresh] ERROR: ${MODULE_BASE} is group-writable and no non-root ${_tree_grp:-group} member was found to run the spider (set CACHE_BUILD_USER). Refusing to run as root -- that would overwrite the live cache with an EMPTY one. Leaving the existing cache untouched." >&2
+      exit 1
+   fi
+   unset _tree_grp _cache_user
+fi
+unset _base_mode
+
 if [ "${FORCE}" -eq 0 ] && [ -f "${CACHE_DIR}/spiderT.lua" ]; then
    # Any modulefile newer than the cache -> stale. (Module tree only; small + fast.)
    newer="$(find "${MODULE_ROOT}" -type f -newer "${CACHE_DIR}/spiderT.lua" -print -quit 2>/dev/null || true)"
@@ -72,6 +116,31 @@ if [ "${FORCE}" -eq 0 ] && [ -f "${CACHE_DIR}/spiderT.lua" ]; then
 fi
 
 echo "[refresh] rebuilding spider cache from ${MODULE_BASE} using ${UPDATER}"
-"${UPDATER}" -d "${CACHE_DIR}" -t "${TS}" "${MODULE_BASE}"
+# The Lmod updater backs up the previous cache with `cp -p` (preserve
+# ownership) before mv'ing the new one into place (install_new_cache() in
+# update_lmod_system_cache_files). On an NFS export with root_squash that
+# `cp -p` cannot preserve ownership and fails with "Operation not supported",
+# which makes the updater return non-zero EVEN WHEN the new spiderT.lua was
+# written correctly by the mv that follows. Under `set -e` that false failure
+# aborts the refresh and callers log a scary "spider-cache refresh failed".
+# So capture the exit code instead of dying on it, then decide success from the
+# cache we actually produced.
+set +e
+"${SPIDER_PREFIX[@]}" "${UPDATER}" -d "${CACHE_DIR}" -t "${TS}" "${MODULE_BASE}"
+_updater_rc=$?
+set -e
+
+# Validate the real artefact. A healthy cache references actual modulefile
+# locations under ${MODULE_ROOT}; an empty spider yields a valid-Lua-but-empty
+# `spiderT = {}` with no such paths, which is worse than no cache (clients then
+# resolve every module as "unknown"). Fail loudly on that so the exit status is
+# trustworthy and the periodic backstop / next run retries.
+if [ ! -s "${CACHE_DIR}/spiderT.lua" ] || ! grep -q "${MODULE_ROOT}" "${CACHE_DIR}/spiderT.lua" 2>/dev/null; then
+   echo "[refresh] ERROR: spider produced an empty/invalid cache at ${CACHE_DIR}/spiderT.lua (updater rc=${_updater_rc}); it references no modulefiles under ${MODULE_ROOT}." >&2
+   exit 1
+fi
+if [ "${_updater_rc}" -ne 0 ]; then
+   echo "[refresh] note: updater exited ${_updater_rc} -- typically the NFS 'cp -p' backup of spiderT.old.lua under root_squash; the new spiderT.lua is valid, so treating this as success."
+fi
 echo "[refresh] done:"
 ls -la "${CACHE_DIR}/spiderT.lua" "${TS}" 2>&1 | sed 's/^/[refresh]   /'

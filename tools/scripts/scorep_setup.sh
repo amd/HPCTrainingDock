@@ -112,6 +112,17 @@ ROCMPLUS_PATH_INPUT=""
 REPLACE=0
 REPLACE_PDT=0
 KEEP_FAILED_INSTALLS=0
+# ── CubeGUI AppImage (convenience CUBE profile viewer) ────────────────
+# Score-P writes CUBE4 profiles (profile.cubex) that are opened in CubeGUI,
+# which is not packaged on the cluster (see
+# MPI-examples/cg-solver-example/docs/PROFILER_ISSUES.md §2.1 and
+# docs/profilers/scorep.md §6). Fetch the official self-contained AppImage,
+# extract it headlessly (--appimage-extract needs no FUSE), and expose a
+# `cubegui` launcher on the Score-P module PATH so a site no longer needs a
+# separate CubeGUI install. Best-effort: any fetch/extract failure warns but
+# never fails the Score-P install. Disable with --install-cubegui 0.
+INSTALL_CUBEGUI=1
+CUBEGUI_VERSION=4.9.1
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO=""
@@ -153,6 +164,8 @@ usage()
    echo "  --replace [ 0|1 ] remove prior scorep install + modulefile before building, default $REPLACE (PDT NOT removed)"
    echo "  --replace-pdt [ 0|1 ] also remove and rebuild the shared PDT install, default $REPLACE_PDT"
    echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
+   echo "  --install-cubegui [ 0|1 ] fetch+extract the CubeGUI AppImage and put a 'cubegui' launcher on the module PATH, default $INSTALL_CUBEGUI"
+   echo "  --cubegui-version [ CUBEGUI_VERSION ] CubeGUI AppImage version to fetch, default $CUBEGUI_VERSION"
    echo "  --help: print this usage information"
    exit 1
 }
@@ -244,6 +257,16 @@ do
       "--keep-failed-installs")
           shift
           KEEP_FAILED_INSTALLS=${1}
+          reset-last
+          ;;
+      "--install-cubegui")
+          shift
+          INSTALL_CUBEGUI=${1}
+          reset-last
+          ;;
+      "--cubegui-version")
+          shift
+          CUBEGUI_VERSION=${1}
           reset-last
           ;;
       "--*")
@@ -769,6 +792,65 @@ else
 
    fi
 
+   # ── CubeGUI AppImage provisioning (see the INSTALL_CUBEGUI comment at the
+   # top) ───────────────────────────────────────────────────────────────
+   # Runs in the common tail (after either the cache-restore or the source
+   # build) so CubeGUI is provisioned regardless of how Score-P itself landed
+   # -- the scorep cache tar carries only scorep-v${VER}, not this viewer. The
+   # whole block is best-effort: a network/extract failure prints a warning and
+   # leaves ${CUBEGUI_BIN}/cubegui absent, which the modulefile section below
+   # detects and simply omits from PATH (no PATH entry, no failure).
+   CUBEGUI_DIR="${SCOREP_PATH}/cubegui"
+   CUBEGUI_BIN="${CUBEGUI_DIR}/bin"
+   if [ "${INSTALL_CUBEGUI}" = "1" ] && [ ! -x "${CUBEGUI_BIN}/cubegui" ]; then
+      _install_cubegui() {
+         local ver="${CUBEGUI_VERSION}"
+         local majmin="${ver%.*}"            # 4.9.1 -> 4.9 (release dir on the server)
+         local url="https://apps.fz-juelich.de/scalasca/releases/cube/${majmin}/dist/CubeGui-${ver}.AppImage"
+         local tmp; tmp="$(mktemp -d -t cubegui.XXXXXX)" || return 1
+         echo "scorep: fetching CubeGUI ${ver} AppImage from ${url}"
+         if ! wget -q "${url}" -O "${tmp}/CubeGui.AppImage"; then
+            echo "scorep: CubeGUI download failed"; rm -rf "${tmp}"; return 1
+         fi
+         chmod +x "${tmp}/CubeGui.AppImage"
+         # --appimage-extract unpacks without FUSE (works on a headless build
+         # node); only *running* the raw AppImage would need FUSE + a display.
+         if ! ( cd "${tmp}" && ./CubeGui.AppImage --appimage-extract >/dev/null 2>&1 ); then
+            echo "scorep: CubeGUI --appimage-extract failed"; rm -rf "${tmp}"; return 1
+         fi
+         if [ ! -x "${tmp}/squashfs-root/usr/bin/cube" ]; then
+            echo "scorep: CubeGUI extract produced no usr/bin/cube"; rm -rf "${tmp}"; return 1
+         fi
+         ${SUDO} mkdir -p "${CUBEGUI_BIN}"
+         ${SUDO} rm -rf "${CUBEGUI_DIR}/squashfs-root"
+         ${SUDO} mv "${tmp}/squashfs-root" "${CUBEGUI_DIR}/squashfs-root"
+         # Launcher on PATH: point LD_LIBRARY_PATH at the AppImage's bundled
+         # Qt/xcb libs and exec the extracted `cube`. Needs a real X display
+         # (VNC/noVNC/ssh -X) + libxcb-cursor0 -- both covered by the base OS
+         # layer graphics deps (see baseospackages_setup.sh).
+         ${SUDO} tee "${CUBEGUI_BIN}/cubegui" >/dev/null <<'CUBEGUI_WRAP'
+#!/bin/bash
+_here="$(cd "$(dirname "$(readlink -fm "$0")")/.." && pwd)"
+export LD_LIBRARY_PATH="${_here}/squashfs-root/usr/lib:${LD_LIBRARY_PATH:-}"
+exec "${_here}/squashfs-root/usr/bin/cube" "$@"
+CUBEGUI_WRAP
+         ${SUDO} chmod +x "${CUBEGUI_BIN}/cubegui"
+         rm -rf "${tmp}"
+         echo "scorep: CubeGUI ${ver} installed at ${CUBEGUI_DIR} (launch 'cubegui profile.cubex' in a VNC/X11 desktop)"
+      }
+      _install_cubegui || echo "scorep: CubeGUI provisioning skipped (non-fatal; fall back to the AppImage steps in scorep.md §6)"
+   fi
+
+   # Modulefile PATH line for the CubeGUI launcher, emitted only when the
+   # launcher actually exists (provisioning above may have been disabled or
+   # failed non-fatally).
+   CUBEGUI_MOD_LUA=""
+   CUBEGUI_MOD_TCL=""
+   if [ -x "${CUBEGUI_BIN}/cubegui" ]; then
+      CUBEGUI_MOD_LUA="prepend_path(\"PATH\",\"${CUBEGUI_BIN}\")"
+      CUBEGUI_MOD_TCL="prepend-path PATH \"${CUBEGUI_BIN}\""
+   fi
+
    # Create a module file for SCORE-P
    #
    # Modulefile-write sudo: probe the module tree for user-writability and
@@ -851,6 +933,7 @@ else
 	${ROCM_PREREQ_LUA}
 	prepend_path("PATH","${SCOREP_PATH}/bin")
 	prepend_path("PATH","${PDT_PATH}/bin")
+	${CUBEGUI_MOD_LUA}
 	EOF
    else
       cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${SCOREP_VERSION}${MODEXT}
@@ -861,6 +944,7 @@ else
 	prereq ${ROCM_PREREQ_TCL}
 	prepend-path PATH "${SCOREP_PATH}/bin"
 	prepend-path PATH "${PDT_PATH}/bin"
+	${CUBEGUI_MOD_TCL}
 	EOF
    fi
 

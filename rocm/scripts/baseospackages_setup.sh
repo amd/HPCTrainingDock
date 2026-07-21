@@ -52,6 +52,15 @@ if [ "${DISTRO}" = "ubuntu" ]; then
 # Install python packages
    ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y python3-pip python3-dev python3-venv
 
+   # Profiler-GUI runtime deps (see MPI-examples/cg-solver-example/docs/PROFILER_ISSUES.md
+   # §2.1/§2.3). Placed in the base OS layer so they land in the runtime image, not just a
+   # tool-build image: default-jre lets TAU's paraprof start; libturbojpeg ships
+   # libturbojpeg.so.0 (fixes TurboVNC's Xvnc); xvfb + libxcb-cursor0 let CubeGUI (Qt/xcb)
+   # render on a headless node so screenshots can be scripted. NB: on Ubuntu 24.04 the
+   # runtime TurboJPEG package is 'libturbojpeg' (not the Debian-era 'libturbojpeg0').
+   ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y \
+      default-jre libturbojpeg xvfb libxcb-cursor0
+
    ${SUDO} localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
 elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    if [[ `type sudo |& grep "not found" | wc -l` == "1" ]]; then
@@ -72,6 +81,11 @@ elif [[ "${RHEL_COMPATIBLE}" == 1 ]]; then
    ${PKG_SUDO} yum groupinstall -y "Development Tools"
    #${PKG_SUDO} yum install -y ${SUDO}
    ${PKG_SUDO} yum install -y --allowerasing curl dpkg-devel numactl-devel openmpi-devel papi-devel python3-pip wget zlib-devel 
+   # Profiler-GUI runtime deps (see PROFILER_ISSUES.md §2.1/§2.3): java for TAU paraprof,
+   # turbojpeg for TurboVNC's Xvnc, Xvfb + xcb-util-cursor for headless CubeGUI (Qt/xcb).
+   # Best-effort (|| true) so a package absent on a given RHEL variant/repo set cannot
+   # abort the base OS layer.
+   ${PKG_SUDO} yum install -y java-latest-openjdk turbojpeg xorg-x11-server-Xvfb xcb-util-cursor || true
    ${PKG_SUDO} yum clean all
 elif [ "${DISTRO}" = "opensuse leap" ]; then
    ${SUDO} zypper update -y && \
