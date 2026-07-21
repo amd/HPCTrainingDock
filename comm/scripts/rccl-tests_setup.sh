@@ -53,16 +53,21 @@ if [[ " $* " == *" --amdgpu-gfxmodel "* ]]; then
 else
    AMDGPU_GFXMODEL=$(rocminfo 2>/dev/null | grep gfx | sed -e 's/Name://' | head -1 | sed 's/ //g' || true)
 fi
-RCCL_TESTS_REPO_URL=https://github.com/ROCm/rccl-tests.git
+# rccl-tests now lives in the ROCm mono-repo. The standalone ROCm/rccl-tests
+# repo is DEPRECATED and its develop branch carries a regression (buffers left
+# unallocated in the default non-parallel-init path -> HIP illegal memory
+# access). Build from the mono-repo subdir projects/rccl-tests instead.
+RCCL_TESTS_REPO_URL=https://github.com/ROCm/rocm-systems.git
+RCCL_TESTS_SUBDIR=projects/rccl-tests
 GITHUB_BRANCH_INPUT=""
-# Pinned to a specific commit rather than tracking develop: develop carries a
-# regression (rocm-systems#3588, 2026-03-05, "ROCM-3816 Out of Memory fix")
-# that leaves the send/recv buffers unallocated in the default
-# (non-parallel-init) run path, so every default *_perf run crashes on the
-# first collective with a HIP illegal memory access. a52452e is the last
-# develop commit before that regression. Bump this once upstream fixes it.
-# --github-branch still accepts a branch, tag, or commit SHA.
-GITHUB_BRANCH_DEFAULT=a52452e891d5dc07c83cf4edaea01ae4ab684b3a
+# Pinned mono-repo commit (NOT develop tip): the tip references
+# NCCL_CTA_POLICY_ZERO under a `NCCL_VERSION_CODE >= 2.27.0` guard, but that
+# symbol only exists in RCCL 2.28+, so the tip fails to compile against the
+# RCCL 2.27.x that ships in ROCm 7.1/7.2. This commit (2026-06-05) has the
+# buffer-alloc fix and builds against RCCL 2.21-2.27. Bump once upstream fixes
+# the guard threshold. --github-branch accepts a branch, tag, or FULL SHA
+# (GitHub only serves full 40-char SHAs by ref for fetch).
+GITHUB_BRANCH_DEFAULT=0e7d4a3ba4e87c84dbc56ed74df6c2dd3e901f79
 RCCL_TESTS_VERSION_INPUT=""
 BUILD_MPI=1
 MPI_MODULE=openmpi
@@ -274,15 +279,20 @@ echo ""
 # to the (possibly NFS) install path.
 RCCL_TESTS_BUILD_DIR=$(mktemp -d -t rccl-tests-build.XXXXXX)
 cd "${RCCL_TESTS_BUILD_DIR}"
-# Full clone (not --depth 1 --branch): GITHUB_BRANCH may be a branch, tag, OR
-# a commit SHA, and a shallow --branch clone cannot check out an arbitrary
-# commit. The rccl-tests repo is small, so the extra history is cheap.
-git clone "${RCCL_TESTS_REPO_URL}" rccl-tests-source
+# Sparse + shallow + blobless checkout of ONLY projects/rccl-tests at the pinned
+# commit. The mono-repo is huge; this pulls ~4 MB instead of the whole tree.
+# GITHUB_BRANCH may be a branch, tag, or FULL commit SHA.
+git init -q rccl-tests-source
 cd rccl-tests-source
-git checkout --detach "${GITHUB_BRANCH}"
-# Resolved rccl-tests source commit, recorded in the modulefile whatis so the
-# pinned upstream commit is traceable from `module whatis rccl-tests/<ver>`.
+git remote add origin "${RCCL_TESTS_REPO_URL}"
+git sparse-checkout init --cone
+git sparse-checkout set "${RCCL_TESTS_SUBDIR}"
+git fetch -q --depth 1 --filter=blob:none origin "${GITHUB_BRANCH}"
+git checkout -q FETCH_HEAD
+# Resolved source commit, recorded in the modulefile whatis for provenance.
 RCCL_TESTS_SRC_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+# The Makefile lives in the subdir; build from there.
+cd "${RCCL_TESTS_SUBDIR}"
 
 # RCCL lives inside ROCm, so NCCL_HOME=HIP_HOME=ROCM_PATH. GPU_TARGETS is
 # passed only when known (empty -> Makefile builds all supported archs).
@@ -338,7 +348,7 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("Version: rccl-tests-${RCCL_TESTS_VERSION} (source: ${RCCL_TESTS_SRC_COMMIT}, MPI build: ${BUILD_MPI})")
 	whatis("Description: RCCL performance and correctness benchmarks (all_reduce_perf, ...)")
-	whatis("URL: https://github.com/ROCm/rccl-tests")
+	whatis("URL: https://github.com/ROCm/rocm-systems (projects/rccl-tests)")
 	
 	local base = "${RCCL_TESTS_PATH}"
 	prepend_path("PATH", pathJoin(base, "bin"))
