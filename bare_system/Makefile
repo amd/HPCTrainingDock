@@ -112,8 +112,7 @@ rocprof-compute_rocm.timestamp: rocm.timestamp
 rocprofiler-sdk.timestamp: rocm.timestamp openmpi.timestamp
 	tools/scripts/rocprofiler-sdk_setup.sh \
 	   --rocm-version ${ROCM_VERSION} \
-	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
-	   --build-rocprofiler-sdk 1
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}'
 	touch rocprofiler-sdk.timestamp
 
 slurm.timestamp:

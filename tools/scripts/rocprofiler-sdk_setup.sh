@@ -28,7 +28,7 @@ INSTALL_PATH_INPUT=""
 MODULE_PATH="/etc/lmod/modules/ROCm/rocprofiler-sdk"
 MPI_MODULE="openmpi"
 GITHUB_BRANCH="develop"
-BUILD_ROCPROFILER_SDK=0
+BUILD_ROCPROFILER_SDK=1
 
 if [  -f /.singularity.d/Singularity ]; then
    SUDO_PACKAGE_INSTALL=""
@@ -117,7 +117,8 @@ do
 done
 
 if [ "$BUILD_ROCPROFILER_SDK" == "0" ]; then
-   echo "Rocprofiler SDK build flag is turned off"
+   echo "Rocprofiler SDK build flag is turned off (--build-rocprofiler-sdk 0)."
+   echo "To build/install rocprofiler-sdk from source, re-run with '--build-rocprofiler-sdk 1' (this is now the default)."
    exit 1
 fi
 
