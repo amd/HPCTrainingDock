@@ -248,7 +248,14 @@ mkdir -p build && cd build
 ${SUDO} mkdir -p ${UMPIRE_PATH}
 [[ "${USER}" != "root" ]] && ${SUDO} chmod -R a+w ${UMPIRE_PATH}
 
-cmake -DCMAKE_INSTALL_PREFIX=${UMPIRE_PATH} \
+# Umpire vendors fmt 10.2.1, whose consteval-based compile-time format-string
+# checking fails to compile under recent clang (>=17, e.g. amdclang/amdflang-new
+# clang-22) in C++20 mode ("call to consteval function ... is not a constant
+# expression"). Defining FMT_CONSTEVAL empty disables ONLY fmt's compile-time
+# format checks (runtime checks remain); it touches fmt headers, not Umpire.
+# Appended to any operator-supplied CXXFLAGS so it is not clobbered.
+cmake -DCMAKE_CXX_FLAGS="-DFMT_CONSTEVAL= ${CXXFLAGS:-}" \
+      -DCMAKE_INSTALL_PREFIX=${UMPIRE_PATH} \
       -DROCM_ROOT_DIR=${ROCM_PATH} \
       -DHIP_ROOT_DIR=${ROCM_PATH}/hip \
       -DHIP_PATH=${ROCM_PATH}/llvm/bin \
@@ -266,6 +273,7 @@ cmake -DCMAKE_INSTALL_PREFIX=${UMPIRE_PATH} \
       -DUMPIRE_ENABLE_IPC_SHARED_MEMORY=On \
       -DENABLE_FORTRAN=On \
       -DENABLE_TESTS=Off \
+      -DENABLE_EXAMPLES=Off \
       ../
 
 make -j 16
