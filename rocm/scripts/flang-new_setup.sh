@@ -21,11 +21,13 @@ MODULE_PATH=/etc/lmod/modules/ROCm/amdflang-new
 BUILD_FLANGNEW=0
 ROCM_VERSION=6.2.0
 # amdflang-new (the AFAR Fortran drop) is a compiler that belongs BESIDE
-# the SDK it targets, so it installs under the rocm-<version> SDK tree,
-# NOT rocmplus-<version> (the tcl modulefile base below already encodes
-# this: rocm-<version>/rocm-afar-<release>). The AFAR dir lands at
+# the SDK it targets, and this site installs it under the rocmplus-<version>
+# tree (a sibling of, not inside, the rocm-<version> SDK). Both the install
+# dir and the generated modulefile base derive from UNTAR_DIR, so this must
+# be rocmplus-<version> or the modulefile ends up pointing at a nonexistent
+# rocm-<version>/rocm-afar-<release> path. The AFAR dir lands at
 # ${UNTAR_DIR}/rocm-afar-<release>.
-UNTAR_DIR=/opt/rocm-${ROCM_VERSION}
+UNTAR_DIR=/opt/rocmplus-${ROCM_VERSION}
 UNTAR_DIR_INPUT=""
 DISTRO=`cat /etc/os-release | grep '^NAME' | sed -e 's/NAME="//' -e 's/"$//' | tr '[:upper:]' '[:lower:]' `
 DISTRO_SHORT=$DISTRO
@@ -154,8 +156,8 @@ if [ "${UNTAR_DIR_INPUT}" != "" ]; then
    UNTAR_DIR=${UNTAR_DIR_INPUT}
 else
    # override path in case ROCM_VERSION has been supplied as input
-   # (under rocm-<version>, NOT rocmplus-<version> -- see top of file)
-   UNTAR_DIR=/opt/rocm-${ROCM_VERSION}
+   # (under rocmplus-<version>, a sibling of the rocm-<version> SDK -- see top of file)
+   UNTAR_DIR=/opt/rocmplus-${ROCM_VERSION}
 fi
 
 AMDGPU_GFXMODEL_STRING=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/_/g'`
@@ -382,7 +384,7 @@ EOF
 	module-whatis "AMD AFAR drop #4.0 Beta Fortran OpenMP Compiler based on LLVM"
 
 	# Base install path
-	set base /shared/apps/rhel9/rocm-${ROCM_VERSION}/rocm-afar-${FLANG_RELEASE_NUMBER}
+	set base /shared/apps/rhel9/rocmplus-${ROCM_VERSION}/rocm-afar-${FLANG_RELEASE_NUMBER}
 
 	# Environment variables
 	setenv AFAR_PATH $base

@@ -112,6 +112,7 @@ SITE_CLI=0
 : ${BUILD_LIKWID:="1"}
 : ${BUILD_MDB:="1"}
 : ${BUILD_INTELLIKIT:="1"}
+: ${BUILD_ROC_OPTIQ:="1"}
 : ${BUILD_HPCTOOLKIT:="1"}
 : ${BUILD_MPI4PY:="1"}
 : ${BUILD_TAU:="1"}
@@ -899,6 +900,7 @@ declare -A PKG_FLAG=(
    [likwid]=BUILD_LIKWID
    [mdb]=BUILD_MDB
    [intellikit]=BUILD_INTELLIKIT
+   [roc-optiq]=BUILD_ROC_OPTIQ
    [scorep]=BUILD_SCOREP
    [tau]=BUILD_TAU
    [cupy]=BUILD_CUPY
@@ -944,6 +946,7 @@ declare -A PKG_VER_FLAG=(
    [likwid]="--likwid-version"
    [mdb]="--mdb-version"
    [intellikit]="--intellikit-version"
+   [roc-optiq]="--roc-optiq-version"
    [scorep]="--scorep-version"
    [cupy]="--cupy-version"
    [hip-python]="--hip-python-version"
@@ -2120,6 +2123,14 @@ run_and_log_versioned mdb tools/scripts/mdb_setup.sh ${COMMON_OPTIONS} --build-m
 # is an explicit always-skip under --quick-installs (see QUICK_INSTALLS_PKGS).
 run_and_log_versioned intellikit tools/scripts/intellikit_setup.sh ${COMMON_OPTIONS} --build-intellikit ${BUILD_INTELLIKIT} --python-version ${PYTHON_VERSION} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/intellikit)
+
+# roc-optiq is the ROCm Optiq visualizer for the ROCm Profiler Tools (ROCm
+# Systems Profiler / ROCm Compute Profiler): a C++/CMake app (GLFW/Dear
+# ImGui/Vulkan/OpenGL) built from a version-tagged upstream release into a
+# version-suffixed install dir + VERSION.lua module. Like mdb/likwid it is a
+# versioned leaf; --build-roc-optiq 0 opts out (leaf exits NOOP_RC).
+run_and_log_versioned roc-optiq tools/scripts/roc-optiq_setup.sh ${COMMON_OPTIONS} --build-roc-optiq ${BUILD_ROC_OPTIQ} ${REPLACE_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/roc-optiq)
 
 # hpctoolkit builds hpcprof-mpi when meson's dependency('MPI') finds mpicc/
 # mpicxx. The leaf default MPI module is "openmpi", which does not exist on a
