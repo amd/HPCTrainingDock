@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
-all: rocm openmpi rocprof-sys_rocm rocprof-sys_source rocprof-compute_rocm rocprof-compute_source kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk compiler petsc hypre tensorflow ftorch julia smartsim lammps likwid mdb intellikit
-.PHONY: baseospackages rocm openmpi mvapich slurm rocprof-sys_rocm rocprof-sys_source amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk rocprof-compute_rocm rocprof-compute_source compiler petsc hypre tensorflow ftorch julia smartsim lammps likwid mdb intellikit
+all: rocm openmpi rocprof-sys_rocm rocprof-sys_source rocprof-compute_rocm rocprof-compute_source kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk compiler petsc hypre tensorflow ftorch julia smartsim lammps likwid mdb intellikit roc-optiq
+.PHONY: baseospackages rocm openmpi mvapich slurm rocprof-sys_rocm rocprof-sys_source amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk rocprof-compute_rocm rocprof-compute_source compiler petsc hypre tensorflow ftorch julia smartsim lammps likwid mdb intellikit roc-optiq
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
@@ -29,6 +29,7 @@ scorep: scorep.timestamp
 likwid: likwid.timestamp
 mdb: mdb.timestamp
 intellikit: intellikit.timestamp
+roc-optiq: roc-optiq.timestamp
 mpi4py: mpi4py.timestamp
 hpctoolkit: hpctoolkit.timestamp
 cupy: cupy.timestamp
@@ -197,6 +198,13 @@ intellikit.timestamp: rocm.timestamp
 	   --python-version '${PYTHON_VERSION}' \
 	   --build-intellikit 1
 	touch intellikit.timestamp
+
+roc-optiq.timestamp: rocm.timestamp
+	tools/scripts/roc-optiq_setup.sh \
+	   --rocm-version ${ROCM_VERSION} \
+	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
+	   --build-roc-optiq 1
+	touch roc-optiq.timestamp
 
 # From Training layer
 

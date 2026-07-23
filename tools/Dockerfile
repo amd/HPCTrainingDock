@@ -26,6 +26,7 @@ ARG BUILD_ROCPROFILER_SDK
 ARG BUILD_AQLPROFILE
 ARG BUILD_MDB
 ARG BUILD_INTELLIKIT
+ARG BUILD_ROC_OPTIQ=0
 
 LABEL maintainer="bob.robey@amd.com"
 
@@ -84,6 +85,13 @@ RUN  /tmp/tools/mdb_setup.sh --rocm-version ${ROCM_VERSION} --build-mdb ${BUILD_
 COPY tools/scripts/intellikit_setup.sh /tmp/tools/intellikit_setup.sh
 RUN  /tmp/tools/intellikit_setup.sh --rocm-version ${ROCM_VERSION} --build-intellikit ${BUILD_INTELLIKIT} --python-version ${PYTHON_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} && \
      rm -f /tmp/tools/intellikit_setup.sh
+
+# roc-optiq exits NOOP_RC=43 on opt-out (--build-roc-optiq 0, the default
+# ARG). Treat that sentinel as success so a default/opt-out image build is
+# not failed by the skip; any other non-zero rc still fails the build.
+COPY tools/scripts/roc-optiq_setup.sh /tmp/tools/roc-optiq_setup.sh
+RUN  /tmp/tools/roc-optiq_setup.sh --rocm-version ${ROCM_VERSION} --build-roc-optiq ${BUILD_ROC_OPTIQ} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} || [ "$?" = "43" ] && \
+     rm -f /tmp/tools/roc-optiq_setup.sh
 
 #
 # Install Grafana
