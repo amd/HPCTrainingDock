@@ -16,13 +16,16 @@ set -eo pipefail
 # leaf-setup style (mirrors emacs_setup.sh / miniforge3_setup.sh).
 #
 # What this does (the Ubuntu 24.04 migration install):
-#   1. git clone the (PRIVATE) roofline-extractor repo -> tool payload
-#      (rooflineExtractor.py, profile_app.py, convert-*.py, config/,
-#       roof-counters-*.txt, specs.csv, d3.min.js, METRICS_*.md, README).
+#   1. git clone the (PUBLIC) roofline-extractor repo -> tool payload
+#      (rooflineExtractor.py, profile_app.py,
+#       convert-counters-collection-format.py, config/ (cache_bandwidths.csv,
+#       benchWarmer.csv, mi*_alpha_summary.csv), roof-counters-gfx*.txt,
+#       d3.min.js, METRICS_*.md, requirements.txt, README.md, LICENSE.md).
 #   1b. Apply the sidecar patch (roofline_extractor.patch) to the fresh
 #      clone: the CWD-relative --output-dir fix in profile_app.py (avoids
-#      PermissionError writing under the install dir) plus the richer
-#      --help text for both wrapper entry points. Idempotent + fail-loud.
+#      PermissionError writing under the install dir, and drops the implicit
+#      ./data/ prefix) plus the richer --help text for both wrapper entry
+#      points. Idempotent + fail-loud.
 #   2. Copy that payload into INSTALL_PATH.
 #   3. GENERATE the two bin wrappers (roofline-extractor-extract /
 #      -profile) -- these are deployment artifacts, NOT in the repo.
@@ -40,16 +43,14 @@ set -eo pipefail
 #   * The man page (share/man/man1/roofline-extractor.1). It is not in the
 #     repo and is managed separately; this script does not install it.
 #
-# NOTE: the repo is PRIVATE. ROOFLINE_REPO below is a PLACEHOLDER; set it
-# (and ensure the running user/host has clone access -- SSH deploy key or
-# token) before use.
+# NOTE: the repo is PUBLIC, so the default HTTPS clone needs no credentials.
 # ─────────────────────────────────────────────────────────────────────
 
 # Variables controlling setup process
 BUILD_ROOFLINE=1
 ROOFLINE_VERSION=dev
-# PLACEHOLDER private repo URL -- replace with the real one.
-ROOFLINE_REPO="git@github.com:AMD-HPC/rooflineExtractor.git"
+# Public repo -- anonymous HTTPS clone, no deploy key or token required.
+ROOFLINE_REPO="https://github.com/AMD-HPC/rooflineExtractor.git"
 ROOFLINE_REF=main
 # INSTALL_PATH is the leaf; --install-path is treated as the PARENT dir
 # (leaf appends rooflineExtractor), matching the extras convention so
@@ -100,7 +101,7 @@ usage()
    echo "  WARNING: when specifying --install-path and --module-path, the PARENT directories must already exist (the script probes them for write permission)"
    echo "  --build-roofline [ 0|1 ]       default $BUILD_ROOFLINE"
    echo "  --roofline-version [ VER ]     modulefile name stem, default $ROOFLINE_VERSION"
-   echo "  --repo [ URL ]                 git repo to clone (PLACEHOLDER), default $ROOFLINE_REPO"
+   echo "  --repo [ URL ]                 git repo to clone, default $ROOFLINE_REPO"
    echo "  --ref [ BRANCH|TAG|SHA ]       git ref to check out, default $ROOFLINE_REF"
    echo "  --install-path [ PATH ]        PARENT dir; leaf appends rooflineExtractor. default parent of $INSTALL_PATH"
    echo "  --module-path [ PATH ]         modulefile dir, default $MODULE_PATH"
@@ -292,7 +293,7 @@ echo " Installing Roofline Extractor (${ROOFLINE_VERSION})"
 echo "============================"
 echo ""
 
-# ── 1. clone the (private) repo into a per-job throwaway dir ───────────
+# ── 1. clone the (public) repo into a per-job throwaway dir ────────────
 # Cleaned by _roofline_on_exit (do NOT add a second EXIT trap here).
 ROOFLINE_CLONE_ROOT=$(mktemp -d -t roofline-clone.XXXXXX)
 echo "[roofline] cloning ${ROOFLINE_REPO} (ref ${ROOFLINE_REF}) ..."

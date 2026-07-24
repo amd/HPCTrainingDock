@@ -63,7 +63,7 @@ KEEP_FAILED_INSTALLS=0
 INSTALL_PATH_INPUT=""
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-MPI/mpitrace
 # Cluster Lmod spider-cache refresh script (bumps the cache so `module load`
-# sees the new modulefile without --ignore_cache). See roofline_extractor_setup.sh.
+# sees the new modulefile without --ignore_cache).
 MODULE_CACHE_REFRESH=/nfsapps/ubuntu-24.04/moduleData/refresh_module_cache.sh
 SUDO="sudo"
 [ -f /.singularity.d/Singularity ] && SUDO=""

@@ -1,24 +1,26 @@
---- a/profile_app.py	2026-07-09 18:00:59.789471140 -0500
-+++ b/profile_app.py	2026-07-09 18:00:37.886850995 -0500
-@@ -283,8 +283,29 @@
+diff --git a/profile_app.py b/profile_app.py
+index b8046b0..e9f5de7 100644
+--- a/profile_app.py
++++ b/profile_app.py
+@@ -282,8 +282,29 @@ def run_rocprofv3_with_retry(cmd_with_csv, cmd_without_csv, cwd, logger=None):
  
  def main():
      parser = argparse.ArgumentParser(
 -        description='Run rocprofv3 with counter collection and kernel tracing',
--        usage='%(prog)s [-o OUTPUT_DIR] [--arch ARCH] [--proj-arch PROJ_ARCH] -- run_command [args...]'
+-        usage='%(prog)s [-o OUTPUT_DIR] [--arch ARCH] -- run_command [args...]'
 +        prog='roofline-extractor-profile',
 +        description=(
 +            'Automated end-to-end roofline profiling for an application. '
-+            'Auto-detects the GPU architecture, runs rocprofv3 to collect '
-+            'hardware counters (four runs) and a kernel trace (one run), '
-+            'post-processes the data, and runs rooflineExtractor to produce '
-+            'a guided analysis, an interactive HTML roofline plot, and CSV '
-+            'dumps. All outputs are written under --output-dir.'
++            'Runs rocprofv3 to collect hardware counters (four runs) and a '
++            'kernel trace (one run), post-processes the data, and runs '
++            'rooflineExtractor to produce a guided analysis, an interactive '
++            'HTML roofline plot, and CSV dumps. All outputs are written under '
++            '--output-dir.'
 +        ),
-+        usage='%(prog)s [-o OUTPUT_DIR] [--arch ARCH] [--proj-arch PROJ_ARCH] -- <run_command> [args...]',
++        usage='%(prog)s [-o OUTPUT_DIR] --arch ARCH -- <run_command> [args...]',
 +        epilog=(
 +            'Example:\n'
-+            '  roofline-extractor-profile -o my_results --proj-arch MI355X -- ./my_app arg1\n'
++            '  roofline-extractor-profile -o my_results --arch MI355X -- ./my_app arg1\n'
 +            '\n'
 +            'Notes:\n'
 +            '  * The "--" separator before <run_command> is required so flags meant\n'
@@ -32,8 +34,8 @@
      )
      parser.add_argument(
          '-o', '--output-dir',
-@@ -341,10 +362,6 @@
-             f"Supported: {', '.join(sorted(supported_proj_arch))}"
+@@ -322,10 +343,6 @@ def main():
+             f"Unsupported architecture '{args.arch}'. Supported: {', '.join(sorted(supported_arch))}"
          )
  
 -    # Prepend ./data/ to output_dir if it's not already there and not an absolute path
@@ -43,7 +45,7 @@
      # Remove the '--' separator if present
      if run_command and run_command[0] == '--':
          run_command = run_command[1:]
-@@ -385,9 +402,9 @@
+@@ -357,9 +374,9 @@ def main():
      # Save original working directory
      original_dir = os.getcwd()
      
@@ -51,14 +53,16 @@
 -    output_path = Path(__file__).parent / output_dir
 -    output_dir = os.path.abspath(output_path)
 +    # Resolve relative --output-dir against the user's CWD (not the install dir)
-+    # so unprivileged users don't hit PermissionError under /shared/apps/...
++    # so unprivileged users don't hit PermissionError under /nfsapps/...
 +    output_dir = os.path.abspath(output_dir)
      
-     # Convert input counter file to absolute path (use detected architecture)
+     # Convert input counter file to absolute path (use selected architecture)
      roof_path = Path(__file__).parent / f'roof-counters-{gfx_arch}.txt'
---- a/rooflineExtractor.py	2026-07-09 18:01:12.242823740 -0500
-+++ b/rooflineExtractor.py	2026-07-09 18:00:37.918851901 -0500
-@@ -2798,7 +2798,31 @@
+diff --git a/rooflineExtractor.py b/rooflineExtractor.py
+index 2bf10bc..76b0a93 100644
+--- a/rooflineExtractor.py
++++ b/rooflineExtractor.py
+@@ -3205,7 +3205,31 @@ def extract(
  def main():
  
      # Get filenames from input args
