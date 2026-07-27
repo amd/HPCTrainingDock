@@ -163,9 +163,13 @@ usage() {
 Usage: $0 [opts]
    --rocm-versions "v1 v2 ..."   space- or comma-separated list (default: 7.1.0 7.0.2 7.0.1 7.0.0 6.4.3 6.4.2 6.4.1 6.4.0).
                                  Accepts FOUR token shapes mixed in any order:
-                                   * regular numeric        e.g. 7.2.1, 6.4.3
+                                   * regular numeric        e.g. 7.14.0, 7.2.1, 6.4.3
                                        Drives the full docker-build + make-rocm-package pipeline
-                                       via run_rocm_build.sh.
+                                       via run_rocm_build.sh. For >= 7.12 the in-container
+                                       rocm_setup.sh IS_ROCM_PREVIEW path apt-installs GA ROCm
+                                       from the repo.amd.com apt repos (packages-multi-arch for
+                                       >= 7.14, packages for 7.12/7.13) instead of the gated
+                                       stable tarball. < 7.12 uses the legacy amdgpu-install.
                                        Install: rocm-<v>, Module: base/rocm/<v>.lua
                                    * AFAR drops             e.g. afar-22.1.0, afar-22.2.0
                                        Skip docker entirely and just wget + tar -xjpf the drop
@@ -190,11 +194,15 @@ Usage: $0 [opts]
                                        rocm/afar-<N>-<rocm>). <rocm> is derived from
                                        .info/version (or the tarball filename's NUMERIC
                                        segment).
-                                   * TheRock releases       e.g. therock-7.13, therock-7.13.0
+                                   * TheRock releases       e.g. therock-7.13, therock-7.14
                                        NON-flang channel: source is the distro-agnostic
                                        pre-built tarball at https://repo.amd.com/rocm/tarball/
                                        (NOT the flang/ site). Driven by
-                                       run_rocm_therock_install.sh. Both X.Y (matching the
+                                       run_rocm_therock_install.sh. Primarily for nightlies /
+                                       prereleases now (pair with --therock-url-base); GA ROCm
+                                       (>= 7.12) is installed via bare numeric tokens on the
+                                       docker/apt path above, since the stable tarball host is
+                                       access-controlled. Both X.Y (matching the
                                        github release tag therock-X.Y) and X.Y.Z forms are
                                        accepted; the install dir uses the .info/version-derived
                                        numeric (rocm-therock-X.Y.Z), the modulefile uses the
@@ -408,9 +416,10 @@ if [[ -n "${PROGRAM_ENVIRONMENTS_RAW}" ]]; then
          return 0
       fi
       # Bare numeric X.Y[.Z] resolves to itself (identity). The install
-      # dispatch decides docker-build vs TheRock-tarball by the >= 7.10.0
-      # threshold (see _is_therock_numeric below and the sbatch), so a
-      # numeric TheRock release (7.12.0, 7.13.0, ...) needs NO conf entry.
+      # dispatch decides docker-build vs TheRock-tarball by version band (see
+      # _is_therock_numeric below and the sbatch): [7.10.0, 7.12.0) -> tarball;
+      # >= 7.12 -> docker/apt preview path; < 7.10.0 -> docker/make. Numeric GA
+      # releases (7.12.0, 7.13.0, 7.14.0, ...) need NO conf entry.
       if [[ "${_s}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
          printf '%s\n' "${_s}"
          return 0
@@ -481,18 +490,29 @@ N=${#VERSIONS_ARR[@]}
 #       curl + tar from repo.amd.com/rocm/tarball/, ~11 min wall (same
 #       order of magnitude as AFAR; both NFS-bound on the extract).
 #   * Numeric tokens (X.Y.Z) -> run_rocm_build.sh
-#       docker + make + extract + patches, ~95 min wall.
+#       docker + make + extract + patches, ~95 min wall. For >= 7.12 this
+#       drives the docker/apt preview path (rocm_setup.sh IS_ROCM_PREVIEW),
+#       which installs GA ROCm from the repo.amd.com apt repos instead of the
+#       gated stable tarball (repo.amd.com/rocm/tarball is access-controlled).
 # Split here so the time budget reflects reality and the submitter
 # banner surfaces the per-bucket counts.
-# Version-threshold predicate: a bare numeric ROCm token >= 7.10.0 is only
-# available as a pre-built TheRock tarball (the docker-built numeric release
-# line ends below 7.10.0), so it takes the TheRock install path even though it
-# carries no `therock-` prefix. sort -V comparison: token sorts >= 7.10.0 iff
-# 7.10.0 is the first line of `printf '7.10.0\n<tok>\n' | sort -V`.
+# Version-threshold predicate: a bare numeric ROCm token in the [7.10.0, 7.12.0)
+# band is only available as a pre-built TheRock tarball (the docker-built numeric
+# release line ends below 7.10.0), so it takes the TheRock tarball path even
+# though it carries no `therock-` prefix. Bare numeric >= 7.12 is published on
+# the repo.amd.com apt repos and installs via the docker/apt preview path, so it
+# is EXCLUDED here (falls through to the numeric/docker bucket). Nightlies /
+# prereleases still use explicit `therock-*` tokens (+ --therock-url-base).
+# sort -V comparison: token sorts >= 7.10.0 iff 7.10.0 is the first line of
+# `printf '7.10.0\n<tok>\n' | sort -V`; same idiom for the 7.12 upper bound.
 _is_therock_numeric() {
    local _t="$1"
    [[ "${_t}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
-   [ "$(printf '%s\n' "7.10.0" "${_t}" | sort -V | head -n1)" = "7.10.0" ]
+   # lower bound: >= 7.10.0
+   [ "$(printf '%s\n' "7.10.0" "${_t}" | sort -V | head -n1)" = "7.10.0" ] || return 1
+   # exclude >= 7.12: those install via the docker/apt preview path, not tarball.
+   [ "$(printf '%s\n' "7.12" "${_t}" | sort -V | head -n1)" = "7.12" ] && return 1
+   return 0
 }
 
 AFAR_VERSIONS=()
@@ -504,7 +524,8 @@ for _v in "${VERSIONS_ARR[@]}"; do
    elif [[ "${_v}" == therock-* ]]; then
       THEROCK_VERSIONS+=("${_v}")
    elif _is_therock_numeric "${_v}"; then
-      # Bare numeric >= 7.10.0 -> TheRock tarball path (numeric naming).
+      # Bare numeric in [7.10.0, 7.12.0) -> TheRock tarball path (numeric naming).
+      # >= 7.12 is excluded by the predicate and falls to NUMERIC (docker/apt).
       THEROCK_VERSIONS+=("${_v}")
    else
       NUMERIC_VERSIONS+=("${_v}")

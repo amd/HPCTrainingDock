@@ -258,14 +258,22 @@ SUMMARY="sweep_summary_$(date +%Y%m%d_%H%M%S)_job${SLURM_JOB_ID}.out"
 # printed.
 # Version-threshold predicate (top-level so BOTH the --program-environments
 # flow and the legacy --rocm-versions loop can use it): a bare numeric ROCm
-# token >= 7.10.0 is only available as a pre-built TheRock tarball (the
-# docker-built numeric release line ends below 7.10.0), so it takes the
-# TheRock install path with numeric naming (rocm-<numeric>, rocm/<numeric>,
-# rocmplus-<numeric>) even though it carries no `therock-` prefix.
+# token in the [7.10.0, 7.12.0) band is only available as a pre-built TheRock
+# tarball (the docker-built numeric release line ends below 7.10.0), so it takes
+# the TheRock tarball path with numeric naming (rocm-<numeric>, rocm/<numeric>,
+# rocmplus-<numeric>) even though it carries no `therock-` prefix. Bare numeric
+# >= 7.12 is published on the repo.amd.com apt repos and installs via the
+# docker/apt preview path (rocm_setup.sh IS_ROCM_PREVIEW), so it is EXCLUDED
+# here and falls through to the numeric/docker kind. Nightlies/prereleases still
+# use explicit `therock-*` tokens (+ --therock-url-base).
 _is_therock_numeric() {
    local _t="$1"
    [[ "${_t}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
-   [ "$(printf '%s\n' "7.10.0" "${_t}" | sort -V | head -n1)" = "7.10.0" ]
+   # lower bound: >= 7.10.0
+   [ "$(printf '%s\n' "7.10.0" "${_t}" | sort -V | head -n1)" = "7.10.0" ] || return 1
+   # exclude >= 7.12: those install via the docker/apt preview path, not tarball.
+   [ "$(printf '%s\n' "7.12" "${_t}" | sort -V | head -n1)" = "7.12" ] && return 1
+   return 0
 }
 
 if [[ -n "${PROGRAM_ENVIRONMENTS}" ]]; then
@@ -287,8 +295,9 @@ if [[ -n "${PROGRAM_ENVIRONMENTS}" ]]; then
          printf 'therock-afar-%s\n' "${BASH_REMATCH[1]}"
          return 0
       fi
-      # Bare numeric X.Y[.Z] -> identity; the >= 7.10.0 threshold (classify_kind
-      # below) decides docker-build vs TheRock-tarball, so numeric TheRock
+      # Bare numeric X.Y[.Z] -> identity; the version band (classify_kind below)
+      # decides docker-build vs TheRock-tarball: [7.10.0, 7.12.0) -> tarball;
+      # >= 7.12 -> docker/apt preview path; < 7.10.0 -> docker/make. Numeric GA
       # releases need no conf entry.
       if [[ "${_s}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
          printf '%s\n' "${_s}"
@@ -299,7 +308,8 @@ if [[ -n "${PROGRAM_ENVIRONMENTS}" ]]; then
 
    # Classify a canonical token into its install kind. Centralized so every
    # dispatch site agrees: therock-afar-* -> therock-afar; therock-* -> therock;
-   # bare numeric >= 7.10.0 -> therock (numeric TheRock); else numeric (docker).
+   # bare numeric [7.10.0, 7.12.0) -> therock (numeric TheRock tarball); else
+   # numeric (docker -- >= 7.12 uses the apt preview path, < 7.10.0 uses make).
    classify_kind() {
       local _tok="$1"
       if   [[ "${_tok}" == therock-afar-* ]]; then echo "therock-afar"

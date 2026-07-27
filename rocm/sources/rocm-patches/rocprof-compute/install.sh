@@ -91,15 +91,27 @@ else
     BLOCK=$(printf '\n\t-- %s\n\t-- The overlay shadows the broken in-distribution rocprof-compute\n\t-- symlink.  See:\n\t--   %s/README.md\n%s\n' \
         "$MARKER" "$SCRIPT_DIR" "$PREPEND_LINE")
     TMP=$(mktemp)
+    # NOTE: the in-distribution modulefiles align the PATH assignment with
+    # padding spaces, e.g. prepend_path("PATH",               pathJoin(base,
+    # "bin")).  Match arbitrary whitespace after the comma so the anchor is
+    # found regardless of alignment (a single-space regex silently no-ops).
     awk -v block="$BLOCK" '
         { print }
-        /^prepend_path\("PATH", pathJoin\(base, "bin"\)\)$/ && !done {
+        /^prepend_path\("PATH",[[:space:]]*pathJoin\(base, "bin"\)\)$/ && !done {
             print block
             done = 1
         }
     ' "$MODULEFILE" > "$TMP"
     sudo install -m 0644 "$TMP" "$MODULEFILE"
     rm -f "$TMP"
+    # Guard: fail loudly if the anchor was not found (otherwise the overlay
+    # is built but never lands on PATH and tests fall back to the broken
+    # in-distribution rocprof-compute).
+    if ! grep -q "$MARKER" "$MODULEFILE"; then
+        echo "ERROR: could not find PATH anchor in $MODULEFILE; overlay NOT wired." >&2
+        echo "       Expected a line like: prepend_path(\"PATH\", pathJoin(base, \"bin\"))" >&2
+        exit 3
+    fi
     echo "[install] edited modulefile $MODULEFILE"
 fi
 

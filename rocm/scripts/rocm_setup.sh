@@ -371,23 +371,24 @@ fi
 # AMDGPU_INSTALL_VERSION
 version-set
 
-# ROCm 7.12+ Tech Preview (the TheRock preview stream -- 7.12.0, 7.13.0,
-# and any later preview release in this branch) uses a fundamentally
-# different package distribution from the legacy 5.x-7.2 stream. Note
-# that 7.12 / 7.13 are NOT published on repo.radeon.com at all (the
-# legacy amdgpu-install path 404s for them); they exist ONLY on the new
-# repo.amd.com TheRock-preview host below, which is why the gate must
-# catch 7.12+ and route them here:
-#   * apt source lives at repo.amd.com/rocm/packages/<distro> (NOT
-#     repo.radeon.com/rocm/apt/<X.Y.Z>); the legacy host has no 7.12/7.13 tree.
-#   * GPG key at repo.amd.com/rocm/packages/gpg/rocm.gpg, installed to
+# ROCm 7.12+ (the TheRock preview stream -- 7.12.0, 7.13.0 -- plus GA
+# 7.14+ releases) uses a fundamentally different package distribution
+# from the legacy 5.x-7.2 stream. Note that 7.12+ are NOT published on
+# repo.radeon.com at all (the legacy amdgpu-install path 404s for them);
+# they exist ONLY on the new repo.amd.com apt repos below, which is why
+# the gate must catch 7.12+ and route them here:
+#   * apt source lives at repo.amd.com/rocm/<repo>/<distro> where <repo>
+#     is version-selected (see ROCM_PREVIEW_REPO in the branch below):
+#       - packages-multi-arch  for GA 7.14+ (per-target suffixes, e.g. gfx942)
+#       - packages             for 7.12/7.13 preview (gfx-family suffixes)
+#     NOT repo.radeon.com/rocm/apt/<X.Y.Z>; the legacy host has no 7.12+ tree.
+#   * GPG key at repo.amd.com/rocm/<repo>/gpg/rocm.gpg, installed to
 #     /etc/apt/keyrings/amdrocm.gpg (separate keyring filename from the
 #     legacy /etc/apt/keyrings/rocm.gpg so the two can coexist).
-#   * amdgpu-install installer is series 31.30 (e.g.
-#     amdgpu-install_31.30.313000-1_all.deb) with first-class
-#     --rocmrelease=<X.Y>  + --gfxversion=<gfx-family>  flags. Package
-#     names are gfx-tagged (e.g. amdrocm7.12-gfx94x / amdrocm7.13-gfx94x
-#     for gfx942/MI300).
+#   * amdgpu-install (series 31.30) is bypassed -- it builds malformed
+#     package names for this tree; we apt-install the amdrocm-core-sdk<X.Y>
+#     meta directly. Package names are gfx-tagged (e.g. amdrocm7.13-gfx94x
+#     on packages/, amdrocm-core-sdk7.14-gfx942 on packages-multi-arch/).
 #   * Packages install into /opt/rocm/core-<X.Y>/ (NOT /opt/rocm-<X.Y.Z>/).
 #     We add compatibility symlinks below so the rest of this script and
 #     all downstream rocm/, extras/, comm/, tools/ scripts that hard-code
@@ -514,8 +515,17 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
          #   * Different keyring filename      (amdrocm.gpg vs rocm.gpg)
          #   * Different installer series      (31.30   vs   X.Y matching ROCm)
          #   * Required --rocmrelease=X.Y      (short form, e.g. 7.13, NOT 7.13.0)
-         #   * Required --gfxversion=<family>  (e.g. gfx94x for gfx942/MI300A)
+         #   * Required --gfxversion=<suffix>  (see ROCM_PREVIEW_REPO below)
          #   * Different install root          (/opt/rocm/core-X.Y/ vs /opt/rocm-X.Y.Z/)
+         #
+         # VERSION-AWARE REPO SELECTION (ROCM_PREVIEW_REPO): GA 7.14+ is
+         # published ONLY on the multi-arch repo repo.amd.com/rocm/packages-multi-arch
+         # with per-target package suffixes (e.g. amdrocm-core-sdk7.14-gfx942).
+         # The older 7.12/7.13 preview lives on repo.amd.com/rocm/packages with
+         # gfx-FAMILY suffixes (e.g. amdrocm-core-sdk7.13-gfx94x) and has no 7.14.
+         # So we pick packages-multi-arch (+ specific gfx target) for >= 7.14 and
+         # packages (+ gfx family) for 7.12/7.13. Both share the same
+         # amdrocm-core-sdk<X.Y>-<suffix> meta-package naming.
          #
          # We layer compatibility symlinks at the end so the rest of this
          # script (modulefile generation, amdclang autodetection, etc.) and
@@ -555,47 +565,73 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
                *) send-error "ROCm ${ROCM_VERSION} preview: unsupported Ubuntu ${DISTRO_VERSION}; supported: 22.04 / 24.04 / 26.04" ;;
             esac
 
+            # Pick the apt repo by version (see header comment): GA 7.14+ ->
+            # packages-multi-arch (specific gfx target); 7.12/7.13 -> packages
+            # (gfx family). sort -V: ROCM_VERSION >= 7.14 iff 7.14 is the first
+            # line of `printf '7.14\n<ver>\n' | sort -V`.
+            if [ "$(printf '%s\n' "7.14" "${ROCM_VERSION}" | sort -V | head -n1)" = "7.14" ]; then
+               ROCM_PREVIEW_REPO="packages-multi-arch"
+            else
+               ROCM_PREVIEW_REPO="packages"
+            fi
+            echo "[rocm_setup] preview: using apt repo repo.amd.com/rocm/${ROCM_PREVIEW_REPO} for ROCm ${ROCM_VERSION}"
+
             # Install the new repo.amd.com GPG key into a distinct keyring
             # file (amdrocm.gpg) so it coexists with the legacy rocm.gpg
-            # keyring (used by 5.x-7.2 repos at repo.radeon.com).
+            # keyring (used by 5.x-7.2 repos at repo.radeon.com). The signing
+            # key is the same across packages/ and packages-multi-arch/, but we
+            # fetch it from the selected repo for consistency.
             ${SUDO} mkdir --parents --mode=0755 /etc/apt/keyrings
-            wget -q -O - https://repo.amd.com/rocm/packages/gpg/rocm.gpg \
+            wget -q -O - "https://repo.amd.com/rocm/${ROCM_PREVIEW_REPO}/gpg/rocm.gpg" \
                | gpg --dearmor \
                | ${SUDO} tee /etc/apt/keyrings/amdrocm.gpg > /dev/null
 
-            # Register the single-arch (instinct/radeon/ryzen) apt source
-            # at repo.amd.com. The fam=all multi-arch repo carries ARM64
-            # too, which we don't need for x86_64 HPC builds.
-            echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/packages/${ROCM_AMD_DIST_TAG} stable main" \
+            # Register the apt source at repo.amd.com. packages/ is single-arch
+            # (instinct/radeon/ryzen, x86_64); packages-multi-arch/ carries the
+            # GA 7.14+ tree (per-target suffixes). We pin arch=amd64 for our
+            # x86_64 HPC builds either way.
+            echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/${ROCM_PREVIEW_REPO}/${ROCM_AMD_DIST_TAG} stable main" \
                | ${SUDO} tee /etc/apt/sources.list.d/amdrocm-preview.list > /dev/null
             ${PKG_SUDO} apt-get update
 
             # AMDGPU_GFXMODEL is a semicolon-separated list like "gfx942"
-            # or "gfx942;gfx90a". The 7.13 amdrocm packages are tagged
-            # with the gfx FAMILY, not the specific gfx target:
-            #   gfx94x  (covers gfx940/gfx941/gfx942/gfx94X => MI300A/X)
-            #   gfx95x  (covers gfx950 family)
-            #   gfx101x (covers gfx1010/gfx1011/gfx1012/...)
-            #   gfx103x (covers gfx1030/gfx1031/...)
-            #   gfx110x (covers gfx1100/gfx1101/gfx1102/gfx1103)
-            #   gfx120x (covers gfx1200/gfx1201)
-            # Some gfx names have their own package and are NOT collapsed
-            # into a family: gfx908, gfx90a, gfx950, gfx1150, gfx1151,
-            # gfx1152. Use the first ;-separated target as the install gfx;
-            # operators wanting multi-target should run separate builds.
+            # or "gfx942;gfx90a". Use the first ;-separated target as the
+            # install gfx; operators wanting multi-target should run separate
+            # builds. The package SUFFIX depends on which repo we selected:
+            #
+            #   * packages-multi-arch (GA 7.14+): packages are tagged with the
+            #     SPECIFIC gfx target (e.g. amdrocm-core-sdk7.14-gfx942), so we
+            #     use the first target verbatim.
+            #   * packages (7.12/7.13 preview): packages are tagged with the gfx
+            #     FAMILY, not the specific target:
+            #       gfx94x  (covers gfx940/gfx941/gfx942/gfx94X => MI300A/X)
+            #       gfx95x  (covers gfx950 family)
+            #       gfx101x (covers gfx1010/gfx1011/gfx1012/...)
+            #       gfx103x (covers gfx1030/gfx1031/...)
+            #       gfx110x (covers gfx1100/gfx1101/gfx1102/gfx1103)
+            #       gfx120x (covers gfx1200/gfx1201)
+            #     Some gfx names have their own package and are NOT collapsed
+            #     into a family: gfx908, gfx90a, gfx950, gfx1150, gfx1151, gfx1152.
             _first_gfx="${AMDGPU_GFXMODEL%%;*}"
-            case "${_first_gfx}" in
-               gfx908|gfx90a|gfx950|gfx1150|gfx1151|gfx1152)
-                  ROCM_PREVIEW_GFX="${_first_gfx}" ;;
-               gfx94[0-9])  ROCM_PREVIEW_GFX="gfx94x"  ;;
-               gfx95[0-9])  ROCM_PREVIEW_GFX="gfx95x"  ;;
-               gfx101[0-9]) ROCM_PREVIEW_GFX="gfx101x" ;;
-               gfx103[0-9]) ROCM_PREVIEW_GFX="gfx103x" ;;
-               gfx110[0-9]) ROCM_PREVIEW_GFX="gfx110x" ;;
-               gfx120[0-9]) ROCM_PREVIEW_GFX="gfx120x" ;;
-               "")          send-error "ROCm ${ROCM_VERSION} preview: AMDGPU_GFXMODEL is empty; cannot pick gfx-family package suffix" ;;
-               *)           ROCM_PREVIEW_GFX="${_first_gfx}" ;;
-            esac
+            if [ -z "${_first_gfx}" ]; then
+               send-error "ROCm ${ROCM_VERSION} preview: AMDGPU_GFXMODEL is empty; cannot pick gfx package suffix"
+            fi
+            if [ "${ROCM_PREVIEW_REPO}" = "packages-multi-arch" ]; then
+               # Specific target verbatim (e.g. gfx942, gfx950, gfx90a, gfx1100).
+               ROCM_PREVIEW_GFX="${_first_gfx}"
+            else
+               case "${_first_gfx}" in
+                  gfx908|gfx90a|gfx950|gfx1150|gfx1151|gfx1152)
+                     ROCM_PREVIEW_GFX="${_first_gfx}" ;;
+                  gfx94[0-9])  ROCM_PREVIEW_GFX="gfx94x"  ;;
+                  gfx95[0-9])  ROCM_PREVIEW_GFX="gfx95x"  ;;
+                  gfx101[0-9]) ROCM_PREVIEW_GFX="gfx101x" ;;
+                  gfx103[0-9]) ROCM_PREVIEW_GFX="gfx103x" ;;
+                  gfx110[0-9]) ROCM_PREVIEW_GFX="gfx110x" ;;
+                  gfx120[0-9]) ROCM_PREVIEW_GFX="gfx120x" ;;
+                  *)           ROCM_PREVIEW_GFX="${_first_gfx}" ;;
+               esac
+            fi
             unset _first_gfx
 
             # KNOWN AMD BUG: amdgpu-install 31.30.313000 (only installer
@@ -613,16 +649,18 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
             # slurm-10042-rocm-sweep.out (2026-05-19).
             #
             # Fix: bypass amdgpu-install entirely. Install the canonical
-            # SDK meta-package amdrocm-core-sdk${X.Y}-${gfx-family}
-            # directly via apt. Its Depends: chain transitively pulls
+            # SDK meta-package amdrocm-core-sdk${X.Y}-${suffix} directly via
+            # apt (suffix = specific target for packages-multi-arch, gfx family
+            # for packages). Its Depends: chain transitively pulls
             # amdrocm-core-dev (which pulls amdrocm-core => base + llvm
             # + runtime + every -dev variant of the libs + opencl-dev),
             # amdrocm-developer-tools (profiler + smi base), amdrocm-rdc,
             # and amdrocm-opencl -- equivalent coverage to
             # --usecase=rocm,rocmdev,rocmdevtools,hiplibsdk,openclsdk,mlsdk
             # in the legacy amdgpu-install. Verified shape against
-            # https://repo.amd.com/rocm/packages/ubuntu2404/dists/stable/main/binary-amd64/Packages.gz
-            # (Depends graph rooted at amdrocm-core-sdk7.13-gfx94x).
+            # repo.amd.com/rocm/${ROCM_PREVIEW_REPO}/${ROCM_AMD_DIST_TAG}/dists/stable/main/binary-amd64/Packages.gz
+            # (Depends graphs rooted at amdrocm-core-sdk7.13-gfx94x on packages/
+            # and amdrocm-core-sdk7.14-gfx942 on packages-multi-arch/).
             ROCM_PREVIEW_META="amdrocm-core-sdk${ROCM_MAJORMINOR}-${ROCM_PREVIEW_GFX}"
             echo "[rocm_setup] preview: apt-get install ${ROCM_PREVIEW_META} (bypassing broken amdgpu-install 31.30)"
             ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y \
@@ -1145,6 +1183,17 @@ ${SUDO} mkdir -p ${MODULE_PATH}
 # autodetecting default version for distro and getting available gcc version list
 GCC_BASE_VERSION=`ls /usr/bin/gcc-* | cut -f2 -d'-' | grep '^[[:digit:]]' | head -1`
 
+# HSA_NO_SCRATCH_RECLAIM=1 is needed for good RCCL performance on ROCm >= 7.13.0.
+# The ubuntu base module below sets it unconditionally (RCCL fix from commit
+# dad2069); for the RHEL and Cray base modules we gate it to >= 7.13.0 so older
+# versions are left untouched. sort -V puts "7.13.0" first iff ROCM_VERSION >= 7.13.0.
+HSA_SCRATCH_LUA=""
+HSA_SCRATCH_TCL=""
+if [ "$(printf '%s\n' "7.13.0" "${ROCM_VERSION}" | sort -V | head -n1)" = "7.13.0" ]; then
+   HSA_SCRATCH_LUA='setenv("HSA_NO_SCRATCH_RECLAIM","1")'
+   HSA_SCRATCH_TCL='setenv HSA_NO_SCRATCH_RECLAIM 1'
+fi
+
 if [[ "${CRAY_SYSTEM}" == 1 ]]; then
 # ---- Cray base 'rocm' module (Tcl), modeled on /opt/modulefiles/rocm/<v> ----
 # AMD_CURPATH uses the container-form /opt/rocm-<v> placeholder; run_rocm_build.sh
@@ -1192,6 +1241,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}
 	setenv CRAY_ROCM_VERSION  \$MOD_LEVEL
 	setenv ROCM_PATH          \$AMD_CURPATH
 	setenv HIP_LIB_PATH       \$AMD_LIB
+	${HSA_SCRATCH_TCL}
 
 	prepend-path PATH         \$AMD_BIN
 	prepend-path MANPATH      \$AMD_MAN
@@ -1284,6 +1334,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	local mbase = myFileName():gsub("/[^/]*\$",""):gsub("/[^/]*\$",""):gsub("/[^/]*\$","")
 
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "liblib/rocm_sysdeps/lib"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPATH", pathJoin(base, "include"))
@@ -1329,6 +1380,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	prepend_path("CPATH", pathJoin(base, "include"))
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("INCLUDE", pathJoin(base, "include"))
+	${HSA_SCRATCH_LUA}
 	prepend_path("MODULEPATH", pathJoin(mbase, "rocm-${ROCM_VERSION}"))
 	prepend_path("MODULEPATH", pathJoin(mbase, "rocmplus-${ROCM_VERSION}"))
 	setenv("ROCM_PATH", base)
