@@ -2,6 +2,17 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-07-28
+
+- ROCm versions:
+    + 7.14.0
+- User-facing modules:
+    + uprof
+- Modules:
+    + rocm/7.14.0
+    + uprof/5.3-518
+
+[Full snapshot](archive/AAC6_system_status_2026-07-28.md)
 ## 2026-07-24
 
 - Down/drained nodes:
