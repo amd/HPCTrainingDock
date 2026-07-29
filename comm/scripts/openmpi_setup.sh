@@ -1431,43 +1431,82 @@ if [[ "${DRY_RUN}" == "0" ]]; then
    fi
    unset _leaf_dir
 
-   # ── Detect an incomplete / stub RCCL runtime ───────────────────────
-   # UCC 1.6.0's tl_rccl transport calls ncclCommInitRank at MPI_Init.
-   # Some ROCm trees ship a librccl.so that has the full host API but an
-   # EMPTY device-code section: .hip_fatbin is type NOBITS (0 bytes on
-   # disk) and the whole .so is only a few MB instead of the normal
-   # ~350-400 MB. Against such a runtime ncclCommInitRank has no device
-   # kernels to load and UCC wedges inside MPI_Init -- observed as a HANG
-   # on the patched rocm-7.14.0 base and a SEGV on the rocm-7.15 nightlies,
-   # taking down every OpenMPI-based regression test. A COMPLETE RCCL
-   # (rocm-7.13.0, the rocm-7.14.0a* nightly, ...) works fine and must be
-   # left alone. So probe the actual librccl.so we will run against and,
-   # when it is a stub, disable ONLY UCC's rccl transport in the generated
-   # modulefile (UCC's ucp transport + the rest of UCC collectives stay
-   # active, and correctness is preserved -- UCP handles ROCm buffers).
-   # This is version-agnostic: it fires exactly on the broken builds and
-   # spares the good ones, which a hardcoded 7.14*/7.15* version gate can
-   # not do (the 7.14 nightly and patched 7.14.0 share a version string
-   # but ship different RCCLs).
-   UCC_RCCL_STUB=0
+   # ── UCC 1.6.0 tl_rccl compatibility probe ──────────────────────────
+   # UCC 1.6.0's rccl transport (tl_rccl) calls ncclCommInitRank during
+   # MPI_Init, which eagerly runs ncclInitKernelsForDevice ->
+   # hipFuncGetAttributes BEFORE any user device-bind has settled. Two
+   # RCCL populations don't satisfy that specific pre-Init call sequence,
+   # so UCC's tl_rccl wedges (HANG) or trips (SEGV) inside MPI_Init and
+   # takes down every OpenMPI-based leaf. In BOTH cases RCCL itself is
+   # complete and works normally when driven directly (PyTorch, rccl-tests,
+   # etc.); only UCC's eager pre-Init handshake is affected. So we disable
+   # ONLY UCC's rccl transport (UCC_TLS=^rccl) in the generated modulefile;
+   # UCC's UCP transport (ROCm/GPU-buffer aware) and the rest of UCC's
+   # collectives stay active and correctness is preserved.
+   #
+   # Detection is property-based (packaging + RCCL version), NOT keyed on
+   # the ROCM_VERSION token or a *therock* path substring, because:
+   #   * the same ROCm token can ship either layout -- e.g. the packaged
+   #     rocm-7.14.0 base uses out-of-line kpack device code while the
+   #     rocm-7.14.0a* nightly ships a normal in-line librccl.so (and is
+   #     correctly left untouched here); and
+   #   * the *therock* substring never matched the rocm-afar-* install
+   #     dirs, so 7.12.0/afar were silently unguarded before.
+   #
+   # Signals, checked in order (first match wins, so the reason is accurate):
+   #   (a) OUT-OF-LINE device code (ROCm 7.14+ "kpack" packaging): the
+   #       librccl.so is a thin loader whose .hip_fatbin is NOBITS and whose
+   #       real kernels live in ${ROCM_PATH}/.kpack/rccl_lib_*.kpack, resolved
+   #       lazily via rocm-core.
+   #   (b) The RCCL 2.28.x preview series (TheRock 23.1/23.2, AFAR 23.x, and
+   #       their SDK-numeric 7.12.0/7.13.0 aliases): a version-specific
+   #       tl_rccl MPI_Init regression (SEGV first confirmed on TheRock 23.2.0).
+   #   (c) A size backstop (<50 MB) catches a genuine stub .so on hosts where
+   #       readelf is missing and neither (a) nor (b) identified it.
+   UCC_DISABLE_RCCL_TL=0
+   _ucc_rccl_reason=""
    _rccl_so="${ROCM_PATH:-}/lib/librccl.so"
-   if [ -n "${ROCM_PATH:-}" ] && [ -e "${_rccl_so}" ]; then
-      if command -v readelf >/dev/null 2>&1 \
+   if [ -n "${ROCM_PATH:-}" ]; then
+      # (a) out-of-line / kpack device code (definitive: ROCm 7.14+ layout)
+      if [ -e "${_rccl_so}" ] && command -v readelf >/dev/null 2>&1 \
          && readelf -S "${_rccl_so}" 2>/dev/null | grep -E '\.hip_fatbin' | grep -q 'NOBITS'; then
-         UCC_RCCL_STUB=1
+         UCC_DISABLE_RCCL_TL=1
+         _ucc_rccl_reason="RCCL device code is loaded at runtime (empty in-.so .hip_fatbin; kpack packaging)"
       fi
-      # Size fallback (readelf missing / section-name wrap): a real RCCL
-      # carries per-arch device fatbins and is >=100 MB; a stub is ~4 MB.
-      if [ "${UCC_RCCL_STUB}" = "0" ]; then
+      if [ "${UCC_DISABLE_RCCL_TL}" = "0" ] && ls "${ROCM_PATH}"/.kpack/rccl_lib_*.kpack >/dev/null 2>&1; then
+         UCC_DISABLE_RCCL_TL=1
+         _ucc_rccl_reason="RCCL device code is packaged out-of-line (${ROCM_PATH}/.kpack/rccl_lib_*.kpack)"
+      fi
+      # (b) RCCL 2.28.x preview series (TheRock 23.1/23.2, AFAR 23.x, 7.12/7.13).
+      # Checked before the size backstop so small-but-complete preview builds
+      # (e.g. single-arch 7.12.0) are attributed to the version, not mislabelled.
+      if [ "${UCC_DISABLE_RCCL_TL}" = "0" ]; then
+         _rccl_ver=$(grep -o 'PACKAGE_VERSION "[0-9.]*' \
+                     "${ROCM_PATH}/lib/cmake/rccl/rccl-config-version.cmake" 2>/dev/null \
+                     | grep -o '[0-9.]*$')
+         case "${_rccl_ver}" in
+            2.28.*) UCC_DISABLE_RCCL_TL=1
+                    _ucc_rccl_reason="RCCL ${_rccl_ver} (preview series) predates the UCC 1.6.0 tl_rccl MPI_Init fix" ;;
+         esac
+         unset _rccl_ver
+      fi
+      # (c) size backstop: a genuine stub .so that carries neither a NOBITS
+      # marker readable by readelf nor a .kpack glob and isn't 2.28.x.
+      if [ "${UCC_DISABLE_RCCL_TL}" = "0" ] && [ -e "${_rccl_so}" ]; then
          _rccl_sz=$(stat -Lc %s "${_rccl_so}" 2>/dev/null || echo 0)
-         [ "${_rccl_sz}" -lt 52428800 ] && UCC_RCCL_STUB=1
+         if [ "${_rccl_sz}" -lt 52428800 ]; then
+            UCC_DISABLE_RCCL_TL=1
+            _ucc_rccl_reason="librccl.so is only ${_rccl_sz} B (<50 MB) -- too small to embed device code"
+         fi
          unset _rccl_sz
       fi
    fi
    unset _rccl_so
-   if [ "${UCC_RCCL_STUB}" = "1" ]; then
-      echo "openmpi: detected incomplete/stub librccl.so under ${ROCM_PATH};" \
-           "baking setenv UCC_TLS=^rccl into the modulefile (UCC rccl transport disabled)."
+   if [ "${UCC_DISABLE_RCCL_TL}" = "1" ]; then
+      echo "openmpi: ${_ucc_rccl_reason}; UCC 1.6.0's rccl transport can't complete its" \
+           "MPI_Init handshake against it, so baking setenv UCC_TLS=^rccl into the modulefile." \
+           "UCC falls back to its ROCm-aware UCP transport; RCCL itself is complete and works" \
+           "normally when used directly (PyTorch, rccl-tests, etc.)."
    fi
 
 # The - option suppresses tabs
@@ -1496,23 +1535,14 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 	prereq("${ROCM_MODULE_NAME}")
 	family("MPI")
 EOF
-   elif [[ ( "${ROCM_VERSION}" == "7.13.0" && "${ROCM_PATH}" == *therock* ) \
-           || "${UCC_RCCL_STUB}" == "1" ]]; then
-     # UCC 1.6.0's RCCL transport breaks inside MPI_Init on certain ROCm
-     # RCCL runtimes: ncclCommInitRank -> ncclInitKernelsForDevice ->
-     # hipFuncGetAttributes trips before any user device-bind has settled.
-     # Two known-bad populations:
-     #   (a) TheRock 23.2.0 (RCCL 2.28.3): faults / segfaults.
-     #   (b) Incomplete "stub" librccl.so builds whose device code section
-     #       (.hip_fatbin) is empty -- the patched rocm-7.14.0 base HANGS
-     #       and the rocm-7.15 nightlies SEGV in ncclCommInitRank. These
-     #       are caught generically by the UCC_RCCL_STUB probe above (a
-     #       hardcoded version gate can't distinguish them from the working
-     #       rocm-7.14.0a* nightly, which shares the version string but
-     #       ships a complete 350-400 MB RCCL).
-     # RCCL itself works correctly when called directly; only UCC's pre-Init
-     # call sequence trips it. Disable just the rccl transport in UCC; the
-     # ucp transport (and the rest of UCC collectives) stays active.
+   elif [[ "${UCC_DISABLE_RCCL_TL}" == "1" ]]; then
+     # UCC 1.6.0's rccl transport can't complete its MPI_Init handshake
+     # against the RCCL populations flagged by the UCC_DISABLE_RCCL_TL probe
+     # above (out-of-line/kpack device code, or the RCCL 2.28.x preview
+     # series). RCCL itself is complete and works when called directly;
+     # only UCC's tl_rccl pre-Init sequence is affected, so we disable just
+     # that transport -- UCC's UCP transport (ROCm-buffer aware) and the rest
+     # of UCC's collectives stay active and correct.
      # Same precedent pattern as the 7.1.0 bcast workaround above.
 
      cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}.lua
@@ -1568,13 +1598,14 @@ fi
 # Drop the rocm module from the running shell so the next leaf script
 # starts from the same baseline (preflight will reload it). Moved here
 # from BEFORE the modulefile-write block (was at line 1162 prior to
-# 2026-05-06): the rocm modulefile setenv()s ROCM_PATH, and the elif
-# at the top of the if/elif/else above tests `${ROCM_PATH} == *therock*`
-# to decide whether to bake `setenv("UCC_TLS","^rccl")` into the
-# generated openmpi modulefile (UCC 1.6.0 RCCL transport segfaults in
-# MPI_Init on TheRock 23.2.0). Unloading rocm BEFORE that check made
-# ROCM_PATH empty, the elif fell through to else, and 8393 (2026-05-05)
-# emitted a modulefile WITHOUT the UCC_TLS workaround.
+# 2026-05-06): the rocm modulefile setenv()s ROCM_PATH, and the
+# UCC_DISABLE_RCCL_TL probe + the if/elif/else above read files UNDER
+# ${ROCM_PATH} (lib/librccl.so, .kpack/rccl_lib_*.kpack, and
+# lib/cmake/rccl/rccl-config-version.cmake) to decide whether to bake
+# `setenv("UCC_TLS","^rccl")` into the generated openmpi modulefile.
+# Unloading rocm BEFORE that point makes ROCM_PATH empty, the probe finds
+# nothing, the elif falls through to else, and the modulefile is emitted
+# WITHOUT the UCC_TLS workaround (regression seen as 8393, 2026-05-05).
 module unload "${ROCM_MODULE_NAME}"
 
 #git clone https://github.com/amd/HPCTrainingExamples

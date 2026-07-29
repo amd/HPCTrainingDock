@@ -10,9 +10,6 @@
 # disables the in-session XFCE screen lockers that would otherwise trap those
 # passwordless users behind an unpassable lightdm greeter, and writes an Lmod
 # modulefile.
-#
-# See docs/System_Management_Reports/08_VNC_noVNC_Remote_Desktop.md (esp. "TurboVNC
-# Security Types" and section 6.5 "Screen-locker lockout on VNC sessions").
 
 # Capture this script's absolute path BEFORE any cd, so the inline git-provenance
 # block lower down can resolve the script in the repo even after the build has cd'd
@@ -260,7 +257,7 @@ else
    # password for UnixLogin). The nginx TOTP reverse proxy is the access gate.
    # -------------------------------------------------------------------------
    ${SUDO} tee ${INSTALL_PATH}/etc/turbovncserver-security.conf >/dev/null <<-EOF
-	# Managed by turbovnc_setup.sh. See 08_VNC_noVNC_Remote_Desktop.md.
+	# Managed by turbovnc_setup.sh.
 	# Cluster accounts are SSH-key-only; access is gated by the nginx TOTP proxy.
 	pam-service-name = turbovnc
 	permitted-security-types = ${SECURITY_TYPES}
@@ -269,7 +266,7 @@ else
 	EOF
 
    ${SUDO} tee ${INSTALL_PATH}/etc/turbovncserver.conf >/dev/null <<-EOF
-	# Managed by turbovnc_setup.sh. See 08_VNC_noVNC_Remote_Desktop.md.
+	# Managed by turbovnc_setup.sh.
 	\$geometry = "${GEOMETRY}";
 	\$depth = 24;
 	\$wm = "${WM}";

@@ -150,7 +150,7 @@ SITE_CLI=0
 # Shared across ROCm versions (installs under TOP_INSTALL_PATH like emacs/miniconda3),
 # so it builds once on the first sweep version and existence-skips the rest. Access is
 # gated upstream by the nginx TOTP proxy; the leaf configures the None security type and
-# disables the XFCE screen lockers (see docs/System_Management_Reports/08_VNC_noVNC_Remote_Desktop.md).
+# disables the XFCE screen lockers.
 # Defaults ON to match emacs/miniconda3; set BUILD_TURBOVNC=0 to opt out (note: the leaf
 # apt-installs the xfce4 desktop + noVNC/websockify runtime).
 : ${BUILD_TURBOVNC:="1"}
