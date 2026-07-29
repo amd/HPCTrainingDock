@@ -1431,6 +1431,45 @@ if [[ "${DRY_RUN}" == "0" ]]; then
    fi
    unset _leaf_dir
 
+   # ── Detect an incomplete / stub RCCL runtime ───────────────────────
+   # UCC 1.6.0's tl_rccl transport calls ncclCommInitRank at MPI_Init.
+   # Some ROCm trees ship a librccl.so that has the full host API but an
+   # EMPTY device-code section: .hip_fatbin is type NOBITS (0 bytes on
+   # disk) and the whole .so is only a few MB instead of the normal
+   # ~350-400 MB. Against such a runtime ncclCommInitRank has no device
+   # kernels to load and UCC wedges inside MPI_Init -- observed as a HANG
+   # on the patched rocm-7.14.0 base and a SEGV on the rocm-7.15 nightlies,
+   # taking down every OpenMPI-based regression test. A COMPLETE RCCL
+   # (rocm-7.13.0, the rocm-7.14.0a* nightly, ...) works fine and must be
+   # left alone. So probe the actual librccl.so we will run against and,
+   # when it is a stub, disable ONLY UCC's rccl transport in the generated
+   # modulefile (UCC's ucp transport + the rest of UCC collectives stay
+   # active, and correctness is preserved -- UCP handles ROCm buffers).
+   # This is version-agnostic: it fires exactly on the broken builds and
+   # spares the good ones, which a hardcoded 7.14*/7.15* version gate can
+   # not do (the 7.14 nightly and patched 7.14.0 share a version string
+   # but ship different RCCLs).
+   UCC_RCCL_STUB=0
+   _rccl_so="${ROCM_PATH:-}/lib/librccl.so"
+   if [ -n "${ROCM_PATH:-}" ] && [ -e "${_rccl_so}" ]; then
+      if command -v readelf >/dev/null 2>&1 \
+         && readelf -S "${_rccl_so}" 2>/dev/null | grep -E '\.hip_fatbin' | grep -q 'NOBITS'; then
+         UCC_RCCL_STUB=1
+      fi
+      # Size fallback (readelf missing / section-name wrap): a real RCCL
+      # carries per-arch device fatbins and is >=100 MB; a stub is ~4 MB.
+      if [ "${UCC_RCCL_STUB}" = "0" ]; then
+         _rccl_sz=$(stat -Lc %s "${_rccl_so}" 2>/dev/null || echo 0)
+         [ "${_rccl_sz}" -lt 52428800 ] && UCC_RCCL_STUB=1
+         unset _rccl_sz
+      fi
+   fi
+   unset _rccl_so
+   if [ "${UCC_RCCL_STUB}" = "1" ]; then
+      echo "openmpi: detected incomplete/stub librccl.so under ${ROCM_PATH};" \
+           "baking setenv UCC_TLS=^rccl into the modulefile (UCC rccl transport disabled)."
+   fi
+
 # The - option suppresses tabs
    if [[ "${ROCM_VERSION}" == "7.1.0" ]]; then
      # Need the legacy mode enabled as a workaround for a bcast bug
@@ -1457,16 +1496,24 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 	prereq("${ROCM_MODULE_NAME}")
 	family("MPI")
 EOF
-   elif [[ "${ROCM_VERSION}" == "7.13.0" && "${ROCM_PATH}" == *therock* ]]; then
-     # UCC 1.6.0's RCCL transport segfaults inside MPI_Init on TheRock 23.2.0
-     # (RCCL 2.28.3): ncclCommInitRank -> ncclInitKernelsForDevice ->
-     # hipFuncGetAttributes faults before any user device-bind has settled.
+   elif [[ ( "${ROCM_VERSION}" == "7.13.0" && "${ROCM_PATH}" == *therock* ) \
+           || "${UCC_RCCL_STUB}" == "1" ]]; then
+     # UCC 1.6.0's RCCL transport breaks inside MPI_Init on certain ROCm
+     # RCCL runtimes: ncclCommInitRank -> ncclInitKernelsForDevice ->
+     # hipFuncGetAttributes trips before any user device-bind has settled.
+     # Two known-bad populations:
+     #   (a) TheRock 23.2.0 (RCCL 2.28.3): faults / segfaults.
+     #   (b) Incomplete "stub" librccl.so builds whose device code section
+     #       (.hip_fatbin) is empty -- the patched rocm-7.14.0 base HANGS
+     #       and the rocm-7.15 nightlies SEGV in ncclCommInitRank. These
+     #       are caught generically by the UCC_RCCL_STUB probe above (a
+     #       hardcoded version gate can't distinguish them from the working
+     #       rocm-7.14.0a* nightly, which shares the version string but
+     #       ships a complete 350-400 MB RCCL).
      # RCCL itself works correctly when called directly; only UCC's pre-Init
      # call sequence trips it. Disable just the rccl transport in UCC; the
-     # ucp transport (and the rest of UCC collectives) stays active. Scope
-     # narrowed to TheRock 7.13.0; broaden after testing therock-23.1.0
-     # (alias 7.12.0). Same precedent pattern as the 7.1.0 bcast workaround
-     # above.
+     # ucp transport (and the rest of UCC collectives) stays active.
+     # Same precedent pattern as the 7.1.0 bcast workaround above.
 
      cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}.lua
 	whatis("Name: GPU-aware openmpi")
