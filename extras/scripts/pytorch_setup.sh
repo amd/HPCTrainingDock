@@ -389,6 +389,7 @@ default_pytorch_version_for_rocm() {
       # keep this AFTER the single-digit 7.x rows so 7.1/7.2 keep their
       # pinned 2.10/2.11 defaults.
       7.[1-9][0-9])                         echo "2.9.1" ;;
+      10.[0-9][0-9])                        echo "2.9.1" ;;
       # Off-table guards: too-old / too-new ROCm. Empty stdout means
       # "I don't know" and the resolver keeps the file-default (now
       # 2.12.0, newest known).
