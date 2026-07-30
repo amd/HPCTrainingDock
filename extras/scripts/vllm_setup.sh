@@ -42,6 +42,11 @@ VLLM_REF_USER_SET=0
 # comment where it is applied, below). Default on; disable to re-test on a
 # newer rocm/pytorch/vLLM combo that may no longer need it.
 HIP_VERSION_PATCH=1
+# Apply the atomicAdd half/half2 guard workaround (vllm PR #41802 backport;
+# see the comment where it is applied, below). Default on; it self-gates on
+# the HIP version in-source, so it is a no-op on ROCm <= 7.12 and on vLLM
+# refs that already carry the guard. Disable to re-test on a newer vLLM ref.
+ATOMICADD_GUARD_PATCH=1
 # vLLM version. Empty => auto-derive from the pytorch module's torch
 # (see the "vLLM version gate" block after arg parsing). Tracked
 # separately so that block can tell "user passed --vllm-version" from
@@ -106,6 +111,7 @@ usage()
    echo "  --vllm-repo [ VLLM_REPO ] git repo to build vLLM from, default $VLLM_REPO"
    echo "  --vllm-ref [ VLLM_REF ] git tag/branch/commit to build, default v\${VLLM_VERSION}"
    echo "  --hip-version-patch [ 0|1 ] apply the TORCH_HIP_VERSION stable-ABI ROCm compile workaround, default $HIP_VERSION_PATCH (re-evaluate per rocm/torch/vLLM version)"
+   echo "  --atomicadd-guard-patch [ 0|1 ] apply the atomicAdd half/half2 ROCm>=7.13 guard (vllm PR #41802 backport), default $ATOMICADD_GUARD_PATCH (self-gates in-source; no-op on ROCm<=7.12 or vLLM refs that already carry it)"
    echo "  --pytorch-module [ PYTORCH_MODULE ] pytorch module to load, default $PYTORCH_MODULE"
    echo "  --pytorch-version [ PYTORCH_VERSION ] bound pytorch version; keys the install dir + modulefile (vllm-v\${VLLM_VERSION}-pt\${PYTORCH_VERSION}) so multiple (vllm,pytorch) pairs coexist. Empty (default) -> resolved from the loaded pytorch module token."
    echo "  --protect-packages [ names ] extra space-separated ABI/ROCm packages to hard-pin from the pytorch module (appended to the default set)"
@@ -179,6 +185,11 @@ do
       "--hip-version-patch")
           shift
           HIP_VERSION_PATCH=${1}
+          reset-last
+          ;;
+      "--atomicadd-guard-patch")
+          shift
+          ATOMICADD_GUARD_PATCH=${1}
           reset-last
           ;;
       "--pytorch-module")
@@ -415,6 +426,37 @@ else
    VLLM_PATH="/opt/rocmplus-${ROCM_VERSION}/${VLLM_DIRNAME}"
 fi
 
+# ── Install-path sudo (computed EARLY, before --replace) ──────────────
+# The --replace block below rm -rf's the install dir + modulefile with
+# ${SUDO}, and the source-build branch mkdir's ${VLLM_PATH} with it. The
+# leaf default is SUDO=sudo; on a cluster with no passwordless sudo and a
+# user-owned tree it must stay sudo, while on a user-owned tree it must
+# drop to "" to avoid a password prompt. Decide it ONCE here via an actual
+# write-probe of the nearest existing ancestor rather than the fragile
+# `[ -w ]` test (which can misreport a root-owned NFS parent as writable,
+# clearing sudo and making the later mkdir fail with a bare Permission
+# denied -- see rocm-7.14.0 job 16810). Mirrors the hypre/magma/kokkos/
+# petsc/rocshmem probe. EUID 0 never needs sudo; a Singularity-cleared
+# SUDO is left empty.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   SUDO=""
+elif [ -z "${SUDO}" ]; then
+   :  # already cleared (e.g. Singularity)
+else
+   _iprobe="$(dirname "${VLLM_PATH}")"
+   while [ ! -e "${_iprobe}" ]; do _iprobe="$(dirname "${_iprobe}")"; done
+   _itest=$(mktemp --tmpdir="${_iprobe}" .vllm-inst-probe.XXXXXX 2>/dev/null || true)
+   if [ -n "${_itest}" ] && [ -f "${_itest}" ]; then
+      rm -f "${_itest}"
+      SUDO=""
+      echo "vllm: install ancestor ${_iprobe} is user-writable (probe succeeded); not using sudo for install"
+   else
+      SUDO="sudo"
+      echo "vllm: install ancestor ${_iprobe} not user-writable (probe failed); using sudo for install"
+   fi
+   unset _iprobe _itest
+fi
+
 # ── --replace + existence guard ──────────────────────────────────────
 if [ "${REPLACE}" = "1" ]; then
    echo "[vllm --replace 1] removing prior install + modulefile if present"
@@ -437,6 +479,31 @@ fi
 _vllm_on_exit() {
    local rc=$?
    [ -n "${VLLM_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${VLLM_BUILD_ROOT}"
+   # ── attempted-but-failed marker (inventory 'F' glyph) ─────────────
+   # On failure, drop a persistent vllm.FAILED sibling of the install dir
+   # so inventory_packages.py can tell "build attempted but failed" (F)
+   # apart from "never attempted" (-). It lives in the rocmplus root (a
+   # sibling of VLLM_PATH), so it survives the rm -rf of VLLM_PATH below.
+   # On a clean exit we clear any stale marker from a prior failed run.
+   # Mirrors hypre_setup.sh. VLLM_PATH may be unset if we exit before it
+   # is computed (e.g. arg parsing) -- guard on it so the trap is safe.
+   if [ -n "${VLLM_PATH:-}" ]; then
+      local _fail_marker="$(dirname "${VLLM_PATH}")/vllm.FAILED"
+      if [ ${rc} -ne 0 ]; then
+         ${SUDO:-sudo} mkdir -p "$(dirname "${VLLM_PATH}")" 2>/dev/null || true
+         ${SUDO:-sudo} tee "${_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+FAILED package: vllm
+ROCm SDK:        ${ROCM_PATH:-unknown}
+ROCm token:      ${ROCM_VERSION:-unknown}
+vLLM version:    ${VLLM_VERSION:-unknown} (ref ${VLLM_REF:-unknown}, bound pytorch ${PYTORCH_VERSION:-unknown})
+Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Setup script:    vllm_setup.sh (EXIT-trap fail marker)
+Reason:          build exited rc=${rc}; partial install wiped (see log_vllm_*.txt).
+MARKER_EOF
+      else
+         ${SUDO:-sudo} rm -f "${_fail_marker}"
+      fi
+   fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[vllm fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO:-sudo} rm -rf "${VLLM_PATH}"
@@ -496,11 +563,19 @@ else
    echo "======================================="
    echo ""
 
-   # don't use sudo if the user has write access to the install path
-   if [ -d "$(dirname "${VLLM_PATH}")" ] && [ -w "$(dirname "${VLLM_PATH}")" ]; then
-      SUDO=""
+   # ${SUDO} was decided once, up front, by the install-path write-probe
+   # (see "Install-path sudo" block above). Create the install dir and
+   # ABORT loudly if it fails -- a silent mkdir failure here previously let
+   # the build limp on for ~15k log lines before dying on an unrelated
+   # compile error, burying the real "Permission denied" (job 16810). The
+   # non-zero exit fires the EXIT trap (fail-cleanup) and surfaces as a
+   # real FAILED in the main_setup summary instead of a misleading pass.
+   if ! ${SUDO} mkdir -p "${VLLM_PATH}"; then
+      echo "ERROR: could not create vLLM install dir ${VLLM_PATH} (SUDO='${SUDO}')."
+      echo "       The install-path ancestor is not writable and sudo did not succeed;"
+      echo "       re-run as root, with passwordless sudo, or point --install-path at a writable tree."
+      exit 1
    fi
-   ${SUDO} mkdir -p "${VLLM_PATH}"
    if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
       ${SUDO} chmod -R a+w "${VLLM_PATH}"
    fi
@@ -611,6 +686,57 @@ CMAKE_PATCH
       unset _vllm_cml
    else
       echo "vllm: TORCH_HIP_VERSION workaround DISABLED (--hip-version-patch 0)"
+   fi
+
+   # ── WORKAROUND: duplicate atomicAdd(half*/half2*) on ROCm >= 7.13 ────
+   #
+   # SYMPTOM (vLLM v0.11.0 + torch 2.9 + ROCm 7.13/7.14):
+   #   csrc/quantization/gptq/q_gemm.hip:322: error: call to 'atomicAdd'
+   #   is ambiguous  (candidates: hip/amd_detail/amd_hip_fp16.h:875
+   #   'atomicAdd(__half2*, __half2)' vs gptq/compat.cuh's shim).
+   #
+   # ROOT CAUSE: ROCm 7.13's HIP headers (rocm-systems#5194) added NATIVE
+   #   atomicAdd(__half*) and atomicAdd(__half2*). vLLM's compat.cuh still
+   #   unconditionally defines its own half/half2 atomicAdd shims to backfill
+   #   older ROCm; since half2==__half2 the two are indistinguishable ->
+   #   ambiguous overload. Absent in ROCm <= 7.12 (header lacked the native
+   #   overload). This is NOT a compiler bug; clang correctly diagnoses it.
+   #
+   # FIX: upstream vLLM PR #41802 guards the shim block with a HIP-version
+   #   check so it is skipped on ROCm >= 7.13. That fix is NOT in the
+   #   torch-2.9-compatible release line we build (v0.11.0/0.11.1/0.11.2 and
+   #   even v0.12.0 still ship the unguarded shim), so we backport the exact
+   #   one-line guard here. It self-gates on HIP_VERSION_MAJOR/MINOR, so it
+   #   is correct for 7.13, 7.14 and beyond and a no-op on ROCm <= 7.12.
+   #
+   # RE-EVALUATE when bumping the vLLM ref: if compat.cuh already carries the
+   #   guard (or the gptq kernels are relocated), this block auto-no-ops and
+   #   prints a notice. Re-test with --atomicadd-guard-patch 0.
+   if [ "${ATOMICADD_GUARD_PATCH}" = "1" ]; then
+      _vllm_compat="${VLLM_SRC}/csrc/quantization/gptq/compat.cuh"
+      if [ ! -f "${_vllm_compat}" ]; then
+         echo "vllm: compat.cuh not found at expected path (gptq kernels relocated upstream?); atomicAdd guard SKIPPED. If the build fails with 'atomicAdd is ambiguous', revisit this workaround."
+      elif grep -q 'HIP_VERSION_MAJOR \* 100 + HIP_VERSION_MINOR' "${_vllm_compat}"; then
+         echo "vllm: compat.cuh already carries the atomicAdd HIP-version guard; no patch needed."
+      elif grep -qF '#if defined(__CUDA_ARCH__) || defined(USE_ROCM)' "${_vllm_compat}"; then
+         python3 - "${_vllm_compat}" <<'PY'
+import sys
+path = sys.argv[1]
+old = "#if defined(__CUDA_ARCH__) || defined(USE_ROCM)\n"
+new = ("#if defined(__CUDA_ARCH__) || \\\n"
+       "    (defined(USE_ROCM) && (HIP_VERSION_MAJOR * 100 + HIP_VERSION_MINOR) < 713)\n")
+src = open(path).read()
+if src.count(old) != 1:
+    sys.exit("vllm: atomicAdd guard anchor not unique in compat.cuh; refusing to patch")
+open(path, "w").write(src.replace(old, new, 1))
+PY
+         echo "vllm: applied atomicAdd half/half2 ROCm>=7.13 guard to compat.cuh (vllm PR #41802 backport; disable with --atomicadd-guard-patch 0)"
+      else
+         echo "vllm: compat.cuh atomicAdd anchor not found (upstream changed the guard?); atomicAdd guard SKIPPED. If the build fails with 'atomicAdd is ambiguous', revisit this workaround."
+      fi
+      unset _vllm_compat
+   else
+      echo "vllm: atomicAdd guard workaround DISABLED (--atomicadd-guard-patch 0)"
    fi
 
    # ── Build toolchain for --no-build-isolation ───────────────────────
