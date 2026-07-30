@@ -817,6 +817,33 @@ print('matdensecupmimpl.h patched: added <cuda/std/iterator> for CCCL 3.0+')
          fi
          unset _ns_dir
 
+         # ── ROCm 7.14.0 amdflang -march=native codegen crash (2026-07-30) ──
+         # ROCm 7.14.0's amdflang (LLVM Flang 23.0.0git, llvm-project commit
+         # 46fcb339) SEGFAULTS in the flang frontend when compiling some F77
+         # (e.g. the bundled fblaslapack lapack/dggbal.f) with -march=native
+         # at -O2 or higher. Verified 2026-07-30 on aac6-fe1: the identical
+         # file+flags compile cleanly on rocm 7.13.0 (flang commit 43215c73)
+         # and rocm 7.2.4 (flang 22), so this is a regression isolated to the
+         # 7.14.0 flang build. Symptom in configure.log:
+         #   flang-23: error: unable to execute command: Segmentation fault
+         #   Error running make on .../externalpackages/git.fblaslapack
+         # Trigger is -march=native (znver*) at -O2+; -mtune=native alone is
+         # safe and the full fblaslapack lib builds with "-O3 -mtune=native".
+         # Only the Fortran compiler is affected -- amdclang (C/C++/HIP) is
+         # fine -- so we drop -march=native from FOPTFLAGS ONLY, and ONLY for
+         # 7.14.0 (incl. its nightly aYYYYMMDD tokens). A later 7.14.x / 7.15
+         # minor release is expected to ship the fixed flang and will keep the
+         # default -march=native. C/C++/HIP opt flags are unchanged.
+         FOPTFLAGS_VALUE="-O3 -march=native -mtune=native"
+         case "${ROCM_VERSION}" in
+            7.14.0|7.14.0a*)
+               FOPTFLAGS_VALUE="-O3 -mtune=native"
+               echo "petsc: ROCm ${ROCM_VERSION} detected -- dropping -march=native from FOPTFLAGS"
+               echo "petsc:   (works around amdflang frontend segfault on -march=native at -O2+;"
+               echo "petsc:    C/C++/HIP flags unchanged. Remove this guard once the 7.14 flang is fixed.)"
+               ;;
+         esac
+
          # PETSC_FORTRAN_FLAG is --with-fortran-bindings=1 by default but flips to
          # --with-fortran-bindings=0 when classic-Flang is detected upstream
          # (see classic-Flang block above). Built as an array so args that
@@ -826,7 +853,7 @@ print('matdensecupmimpl.h patched: added <cuda/std/iterator> for CCCL 3.0+')
             --with-debugging=0 --with-x=0
             COPTFLAGS="-O3 -march=native -mtune=native"
             CXXOPTFLAGS="-O3 -march=native -mtune=native"
-            FOPTFLAGS="-O3 -march=native -mtune=native"
+            FOPTFLAGS="${FOPTFLAGS_VALUE}"
             HIPOPTFLAGS="-O3 -march=native -mtune=native"
             --download-fblaslapack=1 --download-hdf5=$DOWNLOAD_HDF5 --download-metis=1
             --download-parmetis=1 --with-shared-libraries=1 --download-blacs=1
