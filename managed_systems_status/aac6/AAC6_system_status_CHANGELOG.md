@@ -2,6 +2,17 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-07-31
+
+- Slurm partitions:
+    + sh5_cpx_admin_long:4
+    + SH5_MI300A_CPX:4
+    - sh5_cpx_admin_long:3
+    - SH5_MI300A_CPX:3
+- Down/drained nodes:
+    + sh5-pl1-s12-36:drain*
+
+[Full snapshot](archive/AAC6_system_status_2026-07-31.md)
 ## 2026-07-28
 
 - ROCm versions:
