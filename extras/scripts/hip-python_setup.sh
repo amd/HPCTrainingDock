@@ -508,7 +508,15 @@ PY
       echo "Installing numba-hip with extras suffix: rocm-${NUMBA_HIP_EXTRA_SUFFIX}"
       python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python -i https://test.pypi.org/simple "hip-python==${HIP_PYTHON_PIP_SPEC}" --force-reinstall --no-cache
       python3 -m pip install --target=$HIP_PYTHON_PATH/hip-python -i https://test.pypi.org/simple "hip-python-as-cuda==${HIP_PYTHON_PIP_SPEC}" --force-reinstall --no-cache
-      python3 -m pip config set global.extra-index-url https://test.pypi.org/simple
+      # NOTE: do NOT persist test.pypi.org as a GLOBAL pip extra-index-url.
+      # The two installs above already scope Test PyPI to hip-python via `-i`.
+      # A `pip config set global.extra-index-url https://test.pypi.org/simple`
+      # here leaks Test PyPI into ~/.config/pip/pip.conf (shared NFS $HOME),
+      # poisoning EVERY later pip run cluster-wide: e.g. the vLLM dependency
+      # resolve then prefers a name-squatting `FASTAPI 1.0` placeholder off
+      # Test PyPI (1.0 > real fastapi 0.115.x) and dies with
+      # metadata-generation-failed (rocm-7.14.0 job 16823). Keep the extra
+      # index confined to the `-i` flags above.
       # numba-hip + numba namespace collision (two-pass install) ─────────
       # numba-hip overlays the `numba` namespace (it ships numba/hip/...)
       # while its dependency numba 0.60.0 ships numba/core, numba/np, ...

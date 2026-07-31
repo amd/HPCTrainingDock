@@ -739,6 +739,22 @@ PY
       echo "vllm: atomicAdd guard workaround DISABLED (--atomicadd-guard-patch 0)"
    fi
 
+   # ── Harden pip against a polluted global/user pip config ───────────
+   # A stray `extra-index-url` in ~/.config/pip/pip.conf (notably
+   # https://test.pypi.org/simple, which hip-python_setup.sh used to persist
+   # via `pip config set global.extra-index-url`, and $HOME being shared NFS
+   # leaks it to every node) makes EVERY pip run below ALSO consult Test PyPI.
+   # There a name-squatting `FASTAPI 1.0` placeholder outranks real fastapi
+   # (1.0 > 0.115.x) and aborts the dependency resolve with
+   # metadata-generation-failed (rocm-7.14.0 job 16823). A `--index-url` flag
+   # does NOT clear a config `extra-index-url`, so neutralize the config file
+   # itself (PIP_CONFIG_FILE=/dev/null) and pin the canonical index; this makes
+   # the toolchain/wheel/resolve/install steps deterministic regardless of the
+   # ambient pip config. This cluster reaches pypi.org directly (no internal
+   # mirror/proxy in the pip config), so ignoring config files is safe here.
+   export PIP_CONFIG_FILE=/dev/null
+   export PIP_INDEX_URL="https://pypi.org/simple"
+
    # ── Build toolchain for --no-build-isolation ───────────────────────
    # With --no-build-isolation pip uses THIS environment's build backend
    # instead of provisioning a clean one, which is exactly what lets the
@@ -856,10 +872,24 @@ PY
    AMDSMI_SRC="${ROCM_PATH:-}/share/amd_smi"
    if [ -n "${ROCM_PATH:-}" ] && [ -f "${AMDSMI_SRC}/pyproject.toml" ]; then
       echo "vllm: installing amdsmi bindings from ${AMDSMI_SRC} (ROCm platform detection)"
+      # Build from a WRITABLE COPY, never from ${AMDSMI_SRC} directly. pip does
+      # an in-tree PEP 517 build (writes build/ + *.egg-info INTO the source
+      # dir), but ${AMDSMI_SRC} lives in the root-owned, read-only ROCm install
+      # tree (/opt/rocm-*/share/amd_smi) -> "could not create 'build/lib/amdsmi':
+      # Permission denied" (rocm-7.14.0 job 16824). --no-build-isolation does
+      # NOT relocate the build. The bindings are self-contained (pure-Python +
+      # a bundled libamd_smi.so shipped as package_data), so a plain recursive
+      # copy into the per-job build root builds cleanly and never touches the
+      # ROCm tree. cp -r (not -a) so we do not try to preserve root ownership
+      # (which fails as a normal user); the copy is admin-owned and writable.
+      AMDSMI_BUILD="${VLLM_BUILD_ROOT}/amd_smi"
+      rm -rf "${AMDSMI_BUILD}"
+      mkdir -p "${AMDSMI_BUILD}"
+      cp -r "${AMDSMI_SRC}/." "${AMDSMI_BUILD}/"
       pip3 install \
          --prefix="${VLLM_PATH}" \
          --no-build-isolation --no-deps --ignore-installed --no-warn-script-location \
-         "${AMDSMI_SRC}" \
+         "${AMDSMI_BUILD}" \
          || send-error "installing amdsmi from ${AMDSMI_SRC} failed; without it vLLM will not detect the ROCm platform."
    else
       echo "vllm: WARNING amdsmi source not found at ${AMDSMI_SRC}; vLLM may fall back to UnspecifiedPlatform and never use the GPU."
