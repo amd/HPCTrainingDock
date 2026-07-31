@@ -583,6 +583,81 @@ else
          git clone -q --depth 1 -b v$CUPY_VERSION --recursive https://github.com/cupy/cupy.git
          cd cupy
       fi
+
+      # ── ROCm 10 / CCCL 3.0 header-removal shims (cupy HIP sources) ────
+      # ROCm 10 rebased rocThrust/hipCUB onto NVIDIA CCCL 3.0, which
+      # REMOVED two headers cupy's HIP sources include unconditionally:
+      #   cupy/cuda/cupy_cub.cu    <hipcub/iterator/transform_input_iterator.hpp>
+      #   cupy/cuda/cupy_thrust.cu <thrust/optional.h>
+      # -> fatal "file not found" (slurm 16809, rocm-10.0.0a20260730,
+      #    2026-07-30; cupy_cub.cu:21 and cupy_thrust.cu:17).
+      # Both are wrapped in __has_include guards so this is a strict no-op
+      # on ROCm <= 7.x (headers still present) and on the CUDA branch:
+      #   - cupy_cub.cu: hipcub::TransformInputIterator was removed together
+      #     with its header; alias it to the surviving
+      #     rocprim::transform_iterator (identical (iterator, op) ctor order,
+      #     verified against rocprim/iterator/transform_iterator.hpp).
+      #   - cupy_thrust.cu: the include is pulled in ONLY for the
+      #     THRUST_OPTIONAL_CPP11_CONSTEXPR macro (a constexpr qualifier);
+      #     thrust::optional itself is unused, so define the macro directly.
+      # Applied to all clone paths uniformly; the guards make it safe.
+      python3 - cupy/cuda/cupy_cub.cu cupy/cuda/cupy_thrust.cu <<'__CUPY_CCCL3_PATCH_PYEOF__'
+import sys, pathlib
+
+cub, thr = (pathlib.Path(a) for a in sys.argv[1:3])
+
+if cub.is_file():
+    s = cub.read_text()
+    old = '#include <hipcub/iterator/transform_input_iterator.hpp>\n'
+    if old in s and 'HPCTrainingDock TransformInputIterator shim' not in s:
+        new = (
+            '#if defined(__has_include) && !__has_include(<hipcub/iterator/transform_input_iterator.hpp>)\n'
+            '// [HPCTrainingDock TransformInputIterator shim] ROCm 10 / CCCL 3.0\n'
+            '// removed hipcub::TransformInputIterator and its header. Alias it to\n'
+            '// the surviving rocprim::transform_iterator (same (iterator, op) ctor).\n'
+            '#include <cstddef>\n'
+            '#include <rocprim/iterator/transform_iterator.hpp>\n'
+            'namespace hipcub {\n'
+            'template <typename ValueType, typename ConversionOp, typename InputIteratorT,\n'
+            '          typename OffsetT = std::ptrdiff_t>\n'
+            'using TransformInputIterator =\n'
+            '    ::rocprim::transform_iterator<InputIteratorT, ConversionOp, ValueType>;\n'
+            '}  // namespace hipcub\n'
+            '#else\n'
+            + old +
+            '#endif\n'
+        )
+        cub.write_text(s.replace(old, new, 1))
+        print("cupy_cub.cu: applied hipcub::TransformInputIterator CCCL-3 shim")
+    else:
+        print("cupy_cub.cu: skip (already patched or include absent)")
+else:
+    print("cupy_cub.cu: not found -- skip")
+
+if thr.is_file():
+    s = thr.read_text()
+    old = '#include <thrust/optional.h>\n'
+    if old in s and 'HPCTrainingDock thrust::optional' not in s:
+        new = (
+            '#if defined(__has_include) && !__has_include(<thrust/optional.h>)\n'
+            '// [HPCTrainingDock thrust::optional shim] ROCm 10 / CCCL 3.0 removed\n'
+            '// thrust/optional.h. cupy only needs THRUST_OPTIONAL_CPP11_CONSTEXPR\n'
+            '// (a constexpr qualifier), not the thrust::optional type.\n'
+            '#ifndef THRUST_OPTIONAL_CPP11_CONSTEXPR\n'
+            '#define THRUST_OPTIONAL_CPP11_CONSTEXPR constexpr\n'
+            '#endif\n'
+            '#else\n'
+            + old +
+            '#endif\n'
+        )
+        thr.write_text(s.replace(old, new, 1))
+        print("cupy_thrust.cu: applied thrust/optional.h CCCL-3 fallback")
+    else:
+        print("cupy_thrust.cu: skip (already patched or include absent)")
+else:
+    print("cupy_thrust.cu: not found -- skip")
+__CUPY_CCCL3_PATCH_PYEOF__
+
       uv build --wheel
       uv pip install -v --upgrade --target=$CUPY_PATH dist/*.whl
       uv pip install -v --target=$CUPY_PATH cupy-xarray --no-deps

@@ -486,7 +486,7 @@ else
       export CLANG_COMPILER=`which clang`
       sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
 
-      result=`echo ${ROCM_VERSION} | awk '$1>6.3.9'` && echo $result
+      result=$( [ "$(printf '%s\n%s\n' "$ROCM_VERSION" "6.3.9" | sort -V | tail -n1)" != "6.3.9" ] && printf '%s' "$ROCM_VERSION" || : ) && echo $result
       if [[ "${result}" ]]; then
 	 # need this for ROCm greater than 6.4.0 due to upgrade in clang version
          sed -i '$a build:rocm --copt=-Wno-error=c23-extensions' .bazelrc

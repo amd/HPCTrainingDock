@@ -766,7 +766,7 @@ else
       # otherwise the plugin's find_package(LLVM)/clang headers are missing
       # and the whole build would fail on this single optional feature.
       ROCM_FLAGS="-rocm=${ROCM_PATH} -hip=${ROCM_PATH} -rocmsmi=${ROCM_PATH} -roctracer=${ROCM_PATH} -rocprofiler=${ROCM_PATH}"
-      result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
+      result=$( [ "$(printf '%s\n%s\n' "$ROCM_VERSION" "6.1.2" | sort -V | tail -n1)" != "6.1.2" ] && printf '%s' "$ROCM_VERSION" || : ) && echo $result
       if [[ "${result}" ]]; then # ROCM_VERSION >= 6.2
          ROCM_FLAGS="-rocm=${ROCM_PATH} -hip=${ROCM_PATH} -rocmsmi=${ROCM_PATH} -rocprofsdk=${ROCM_PATH}"
          if [ -n "${TAU_LLVM_CLANG_INC}" ] && [ -d "${ROCM_PATH}/llvm/lib/cmake/llvm" ]; then

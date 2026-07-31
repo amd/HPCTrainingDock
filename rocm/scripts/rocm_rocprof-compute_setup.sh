@@ -75,7 +75,7 @@ done
 
 # if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
 # if ROCM_VERSION is less than or equal to 6.1.2, the awk command result will be blank
-result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
+result=$( [ "$(printf '%s\n%s\n' "$ROCM_VERSION" "6.1.2" | sort -V | tail -n1)" != "6.1.2" ] && printf '%s' "$ROCM_VERSION" || : ) && echo $result
 if [[ "${result}" == "${ROCM_VERSION}" ]]; then
    echo "ROCm built-in profiling tools should already be installed on ROCm versions after 6.2.0"
    exit
@@ -86,7 +86,7 @@ TOOL_EXEC_NAME=omniperf
 TOOL_NAME_MC=Omniperf
 TOOL_NAME_UC=OMNIPERF
 # if ROCM_VERSION is greater than 6.2.9, the awk command will give the ROCM_VERSION number
-result=`echo ${ROCM_VERSION} | awk '$1>6.2.9'` && echo $result
+result=$( [ "$(printf '%s\n%s\n' "$ROCM_VERSION" "6.2.9" | sort -V | tail -n1)" != "6.2.9" ] && printf '%s' "$ROCM_VERSION" || : ) && echo $result
 if [[ "${result}" ]]; then
    TOOL_NAME=rocprofiler-compute
    TOOL_EXEC_NAME=rocprof-compute
@@ -105,7 +105,7 @@ echo ""
 
 # if ROCM_VERSION is greater than 6.1.2, the awk command will give the ROCM_VERSION number
 # if ROCM_VERSION is less than or equal to 6.1.2, the awk command result will be blank
-result=`echo $ROCM_VERSION | awk '$1>6.1.2'` && echo $result
+result=$( [ "$(printf '%s\n%s\n' "$ROCM_VERSION" "6.1.2" | sort -V | tail -n1)" != "6.1.2" ] && printf '%s' "$ROCM_VERSION" || : ) && echo $result
 if [[ -f /opt/rocm-${ROCM_VERSION}/bin/${TOOL_EXEC_NAME} ]] ; then
    echo "ROCm built-in ${TOOL_NAME_MC} already installed"
 else

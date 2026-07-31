@@ -75,13 +75,21 @@ done
 ROCM_VERSIONS_NORM="${ROCM_VERSIONS_RAW//,/ }"
 read -r -a ARR <<< "${ROCM_VERSIONS_NORM}"
 
-# A bare numeric >= 7.10.0 is a TheRock tarball (download ~6 min), not a docker
-# build (~95 min); classify it with the downloads for the time budget. Mirrors
-# _is_therock_numeric in run_rocm_build_sweep.{sh,sbatch}.
+# A bare numeric in [7.10.0, 7.12.0) is only available as a pre-built TheRock
+# tarball (download ~6 min), not a docker build (~95 min); classify it with the
+# downloads for the time budget. Bare numeric >= 7.12 is GA on the repo.amd.com
+# apt/dnf repos and installs via the docker/package-manager path
+# (run_rocm_build.sh -> rocm_setup.sh IS_ROCM_PREVIEW), so it is EXCLUDED here
+# and counted as a numeric build. Mirrors _is_therock_numeric in
+# run_rocm_build_sweep.{sh,sbatch}.
 _is_therock_numeric() {
    local _t="$1"
    [[ "${_t}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
-   [ "$(printf '%s\n' "7.10.0" "${_t}" | sort -V | head -n1)" = "7.10.0" ]
+   # lower bound: >= 7.10.0
+   [ "$(printf '%s\n' "7.10.0" "${_t}" | sort -V | head -n1)" = "7.10.0" ] || return 1
+   # exclude >= 7.12: those install via the docker/apt(dnf) preview path, not tarball.
+   [ "$(printf '%s\n' "7.12" "${_t}" | sort -V | head -n1)" = "7.12" ] && return 1
+   return 0
 }
 
 N_NUM=0; N_DL=0

@@ -765,7 +765,7 @@ else
       # this here is to take into account that the ROCm/jax repo has been deprecated
       # after the release of ROCm 7.1.0 and now it is all located at ROCm/rocm-jax
       if [[ $JAX_VERSION == "7.1" || $JAX_VERSION == "8.0" ]]; then
-         result=`echo ${ROCM_VERSION} | awk '$1>7.0'` && echo $result
+         result=$( [ "$(printf '%s\n%s\n' "$ROCM_VERSION" "7.0" | sort -V | tail -n1)" != "7.0" ] && printf '%s' "$ROCM_VERSION" || : ) && echo $result
          # check if ROCm version is greater than or equal to 7.0
          if [[ "${result}" ]]; then
 
@@ -841,7 +841,7 @@ else
             compat_info	    
          fi		 
       else 	      
-         result=`echo ${ROCM_VERSION} | awk '$1>6.3.9'` && echo $result
+         result=$( [ "$(printf '%s\n%s\n' "$ROCM_VERSION" "6.3.9" | sort -V | tail -n1)" != "6.3.9" ] && printf '%s' "$ROCM_VERSION" || : ) && echo $result
          # check if ROCm version is greater than or equal to 6.4.0
          if [[ "${result}" ]]; then
             if [[ $JAX_VERSION == "4.35" ]]; then

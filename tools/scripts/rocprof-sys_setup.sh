@@ -196,7 +196,7 @@ do
    shift
 done
 
-result=`echo ${ROCM_VERSION} | awk '$1>6.2.9'` && echo $result
+result=$( [ "$(printf '%s\n%s\n' "$ROCM_VERSION" "6.2.9" | sort -V | tail -n1)" != "6.2.9" ] && printf '%s' "$ROCM_VERSION" || : ) && echo $result
 if [[ "${result}" ]]; then
    TOOL_NAME="rocprofiler-systems"
    TOOL_REPO="https://github.com/ROCm/rocm-systems.git"

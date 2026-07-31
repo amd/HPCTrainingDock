@@ -389,7 +389,12 @@ default_pytorch_version_for_rocm() {
       # keep this AFTER the single-digit 7.x rows so 7.1/7.2 keep their
       # pinned 2.10/2.11 defaults.
       7.[1-9][0-9])                         echo "2.9.1" ;;
-      10.[0-9][0-9])                        echo "2.9.1" ;;
+      # ROCm 10 nightlies. ROCM_MAJOR_MINOR is `cut -f1-2 -d.` of e.g.
+      # 10.0.0a20260730 -> "10.0" (ONE minor digit), so the bare
+      # 10.[0-9][0-9] glob (two minor digits) never matched and the
+      # nightly silently fell through to the file default 2.12.0. Match
+      # both one- and two-digit minors so 10.0 lands on the intended pin.
+      10.[0-9]|10.[0-9][0-9])               echo "2.9.1" ;;
       # Off-table guards: too-old / too-new ROCm. Empty stdout means
       # "I don't know" and the resolver keeps the file-default (now
       # 2.12.0, newest known).
@@ -3087,6 +3092,67 @@ else
       done
 
       cd pytorch-v${PYTORCH_VERSION}
+
+      # ── ROCm 10 / CCCL 3.0 CUB_VERSION detection (backport pytorch main) ──
+      # ROCm 10 rebased rocThrust/hipCUB onto NVIDIA CCCL 3.0
+      # (include/hipcub/hipcub_version.hpp: HIPCUB_CCCL_VERSION 300003),
+      # which REMOVED hipcub::TransformInputIterator and its header
+      # hipcub/iterator/transform_input_iterator.hpp. PyTorch already knows
+      # how to use the CUB v3 API (::thrust::transform_iterator, selected by
+      # CUB_V3_PLUS() i.e. CUB_VERSION >= 200800), but on ROCm
+      # aten/src/ATen/cuda/cub_definitions.cuh HARDCODES CUB_VERSION 200001,
+      # so the ROCm build always took the legacy branch and cub.cuh failed:
+      #   cub.cuh:387 error: ...hipcub::TransformInputIterator... (10 errors,
+      #   gfx90a) -- slurm 16809, rocm-10.0.0a20260730, 2026-07-30.
+      # Upstream pytorch main fixed this by deriving CUB_VERSION from the
+      # hipCUB-advertised CCCL version; we backport the identical shape.
+      # Idempotent + backward compatible: only rewrites the hardcoded ROCm
+      # 200001 fallback, and older hipCUB (ROCm <= 7.x) either lacks
+      # HIPCUB_CCCL_VERSION or reports < 300000, so it keeps the 200001 path
+      # and the legacy hipcub::TransformInputIterator branch unchanged.
+      # NOTE: hipcub::Equality() at cub.cuh:~516/529 is not version-gated and
+      # remains a (non-fatal) deprecation warning after this fix.
+      _CUBDEF="aten/src/ATen/cuda/cub_definitions.cuh"
+      if [ -f "${_CUBDEF}" ] \
+         && grep -q '#define CUB_VERSION 200001' "${_CUBDEF}" \
+         && ! grep -q 'HIPCUB_CCCL_VERSION' "${_CUBDEF}"; then
+         echo "Patching ${_CUBDEF} to derive CUB_VERSION from HIPCUB_CCCL_VERSION on ROCm (backport of upstream pytorch main)"
+         python3 - "${_CUBDEF}" <<'PY'
+import re, sys, pathlib
+p = pathlib.Path(sys.argv[1])
+s = p.read_text()
+pat = re.compile(
+   r'#if !defined\(USE_ROCM\)\n'
+   r'#include <cub/version\.cuh>\n'
+   r'#else\n'
+   r'#define CUB_VERSION 200001\n'
+   r'#endif\n'
+)
+repl = (
+   '#if !defined(USE_ROCM)\n'
+   '#include <cub/version.cuh>\n'
+   '#else\n'
+   '// [HPCTrainingDock backport of upstream pytorch main] derive CUB_VERSION\n'
+   '// from the hipCUB-advertised CCCL version so ROCm 10 (CCCL 3.0.x) takes\n'
+   '// the CUB v3 API path instead of the removed hipcub::TransformInputIterator.\n'
+   '#include <hipcub/hipcub_version.hpp>\n'
+   '#if defined(HIPCUB_CCCL_VERSION) && HIPCUB_CCCL_VERSION >= 300000\n'
+   '#define CUB_VERSION HIPCUB_CCCL_VERSION\n'
+   '#else\n'
+   '#define CUB_VERSION 200001\n'
+   '#endif\n'
+   '#endif\n'
+)
+new, n = pat.subn(repl, s, count=1)
+if n != 1:
+   sys.exit("ERROR: cub_definitions.cuh USE_ROCM/CUB_VERSION block did not match exactly once (n=%d); bailing" % n)
+p.write_text(new)
+PY
+         echo "  -> patched (verify):"
+         grep -nE 'USE_ROCM|CUB_VERSION|HIPCUB_CCCL_VERSION' "${_CUBDEF}" | sed 's/^/    /'
+      else
+         echo "Skipping ${_CUBDEF} CUB_VERSION backport (file missing, already patched, or upstream already derives it)"
+      fi
 
       # ── PT 2.11 + RCCL >= 2.28 nccl_device.h backport (PT 2.12 fix) ──
       # PT 2.11 torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp

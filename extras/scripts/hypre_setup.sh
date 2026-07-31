@@ -714,11 +714,20 @@ else
          cd hypre-${HYPRE_VERSION}/src
 
          # ROCm-build patches. Two classes:
-         #   (a) HYPRE_THRUST_IDENTITY -> thrust::identity<T>() inlining.
+         #   (a) HYPRE_THRUST_IDENTITY -> <ns>::identity<T>() inlining.
          #       Verified the macro definition is byte-identical in 3.0.0
          #       and 3.1.0 (utilities/_hypre_utilities.hpp:451-453,
          #       utilities/device_utils.h:233-235), so these 9 string
          #       substitutions remain valid across both versions.
+         #       <ns> is normally `thrust`, but ROCm 10 rebased rocThrust
+         #       onto NVIDIA CCCL 3.0 (THRUST_VERSION >= 300000), which
+         #       removed thrust::identity from the public thrust namespace.
+         #       rocprim::identity<T> is a shape-identical drop-in
+         #       (constexpr T operator()(const T&); rocprim/detail/
+         #       functional.hpp) and is already visible in these device
+         #       translation units via the rocThrust header stack, so on
+         #       CCCL-3 SDKs we substitute rocprim::identity instead. See
+         #       ${HYPRE_IDENTITY_NS} selection just below.
          #   (b) Commenting out the user-defined __syncwarp() shim that
          #       collides with ROCm's own. In 3.0.0 the shim sits at
          #       _hypre_utilities.hpp:1481-1484; in 3.1.0 the file was
@@ -739,16 +748,43 @@ else
             echo "hypre: (line numbers shifted upstream; if build fails on __syncwarp redefinition, re-add a version-correct patch here)"
          fi
 
-         sed -i -e 's/HYPRE_THRUST_IDENTITY(char)/thrust::identity<char>()/' seq_mv/csr_spgemm_device_symbl.c
-         sed -i -e 's/HYPRE_THRUST_IDENTITY(char)/thrust::identity<char>()/' IJ_mv/IJMatrix_parcsr_device.c
-         sed -i -e 's/HYPRE_THRUST_IDENTITY(char)/thrust::identity<char>()/' IJ_mv/IJVector_parcsr_device.c
-         sed -i -e 's/HYPRE_THRUST_IDENTITY(HYPRE_Int)/thrust::identity<HYPRE_Int>()/' parcsr_mv/par_csr_fffc_device.c
-         sed -i -e 's/HYPRE_THRUST_IDENTITY(HYPRE_Int)/thrust::identity<HYPRE_Int>()/' parcsr_ls/ame.c
-         sed -i -e 's/HYPRE_THRUST_IDENTITY(HYPRE_Int)/thrust::identity<HYPRE_Int>()/' parcsr_ls/par_coarsen_device.c
-         sed -i -e 's/HYPRE_THRUST_IDENTITY(HYPRE_Int)/thrust::identity<HYPRE_Int>()/' parcsr_ls/par_mod_multi_interp_device.c
-         sed -i -e 's/HYPRE_THRUST_IDENTITY(HYPRE_Complex)/thrust::identity<HYPRE_Complex>()/' IJ_mv/IJMatrix_parcsr_device.c
-         sed -i -e 's/HYPRE_THRUST_IDENTITY(HYPRE_Complex)/thrust::identity<HYPRE_Complex>()/' IJ_mv/IJVector_parcsr_device.c
-         sed -i -e 's/HYPRE_THRUST_IDENTITY(HYPRE_Complex)/thrust::identity<HYPRE_Complex>()/' parcsr_ls/ams.c
+         # Pick the identity functor namespace based on the *installed*
+         # Thrust version (not the ROCm marketing string): CCCL 3.0
+         # (THRUST_VERSION >= 300000, shipped by ROCm 10) dropped
+         # thrust::identity, so emit rocprim::identity there instead.
+         HYPRE_IDENTITY_NS="thrust"
+         _hypre_thrust_ver_hdr="${ROCM_PATH:-/opt/rocm}/include/thrust/version.h"
+         _hypre_thrust_ver=$(sed -n 's/^#define THRUST_VERSION \([0-9][0-9]*\).*/\1/p' "${_hypre_thrust_ver_hdr}" 2>/dev/null | head -1)
+         if [ -n "${_hypre_thrust_ver}" ]; then
+            if [ "${_hypre_thrust_ver}" -ge 300000 ] 2>/dev/null; then
+               HYPRE_IDENTITY_NS="rocprim"
+            fi
+         elif [ "${ROCM_VERSION%%.*}" -ge 10 ] 2>/dev/null; then
+            # thrust/version.h not readable at patch time, but ROCm major
+            # >= 10 strongly implies a CCCL-3 rocThrust.
+            HYPRE_IDENTITY_NS="rocprim"
+         fi
+         echo "hypre: HYPRE_THRUST_IDENTITY -> ${HYPRE_IDENTITY_NS}::identity<T>() (THRUST_VERSION=${_hypre_thrust_ver:-unknown}, ROCM_VERSION=${ROCM_VERSION})"
+
+         sed -i -e "s/HYPRE_THRUST_IDENTITY(char)/${HYPRE_IDENTITY_NS}::identity<char>()/" seq_mv/csr_spgemm_device_symbl.c
+         sed -i -e "s/HYPRE_THRUST_IDENTITY(char)/${HYPRE_IDENTITY_NS}::identity<char>()/" IJ_mv/IJMatrix_parcsr_device.c
+         sed -i -e "s/HYPRE_THRUST_IDENTITY(char)/${HYPRE_IDENTITY_NS}::identity<char>()/" IJ_mv/IJVector_parcsr_device.c
+         sed -i -e "s/HYPRE_THRUST_IDENTITY(HYPRE_Int)/${HYPRE_IDENTITY_NS}::identity<HYPRE_Int>()/" parcsr_mv/par_csr_fffc_device.c
+         sed -i -e "s/HYPRE_THRUST_IDENTITY(HYPRE_Int)/${HYPRE_IDENTITY_NS}::identity<HYPRE_Int>()/" parcsr_ls/ame.c
+         sed -i -e "s/HYPRE_THRUST_IDENTITY(HYPRE_Int)/${HYPRE_IDENTITY_NS}::identity<HYPRE_Int>()/" parcsr_ls/par_coarsen_device.c
+         sed -i -e "s/HYPRE_THRUST_IDENTITY(HYPRE_Int)/${HYPRE_IDENTITY_NS}::identity<HYPRE_Int>()/" parcsr_ls/par_mod_multi_interp_device.c
+         sed -i -e "s/HYPRE_THRUST_IDENTITY(HYPRE_Complex)/${HYPRE_IDENTITY_NS}::identity<HYPRE_Complex>()/" IJ_mv/IJMatrix_parcsr_device.c
+         sed -i -e "s/HYPRE_THRUST_IDENTITY(HYPRE_Complex)/${HYPRE_IDENTITY_NS}::identity<HYPRE_Complex>()/" IJ_mv/IJVector_parcsr_device.c
+         sed -i -e "s/HYPRE_THRUST_IDENTITY(HYPRE_Complex)/${HYPRE_IDENTITY_NS}::identity<HYPRE_Complex>()/" parcsr_ls/ams.c
+
+         if [ "${HYPRE_IDENTITY_NS}" = "rocprim" ]; then
+            # Safety net for CCCL-3 SDKs only: convert any residual
+            # thrust::identity call sites the file-specific substitutions
+            # above did not cover (e.g. a new usage in a future HYPRE tag).
+            # thrust::identity does not exist on CCCL 3.0, so this cannot
+            # clobber a still-valid symbol; on older ROCm it is skipped.
+            grep -rlZ 'thrust::identity' . 2>/dev/null | xargs -0 -r sed -i 's/thrust::identity/rocprim::identity/g' || true
+         fi
 
          mkdir build && cd build
 
