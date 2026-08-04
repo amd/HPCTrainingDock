@@ -3154,6 +3154,59 @@ PY
          echo "Skipping ${_CUBDEF} CUB_VERSION backport (file missing, already patched, or upstream already derives it)"
       fi
 
+      # ── ROCm 10 / CCCL 3.0 FpLimits/NumericTraits guard (backport pytorch main) ──
+      # ROCm 10's CCCL 3.0 hipCUB REMOVED hipcub::FpLimits and changed
+      # hipcub::BaseTraits (it now takes a trailing `typename T`; see
+      # include/hipcub/backend/rocprim/.../util_type.hpp:653). PyTorch's cub.cuh
+      # backports an FpLimits<c10::BFloat16> + NumericTraits<c10::BFloat16>
+      # specialization to teach CUB radix-sort about bfloat16. In PyTorch 2.9.x
+      # that block is gated by `... || defined(USE_ROCM)` -- ALWAYS compiled on
+      # ROCm, with NO CUB-version gate -- so on CCCL 3.0 it fails with 41 errors:
+      #   cub.cuh:84 error: no struct named 'FpLimits' in namespace 'hipcub'
+      #   cub.cuh:99 error: template argument for template type parameter must be
+      #              a type   (hipcub::BaseTraits) -- slurm 16975,
+      #   rocm-10.0.0a20260730 (PyTorch 2.9.1), 2026-08-03.
+      # This is DISTINCT from the CUB_VERSION/TransformInputIterator fix above
+      # (that block is CUB_V3_PLUS()-gated; this one is not), so both patches are
+      # required. Upstream pytorch main changed the ROCm arm to
+      # `defined(USE_ROCM) && CUB_VERSION < 300000` (comment: "ROCm 8.0 lifts the
+      # compatible CUB version to 3.x which uses libhipcxx and derives numerical
+      # limits from there"). We backport the identical CUB_VERSION < 300000
+      # exclusion onto the ROCm arm ONLY, leaving the non-ROCm arm intact.
+      # Composes with the cub_definitions.cuh patch above: that sets
+      # CUB_VERSION = HIPCUB_CCCL_VERSION (300003) on ROCm 10, so this backport is
+      # skipped there; ROCm <= 7.x keeps CUB_VERSION 200001 (< 300000) and still
+      # gets the FpLimits backport unchanged. Idempotent: skipped when the file is
+      # missing, already carries `CUB_VERSION < 300000` (this patch or upstream
+      # main), or the exact 2.9.x guard line is absent.
+      _CUBCUH="aten/src/ATen/cuda/cub.cuh"
+      if [ -f "${_CUBCUH}" ] \
+         && grep -qF '(!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || defined(USE_ROCM)' "${_CUBCUH}" \
+         && ! grep -qF 'defined(USE_ROCM) && CUB_VERSION < 300000' "${_CUBCUH}"; then
+         echo "Patching ${_CUBCUH} to skip the FpLimits/NumericTraits backport on CCCL 3.0 ROCm (backport of upstream pytorch main)"
+         python3 - "${_CUBCUH}" <<'PY'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1])
+s = p.read_text()
+old = '#if (!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || defined(USE_ROCM)'
+new = (
+   '// [HPCTrainingDock backport of upstream pytorch main] exclude the\n'
+   '// FpLimits/NumericTraits<c10::BFloat16> backport on CCCL 3.0 ROCm\n'
+   '// (CUB_VERSION >= 300000): hipCUB removed hipcub::FpLimits and changed\n'
+   '// hipcub::BaseTraits, and libhipcxx derives the numeric limits itself.\n'
+   '#if (!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || (defined(USE_ROCM) && CUB_VERSION < 300000)'
+)
+n = s.count(old)
+if n != 1:
+   sys.exit("ERROR: cub.cuh FpLimits guard did not match exactly once (n=%d); bailing" % n)
+p.write_text(s.replace(old, new, 1))
+PY
+         echo "  -> patched (verify):"
+         grep -nE 'CUB_SUPPORTS_NV_BFLOAT16\(\)|CUB_VERSION < 300000|FpLimits<c10::BFloat16>' "${_CUBCUH}" | head | sed 's/^/    /'
+      else
+         echo "Skipping ${_CUBCUH} FpLimits guard backport (file missing, already patched, or upstream already guards it)"
+      fi
+
       # ── PT 2.11 + RCCL >= 2.28 nccl_device.h backport (PT 2.12 fix) ──
       # PT 2.11 torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp
       # includes <nccl_device.h> unconditionally whenever the bundled

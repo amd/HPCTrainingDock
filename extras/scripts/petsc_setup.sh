@@ -734,6 +734,54 @@ print('matdensecupmimpl.h patched: added <cuda/std/iterator> for CCCL 3.0+')
             echo "petsc: no libcudacxx detected (no ${ROCM_PATH:-<unset>}/include/cuda/std/__cccl/version.h) -- skipping matdensecupmimpl.h cuda/std/iterator patch"
          fi
 
+         # Patch aijhipsparse.hip.cpp: guard the thrust/async/for_each.h include
+         # for CCCL 3.0+ rocms. ROCm 10 (CCCL 3.0.x) REMOVED the experimental
+         # thrust::async namespace entirely -- the whole thrust/async/ directory
+         # (copy/for_each/reduce/scan/sort/transform) is gone (present in
+         # rocm-7.14.0a20260612, absent in rocm-10.0.0a20260730), with no
+         # relocated header. PETSc 3.24.1 line 19 does
+         # `#include <thrust/async/for_each.h>` under `#if PETSC_CPP_VERSION >= 14`
+         # (always true at -std=gnu++20), so the HIPC compile of aijhipsparse.o
+         # dies at preprocessing:
+         #   aijhipsparse.hip.cpp:19:12: fatal error:
+         #     'thrust/async/for_each.h' file not found   (slurm 17007,
+         #   rocm-10.0.0a20260730, PETSc 3.24.1, 2026-08-03).
+         # The header only feeds DEAD code: the single thrust::async::for_each()
+         # call (~line 3151) sits inside `#if 0` (the live MatMultAdd path uses a
+         # ScatterAdd kernel), and PETSC_HAVE_THRUST_ASYNC is defined but never
+         # tested. So add an __has_include guard: the include is skipped when the
+         # header is absent (CCCL 3.0+) and left untouched otherwise.
+         #
+         # Shell-guarded on the header's ABSENCE so rocms that still ship
+         # thrust/async/for_each.h (numbered + <= 7.x nightlies) keep the source
+         # byte-identical to upstream PETSc 3.24.1. Easy to tell at a glance:
+         # grep __has_include ${PETSC_REPO}/src/mat/impls/aij/seq/seqhipsparse/aijhipsparse.hip.cpp
+         if [ -n "${ROCM_PATH:-}" ] && [ ! -f "${ROCM_PATH}/include/thrust/async/for_each.h" ]; then
+            echo "petsc: thrust/async/for_each.h absent under ${ROCM_PATH}/include (CCCL 3.0+) -- applying aijhipsparse.hip.cpp async-include guard"
+            python3 -c "
+import os
+f = os.path.join('src','mat','impls','aij','seq','seqhipsparse','aijhipsparse.hip.cpp')
+txt = open(f).read()
+old = '''#if PETSC_CPP_VERSION >= 14
+  #define PETSC_HAVE_THRUST_ASYNC 1
+  #include <thrust/async/for_each.h>
+#endif'''
+new = '''/* [HPCTrainingDock] CCCL 3.0 (ROCm 10) removed the experimental thrust::async
+   namespace; the header below only feeds a dead #if 0 block and an untested
+   PETSC_HAVE_THRUST_ASYNC macro, so guard it on header presence. */
+#if PETSC_CPP_VERSION >= 14 && (!defined(__has_include) || __has_include(<thrust/async/for_each.h>))
+  #define PETSC_HAVE_THRUST_ASYNC 1
+  #include <thrust/async/for_each.h>
+#endif'''
+assert old in txt, 'aijhipsparse.hip.cpp thrust/async/for_each.h include block not found; the file may have changed'
+assert new not in txt, 'aijhipsparse.hip.cpp async-include guard already applied'
+open(f,'w').write(txt.replace(old, new, 1))
+print('aijhipsparse.hip.cpp patched: __has_include guard on thrust/async/for_each.h for CCCL 3.0+')
+"
+         else
+            echo "petsc: thrust/async/for_each.h present (or ROCM_PATH unset) -- skipping aijhipsparse.hip.cpp async-include guard"
+         fi
+
          # System hdf5 is OPTIONAL: if its module loads cleanly we use it
          # (DOWNLOAD_HDF5=0 -> --download-hdf5=0); otherwise we fall back
          # to PETSc's own internal hdf5 build (DOWNLOAD_HDF5=1 ->
