@@ -549,7 +549,16 @@ PY
       # site-packages merges them correctly. So install numba-hip + deps
       # into the BUILD VENV (no --target) and copy the merged tree into the
       # install dir.
-      python3 -m pip install "numba-hip[rocm-${NUMBA_HIP_EXTRA_SUFFIX}] @ git+https://github.com/ROCm/numba-hip.git" --force-reinstall --no-cache
+      # numba-hip's BASE deps hard-require hip-python-as-cuda>=6.3.0, which is
+      # published ONLY on Test PyPI (real PyPI 404s that package name), while
+      # numba/llvmlite/numpy/rocm-llvm-python live on real PyPI. Without a Test
+      # PyPI source here, pip resolves hip-python (present on real PyPI) but
+      # fails hip-python-as-cuda -> "No matching distribution ... (from versions:
+      # none)" and the whole hip-python package errors rc=1. Add Test PyPI as a
+      # PER-COMMAND --extra-index-url (NOT `pip config set` -- see the global
+      # poisoning warning above): scoped to this single invocation + the
+      # throwaway build venv, so nothing leaks into ~/.config/pip/pip.conf.
+      python3 -m pip install --extra-index-url https://test.pypi.org/simple "numba-hip[rocm-${NUMBA_HIP_EXTRA_SUFFIX}] @ git+https://github.com/ROCm/numba-hip.git" --force-reinstall --no-cache
       _VENV_SITE="$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
       ${SUDO} mkdir -p "$HIP_PYTHON_PATH/numba-hip"
       # Copy everything pip produced EXCEPT the venv's own packaging

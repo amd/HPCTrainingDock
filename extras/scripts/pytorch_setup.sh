@@ -3207,6 +3207,37 @@ PY
          echo "Skipping ${_CUBCUH} FpLimits guard backport (file missing, already patched, or upstream already guards it)"
       fi
 
+      # ── ROCm 10 libcu++ `namespace hip = cuda` collision in Copy.hip ──
+      # ROCm 10's bundled libcu++/CCCL headers inject a GLOBAL namespace alias
+      #   namespace hip = cuda;
+      # (rocm-10.0.0a<date>/include/cuda/std/__internal/namespaces.h:60, via the
+      # _LIBCUDACXX_END_NAMESPACE_STD macro). Once any cuda/std header is pulled in
+      # (Copy.hip -> ATen/core/Tensor.h -> ... -> cuda/std/tuple), that global
+      # ::hip collides with PyTorch's c10::hip, so the hipify-generated line
+      #   hip::OptionalHIPGuardMasqueradingAsCUDA device_guard;   // Copy.hip:386
+      # fails with: error: reference to 'hip' is ambiguous (candidates: ::hip
+      # [= cuda] and c10::hip) -- slurm 17076, rocm-10.0.0a20260730
+      # (PyTorch 2.9.1), 2026-08-05.
+      # The upstream CUDA source aten/src/ATen/native/cuda/Copy.cu:385 writes the
+      # guard WITH an explicit `cuda::` qualifier (hipified to the ambiguous bare
+      # `hip::`), whereas line 228 of the SAME file uses the guard UNqualified and
+      # compiles fine (it resolves via `using namespace at::cuda;` -> hipified to
+      # `using namespace at::hip;`). Fix: drop the redundant `cuda::` qualifier so
+      # hipify emits an unqualified guard, matching line 228. Patch the CUDA source
+      # (hipify regenerates Copy.hip from it -- same approach as block_reduce.cuh /
+      # BatchLinearAlgebra.cpp below). Idempotent via the grep guard, and a
+      # behavioural no-op on ROCm <= 7.x where bare and qualified resolve to the
+      # same c10::hip guard (there is no global hip=cuda alias to collide with).
+      _COPYCU="aten/src/ATen/native/cuda/Copy.cu"
+      if [ -f "${_COPYCU}" ] && grep -qF 'cuda::OptionalCUDAGuard device_guard;' "${_COPYCU}"; then
+         echo "Patching ${_COPYCU} to drop the ambiguous cuda:: guard qualifier (ROCm 10 libcu++ hip=cuda collision)"
+         sed -i 's/\bcuda::OptionalCUDAGuard device_guard;/OptionalCUDAGuard device_guard;/g' "${_COPYCU}"
+         echo "  -> patched (verify):"
+         grep -nE 'OptionalCUDAGuard device_guard;' "${_COPYCU}" | sed 's/^/    /'
+      else
+         echo "Skipping ${_COPYCU} guard-qualifier patch (file missing or already patched)"
+      fi
+
       # ── PT 2.11 + RCCL >= 2.28 nccl_device.h backport (PT 2.12 fix) ──
       # PT 2.11 torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp
       # includes <nccl_device.h> unconditionally whenever the bundled
