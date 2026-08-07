@@ -162,16 +162,28 @@ usage()
    echo "  --replace [ 0|1 ] remove prior install + modulefile before building, default $REPLACE"
    echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
    echo "  --help: print this usage information"
-   exit 1
 }
 
 send-error()
 {
-    usage
-    echo -e "\nError: ${@}"
+    # Print usage FIRST (to stderr), then the error message LAST so the
+    # actual failure reason is the final, most-visible line. Previously
+    # usage() ended in `exit 1`, so calling it here aborted the function
+    # BEFORE the echo ran -- masking every send-error message (the ftorch
+    # log then showed ONLY the usage text with no reason; slurm 17076,
+    # rocm-10.0.0a20260730, 2026-08-05, where PYTORCH_VERSION could not be
+    # resolved because PyTorch 2.9.1 had failed to build). usage() no
+    # longer exits, so the ordering below is exactly what the reader sees.
+    usage >&2
+    echo -e "\nError: ${*}" >&2
     exit 1
 }
 
+# Define `last` up front so an UNRECOGNIZED FIRST argument reports a proper
+# "Unsupported argument" error instead of dying with `last: command not found`
+# under `set -e` (reset-last only (re)defines it AFTER a valid flag is seen,
+# so before the first valid flag the name was unbound).
+last() { send-error "Unsupported argument :: ${1}"; }
 reset-last()
 {
    last() { send-error "Unsupported argument :: ${1}"; }
@@ -193,6 +205,7 @@ do
           ;;
       "--help")
           usage
+          exit 0
           ;;
       "--module-path")
           shift

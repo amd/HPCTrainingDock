@@ -782,6 +782,79 @@ print('aijhipsparse.hip.cpp patched: __has_include guard on thrust/async/for_eac
             echo "petsc: thrust/async/for_each.h present (or ROCM_PATH unset) -- skipping aijhipsparse.hip.cpp async-include guard"
          fi
 
+         # Patch aijhipsparse.hip.cpp: the IJCompare / IJCompare4 comparator
+         # functors call the MEMBER form thrust::tuple::get<N>() (e.g.
+         # t1.get<0>()). CCCL 3.0 (ROCm 10) makes thrust::tuple an alias of
+         # cuda::std::tuple, which has NO .get<N>() member -- only the free
+         # function thrust::get<N>(t). Result on rocm-10.0.0a20260730
+         # (CCCL 3.0.x), HIPC of aijhipsparse.o:
+         #   aijhipsparse.hip.cpp:3705:47: error: no member named 'get' in
+         #     'cuda::std::tuple<int, int>'          (IJCompare)
+         #   aijhipsparse.hip.cpp:4087:12: error: no member named 'get' in
+         #     'cuda::std::tuple<int, int, double, int>'  (IJCompare4)
+         # (slurm 17076, PETSc 3.24.1, 2026-08-05).
+         # Fix: rewrite the member calls to the free-function form
+         # thrust::get<N>(tX), which is valid on BOTH the old thrust::tuple
+         # (CCCL 2.x, where .get<N>() also exists) and cuda::std::tuple
+         # (CCCL 3.x), so it is a semantically identical no-op on the
+         # numbered / <= 7.x rocms.
+         #
+         # Gated on libcudacxx (CCCL) presence -- the SAME probe as the
+         # matdensecupmimpl.h patch above -- so trees without CCCL stay
+         # byte-identical to upstream PETSc 3.24.1. Idempotent (asserts the
+         # pristine OR already-patched block is present). Greppable at a
+         # glance: grep 'thrust::get<' \
+         #   ${PETSC_REPO}/src/mat/impls/aij/seq/seqhipsparse/aijhipsparse.hip.cpp
+         if [ -n "${ROCM_PATH:-}" ] && [ -f "${ROCM_PATH}/include/cuda/std/__cccl/version.h" ]; then
+            echo "petsc: detected libcudacxx (CCCL) -- applying aijhipsparse.hip.cpp thrust::tuple get<N>() free-function patch"
+            python3 -c "
+import os
+f = os.path.join('src','mat','impls','aij','seq','seqhipsparse','aijhipsparse.hip.cpp')
+txt = open(f).read()
+blocks = [
+('''struct IJCompare {
+  __host__ __device__ inline bool operator()(const thrust::tuple<PetscInt, PetscInt> &t1, const thrust::tuple<PetscInt, PetscInt> &t2)
+  {
+    if (t1.get<0>() < t2.get<0>()) return true;
+    if (t1.get<0>() == t2.get<0>()) return t1.get<1>() < t2.get<1>();
+    return false;
+  }
+};''',
+'''struct IJCompare {
+  __host__ __device__ inline bool operator()(const thrust::tuple<PetscInt, PetscInt> &t1, const thrust::tuple<PetscInt, PetscInt> &t2)
+  {
+    if (thrust::get<0>(t1) < thrust::get<0>(t2)) return true;
+    if (thrust::get<0>(t1) == thrust::get<0>(t2)) return thrust::get<1>(t1) < thrust::get<1>(t2);
+    return false;
+  }
+};'''),
+('''struct IJCompare4 {
+  __host__ __device__ inline bool operator()(const thrust::tuple<int, int, PetscScalar, int> &t1, const thrust::tuple<int, int, PetscScalar, int> &t2)
+  {
+    if (t1.get<0>() < t2.get<0>()) return true;
+    if (t1.get<0>() == t2.get<0>()) return t1.get<1>() < t2.get<1>();
+    return false;
+  }
+};''',
+'''struct IJCompare4 {
+  __host__ __device__ inline bool operator()(const thrust::tuple<int, int, PetscScalar, int> &t1, const thrust::tuple<int, int, PetscScalar, int> &t2)
+  {
+    if (thrust::get<0>(t1) < thrust::get<0>(t2)) return true;
+    if (thrust::get<0>(t1) == thrust::get<0>(t2)) return thrust::get<1>(t1) < thrust::get<1>(t2);
+    return false;
+  }
+};'''),
+]
+for old,new in blocks:
+    assert old in txt or new in txt, 'aijhipsparse.hip.cpp get<N>() comparator block not found; the file may have changed'
+    txt = txt.replace(old, new)
+open(f,'w').write(txt)
+print('aijhipsparse.hip.cpp patched: thrust::tuple get<N>() member calls -> thrust::get<N>() free function (CCCL 3.0)')
+"
+         else
+            echo "petsc: no libcudacxx detected (no ${ROCM_PATH:-<unset>}/include/cuda/std/__cccl/version.h) -- skipping aijhipsparse.hip.cpp thrust::tuple get<N>() free-function patch"
+         fi
+
          # System hdf5 is OPTIONAL: if its module loads cleanly we use it
          # (DOWNLOAD_HDF5=0 -> --download-hdf5=0); otherwise we fall back
          # to PETSc's own internal hdf5 build (DOWNLOAD_HDF5=1 ->

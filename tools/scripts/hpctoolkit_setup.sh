@@ -639,6 +639,58 @@ else
       meson --version >/dev/null 2>&1 || { echo "ERROR: meson still not runnable after repair attempt"; exit 1; }
       git clone -b ${HPCTOOLKIT_VERSION} https://gitlab.com/hpctoolkit/hpctoolkit.git
       cd hpctoolkit
+
+      # ── Patch rocm-ss.c: ROCm 10 shutdown() name collision ───────────
+      # ROCm 10's rocprofiler-sdk/rocprofiler.h transitively includes
+      # <sys/socket.h> (via .../rocprofiler-sdk/hipfile/.../hipfile.h),
+      # which declares POSIX `int shutdown(int, int)`. hpcrun's amd-rocm
+      # sample source defines its own METHOD_FN(shutdown) ->
+      # `void shutdown(sample_source_t *)` (rocm-ss.c:147); in C the two
+      # collide and the whole TU fails to compile:
+      #   rocm-ss.c:147:11: error: conflicting types for 'shutdown';
+      #     have 'void(sample_source_t *)'
+      #   /usr/include/.../sys/socket.h:324: note: previous declaration
+      #     of 'shutdown' with type 'int(int, int)'
+      # (slurm 17076, rocm-10.0.0a20260730, hpctoolkit 2025.1.2, 2026-08-05).
+      # Fix: pre-include the sample_source framework header (so the
+      # sample_source_t `shutdown` MEMBER is declared under its real name
+      # first), then shadow the libc symbol name across ONLY the two
+      # rocprofiler-pulling rocm includes so socket.h's `shutdown` lands
+      # under a harmless alias -- hpcrun never calls libc shutdown(). The
+      # #undef restores the real name for the METHOD_FN(shutdown) definition
+      # + ss_obj.h `.shutdown = shutdown` registration further down. This is
+      # a harmless no-op on rocms whose rocprofiler headers do not pull
+      # socket.h. Idempotent; greppable at a glance:
+      #   grep __hpcrun_libc_shutdown_shadow src/hpcrun/sample-sources/rocm-ss.c
+      python3 -c "
+import os
+f = os.path.join('src','hpcrun','sample-sources','rocm-ss.c')
+txt = open(f).read()
+old = '''#include \"../device-finalizers.h\"
+#include \"../gpu/api/rocm/rocm-interface.h\"
+#include \"../gpu/api/rocm/rocm-counters.h\"'''
+new = '''#include \"../device-finalizers.h\"
+/* [HPCTrainingDock] ROCm 10 rocprofiler-sdk transitively includes
+   <sys/socket.h>, whose POSIX int shutdown(int,int) collides with this
+   sample source's own METHOD_FN(shutdown) -> void shutdown(sample_source_t*).
+   Declare sample_source_t (real 'shutdown' member) FIRST, then shadow the
+   libc symbol name across ONLY the rocprofiler-pulling rocm includes so
+   socket.h's shutdown lands under a harmless alias (hpcrun never calls libc
+   shutdown()). #undef restores the name for the method def + ss_obj.h
+   registration below. */
+#include \"sample_source_obj.h\"
+#define shutdown __hpcrun_libc_shutdown_shadow
+#include \"../gpu/api/rocm/rocm-interface.h\"
+#include \"../gpu/api/rocm/rocm-counters.h\"
+#undef shutdown'''
+if '__hpcrun_libc_shutdown_shadow' in txt:
+    print('rocm-ss.c already patched for shutdown() collision; skipping')
+else:
+    assert old in txt, 'rocm-ss.c include block not found; the file may have changed'
+    open(f,'w').write(txt.replace(old, new, 1))
+    print('rocm-ss.c patched: shadow libc shutdown() around rocprofiler includes (ROCm 10)')
+"
+
       export CMAKE_PREFIX_PATH=$ROCM_PATH:$CMAKE_PREFIX_PATH
 
       # ── Pin a consistent plain GNU toolchain for the meson build ──────
