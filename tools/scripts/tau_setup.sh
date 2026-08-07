@@ -61,7 +61,19 @@ F_COMPILER=amdflang
 # concrete modulefile token in the build branch below.
 MPI_MODULE="openmpi"
 PDT_PATH_INPUT=""
-GIT_COMMIT="fb4abfffa6683dd82a2b6ffddbfc497e6e1f5d60"
+# ── TAU source pin ────────────────────────────────────────────────────
+# By default we build a specific RELEASED TAU tarball (a reproducible pin),
+# NOT a git checkout. The UO-OACISS/tau2 repo carries NO release tags
+# (verified: `git ls-remote --tags` returns nothing), so a TAU version can
+# only be pinned via the versioned tarball at
+#   http://tau.uoregon.edu/tau_releases/tau-${TAU_VERSION}.tar.gz
+# tau-2.35.2 is the TAU author's (Sameer Shende / UO) recommended build for
+# the aac6 install and matches his known-good manual configure line.
+# Passing --git-commit <hash> overrides this and builds that commit from a
+# git clone instead (dev / bisect builds). GIT_COMMIT defaults EMPTY so the
+# pinned tarball path is taken unless a commit is explicitly requested.
+TAU_VERSION=2.35.2
+GIT_COMMIT=""
 # TAU's modulefile is currently named dev.lua (no version baked in).
 # PDT is a build-time-only dep shared with scorep, so we expose a
 # separate --replace-pdt flag (analogous to scorep_setup.sh).
@@ -92,7 +104,8 @@ usage()
    echo "  --cxx-compiler [ CXX_COMPILER ] default $CXX_COMPILER"
    echo "  --mpi-module [ MPI_MODULE ] module to load for TAU -mpi support, default $MPI_MODULE"
    echo "  --pdt-install-path [ PDT_PATH_INPUT ] default $PDT_PATH"
-   echo "  --git-commit [ GIT_COMMIT ] specify what commit hash you want to build from, default is $GIT_COMMIT"
+   echo "  --tau-version [ TAU_VERSION ] released TAU tarball to pin/build (tau_releases/tau-<ver>.tar.gz), default $TAU_VERSION"
+   echo "  --git-commit [ GIT_COMMIT ] build this tau2 git commit instead of the pinned tarball (dev/bisect), default is the pinned tarball"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL_INPUT ] default autodetected"
    echo "  --replace [ 0|1 ] remove prior tau install + modulefile before building, default $REPLACE (PDT NOT removed)"
@@ -126,6 +139,11 @@ do
       "--build-tau")
           shift
           BUILD_TAU=${1}
+          reset-last
+          ;;
+      "--tau-version")
+          shift
+          TAU_VERSION=${1}
           reset-last
           ;;
       "--git-commit")
@@ -400,7 +418,11 @@ echo "ROCM_VERSION: $ROCM_VERSION"
 echo "BUILD_TAU: $BUILD_TAU"
 echo "TAU_PATH: $TAU_PATH"
 echo "PDT_PATH: $PDT_PATH"
-echo "Building TAU off of this commit: $GIT_COMMIT"
+if [ -n "${GIT_COMMIT}" ]; then
+   echo "Building TAU from git commit: $GIT_COMMIT"
+else
+   echo "Building TAU from pinned release tarball: tau-${TAU_VERSION}.tar.gz"
+fi
 echo "==================================="
 echo ""
 
@@ -458,6 +480,203 @@ else
          ROCM_MODULE_NAME="rocm/${ROCM_VERSION}"
       fi
    fi
+
+   # ── tau_exec_launch convenience wrapper (installed into TAU's <arch>/bin) ─
+   # Small launcher for the tutorial's mpirun+tau_exec workflows (RCCL/ROCm
+   # profiling, PC sampling). It lives in TAU's <arch>/bin so it is on PATH
+   # automatically via `module load tau` -- there is NO separate
+   # 'tau_exec_launch' package (passing it to main_setup.sh --packages would
+   # error with "unknown name"; it is part of tau by design).
+   #
+   # Defined as a function so it can be installed from the from-source branch
+   # BEFORE the chown-root / chmod go-w ownership lockdown (using the same
+   # ${SUDO} the make-installs use -- writing AFTER the lockdown hit a
+   # locked-tree "Permission denied" on the NFS install tree and, fatally,
+   # aborted an otherwise-good TAU install under set -e), and best-effort from
+   # the cached-install branch. NON-FATAL by design: a convenience wrapper must
+   # never fail a good TAU build. The QUOTED heredoc keeps every $ literal so
+   # the wrapper expands them at run time, not now.
+   install_tau_exec_launch() {
+      local _dest="$1" _sudo="$2" _tmp
+      _tmp="$(mktemp -t tau_exec_launch.XXXXXX 2>/dev/null)" || {
+         echo "tau: WARNING: could not create temp file for tau_exec_launch; skipping (TAU itself is unaffected)"
+         return 0
+      }
+      cat > "${_tmp}" <<'TAU_EXEC_LAUNCH_EOF'
+#!/bin/bash
+# tau_exec_launch -- convenience launcher for running an MPI benchmark under
+# TAU's tau_exec, for the ROCm/RCCL profiling workflows in the tutorial. Wraps
+# the (otherwise long) `mpirun -np N tau_exec <flags> ...` invocation and prints
+# a pprof text summary afterwards. Installed into TAU's bin by tau_setup.sh, so
+# it is on PATH after `module load tau`. View the resulting timeline in Google
+# Chrome via `perfetto-viewer` (module load google-chrome); see aac6_tau(7).
+#
+# The three --mode values map to the tau_exec flag sets the TAU author uses:
+#   comm    -> tau_exec -rocm            HIP/RCCL API + GPU kernel tracing
+#                                        (ncclCommInitRank, ...; perfetto-viewable)
+#   pc      -> tau_exec -rocm_pc         + GPU PC sampling ([rocm sample] stalls)
+#   pc-ebs  -> tau_exec -rocm_pc -ebs    + CPU event-based sampling (default)
+#
+# Example (matches the author's manual line):
+#   tau_exec_launch --np 2 --mode pc-ebs -- all_gather_perf -g 2
+
+set -eo pipefail
+
+NP=2
+MODE="pc-ebs"
+MODULES="rocm openmpi tau"
+TAU_BINDIR=""
+OUTDIR=""
+BIND_TO="numa"
+MPI_ARGS=""
+TAU_ARGS=""
+SUMMARY=1
+DRY_RUN=0
+
+usage() {
+   cat <<'USAGE'
+Usage: tau_exec_launch [options] -- <program> [program args...]
+
+  --np N                number of MPI ranks (default: 2)
+  --mode MODE           tau_exec ROCm mode (default: pc-ebs)
+                          comm    -> tau_exec -rocm            (HIP/RCCL API + kernels; perfetto-viewable)
+                          pc      -> tau_exec -rocm_pc         (+ GPU PC sampling)
+                          pc-ebs  -> tau_exec -rocm_pc -ebs    (+ CPU event-based sampling)
+  --modules "M1 M2..."  Lmod modules to load first (default: "rocm openmpi tau")
+                          add rccl-tests to get all_gather_perf/all_reduce_perf on PATH
+  --tau-bindir DIR      prepend DIR to PATH (e.g. a custom TAU <arch>/bin install)
+  --outdir DIR          directory for TAU profiles (default: ./tau_<mode>_<timestamp>)
+  --bind-to WHAT        mpirun --bind-to value (default: numa; use "none" to omit)
+  --mpi-args "ARGS"     extra args passed through to mpirun
+  --tau-args "ARGS"     extra args passed through to tau_exec
+  --no-summary          do NOT run pprof after the run (default: run it)
+  --dry-run             print the resolved command(s) and exit
+  --help                this message
+
+Everything after `--` is the program and its arguments, run under tau_exec.
+USAGE
+   exit "${1:-1}"
+}
+
+PROG_ARGS=()
+while [[ $# -gt 0 ]]; do
+   case "$1" in
+      --np)          shift; NP="$1" ;;
+      --mode)        shift; MODE="$1" ;;
+      --modules)     shift; MODULES="$1" ;;
+      --tau-bindir)  shift; TAU_BINDIR="$1" ;;
+      --outdir)      shift; OUTDIR="$1" ;;
+      --bind-to)     shift; BIND_TO="$1" ;;
+      --mpi-args)    shift; MPI_ARGS="$1" ;;
+      --tau-args)    shift; TAU_ARGS="$1" ;;
+      --summary)     SUMMARY=1 ;;
+      --no-summary)  SUMMARY=0 ;;
+      --dry-run)     DRY_RUN=1 ;;
+      --help|-h)     usage 0 ;;
+      --)            shift; PROG_ARGS=("$@"); break ;;
+      --*)           echo "ERROR: unknown option: $1" >&2; usage 1 ;;
+      *)             echo "ERROR: unexpected argument before '--': $1" >&2; usage 1 ;;
+   esac
+   shift
+done
+
+if [ "${#PROG_ARGS[@]}" -eq 0 ]; then
+   echo "ERROR: no program given. Put the benchmark after '--', e.g.:" >&2
+   echo "       tau_exec_launch --np 2 --mode pc-ebs -- all_gather_perf -g 2" >&2
+   exit 1
+fi
+
+case "${MODE}" in
+   comm)    TAU_MODE_FLAGS=(-rocm) ;;
+   pc)      TAU_MODE_FLAGS=(-rocm_pc) ;;
+   pc-ebs)  TAU_MODE_FLAGS=(-rocm_pc -ebs) ;;
+   *) echo "ERROR: --mode must be one of: comm | pc | pc-ebs (got '${MODE}')" >&2; exit 1 ;;
+esac
+
+if ! type module >/dev/null 2>&1; then
+   [ -r /etc/profile.d/lmod.sh ]         && . /etc/profile.d/lmod.sh
+   [ -r /usr/share/lmod/lmod/init/bash ] && . /usr/share/lmod/lmod/init/bash
+fi
+if type module >/dev/null 2>&1; then
+   for m in ${MODULES}; do
+      echo "tau-launch: module load ${m}"
+      module load "${m}" || { echo "ERROR: 'module load ${m}' failed" >&2; exit 1; }
+   done
+else
+   echo "tau-launch: WARNING: Lmod 'module' not available; relying on current PATH for tau_exec/mpirun"
+fi
+
+if [ -n "${TAU_BINDIR}" ]; then
+   export PATH="${TAU_BINDIR}:${PATH}"
+   echo "tau-launch: prepended ${TAU_BINDIR} to PATH"
+fi
+
+for tool in mpirun tau_exec; do
+   if ! command -v "${tool}" >/dev/null 2>&1; then
+      if [ "${DRY_RUN}" = "1" ]; then
+         echo "tau-launch: WARNING: '${tool}' not on PATH (ok for --dry-run)"
+      else
+         echo "ERROR: '${tool}' not found on PATH after loading modules (${MODULES})." >&2
+         echo "       Load the right modules (--modules) or point --tau-bindir at a TAU <arch>/bin." >&2
+         exit 1
+      fi
+   fi
+done
+echo "tau-launch: tau_exec = $(command -v tau_exec || echo '(not found; dry-run)')"
+echo "tau-launch: mpirun   = $(command -v mpirun || echo '(not found; dry-run)')"
+
+if [ -z "${OUTDIR}" ]; then
+   OUTDIR="./tau_${MODE}_$(date +%Y%m%d-%H%M%S)"
+fi
+echo "tau-launch: TAU profiles -> ${OUTDIR}"
+
+MPI_BIND=()
+[ "${BIND_TO}" != "none" ] && MPI_BIND=(--bind-to "${BIND_TO}")
+
+CMD=(mpirun -np "${NP}" "${MPI_BIND[@]}" ${MPI_ARGS}
+     tau_exec "${TAU_MODE_FLAGS[@]}" ${TAU_ARGS}
+     "${PROG_ARGS[@]}")
+
+echo ""
+echo "tau-launch: running:"
+printf '   %q ' "${CMD[@]}"; echo ""
+echo ""
+
+if [ "${DRY_RUN}" = "1" ]; then
+   echo "tau-launch: --dry-run set; not executing (output dir not created)."
+   exit 0
+fi
+
+mkdir -p "${OUTDIR}"
+OUTDIR="$(cd "${OUTDIR}" && pwd -P)"
+export PROFILEDIR="${OUTDIR}"
+export TRACEDIR="${OUTDIR}"
+
+"${CMD[@]}"
+
+if [ "${SUMMARY}" = "1" ]; then
+   if command -v pprof >/dev/null 2>&1; then
+      echo ""
+      echo "==================================================================="
+      echo " pprof summary (from ${OUTDIR}); use 'paraprof ${OUTDIR}' for a GUI"
+      echo "==================================================================="
+      ( cd "${OUTDIR}" && pprof ) || echo "tau-launch: pprof returned non-zero (profiles are still in ${OUTDIR})"
+   else
+      echo "tau-launch: pprof not on PATH; profiles are in ${OUTDIR} (open with paraprof)"
+   fi
+fi
+
+echo ""
+echo "tau-launch: done. Profiles: ${OUTDIR}"
+TAU_EXEC_LAUNCH_EOF
+      if ${_sudo} cp "${_tmp}" "${_dest}" 2>/dev/null && ${_sudo} chmod 0755 "${_dest}" 2>/dev/null; then
+         echo "tau: installed launcher ${_dest} (on PATH via 'module load tau')"
+      else
+         echo "tau: WARNING: could not install ${_dest} (install tree not writable); tau_exec_launch skipped. TAU itself is fine."
+      fi
+      rm -f "${_tmp}"
+      return 0
+   }
 
    if [ -f ${CACHE_FILES}/pdt.tgz ] && [ -f ${CACHE_FILES}/tau.tgz ]; then
       echo ""
@@ -629,19 +848,35 @@ else
       PDT_PATH=$(spack location -i pdt)
       export PDTDIR=$PDT_PATH
 
-      # We are already in ${TAU_BUILD_DIR} from the spack section
-      # above; tau2 will be cloned into ${TAU_BUILD_DIR}/tau2.
+      # ── Fetch the TAU source tree ────────────────────────────────────
+      # We are already in ${TAU_BUILD_DIR} (under /tmp) from the spack
+      # section above. Two source modes:
       #
-      # Partial clone (--filter=blob:none) skips downloading blobs
-      # for history we don't need; the subsequent `git checkout
-      # $GIT_COMMIT` lazily fetches just the blobs for that commit.
-      # Reduces clone wall-time and disk by ~5-10x vs full clone
-      # while still supporting checkout of any specific commit
-      # (unlike --depth 1, which only gives the tip of the default
-      # branch).
-      git clone --filter=blob:none https://github.com/UO-OACISS/tau2.git || { echo "ERROR: git clone of tau2 failed"; exit 1; }
-      cd tau2
-      git checkout $GIT_COMMIT || { echo "ERROR: git checkout $GIT_COMMIT failed"; exit 1; }
+      #   * DEFAULT (GIT_COMMIT empty): download the pinned, versioned
+      #     release tarball tau-${TAU_VERSION}.tar.gz. This is the only way
+      #     to pin a specific TAU version -- the tau2 repo has no release
+      #     tags -- and reproduces the TAU author's known-good aac6 build.
+      #     Untars to ${TAU_BUILD_DIR}/tau-${TAU_VERSION}.
+      #
+      #   * OVERRIDE (--git-commit <hash>): clone + checkout that commit for
+      #     dev / bisect builds. Partial clone (--filter=blob:none) skips
+      #     history blobs we don't need; the checkout lazily fetches just the
+      #     blobs for that commit (~5-10x smaller/faster than a full clone,
+      #     and unlike --depth 1 still supports any specific commit).
+      if [ -n "${GIT_COMMIT}" ]; then
+         echo "tau: building from git commit ${GIT_COMMIT} (tau2 clone)"
+         git clone --filter=blob:none https://github.com/UO-OACISS/tau2.git || { echo "ERROR: git clone of tau2 failed"; exit 1; }
+         cd tau2
+         git checkout "$GIT_COMMIT" || { echo "ERROR: git checkout $GIT_COMMIT failed"; exit 1; }
+      else
+         TAU_TARBALL="tau-${TAU_VERSION}.tar.gz"
+         TAU_TARBALL_URL="http://tau.uoregon.edu/tau_releases/${TAU_TARBALL}"
+         echo "tau: building from pinned release ${TAU_TARBALL_URL}"
+         # -q drops wget dot-progress noise (matches the ext.tgz fetch below).
+         wget -q "${TAU_TARBALL_URL}" -O "${TAU_TARBALL}" || { echo "ERROR: download of ${TAU_TARBALL_URL} failed"; exit 1; }
+         tar xf "${TAU_TARBALL}" || { echo "ERROR: untar of ${TAU_TARBALL} failed"; exit 1; }
+         cd "tau-${TAU_VERSION}" || { echo "ERROR: expected source dir tau-${TAU_VERSION} not found after untar"; exit 1; }
+      fi
 
       # Patch tau's vendored plugins/llvm/Makefile to (a) embed the
       # ROCm LLVM include dir into CMAKE_CXX_FLAGS, and (b) split
@@ -756,8 +991,14 @@ else
          # install java to use paraprof
          ${PKG_SUDO} apt-get update
          ${PKG_SUDO} apt install -q -y default-jre
+
+         # Python dev headers (Python.h) for TAU's -python bindings. Without
+         # python3-dev, configure autodetects system python3 but the pytau/
+         # tau_python build fails on the missing header. On a Cray RHEL9 host
+         # the equivalent python3-devel comes from the base image.
+         ${PKG_SUDO} apt install -q -y python3-dev
       else
-         echo "tau: apt-get not present (non-Debian host); relying on module MPI ($(command -v mpicc || echo 'mpicc MISSING')) and system java ($(command -v java || echo 'java MISSING'))"
+         echo "tau: apt-get not present (non-Debian host); relying on module MPI ($(command -v mpicc || echo 'mpicc MISSING')), system java ($(command -v java || echo 'java MISSING')), and system Python.h ($(python3-config --includes 2>/dev/null || echo 'python3-dev MISSING'))"
       fi
 
       # ROCm integration flags. -llvm_src enables the optional plugins/llvm
@@ -808,8 +1049,32 @@ else
          echo "tau: HPE/Cray PE detected -> adding -fPIC via -useropt (PIE-default ROCm clang/ld.lld)"
       fi
 
+      # ── Author-recommended configure flags (Sameer Shende / UO, 2026) ─────
+      # Appended to every flavor below so the installed TAU matches the build
+      # the TAU author recommends for RCCL/ROCm profiling + EBS/PC sampling.
+      # These were previously MISSING from the aac6 install (that build had no
+      # -elfutils / -python), which is what this change fixes:
+      #   -python            Python bindings (tau_python / pytau) + Python-side
+      #                      call attribution. Needs Python.h (python3-dev),
+      #                      installed in the apt block above.
+      #   -elfutils=download build+bundle elfutils (ELF/DWARF backend the
+      #                      unwinder + sample->source mapping rely on).
+      #   -dwarf=download    build+bundle libdwarf so EBS/-rocm_pc samples get
+      #                      resolved to source lines / kernel names.
+      #   -perfetto          Perfetto trace backend (tau_exec -rocm perfetto
+      #                      output; opens in perfetto.dev / ui.perfetto.dev).
+      # TAU builds each downloaded dep once in the source tree and reuses it
+      # across the 8 reconfigure passes (same as the existing -bfd/-unwind/-otf
+      # downloads), so this does not multiply build time by 8. The author's
+      # reference line also sets the base compilers to the MPI wrappers
+      # (-c++=mpicxx -cc=mpicc -fortran=mpif90); we instead keep amdclang/
+      # amdflang + the separate -mpi flag so the Cray SDK compiler-pinning
+      # logic above still applies. -rocprofsdk is already threaded via
+      # ROCM_FLAGS (as -rocprofsdk=${ROCM_PATH}) for ROCm >= 6.2.
+      TAU_EXTRA_FLAGS="-python -elfutils=download -dwarf=download -perfetto"
+
       # configure with: MPI OMPT OPENMP PDT ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT}
+      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
 
       # LLVM_PLUGIN= on every `${SUDO} ... make install` line below skips
       # plugins/llvm in the root install pass. Why: TAU's top-level
@@ -832,43 +1097,43 @@ else
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: MPI PDT ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT}
+      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: OMPT OPENMP PDT ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT}
+      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: PDT ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT}
+      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -iowrapper ${TAU_PIC_OPT}
+      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: OMPT OPENMP ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -iowrapper ${TAU_PIC_OPT}
+      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: MPI ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -mpi -iowrapper ${TAU_PIC_OPT}
+      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -mpi -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: MPI OMPT OPENMP ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -iowrapper ${TAU_PIC_OPT}
+      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
@@ -885,14 +1150,21 @@ else
       export TAU_LIB_DIR
       echo "tau: detected arch subdir '${TAU_ARCH}' (TAU_LIB_DIR=${TAU_LIB_DIR})"
 
+      # Install tau_exec_launch NOW -- before the chown-root / chmod go-w
+      # ownership lockdown below -- using the same ${SUDO} the make-installs
+      # above used (a proven-writable path). It then rides the same
+      # chown/chmod as the rest of TAU. Doing this after the lockdown wrote
+      # into a locked NFS tree and aborted the whole build (Permission denied).
+      install_tau_exec_launch "${TAU_PATH}/${TAU_ARCH}/bin/tau_exec_launch" "${SUDO}"
+
       # the configure flag -no_pthread_create
       # still creates linking options for the pthread wrapper
       # that are breaking the instrumentation tests in C and C++
       ${SUDO} rm -f ${TAU_LIB_DIR}/wrappers/pthread_wrapper/link_options.tau
 
-      # TAU_BUILD_DIR (under /tmp, contains tau2/ and the spack clone)
-      # is removed by the EXIT trap above. No need to rm -rf tau2 or
-      # spack explicitly here.
+      # TAU_BUILD_DIR (under /tmp, contains the TAU source tree --
+      # tau-${TAU_VERSION}/ or tau2/ -- and the spack clone) is removed by
+      # the EXIT trap above. No need to rm -rf the source or spack here.
 
       # chown to root only when we actually installed with elevation
       # (SUDO non-empty). On a user-owned install tree (SUDO="") the files
@@ -926,6 +1198,13 @@ else
       TAU_ARCH="$(basename "$(dirname "$(ls -d ${TAU_PATH}/*/bin 2>/dev/null | head -1)")")"
       [ -z "${TAU_ARCH}" ] && TAU_ARCH="x86_64"
       TAU_LIB_DIR="${TAU_PATH}/${TAU_ARCH}/lib"
+   fi
+
+   # tau_exec_launch: the from-source branch already installed it above, before
+   # its ownership lockdown. For the cached-install branch (which just untars a
+   # prebuilt tree), add it now if missing. Best-effort / non-fatal.
+   if [ ! -e "${TAU_PATH}/${TAU_ARCH}/bin/tau_exec_launch" ]; then
+      install_tau_exec_launch "${TAU_PATH}/${TAU_ARCH}/bin/tau_exec_launch" "${SUDO:-}"
    fi
 
    # Create a module file for TAU
