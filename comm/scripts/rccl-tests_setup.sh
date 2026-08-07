@@ -187,7 +187,19 @@ else
    INSTALL_PATH=/opt/rocmplus-${ROCM_VERSION}
 fi
 RCCL_TESTS_PATH="${INSTALL_PATH}/rccl-tests-${RCCL_TESTS_VERSION}"
-MODULEFILE="${MODULE_PATH}/${RCCL_TESTS_VERSION}.lua"
+# ── Modulefile flavor: Lua (Lmod) vs Tcl (classic Environment Modules) ─
+# Lmod consumes <name>.lua; classic Tcl environment-modules consumes an
+# extensionless Tcl file and CANNOT read .lua. Detect Lmod via its env
+# markers; default to Tcl when absent. Mirrors fftw/hdf5/magma/pytorch.
+if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+   MODFLAVOR="lua"; MODEXT=".lua"
+else
+   MODFLAVOR="tcl"; MODEXT=""
+fi
+MODULEFILE="${MODULE_PATH}/${RCCL_TESTS_VERSION}${MODEXT}"
+# Both candidate paths, so cleanup removes a stale shadow of the other flavor.
+MODULEFILE_LUA="${MODULE_PATH}/${RCCL_TESTS_VERSION}.lua"
+MODULEFILE_TCL="${MODULE_PATH}/${RCCL_TESTS_VERSION}"
 
 echo ""
 echo "============================"
@@ -215,7 +227,7 @@ fi
 if [ "${REPLACE}" = "1" ]; then
    echo "[rccl-tests --replace 1] removing prior install + modulefile if present"
    ${SUDO_INSTALL} rm -rf "${RCCL_TESTS_PATH}"
-   ${SUDO_MOD} rm -f  "${MODULEFILE}"
+   ${SUDO_MOD} rm -f  "${MODULEFILE_LUA}" "${MODULEFILE_TCL}"
 fi
 
 if [ -d "${RCCL_TESTS_PATH}" ]; then
@@ -232,7 +244,7 @@ _rccl_tests_on_exit() {
    [ -n "${RCCL_TESTS_BUILD_DIR:-}" ] && rm -rf "${RCCL_TESTS_BUILD_DIR}"
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[rccl-tests fail-cleanup] rc=${rc}: removing partial install + modulefile"
-      ${SUDO_INSTALL} rm -rf "${RCCL_TESTS_PATH}"; ${SUDO_MOD} rm -f "${MODULEFILE}"
+      ${SUDO_INSTALL} rm -rf "${RCCL_TESTS_PATH}"; ${SUDO_MOD} rm -f "${MODULEFILE_LUA}" "${MODULEFILE_TCL}"
    fi
    return ${rc}
 }
@@ -325,9 +337,10 @@ fi
 [ "${BUILD_MPI}" == "1" ] && module unload "${MPI_MODULE}" 2>/dev/null || true
 module unload "${ROCM_MODULE_NAME}" 2>/dev/null || true
 
-# ── Modulefile (Lmod .lua) ───────────────────────────────────────────
+# ── Modulefile (Lua for Lmod, Tcl for classic Environment Modules) ────
 if [[ "${DRY_RUN}" == "0" ]]; then
    ${SUDO_MOD} mkdir -p ${MODULE_PATH}
+   echo "rccl-tests: modulefile flavor = ${MODFLAVOR} (${MODULEFILE})"
 
    # Provenance for the whatis() line; falls back to "unknown" outside a git
    # work tree (Docker layer / release tarball).
@@ -342,6 +355,7 @@ if [[ "${DRY_RUN}" == "0" ]]; then
    fi
    unset _leaf_dir
 
+   if [ "${MODFLAVOR}" = "lua" ]; then
    # The - option suppresses leading tabs.
    cat <<-EOF | ${SUDO_MOD} tee ${MODULEFILE}
 	whatis("Name: rccl-tests")
@@ -357,5 +371,32 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 	EOF
    if [ "${BUILD_MPI}" == "1" ]; then
       echo "	load(\"${MPI_MODULE}\")" | ${SUDO_MOD} tee -a ${MODULEFILE}
+   fi
+   else
+   # Tcl flavor. NOTE the ordering: the MPI `module load` is emitted BEFORE
+   # the prepend-path/setenv. On classic Environment Modules, if a nested
+   # `module load` raises an error mid-evaluation (our openmpi module hits a
+   # pre-existing rocm-afar conflict), the parent modulefile's still-STAGED
+   # env changes are discarded even though it is recorded as loaded. Emitting
+   # the MPI load first means our PATH/RCCL_TESTS_PATH are staged after it and
+   # survive. (Lmod does not have this footgun, hence Lua keeps load() last.)
+   cat <<EOF | ${SUDO_MOD} tee ${MODULEFILE}
+#%Module1.0
+module-whatis "Name: rccl-tests"
+module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+module-whatis "Version: rccl-tests-${RCCL_TESTS_VERSION} (source: ${RCCL_TESTS_SRC_COMMIT}, MPI build: ${BUILD_MPI})"
+module-whatis "Description: RCCL performance and correctness benchmarks (all_reduce_perf, ...)"
+module-whatis "URL: https://github.com/ROCm/rocm-systems (projects/rccl-tests)"
+
+prereq ${ROCM_MODULE_NAME}
+EOF
+   if [ "${BUILD_MPI}" == "1" ]; then
+      echo "if { ![ is-loaded ${MPI_MODULE} ] } { module load ${MPI_MODULE} }" | ${SUDO_MOD} tee -a ${MODULEFILE}
+   fi
+   cat <<EOF | ${SUDO_MOD} tee -a ${MODULEFILE}
+set base "${RCCL_TESTS_PATH}"
+prepend-path PATH \$base/bin
+setenv RCCL_TESTS_PATH \$base
+EOF
    fi
 fi

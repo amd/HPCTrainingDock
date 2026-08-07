@@ -237,9 +237,10 @@ fi
 if [ "${REPLACE}" = "1" ]; then
    echo "[elpa --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${INSTALL_PATH}"
-   echo "  modulefile:  ${MODULE_PATH}/${ELPA_VERSION}.lua"
+   echo "  modulefile:  ${MODULE_PATH}/${ELPA_VERSION}{.lua,} (both flavors)"
    ${SUDO} rm -rf "${INSTALL_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/${ELPA_VERSION}.lua"
+   ${SUDO} rm -f  "${MODULE_PATH}/${ELPA_VERSION}.lua" \
+                  "${MODULE_PATH}/${ELPA_VERSION}"
 fi
 
 # ── Existence guard: skip if already installed ───────────────────────
@@ -489,10 +490,15 @@ else
          echo "elpa: passwordless sudo available -- not self-building; install autoconf >= ${_required} system-wide and re-run."
          return 0
       fi
-      local _ac_root _ac_moddir _ac_modfile
+      local _ac_root _ac_moddir _ac_modfile _ac_modflavor
       _ac_root="$(dirname "${INSTALL_PATH}")/autoconf-${_build_ver}"
       _ac_moddir="${MODULE_PATH}/autoconf"
-      _ac_modfile="${_ac_moddir}/${_build_ver}.lua"
+      # Match the site module system: Lmod -> .lua, else extensionless Tcl.
+      if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+         _ac_modfile="${_ac_moddir}/${_build_ver}.lua"; _ac_modflavor="lua"
+      else
+         _ac_modfile="${_ac_moddir}/${_build_ver}"; _ac_modflavor="tcl"
+      fi
       if [ ! -x "${_ac_root}/bin/autoconf" ]; then
          echo "elpa: building autoconf ${_build_ver} from source into ${_ac_root} (no sudo; system autoconf too old)"
          local _ac_build _rc; _ac_build="$(mktemp -d -t autoconf-build.XXXXXX)"
@@ -514,14 +520,25 @@ else
       else
          echo "elpa: reusing previously built autoconf ${_build_ver} at ${_ac_root}"
       fi
-      # Create/refresh the .lua modulefile (consistent with the other rocmplus leaves).
+      # Create/refresh the modulefile in the site flavor (consistent with
+      # the other rocmplus leaves; Tcl `module` cannot read .lua).
       mkdir -p "${_ac_moddir}"
-      cat > "${_ac_modfile}" <<-EOF
+      if [ "${_ac_modflavor}" = "lua" ]; then
+         cat > "${_ac_modfile}" <<-EOF
 	whatis("Autoconf ${_build_ver} - build-time tool (self-built for ELPA where system autoconf < ${_required})")
 	local base = "${_ac_root}"
 	prepend_path("PATH",     pathJoin(base, "bin"))
 	prepend_path("INFOPATH", pathJoin(base, "share", "info"))
 	EOF
+      else
+         cat > "${_ac_modfile}" <<EOF
+#%Module1.0
+module-whatis "Autoconf ${_build_ver} - build-time tool (self-built for ELPA where system autoconf < ${_required})"
+set base "${_ac_root}"
+prepend-path PATH     \$base/bin
+prepend-path INFOPATH \$base/share/info
+EOF
+      fi
       echo "elpa: created autoconf module ${_ac_modfile}"
       module load "autoconf/${_build_ver}" 2>/dev/null || true
       # Belt-and-suspenders: put it first on PATH even if module-load timing missed.
@@ -699,12 +716,26 @@ _RPV="${ROCM_MODULE_NAME##*/}"
 case "${ROCM_MODULE_NAME}" in
    rocm/*|rocm-new/*)
       ROCM_PREREQ_LUA="prereq_any(\"rocm-new/${_RPV}\", \"rocm/${_RPV}\")"
+      ROCM_PREREQ_TCL="rocm-new/${_RPV} rocm/${_RPV}"
       ;;
    *)
       ROCM_PREREQ_LUA="prereq(\"${ROCM_MODULE_NAME}\")"
+      ROCM_PREREQ_TCL="${ROCM_MODULE_NAME}"
       ;;
 esac
 unset _RPV
+
+# ── Modulefile flavor: Lua (Lmod) vs Tcl (classic Environment Modules) ─
+# Lmod consumes <name>.lua; classic Tcl environment-modules consumes an
+# extensionless Tcl file and CANNOT read .lua (a .lua modulefile is
+# invisible to a Tcl `module load elpa`). Detect Lmod via its env markers;
+# default to Tcl when Lmod is absent. Mirrors fftw/hdf5/magma.
+if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+   _ELPA_MODFILE="${MODULE_PATH}/${ELPA_VERSION}.lua"; _ELPA_MODFLAVOR="lua"
+else
+   _ELPA_MODFILE="${MODULE_PATH}/${ELPA_VERSION}"; _ELPA_MODFLAVOR="tcl"
+fi
+echo "elpa: modulefile flavor = ${_ELPA_MODFLAVOR} (${_ELPA_MODFILE})"
 
 # The - option suppresses tabs.
 #
@@ -717,7 +748,8 @@ unset _RPV
 # ELPA_DIR / ELPA_ROOT / ELPA_HOME are aliases for downstream consumers
 # that follow CMake (<Pkg>_ROOT), spack (<Pkg>_DIR), or hand-rolled
 # (<Pkg>_HOME) conventions.
-cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${ELPA_VERSION}.lua
+if [ "${_ELPA_MODFLAVOR}" = "lua" ]; then
+cat <<-EOF | ${PKG_SUDO_MOD} tee ${_ELPA_MODFILE}
 	whatis("ELPA Version ${ELPA_VERSION} - Eigenvalue SoLvers for Petaflop-Applications, AMD GPU build")
 	whatis("Source: ${ELPA_GIT_REPO} (branch ${ELPA_GIT_BRANCH}, commit ${ELPA_GIT_COMMIT:0:12})")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
@@ -736,3 +768,26 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${ELPA_VERSION}.lua
 	prepend_path("PKG_CONFIG_PATH", pathJoin(base, "lib", "pkgconfig"))
 	prepend_path("CPATH",           pathJoin(base, "include"))
 EOF
+else
+cat <<EOF | ${PKG_SUDO_MOD} tee ${_ELPA_MODFILE}
+#%Module1.0
+module-whatis "ELPA Version ${ELPA_VERSION} - Eigenvalue SoLvers for Petaflop-Applications, AMD GPU build"
+module-whatis "Source: ${ELPA_GIT_REPO} (branch ${ELPA_GIT_BRANCH}, commit ${ELPA_GIT_COMMIT:0:12})"
+module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+
+set base "${INSTALL_PATH}"
+
+prereq ${ROCM_PREREQ_TCL}
+if { ![ is-loaded ${PETSC_MODULE} ] } { module load ${PETSC_MODULE} }
+setenv ELPA_PATH \$base
+setenv ELPA_DIR  \$base
+setenv ELPA_ROOT \$base
+setenv ELPA_HOME \$base
+prepend-path PATH            \$base/bin
+prepend-path LD_LIBRARY_PATH \$base/lib
+prepend-path LIBRARY_PATH    \$base/lib
+prepend-path PKG_CONFIG_PATH \$base/lib/pkgconfig
+prepend-path CPATH           \$base/include
+EOF
+fi
+unset _ELPA_MODFILE _ELPA_MODFLAVOR

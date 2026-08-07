@@ -272,9 +272,10 @@ fi
 if [ "${REPLACE}" = "1" ]; then
    echo "[tensorflow --replace 1] removing prior install + modulefile if present"
    echo "  install dir: ${TF_PATH}"
-   echo "  modulefile:  ${MODULE_PATH}/${TENSORFLOW_VERSION}.lua"
+   echo "  modulefile:  ${MODULE_PATH}/${TENSORFLOW_VERSION}{.lua,} (both flavors)"
    ${SUDO} rm -rf "${TF_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/${TENSORFLOW_VERSION}.lua"
+   ${SUDO} rm -f  "${MODULE_PATH}/${TENSORFLOW_VERSION}.lua" \
+                  "${MODULE_PATH}/${TENSORFLOW_VERSION}"
 fi
 
 # ── Existence guard: skip if already installed (see hypre_setup.sh) ──
@@ -312,7 +313,8 @@ MARKER_EOF
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[tensorflow fail-cleanup] rc=${rc}: removing partial install + modulefile"
       ${SUDO:-sudo} rm -rf "${TF_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${TENSORFLOW_VERSION}.lua"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${TENSORFLOW_VERSION}.lua" \
+                           "${MODULE_PATH}/${TENSORFLOW_VERSION}"
    elif [ ${rc} -ne 0 ]; then
       echo "[tensorflow fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -1016,8 +1018,21 @@ ROCM_FB_PATCH_EOF
    fi
    unset _leaf_dir
 
+   # ── Modulefile flavor: Lua (Lmod) vs Tcl (classic Environment Modules) ─
+   # Lmod consumes <name>.lua; classic Tcl environment-modules consumes an
+   # extensionless Tcl file and CANNOT read .lua (a .lua modulefile is
+   # invisible to a Tcl `module load tensorflow`). Detect Lmod via its env
+   # markers; default to Tcl when Lmod is absent. Mirrors fftw/hdf5/magma.
+   if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+      _MODFILE="${MODULE_PATH}/${TENSORFLOW_VERSION}.lua"; _MODFLAVOR="lua"
+   else
+      _MODFILE="${MODULE_PATH}/${TENSORFLOW_VERSION}"; _MODFLAVOR="tcl"
+   fi
+   echo "tensorflow: modulefile flavor = ${_MODFLAVOR} (${_MODFILE})"
+
    # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${TENSORFLOW_VERSION}.lua
+   if [ "${_MODFLAVOR}" = "lua" ]; then
+   cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
 	whatis("TensorFlow version ${TENSORFLOW_VERSION} with ROCm support")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("Upstream branch: ${GIT_BRANCH}")
@@ -1025,7 +1040,21 @@ ROCM_FB_PATCH_EOF
 	prereq("${ROCM_MODULE_NAME}")
 	prepend_path("PYTHONPATH","$TF_PATH")
 	prepend_path("PATH","${TF_PATH}/bin")
-        setenv("TF_CPP_MIN_LOG_LEVEL","2")
+	setenv("TF_CPP_MIN_LOG_LEVEL","2")
 EOF
+   else
+   cat <<EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
+#%Module1.0
+module-whatis "TensorFlow version ${TENSORFLOW_VERSION} with ROCm support"
+module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+module-whatis "Upstream branch: ${GIT_BRANCH}"
+
+prereq ${ROCM_MODULE_NAME}
+prepend-path PYTHONPATH "${TF_PATH}"
+prepend-path PATH "${TF_PATH}/bin"
+setenv TF_CPP_MIN_LOG_LEVEL "2"
+EOF
+   fi
+   unset _MODFILE _MODFLAVOR
 
 fi

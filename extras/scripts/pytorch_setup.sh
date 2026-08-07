@@ -1436,7 +1436,10 @@ if [[ "${ROCM_PATH:-}" == *afar* ]]; then
          echo "[pytorch afar-skip] removing stale from-source install: ${INSTALL_PATH}"
          ${SUDO} rm -rf "${INSTALL_PATH}"
       fi
-      for _mf in "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua" "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua"; do
+      for _mf in "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua" \
+                 "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}" \
+                 "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua" \
+                 "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled"; do
          if [ -f "${_mf}" ]; then
             echo "[pytorch afar-skip] removing stale modulefile: ${_mf}"
             ${SUDO} rm -f "${_mf}"
@@ -1478,8 +1481,13 @@ if [ "${REPLACE}" = "1" ]; then
    echo "  modulefile:         ${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua"
    echo "  modulefile (tunop): ${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua"
    ${SUDO} rm -rf "${INSTALL_PATH}"
+   # Remove BOTH modulefile flavors (Lmod .lua and extensionless Tcl) so a
+   # re-run that switches flavor (or an operator swapping module systems)
+   # never leaves a stale sibling that shadows the fresh emit.
    ${SUDO} rm -f  "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua" \
-                  "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua"
+                  "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}" \
+                  "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua" \
+                  "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled"
 fi
 
 # ── Existence guard: skip if already installed (see hypre_setup.sh) ──
@@ -1521,7 +1529,9 @@ MARKER_EOF
       echo "[pytorch fail-cleanup] rc=${rc}: removing partial install + modulefiles"
       ${SUDO:-sudo} rm -rf "${INSTALL_PATH}"
       ${SUDO:-sudo} rm -f  "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua" \
-                           "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua"
+                           "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}" \
+                           "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua" \
+                           "${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled"
    elif [ ${rc} -ne 0 ]; then
       echo "[pytorch fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -4562,23 +4572,64 @@ unset _nl
 echo "[modulefile-emit] IS_PT_2_10_PLUS=${IS_PT_2_10_PLUS}; companion prepends:"
 printf '  %s\n' "${MODULE_COMPANION_PREPENDS}" | sed 's/^/    /'
 
-# ── cray-python modulefile load ──────────────────────────────────────
-# When the build-python selection loaded a cray-python module (because
-# the OS-default python was below this PyTorch's floor -- see the
-# "Build-python floor" block), the same module must be loaded at runtime
-# so `module load pytorch` resolves python3 to the >=3.10 interpreter the
-# wheels were built for AND so the python3.${PYTHON_VERSION}/site-packages
-# prepends below point at a matching interpreter. Empty (no line emitted)
-# when the OS-default python already met the floor.
-if [[ -n "${CRAY_PYTHON_MODULE}" ]]; then
+# ── cray-python / runtime python modulefile load ─────────────────────
+# Runtime python module to load from the modulefile. The wheels are
+# built against python3.${PYTHON_VERSION}; on hosts whose OS python is
+# older (this Cray's RHEL base is 3.9, below PyTorch's floor) `module
+# load pytorch` MUST pull a matching interpreter or `import torch` dies
+# with a py<3.10 syntax error in torch/_utils.py ("unsupported operand
+# type(s) for |: 'type' and 'NoneType'"). Prefer the cray-python module
+# the build actually loaded (CRAY_PYTHON_MODULE); if the build
+# interpreter already met the floor (nothing loaded), still bake in the
+# best available cray-python >= the built minor so the modulefile also
+# works on older-python nodes.
+RUNTIME_PYTHON_MODULE="${CRAY_PYTHON_MODULE}"
+if [[ -z "${RUNTIME_PYTHON_MODULE}" ]] && type module >/dev/null 2>&1; then
+   RUNTIME_PYTHON_MODULE=$(module -t avail cray-python 2>&1 \
+      | sed 's/(default)//' \
+      | grep -E "^cray-python/3\.[0-9]+\." \
+      | awk -F'[/.]' -v req="${PYTHON_VERSION}" '$3 >= req {print $0}' \
+      | sort -V | tail -1)
+fi
+if [[ -n "${RUNTIME_PYTHON_MODULE}" ]]; then
+   echo "pytorch: modulefile will load python module '${RUNTIME_PYTHON_MODULE}' at runtime"
    MODULE_CRAY_PYTHON_LOAD="-- cray-python: the >=3.10 interpreter (with dev libs) PyTorch was built against
-	load(\"${CRAY_PYTHON_MODULE}\")"
+	load(\"${RUNTIME_PYTHON_MODULE}\")"
+   MODULE_PY_LOAD_TCL="# cray-python: the >=3.10 interpreter (with dev libs) PyTorch was built against
+if { ![ is-loaded ${RUNTIME_PYTHON_MODULE} ] } { module load ${RUNTIME_PYTHON_MODULE} }"
 else
    MODULE_CRAY_PYTHON_LOAD=""
+   MODULE_PY_LOAD_TCL=""
 fi
 
+# ── Modulefile flavor: Lmod consumes <ver>.lua; classic Tcl Environment
+# Modules (this Cray runs modulecmd 3.2.x) consumes an extensionless Tcl
+# file and CANNOT read .lua at all -- a .lua pytorch modulefile is
+# invisible to a Tcl `module load pytorch`, which fails with "Unable to
+# locate a modulefile for 'pytorch'" and makes every HPCTrainingExamples
+# ctest AI test SKIP. Detect Lmod via its env markers; default to Tcl
+# when Lmod is absent. Mirrors magma_setup.sh:579.
+if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+   MODFLAVOR="lua"; MODEXT=".lua"
+else
+   MODFLAVOR="tcl"; MODEXT=""
+fi
+echo "pytorch: modulefile flavor = ${MODFLAVOR} (extension '${MODEXT:-<none>}')"
+
+# Tcl renderings of the variable-driven PYTHONPATH prepend blocks. Those
+# were assembled above as Lua `prepend_path("PYTHONPATH","X")` lines and
+# contain only that one construct, so a fixed sed converts each to the
+# Tcl `prepend-path PYTHONPATH "X"` form. Empty input stays empty.
+_lua2tcl_prepend() { sed -E 's|prepend_path\("([^"]+)","([^"]+)"\)|prepend-path \1 "\2"|g'; }
+MODULE_COMPANION_PREPENDS_TCL="$(printf '%s' "${MODULE_COMPANION_PREPENDS}" | _lua2tcl_prepend)"
+MODULE_FA_PREPENDS_TCL="$(printf '%s' "${MODULE_FA_PREPENDS}" | _lua2tcl_prepend)"
+
+PYTORCH_MODULEFILE="${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}${MODEXT}"
+PYTORCH_TUNOP_MODULEFILE="${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled${MODEXT}"
+
+if [ "${MODFLAVOR}" = "lua" ]; then
 # the - option suppresses tabs
-cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua
+cat <<-EOF | ${PKG_SUDO_MOD} tee ${PYTORCH_MODULEFILE}
 	whatis("PyTorch version ${PYTORCH_VERSION} with ROCm Support${PYTORCH_INSTALL_SUFFIX:+ (variant: ${PYTORCH_INSTALL_SUFFIX#-})}")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("AOTriton: ${AOTRITON_VERSION}")
@@ -4685,7 +4736,7 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INST
 	setenv("PYTORCH_ROCM_ARCH","${AMDGPU_GFXMODEL}")
 EOF
 # An alternate module with tunable gemms
-cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua
+cat <<-EOF | ${SUDO} tee ${PYTORCH_TUNOP_MODULEFILE}
 	whatis("PyTorch version ${PYTORCH_VERSION} with ROCm Support and Tunable GEMMS${PYTORCH_INSTALL_SUFFIX:+ (variant: ${PYTORCH_INSTALL_SUFFIX#-})}")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("AOTriton: ${AOTRITON_VERSION}")
@@ -4695,6 +4746,91 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFF
 	load("pytorch")
 	setenv("PYTORCH_TUNABLEOP_ENABLED","1")
 EOF
+
+else
+# ── Classic Tcl Environment Modules flavor (Lmod absent) ─────────────
+# Functional twin of the Lua modulefile above. Body is kept flush-left
+# so a plain (non-dash) heredoc needs no tabs; every Tcl-runtime '\$'
+# is backslash-escaped so bash does not expand it, while build-time
+# \${...} shell vars ARE expanded. Mirrors magma_setup.sh's dual emit.
+cat <<EOF | ${PKG_SUDO_MOD} tee ${PYTORCH_MODULEFILE}
+#%Module1.0
+module-whatis "PyTorch version ${PYTORCH_VERSION} with ROCm Support${PYTORCH_INSTALL_SUFFIX:+ (variant: ${PYTORCH_INSTALL_SUFFIX#-})}"
+module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+module-whatis "AOTriton: ${AOTRITON_VERSION}"
+module-whatis "Triton (post-build wheel): ${TRITON_VERSION}"
+module-whatis "FlashAttention: ${FLASHATTENTION_VERSION}"
+
+prereq ${ROCM_MODULE_NAME}
+${MODULE_PY_LOAD_TCL}
+# openmpi is required because libtorch_cpu links libmpi.so (USE_MPI=1
+# was set at build time in pytorch_setup.sh).
+if { ![ is-loaded ${MPI_MODULE} ] } { module load ${MPI_MODULE} }
+# magma provides libmagma.so on LD_LIBRARY_PATH (and MAGMA_HOME). Without
+# it, "import torch" fails: ImportError: libmagma.so: cannot open ...
+if { ![ is-loaded magma ] } { module load magma }
+conflict miniconda3
+${MODULE_FA_PREPENDS_TCL}
+prepend-path PYTHONPATH "${SAGEATTENTION_PATH}"
+prepend-path PYTHONPATH "${TRANSFORMERS_PATH}"
+${MODULE_COMPANION_PREPENDS_TCL}
+prepend-path PYTHONPATH "${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages"
+prepend-path PYTHONPATH "${PYTORCH_PATH}"
+prepend-path PYTHONPATH "${TORCHAUDIO_PATH}"
+prepend-path PYTHONPATH "${TORCHVISION_PATH}"
+prepend-path PYTHONPATH "${DEEPSPEED_PATH}"
+prepend-path PYTHONPATH "${INSTALL_PATH}/pypackages"
+prepend-path PYTHONPATH "${TRITON_PATH}"
+prepend-path PATH "${PYTORCH_PATH}/bin"
+# torch/lib so runtime dlopen() of libcaffe2_nvrtc.so (and siblings)
+# resolves -- glibc ld.so does not consult DT_RUNPATH for dlopen().
+# See the .lua branch for the full rationale.
+prepend-path LD_LIBRARY_PATH "${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages/torch/lib"
+# ROCm llvm/lib so libtorch_cpu.so's DT_NEEDED libomp.so resolves even
+# when LD_LIBRARY_PATH is stripped to just \${ROCM_PATH}/lib.
+prepend-path LD_LIBRARY_PATH "${ROCM_PATH}/llvm/lib"
+# MIOpen user/kernel cache on node-local /tmp; per-job under Slurm so
+# concurrent jobs on one node do not race the same SQLite/ufdb files.
+# Do not clobber MIOPEN_* if the user already set them.
+set _mio_user "unknown"
+if {[info exists env(USER)]} { set _mio_user \$env(USER) }
+set _mio_cache "/tmp/\$_mio_user/miopen-cache"
+if {[info exists env(SLURM_JOB_ID)]} {
+  set _mio_cache "\$_mio_cache/jobs/\$env(SLURM_JOB_ID)"
+} else {
+  set _mio_cache "\$_mio_cache/interactive"
+}
+if {![info exists env(MIOPEN_USER_DB_PATH)]} { setenv MIOPEN_USER_DB_PATH \$_mio_cache }
+if {![info exists env(MIOPEN_CUSTOM_CACHE_DIR)]} { setenv MIOPEN_CUSTOM_CACHE_DIR \$_mio_cache }
+setenv Torch_DIR "${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages"
+# Re-export the gfx arch list pytorch was built for so downstream
+# find_package(Torch) -> LoadHIP.cmake does not hard-error.
+setenv PYTORCH_ROCM_ARCH "${AMDGPU_GFXMODEL}"
+EOF
+# An alternate module with tunable gemms
+cat <<EOF | ${SUDO} tee ${PYTORCH_TUNOP_MODULEFILE}
+#%Module1.0
+module-whatis "PyTorch version ${PYTORCH_VERSION} with ROCm Support and Tunable GEMMS${PYTORCH_INSTALL_SUFFIX:+ (variant: ${PYTORCH_INSTALL_SUFFIX#-})}"
+module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+module-whatis "AOTriton: ${AOTRITON_VERSION}"
+module-whatis "Triton (post-build wheel): ${TRITON_VERSION}"
+module-whatis "FlashAttention: ${FLASHATTENTION_VERSION}"
+
+module load pytorch
+setenv PYTORCH_TUNABLEOP_ENABLED "1"
+EOF
+# Tcl Environment Modules has no implicit "highest version" default like
+# Lmod: with both ${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX} and its
+# _tunableop_enabled sibling present, a bare `module load pytorch` would
+# pick the _tunableop_enabled file, whose own `module load pytorch` then
+# re-resolves to itself -> infinite recursion / hang. Emit a .modulerc that
+# pins the plain build as the default so bare loads (and the tunableop
+# file's inner `module load pytorch`) resolve to it.
+cat <<EOF | ${SUDO} tee ${MODULE_PATH}/.modulerc
+#%Module1.0
+module-version $(basename ${MODULE_PATH})/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX} default
+EOF
+fi
 #	cmd1="mkdir -p $$HOME/miopen_tmpdir; export TMPDIR=$$HOME/miopen_tmpdir"
 #	cmd2="rm -rf $$HOME/miopen_tmpdir; unset TMPDIR"
 #	execute{cmd=cmd1, modeA={"load"}}

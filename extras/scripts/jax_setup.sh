@@ -277,6 +277,12 @@ if { [ "${PYMAJOR}" -lt 3 ] || { [ "${PYMAJOR}" -eq 3 ] && [ "${PYMINOR}" -lt 11
       echo "jax: no cray-python >= 3.11 module available; will select an older JAX line if the python allows it."
    fi
 fi
+# Persist the cray-python module (if one had to be loaded) so the emitted
+# modulefile re-loads the SAME >=3.11 interpreter that jaxlib's C-extensions
+# were built against. Without it, `import jax` fails at runtime with an
+# undefined-symbol ABI error (e.g. PyObject_Vectorcall) whenever the node's
+# default python3 (3.9 on this RHEL 9 Cray) differs from the build python.
+JAX_RUNTIME_PYTHON_MODULE="${_cray_py_mod:-}"
 unset -f _jax_pymajor _jax_pyminor
 
 # ── JAX_VERSION policy gate (python-version-keyed) ───────────────────
@@ -387,9 +393,10 @@ unset _root_mark
 if [ "${REPLACE_JAX}" = "1" ]; then
    echo "[jax --replace-jax 1] removing prior jax install + modulefile if present"
    echo "  install dir: ${JAX_PATH}"
-   echo "  modulefile:  ${MODULE_PATH}/0.${JAX_VERSION}.lua"
+   echo "  modulefile:  ${MODULE_PATH}/0.${JAX_VERSION}{.lua,} (both flavors)"
    ${SUDO} rm -rf "${JAX_PATH}"
-   ${SUDO} rm -f  "${MODULE_PATH}/0.${JAX_VERSION}.lua"
+   ${SUDO} rm -f  "${MODULE_PATH}/0.${JAX_VERSION}.lua" \
+                  "${MODULE_PATH}/0.${JAX_VERSION}"
 fi
 if [ "${REPLACE_JAXLIB}" = "1" ]; then
    echo "[jax --replace-jaxlib 1] removing prior jaxlib install"
@@ -449,7 +456,8 @@ MARKER_EOF
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[jax fail-cleanup] rc=${rc}: removing partial jax + jaxlib installs + modulefile"
       ${SUDO:-sudo} rm -rf "${JAX_PATH}" "${JAXLIB_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/0.${JAX_VERSION}.lua"
+      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/0.${JAX_VERSION}.lua" \
+                           "${MODULE_PATH}/0.${JAX_VERSION}"
    elif [ ${rc} -ne 0 ]; then
       echo "[jax fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -1127,17 +1135,57 @@ else
    # the working path. autotune_level=3 is retained unchanged.
    JAX_XLA_FLAGS="--xla_gpu_enable_triton_gemm=True --xla_gpu_autotune_level=3"
 
+   # ── Modulefile flavor: Lua (Lmod) vs Tcl (classic Environment Modules) ─
+   # Lmod consumes <name>.lua; classic Tcl environment-modules consumes an
+   # extensionless Tcl file and CANNOT read .lua (a .lua modulefile is
+   # invisible to a Tcl `module load jax`). Detect Lmod via its env markers;
+   # default to Tcl when Lmod is absent. Mirrors fftw/hdf5/magma.
+   if [ -n "${LMOD_VERSION:-}${LMOD_CMD:-}${LMOD_DIR:-}" ]; then
+      _MODFILE="${MODULE_PATH}/0.${JAX_VERSION}.lua"; _MODFLAVOR="lua"
+   else
+      _MODFILE="${MODULE_PATH}/0.${JAX_VERSION}"; _MODFLAVOR="tcl"
+   fi
+   echo "jax: modulefile flavor = ${_MODFLAVOR} (${_MODFILE})"
+
+   # Emit a python-load directive only when a cray-python module was needed
+   # at build time (see JAX_RUNTIME_PYTHON_MODULE above). Blank otherwise.
+   if [ -n "${JAX_RUNTIME_PYTHON_MODULE}" ]; then
+      _JAX_PY_LUA="load(\"${JAX_RUNTIME_PYTHON_MODULE}\")"
+      _JAX_PY_TCL="if { ![ is-loaded ${JAX_RUNTIME_PYTHON_MODULE} ] } { module load ${JAX_RUNTIME_PYTHON_MODULE} }"
+   else
+      _JAX_PY_LUA=""
+      _JAX_PY_TCL=""
+   fi
+
    # The - option suppresses tabs
-   cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/0.${JAX_VERSION}.lua
+   if [ "${_MODFLAVOR}" = "lua" ]; then
+   cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
 	whatis("JAX version ${JAX_VERSION} with ROCm support")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
 	prereq("${ROCM_MODULE_NAME}")
+	${_JAX_PY_LUA}
 	setenv("XLA_FLAGS","${JAX_XLA_FLAGS}")
 	setenv("JAX_PLATFORMS","rocm,cpu")
 	prepend_path("LD_PRELOAD","${ROCM_PATH_FOR_MODULE}/lib/llvm/lib/libunwind.so.1")
 	prepend_path("PYTHONPATH","${JAX_PATH}")
 	prepend_path("PYTHONPATH","${JAXLIB_PATH}")
 EOF
+   else
+   cat <<EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
+#%Module1.0
+module-whatis "JAX version ${JAX_VERSION} with ROCm support"
+module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
+
+prereq ${ROCM_MODULE_NAME}
+${_JAX_PY_TCL}
+setenv XLA_FLAGS "${JAX_XLA_FLAGS}"
+setenv JAX_PLATFORMS "rocm,cpu"
+prepend-path LD_PRELOAD "${ROCM_PATH_FOR_MODULE}/lib/llvm/lib/libunwind.so.1"
+prepend-path PYTHONPATH "${JAX_PATH}"
+prepend-path PYTHONPATH "${JAXLIB_PATH}"
+EOF
+   fi
+   unset _MODFILE _MODFLAVOR _JAX_PY_LUA _JAX_PY_TCL
 
 fi
