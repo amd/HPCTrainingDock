@@ -241,13 +241,28 @@ else
    fi
 
    # -------------------------------------------------------------------------
-   # Software DRI driver: Xvnc's default -dridir (below) points into the
-   # install tree; if the source build did not stage a swrast driver there,
-   # fall back to the distro's Mesa swrast so GLX/OpenGL apps still render.
+   # Software DRI driver for Xvnc AIGLX. Xvnc's -dridir (below) points into the
+   # install tree and dlopen()s swrast_dri.so to provide software GLX. On these
+   # MI300A nodes hardware GL is impossible (gfx942/CDNA3 is compute-only; Mesa
+   # radeonsi refuses to "create a graphics context on a compute chip"), so
+   # llvmpipe is the ONLY GL path.
+   #
+   # Modern Mesa (25.x) ships a single unified megadriver, libdril_dri.so, and
+   # swrast/kms_swrast are just symlinks to it (it pulls in libgallium + LLVM ->
+   # llvmpipe). Copying a lone swrast_dri.so is fragile: a stale copy NEEDs
+   # libglapi.so.0 / an old libLLVM that may be absent, and dlopen fails ->
+   # "couldn't find RGB GLX visual". So prefer symlinking the install's DRI
+   # drivers to the node's libdril_dri.so; fall back to copying a classic
+   # swrast_dri.so only on older images that lack the megadriver.
    # -------------------------------------------------------------------------
    SYS_DRIDIR=/usr/lib/x86_64-linux-gnu/dri
-   if [ ! -f "${INSTALL_PATH}/lib/dri/swrast_dri.so" ] && [ -f "${SYS_DRIDIR}/swrast_dri.so" ]; then
-      ${SUDO} mkdir -p "${INSTALL_PATH}/lib/dri"
+   ${SUDO} mkdir -p "${INSTALL_PATH}/lib/dri"
+   if [ -e "${SYS_DRIDIR}/libdril_dri.so" ]; then
+      for _drv in swrast_dri.so kms_swrast_dri.so; do
+         ${SUDO} ln -sfn "${SYS_DRIDIR}/libdril_dri.so" "${INSTALL_PATH}/lib/dri/${_drv}"
+      done
+      unset _drv
+   elif [ ! -f "${INSTALL_PATH}/lib/dri/swrast_dri.so" ] && [ -f "${SYS_DRIDIR}/swrast_dri.so" ]; then
       ${SUDO} cp -a "${SYS_DRIDIR}/swrast_dri.so" "${INSTALL_PATH}/lib/dri/"
    fi
 
@@ -312,6 +327,13 @@ if [ -n "$DISPLAY" ] && command -v xset >/dev/null 2>&1; then
   xset s noblank 2>/dev/null
   xset -dpms 2>/dev/null
 fi
+# Software OpenGL: MI300A (gfx942/CDNA3) GPUs are compute-only and Mesa radeonsi
+# refuses to "create a graphics context on a compute chip", so force llvmpipe.
+# GLX itself is served by Xvnc AIGLX via -dridir (repointed at libdril_dri.so).
+# These exports propagate to the WM session and all in-session GL clients
+# (glxinfo/glxgears, roc-optiq, paraprof), rendering in software on the CPU.
+export LIBGL_ALWAYS_SOFTWARE=1
+export GALLIUM_DRIVER=llvmpipe
 # --- end AAC6 cluster customization ---
 
 NOLOCK_EOF

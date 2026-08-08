@@ -1288,6 +1288,10 @@ TAU_EXEC_LAUNCH_EOF
    esac
    unset _RPV
 
+   # TAU_PROFILE_FORMAT=merged: emit a single merged tauprofile.xml per run
+   # instead of one profile.<node>.<ctx>.<thread> file per rank/thread (which
+   # litters the run directory). Requested by the TAU author for the workshop;
+   # pprof/paraprof read the merged file directly.
    TAU_MODULEFILE="${MODULE_PATH}/dev${MODEXT}"
    if [ "${MODFLAVOR}" = "lua" ]; then
       cat <<-EOF | ${MOD_SUDO} tee ${TAU_MODULEFILE}
@@ -1296,9 +1300,11 @@ TAU_EXEC_LAUNCH_EOF
 
 	${ROCM_PREREQ_LUA}
 	load("${MPI_MODULE}")
+	try_load("google-chrome")
 	prepend_path("PATH","${TAU_PATH}/${TAU_ARCH}/bin")
 	prepend_path("PATH","${PDT_PATH}/bin")
 	setenv("TAU_LIB_DIR","${TAU_LIB_DIR}")
+	setenv("TAU_PROFILE_FORMAT","merged")
 EOF
    else
       cat <<-EOF | ${MOD_SUDO} tee ${TAU_MODULEFILE}
@@ -1308,9 +1314,11 @@ EOF
 
 	prereq ${ROCM_PREREQ_TCL}
 	if { ![ is-loaded ${MPI_MODULE} ] } { module load ${MPI_MODULE} }
+	if { ![ is-loaded google-chrome ] } { catch { module load google-chrome } }
 	prepend-path PATH "${TAU_PATH}/${TAU_ARCH}/bin"
 	prepend-path PATH "${PDT_PATH}/bin"
 	setenv TAU_LIB_DIR "${TAU_LIB_DIR}"
+	setenv TAU_PROFILE_FORMAT "merged"
 EOF
    fi
 
