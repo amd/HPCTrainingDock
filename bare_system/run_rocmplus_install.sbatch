@@ -620,6 +620,17 @@ SITE_ARGS=()
 [[ -n "${ROCM_PATH}"       ]] && SITE_ARGS+=( --rocm-path       "${ROCM_PATH}"       )
 [[ -n "${PNETCDF_VERSION}" ]] && SITE_ARGS+=( --pnetcdf-version "${PNETCDF_VERSION}" )
 
+# ── Do NOT build IntelliKit on the bare-metal nightly sweep ───────────
+# intellikit_setup.sh runs `apt-get install libdwarf-dev`, which drops a
+# distro libdwarf.so.1 into /usr/lib on the shared build host. Because
+# intellikit runs BEFORE tau in main_setup.sh, that stray libdwarf.so.1
+# can be bound into TAU's libraries at link time yet is absent on the
+# compute nodes (-> `libdwarf.so.1 => not found`). main_setup.sh exposes no
+# per-package CLI flag (by design) but honours a BUILD_<PKG> env override
+# (see its `: ${BUILD_INTELLIKIT:="1"}` default), so disable it here for the
+# sweep. IntelliKit should instead be built via the isolated container path
+# (tools/Dockerfile), where its apt deps stay in a throwaway image layer.
+BUILD_INTELLIKIT=0 \
 bare_system/main_setup.sh \
    --rocm-version         "${ROCM_NUMERIC}" \
    --rocm-rc-prefix       "${ROCM_RC_PREFIX}" \

@@ -1065,16 +1065,33 @@ TAU_EXEC_LAUNCH_EOF
       #                      output; opens in perfetto.dev / ui.perfetto.dev).
       # TAU builds each downloaded dep once in the source tree and reuses it
       # across the 8 reconfigure passes (same as the existing -bfd/-unwind/-otf
-      # downloads), so this does not multiply build time by 8. The author's
-      # reference line also sets the base compilers to the MPI wrappers
-      # (-c++=mpicxx -cc=mpicc -fortran=mpif90); we instead keep amdclang/
-      # amdflang + the separate -mpi flag so the Cray SDK compiler-pinning
-      # logic above still applies. -rocprofsdk is already threaded via
-      # ROCM_FLAGS (as -rocprofsdk=${ROCM_PATH}) for ROCm >= 6.2.
+      # downloads), so this does not multiply build time by 8. -rocprofsdk is
+      # already threaded via ROCM_FLAGS (as -rocprofsdk=${ROCM_PATH}) for
+      # ROCm >= 6.2.
       TAU_EXTRA_FLAGS="-python -elfutils=download -dwarf=download -perfetto"
 
+      # ── TAU base compilers: match the author's MPI wrappers ──────────
+      # Build TAU's own libraries with the MPI compiler wrappers
+      # (-c++=mpicxx -cc=mpicc -fortran=mpif90), exactly as the TAU author's
+      # reference build does, INSTEAD of amdclang/amdclang++/amdflang. Why:
+      # under amdclang (ld.lld) the libTAUsh link resolved -ldwarf against the
+      # distro libdwarf.so.1 that intellikit_setup's `apt-get install
+      # libdwarf-dev` drops into /usr/lib on the shared build host, so the
+      # installed libTAUsh recorded NEEDED libdwarf.so.1 -- a soname absent
+      # from TAU's own bundle (libdwarf 0.7.0 -> libdwarf.so.0) and from every
+      # runtime node, giving `libdwarf.so.1 => not found` at load time. The
+      # GCC-backed MPI wrappers (ld.bfd) instead link TAU's bundled
+      # libdwarf.so.0, yielding a self-contained, portable install (verified
+      # byte-for-byte against the author's working tree). The wrappers are
+      # already on PATH from the preflight MPI module (relied on by -mpi
+      # below). On a Cray, mpif90 wraps amdflang, so the ROCM_PATH compiler
+      # pin above (lines ~763-768) still governs the wrapped SDK.
+      TAU_CFG_CC=mpicc
+      TAU_CFG_CXX=mpicxx
+      TAU_CFG_FC=mpif90
+
       # configure with: MPI OMPT OPENMP PDT ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
+      ./configure -c++=$TAU_CFG_CXX -fortran=$TAU_CFG_FC -cc=$TAU_CFG_CC -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
 
       # LLVM_PLUGIN= on every `${SUDO} ... make install` line below skips
       # plugins/llvm in the root install pass. Why: TAU's top-level
@@ -1097,43 +1114,43 @@ TAU_EXEC_LAUNCH_EOF
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: MPI PDT ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
+      ./configure -c++=$TAU_CFG_CXX -fortran=$TAU_CFG_FC -cc=$TAU_CFG_CC -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: OMPT OPENMP PDT ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
+      ./configure -c++=$TAU_CFG_CXX -fortran=$TAU_CFG_FC -cc=$TAU_CFG_CC -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: PDT ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
+      ./configure -c++=$TAU_CFG_CXX -fortran=$TAU_CFG_FC -cc=$TAU_CFG_CC -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -pdt=${PDT_PATH} -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
+      ./configure -c++=$TAU_CFG_CXX -fortran=$TAU_CFG_FC -cc=$TAU_CFG_CC -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: OMPT OPENMP ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
+      ./configure -c++=$TAU_CFG_CXX -fortran=$TAU_CFG_FC -cc=$TAU_CFG_CC -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -ompt -openmp -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: MPI ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -mpi -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
+      ./configure -c++=$TAU_CFG_CXX -fortran=$TAU_CFG_FC -cc=$TAU_CFG_CC -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download  ${ROCM_FLAGS} -mpi -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
 
       # configure with: MPI OMPT OPENMP ROCM
-      ./configure -c++=$CXX_COMPILER -fortran=$F_COMPILER -cc=$C_COMPILER -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
+      ./configure -c++=$TAU_CFG_CXX -fortran=$TAU_CFG_FC -cc=$TAU_CFG_CC -prefix=${TAU_PATH} -zlib=download -otf=download -unwind=download -bfd=download ${ROCM_FLAGS} -mpi -ompt -openmp -iowrapper ${TAU_PIC_OPT} ${TAU_EXTRA_FLAGS}
 
       make -j $(nproc) ${TAU_BUILD_LLVM_OPT}
       ${SUDO} env PATH=$PATH make install LLVM_PLUGIN=
