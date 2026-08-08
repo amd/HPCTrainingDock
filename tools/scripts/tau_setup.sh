@@ -43,6 +43,81 @@ preflight_modules() {
    echo "preflight: all required modules loaded."
 }
 
+# ── Preflight: no distro libdwarf on the build host ───────────────────
+# TAU is configured with -dwarf=download, which builds+bundles libdwarf
+# 0.7.0 (soname libdwarf.so.0; see the ./configure rationale further down).
+# If a *distro* libdwarf is installed on the shared build host (Ubuntu's
+# libdwarf1 / libdwarf-dev ship libdwarf.so.1 -- e.g. dragged in by
+# intellikit_setup.sh's `apt-get install libdwarf-dev`), the libTAUsh link
+# can record NEEDED=libdwarf.so.1, a soname absent from BOTH TAU's own
+# bundle AND every runtime/compute node, so `module load tau` dies with
+# `libdwarf.so.1 => not found`. Guard the requirements phase against that
+# regression: detect a system libdwarf, remove it when we hold (passwordless)
+# root, and otherwise fail with actionable guidance. Escape hatch for a
+# one-off build on a host we cannot clean: TAU_ALLOW_DISTRO_LIBDWARF=1
+# (NOT recommended -- the resulting install is not portable to the nodes).
+preflight_no_distro_libdwarf() {
+   # What the dynamic linker would resolve, restricted to SYSTEM dirs. This
+   # deliberately ignores TAU's own bundled tree (under the install prefix /
+   # /nfsapps, reachable only via RPATH/LD_LIBRARY_PATH, never the ldconfig
+   # cache), so it never false-positives on the bundle we WANT.
+   local hits files pkgs
+   hits="$(ldconfig -p 2>/dev/null | awk '/libdwarf\.so/{print $NF}' \
+             | grep -E '^/(usr/)?lib' || true)"
+   files="$(ls -1 /usr/lib/*/libdwarf.so* /usr/lib/libdwarf.so* \
+                  /lib/*/libdwarf.so*    /lib/libdwarf.so* 2>/dev/null || true)"
+   pkgs="$(dpkg-query -W -f='${Package}\n' 'libdwarf*' 2>/dev/null \
+             | grep -E '^libdwarf' || true)"
+   if [ -z "${hits}${files}${pkgs}" ]; then
+      echo "preflight: no distro libdwarf on build host (good; TAU bundles libdwarf.so.0)."
+      return 0
+   fi
+
+   echo "preflight: WARNING: distro libdwarf detected on build host:" >&2
+   [ -n "${pkgs}"  ] && echo "${pkgs}"  | sort -u | sed 's/^/  dpkg pkg> /' >&2
+   [ -n "${hits}${files}" ] && printf '%s\n%s\n' "${hits}" "${files}" \
+      | grep -E '^/' | sort -u | sed 's/^/  lib>      /' >&2
+
+   # Try to remove it -- packages only, never `rm` a system .so by hand.
+   local SUDO=""
+   if [ "$(id -u)" -ne 0 ]; then
+      sudo -n true 2>/dev/null && SUDO="sudo -n"
+   fi
+   if [ -n "${pkgs}" ] && { [ "$(id -u)" -eq 0 ] || [ -n "${SUDO}" ]; }; then
+      echo "preflight: removing distro libdwarf package(s):$(echo ${pkgs} | tr '\n' ' ')"
+      # shellcheck disable=SC2086
+      ${SUDO} apt-get remove -y ${pkgs} >/dev/null 2>&1 \
+         || ${SUDO} dpkg --remove ${pkgs} >/dev/null 2>&1 || true
+      ${SUDO} ldconfig 2>/dev/null || true
+      hits="$(ldconfig -p 2>/dev/null | awk '/libdwarf\.so/{print $NF}' | grep -E '^/(usr/)?lib' || true)"
+      files="$(ls -1 /usr/lib/*/libdwarf.so* /usr/lib/libdwarf.so* /lib/*/libdwarf.so* /lib/libdwarf.so* 2>/dev/null || true)"
+      pkgs="$(dpkg-query -W -f='${Package}\n' 'libdwarf*' 2>/dev/null | grep -E '^libdwarf' || true)"
+      if [ -z "${hits}${files}${pkgs}" ]; then
+         echo "preflight: distro libdwarf removed; continuing."
+         return 0
+      fi
+   fi
+
+   # Still present (or we lacked rights / a package to remove).
+   if [ "${TAU_ALLOW_DISTRO_LIBDWARF:-0}" = "1" ]; then
+      echo "preflight: WARNING: TAU_ALLOW_DISTRO_LIBDWARF=1 set -- continuing despite distro libdwarf; install may NOT be portable to compute nodes." >&2
+      return 0
+   fi
+   {
+      echo "ERROR: distro libdwarf is present on the build host and was not removed."
+      echo "       TAU (-dwarf=download) bundles libdwarf.so.0; a system libdwarf.so.1"
+      echo "       gets linked into libTAUsh as NEEDED=libdwarf.so.1, which is absent on"
+      echo "       compute nodes ('libdwarf.so.1 => not found' at 'module load tau')."
+      echo "       Fix on the build host, e.g.:"
+      echo "           sudo apt-get remove -y $(echo ${pkgs:-libdwarf1 libdwarf-dev} | tr '\n' ' ')"
+      echo "       and keep intellikit_setup.sh's 'apt-get install libdwarf-dev' off shared"
+      echo "       TAU build hosts (build IntelliKit in its container instead; the sweep"
+      echo "       launcher already passes BUILD_INTELLIKIT=0)."
+      echo "       One-off override (non-portable): export TAU_ALLOW_DISTRO_LIBDWARF=1"
+   } >&2
+   return 1
+}
+
 # Variables controlling setup process
 AMDGPU_GFXMODEL_INPUT=""
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/tau
@@ -750,6 +825,12 @@ TAU_EXEC_LAUNCH_EOF
       REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" "${MPI_MODULE}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
 
+      # libdwarf must resolve to TAU's own -dwarf=download bundle (libdwarf.so.0),
+      # never a distro libdwarf.so.1. Treated as a build requirement: remove the
+      # distro package if we can, else fail (see preflight_no_distro_libdwarf and
+      # the ./configure rationale below).
+      preflight_no_distro_libdwarf || exit 1
+
       # ── Pin amdclang/amdflang/amdclang++ to the requested ROCm SDK ────
       # On a Cray PrgEnv-amd-new shell several rocm/* are loaded at once and
       # `amdclang`/`amdflang` on PATH can resolve to a DIFFERENT SDK than
@@ -1305,10 +1386,13 @@ TAU_EXEC_LAUNCH_EOF
    esac
    unset _RPV
 
-   # TAU_PROFILE_FORMAT=merged: emit a single merged tauprofile.xml per run
-   # instead of one profile.<node>.<ctx>.<thread> file per rank/thread (which
-   # litters the run directory). Requested by the TAU author for the workshop;
-   # pprof/paraprof read the merged file directly.
+   # TAU_PROFILE_FORMAT=merged: emit a single merged tauprofile.xml instead of
+   # littering the run directory with per-rank/thread profile.<node>.<ctx>.<thread>
+   # files. This is the format requested by the TAU author (Sameer Shende, UofO)
+   # and is what workshop users should see. NOTE: the classic pprof tool only
+   # reads the profile.* text format, so the HPCTrainingExamples ctest checks that
+   # post-process TAU output must read the merged tauprofile.xml directly (see
+   # tau_exec_check.sh / tau_rccl_pc_check.sh) rather than shelling out to pprof.
    TAU_MODULEFILE="${MODULE_PATH}/dev${MODEXT}"
    if [ "${MODFLAVOR}" = "lua" ]; then
       cat <<-EOF | ${MOD_SUDO} tee ${TAU_MODULEFILE}
