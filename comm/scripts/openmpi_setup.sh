@@ -1196,6 +1196,33 @@ fi
 # Install OpenMPI
 #
 
+# ---------------------------------------------------------------------------
+# ROCm >= 10 on MI300A (APU): UCX 1.19.1 misroutes host-range coherent/managed
+# GPU buffers to the CMA transport, whose process_vm_readv() EFAULTs
+# cross-process on the APU's coherent VMAs -- aborting GPU-aware p2p (Ghost
+# Exchange) and the UCX-native collective path. Workaround: export UCX_TLS=^cma
+# so intra-node transfers use xpmem. Decided once here, then consumed twice
+# below: the openmpi-mca-params.conf line (via mca_base_env_list, alongside
+# pml/osc/coll) and a `module show` note. Gated to ROCm major >= 10 on an
+# MI300A APU (MI300A/MI300X share the gfx942 target, so disambiguate on the
+# rocminfo marketing name); not applied on discrete MI300X or ROCm < 10.
+# UCX-scoped -> RCCL/PyTorch/JAX (RCCL-direct) unaffected. rocminfo/grep are
+# guarded for set -eo pipefail. Validated on gfx942 (restores 7.2.4 parity).
+# ---------------------------------------------------------------------------
+APPLY_UCX_CMA_WORKAROUND=0
+_ucx_cma_major=""
+if [[ "${ROCM_VERSION}" =~ ^([0-9]+)\. ]]; then
+   _ucx_cma_major="${BASH_REMATCH[1]}"
+fi
+if [[ -n "${_ucx_cma_major}" && "${_ucx_cma_major}" -ge 10 ]]; then
+   _ucx_cma_rocminfo="$(rocminfo 2>/dev/null || true)"
+   if echo "${_ucx_cma_rocminfo}" | grep -qi "MI300A"; then
+      APPLY_UCX_CMA_WORKAROUND=1
+   fi
+   unset _ucx_cma_rocminfo
+fi
+unset _ucx_cma_major
+
 if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE_OPENMPI}" == "0" ]] ; then
    echo "There is a previous installation and the replace flag is false"
    echo "  use --replace to request replacing the current installation"
@@ -1366,6 +1393,13 @@ else
       echo "osc = ucx" | ${SUDO_OPENMPI} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
       echo "coll_ucc_enable = 1" | ${SUDO_OPENMPI} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
       echo "coll_ucc_priority = 100" | ${SUDO_OPENMPI} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
+      if [[ "${APPLY_UCX_CMA_WORKAROUND}" == "1" ]]; then
+         # ROCm >= 10 on MI300A: keep GPU-aware MPI off UCX's CMA transport
+         # (process_vm_readv EFAULT on APU coherent buffers) by exporting
+         # UCX_TLS=^cma to every rank; intra-node transfers use xpmem instead.
+         echo "openmpi: ROCm ${ROCM_VERSION} on MI300A -- baking mca_base_env_list = UCX_TLS=^cma into openmpi-mca-params.conf"
+         echo "mca_base_env_list = UCX_TLS=^cma" | ${SUDO_OPENMPI} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
+      fi
       cd ../..
       rm -rf openmpi-${OPENMPI_VERSION} openmpi-${OPENMPI_VERSION}.tar.bz2
    fi
@@ -1509,6 +1543,15 @@ if [[ "${DRY_RUN}" == "0" ]]; then
            "normally when used directly (PyTorch, rccl-tests, etc.)."
    fi
 
+   # Note surfaced by `module show openmpi` (a whatis line) so users can see --
+   # and know how to override -- the UCX_TLS=^cma setting baked into
+   # openmpi-mca-params.conf above. Empty (blank line) when the workaround is
+   # not applied, i.e. on ROCm < 10 or non-MI300A hardware.
+   UCX_CMA_NOTE_LINE=""
+   if [[ "${APPLY_UCX_CMA_WORKAROUND}" == "1" ]]; then
+      UCX_CMA_NOTE_LINE='whatis("Note: this build sets UCX_TLS=^cma via mca_base_env_list in etc/openmpi-mca-params.conf (ROCm>=10 on MI300A) to keep intra-node GPU-aware MPI off the UCX CMA transport, which EFAULTs on MI300A coherent buffers. Override by setting UCX_TLS in your environment.")'
+   fi
+
 # The - option suppresses tabs
    if [[ "${ROCM_VERSION}" == "7.1.0" ]]; then
      # Need the legacy mode enabled as a workaround for a bcast bug
@@ -1564,6 +1607,7 @@ EOF
 	setenv("MPICXX","${OPENMPI_PATH}/bin/mpicxx")
 	setenv("MPIFORT","${OPENMPI_PATH}/bin/mpifort")
 	setenv("UCC_TLS","^rccl")
+	${UCX_CMA_NOTE_LINE}
 	prereq("${ROCM_MODULE_NAME}")
 	family("MPI")
 EOF
@@ -1587,6 +1631,7 @@ EOF
 	setenv("MPICC","${OPENMPI_PATH}/bin/mpicc")
 	setenv("MPICXX","${OPENMPI_PATH}/bin/mpicxx")
 	setenv("MPIFORT","${OPENMPI_PATH}/bin/mpifort")
+	${UCX_CMA_NOTE_LINE}
 	prereq("${ROCM_MODULE_NAME}")
 	family("MPI")
 EOF

@@ -1369,7 +1369,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	local mbase = myFileName():gsub("/[^/]*\$",""):gsub("/[^/]*\$",""):gsub("/[^/]*\$","")
 
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "liblib/rocm_sysdeps/lib"))
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib/rocm_sysdeps/lib"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPATH", pathJoin(base, "include"))
