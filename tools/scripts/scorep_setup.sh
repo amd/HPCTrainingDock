@@ -752,8 +752,60 @@ else
       # We lose the LLVM-pass-based instrumentation backend; the GCC
       # plugin, OPARI2, MPI wrap, and manual instrumentation backends
       # all remain functional and cover the typical Score-P workflow.
+      # ── System libbfd instead of the vendored binutils download (2026-08-12) ──
+      # `--with-libbfd=download` builds a private binutils from source with the
+      # configure CC/CXX (amdclang). On ROCm 10.1 that binutils (2.46.1) fails to
+      # build -- Score-P's external-package step dies with
+      #   make[4]: *** [Makefile.libbfd:86: all] Error 8
+      #   make[3]: *** [.../scorep-v11.0-dev/lib/scorep/include/bfd.h] Error 2
+      # (slurm 17611, rocm-10.1.0a20260811, 2026-08-12), which SKIPs Score-P and
+      # every Score-P_* nightly test. Ubuntu's binutils-dev already ships a shared
+      # libbfd.so AND a PIC static libbfd_pic.a (either satisfies Score-P's
+      # "shared or PIC libbfd required") plus /usr/include/bfd.h with no
+      # config.h/PACKAGE include-guard, so point Score-P at the system copy and
+      # skip the fragile from-source binutils build entirely.
+      #
+      # We only switch when a SHARED or PIC libbfd is actually present (checking
+      # libbfd.so / libbfd_pic.a, NOT a bare non-PIC libbfd.a which Score-P's
+      # --enable-shared link would reject); otherwise we keep the original
+      # download path so non-Debian hosts (Cray/RHEL) are unaffected. Explicit
+      # --with-libbfd-include / --with-libbfd-lib (not --with-libbfd=<prefix>)
+      # because Debian multiarch puts the lib in /usr/lib/<triplet>, which the
+      # <prefix>/lib shorthand would miss.
+      SCOREP_LIBBFD_OPT="--with-libbfd=download"
+      # binutils-dev (+ libiberty-dev companion) is normally part of the build
+      # image; apt-install best-effort if bfd.h or libiberty is missing.
+      if [ ! -f /usr/include/bfd.h ] || ! ls /usr/lib/*/libiberty.a /usr/lib/libiberty.a >/dev/null 2>&1; then
+         PKG_SUDO=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+         ${PKG_SUDO} apt-get update || true
+         ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y binutils-dev libiberty-dev || true
+      fi
+      _bfd_inc=""
+      [ -f /usr/include/bfd.h ] && _bfd_inc=/usr/include
+      _bfd_lib=""
+      if [ -n "${_bfd_inc}" ]; then
+         _ma="$(gcc -print-multiarch 2>/dev/null || dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || true)"
+         for _d in ${_ma:+/usr/lib/${_ma}} /usr/lib64 /usr/lib; do
+            # Require a shared (.so) or PIC static (_pic.a) libbfd -- a bare
+            # non-PIC libbfd.a would fail Score-P's --enable-shared link.
+            if [ -f "${_d}/libbfd.so" ] || [ -f "${_d}/libbfd_pic.a" ]; then
+               _bfd_lib="${_d}"; break
+            fi
+         done
+      fi
+      if [ -n "${_bfd_inc}" ] && [ -n "${_bfd_lib}" ]; then
+         SCOREP_LIBBFD_OPT="--with-libbfd-include=${_bfd_inc} --with-libbfd-lib=${_bfd_lib}"
+         echo "scorep: using system libbfd (include=${_bfd_inc} lib=${_bfd_lib}); skipping vendored binutils download"
+      else
+         echo "scorep: no shared/PIC system libbfd found; falling back to --with-libbfd=download"
+      fi
+      unset _bfd_inc _bfd_lib _ma _d
+
+      # ${SCOREP_LIBBFD_OPT} is intentionally UNQUOTED so it word-splits into the
+      # two --with-libbfd-include/--with-libbfd-lib tokens (or the single
+      # --with-libbfd=download); the paths never contain spaces.
       ../configure --with-rocm=$ROCM_PATH  --with-mpi=$MPI_CONFIG  --prefix=$SCOREP_PATH  --with-librocm_smi64-include=$ROCM_PATH/include/rocm_smi \
-                   --with-librocm_smi64-lib=$ROCM_PATH/lib --with-libunwind=download --enable-shared --with-libbfd=download --without-shmem  \
+                   --with-librocm_smi64-lib=$ROCM_PATH/lib --with-libunwind=download --enable-shared ${SCOREP_LIBBFD_OPT} --without-shmem  \
 		   --with-libgotcha=download --without-llvm CC=$CC CXX=$CXX FC=$FC \
 		   CFLAGS="-fPIE ${GCC_TOOLCHAIN_PIN}" CXXFLAGS="${GCC_TOOLCHAIN_PIN}"
 

@@ -855,6 +855,58 @@ print('aijhipsparse.hip.cpp patched: thrust::tuple get<N>() member calls -> thru
             echo "petsc: no libcudacxx detected (no ${ROCM_PATH:-<unset>}/include/cuda/std/__cccl/version.h) -- skipping aijhipsparse.hip.cpp thrust::tuple get<N>() free-function patch"
          fi
 
+         # Patch aijhipsparse.hip.cpp: CCCL 3.0 (ROCm 10) REMOVED thrust::identity.
+         # MatSeqAIJHIPSPARSEMergeMats uses `thrust::identity<int>()` twice as a
+         # copy_if / remove_copy_if predicate (the live #else branch plus a dead
+         # #if 0 partition_copy). On rocm-10.1.0a* the HIPC compile of aijhipsparse.o
+         # dies:
+         #   aijhipsparse.hip.cpp:4210:19: error: no template named 'identity' in
+         #     namespace 'thrust'; did you mean 'rocprim::identity'?
+         # (slurm 17611, rocm-10.1.0a20260811, PETSc 3.24.1, 2026-08-12). The live
+         # line is `auto pred = thrust::identity<int>();`; its upstream line 4207
+         # shifts to 4210 because the thrust/async include guard above adds 3 lines.
+         # Fix: define a file-scope int identity functor (mirrors the neighbouring
+         # Shift / IJCompare functors) and rewrite both `thrust::identity<int>()`
+         # call sites to it. The functor is valid on BOTH old thrust (CCCL 2.x,
+         # where thrust::identity still exists) and CCCL 3.x, so it is a
+         # semantically identical no-op on numbered / <= 7.x rocms.
+         #
+         # Gated on libcudacxx (CCCL) presence -- the SAME probe as the two patches
+         # above -- so trees without CCCL stay byte-identical to upstream PETSc
+         # 3.24.1. Idempotent (asserts the pristine OR already-patched form).
+         # Greppable at a glance: grep PetscHipIdentityInt \
+         #   ${PETSC_REPO}/src/mat/impls/aij/seq/seqhipsparse/aijhipsparse.hip.cpp
+         if [ -n "${ROCM_PATH:-}" ] && [ -f "${ROCM_PATH}/include/cuda/std/__cccl/version.h" ]; then
+            echo "petsc: detected libcudacxx (CCCL) -- applying aijhipsparse.hip.cpp thrust::identity removal patch"
+            python3 -c "
+import os
+f = os.path.join('src','mat','impls','aij','seq','seqhipsparse','aijhipsparse.hip.cpp')
+txt = open(f).read()
+anchor = '''struct Shift {
+  int _shift;
+
+  Shift(int shift) : _shift(shift) { }
+  __host__ __device__ inline int operator()(const int &c) { return c + _shift; }
+};'''
+functor = '''
+
+/* [HPCTrainingDock] CCCL 3.0 (ROCm 10) removed thrust::identity; provide a
+   file-scope int identity functor that compiles on both CCCL 2.x and 3.x. */
+struct PetscHipIdentityInt {
+  __host__ __device__ inline int operator()(const int &x) const { return x; }
+};'''
+if 'struct PetscHipIdentityInt' not in txt:
+    assert anchor in txt, 'aijhipsparse.hip.cpp struct Shift anchor not found; the file may have changed'
+    txt = txt.replace(anchor, anchor + functor, 1)
+assert 'thrust::identity<int>()' in txt or 'PetscHipIdentityInt()' in txt, 'aijhipsparse.hip.cpp thrust::identity<int>() usage not found; the file may have changed'
+txt = txt.replace('thrust::identity<int>()', 'PetscHipIdentityInt()')
+open(f,'w').write(txt)
+print('aijhipsparse.hip.cpp patched: thrust::identity<int>() -> PetscHipIdentityInt() (CCCL 3.0 / ROCm 10)')
+"
+         else
+            echo "petsc: no libcudacxx detected (no ${ROCM_PATH:-<unset>}/include/cuda/std/__cccl/version.h) -- skipping aijhipsparse.hip.cpp thrust::identity removal patch"
+         fi
+
          # System hdf5 is OPTIONAL: if its module loads cleanly we use it
          # (DOWNLOAD_HDF5=0 -> --download-hdf5=0); otherwise we fall back
          # to PETSc's own internal hdf5 build (DOWNLOAD_HDF5=1 ->
