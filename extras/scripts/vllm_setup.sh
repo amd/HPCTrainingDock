@@ -8,7 +8,10 @@
 LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
 
 # ─────────────────────────────────────────────────────────────────────
-# vLLM setup for the MI300A (gfx942) cluster.
+# vLLM setup for AMD CDNA GPUs (gfx90a/gfx942/gfx950 -- MI2xx/MI300/MI3xx).
+# The gfx target is autodetected from rocminfo (override --amdgpu-gfxmodel),
+# so this is not tied to any one CDNA part; the MI300A APU-only tweaks in
+# the generated modulefile are gated on runtime APU detection (see IS_APU).
 #
 # Layers on top of the `pytorch` module (which already provides torch,
 # triton, transformers, deepspeed, flashattention). vLLM pins an exact
@@ -373,17 +376,33 @@ if [[ "$AMDGPU_GFXMODEL_INPUT" != "" ]]; then
 else
    AMDGPU_GFXMODEL=$(rocminfo 2>/dev/null | grep gfx | sed -e 's/Name://' | head -1 | sed 's/ //g' || true)
 fi
-# Default to gfx942 (MI300A/MI300X) when detection yields nothing (e.g.
-# building on the GPU-less frontend).
-[ -z "${AMDGPU_GFXMODEL}" ] && AMDGPU_GFXMODEL="gfx942"
+# No silent CDNA-part guess: if rocminfo detected nothing and the operator
+# did not pass --amdgpu-gfxmodel, there is no reliable arch to compile
+# kernels for. Abort with the same guidance main_setup.sh gives rather than
+# defaulting to a specific part (which would bias the build to one CDNA
+# arch). main_setup.sh always forwards --amdgpu-gfxmodel, so this only ever
+# trips on a manual standalone run on a GPU-less node.
+if [ -z "${AMDGPU_GFXMODEL}" ]; then
+   send-error "no GPU architecture specified and rocminfo found no GPUs. Pass --amdgpu-gfxmodel (e.g. --amdgpu-gfxmodel gfx942 or --amdgpu-gfxmodel 'gfx942;gfx90a')."
+fi
 
 # vLLM's source build reads PYTORCH_ROCM_ARCH to pick which gfx targets
 # to compile kernels for. Normalize the detected/space-separated gfx
 # model into vLLM's expected semicolon-separated form and strip the
-# ":sramecc+:xnack-" feature suffixes rocminfo appends. Default to
-# gfx942 (MI300A) when detection is empty (e.g. GPU-less frontend).
+# ":sramecc+:xnack-" feature suffixes rocminfo appends.
 PYTORCH_ROCM_ARCH=$(echo "${AMDGPU_GFXMODEL}" | tr ',' ';' | sed -e 's/:[^;]*//g')
-[ -z "${PYTORCH_ROCM_ARCH}" ] && PYTORCH_ROCM_ARCH="gfx942"
+
+# ── APU vs discrete-GPU gating ───────────────────────────────────────
+# The scratch-reclaim workaround and the single-physical-pool memory
+# warning baked into the modulefile below apply ONLY to the MI300A APU
+# (unified host+GPU memory). On CDNA discrete GPUs (MI300X, MI2xx, MI1xx)
+# they are inapplicable, so we emit them only when an APU is detected.
+# Detection mirrors kokkos_check_apu_enabled.sh (rocminfo marketing name);
+# stderr-silenced + guarded so a failing rocminfo just yields IS_APU=0.
+IS_APU=0
+if rocminfo 2>/dev/null | grep -q "MI300A"; then
+   IS_APU=1
+fi
 
 # ── vLLM version gate ────────────────────────────────────────────────
 # vLLM pins an exact torch, so unless the user forced --vllm-version we
@@ -651,9 +670,9 @@ PY
    #   fix PR vllm#44648 merged 2026-06-05, AFTER the v0.24.0 tag; even main's
    #   source still has the bare CUDA_VERSION gate here).
    #
-   # WHY DEFINING IT TO 0 IS SAFE: on MI300A `get_device_prop()->major` is 9,
-   #   so the companion `cc_major >= 10` in the same `&&` already makes the
-   #   Blackwell branch dead code. The symbol just has to EXIST for the HIP
+   # WHY DEFINING IT TO 0 IS SAFE: on all CDNA (gfx9xx) `get_device_prop()->
+   #   major` is 9, so the companion `cc_major >= 10` in the same `&&` already
+   #   makes the Blackwell branch dead code. The symbol just has to EXIST for the HIP
    #   compile to parse; `TORCH_HIP_VERSION=0` makes every `>= NNNNN` false,
    #   selecting the correct non-Blackwell path. Scoped to the two stable-ABI
    #   targets only (the regular `_C` already has the real symbol).
@@ -670,7 +689,7 @@ PY
 # See vllm_setup.sh for the full rationale. hipify rewrites CUDA_VERSION ->
 # TORCH_HIP_VERSION in the stable-ABI HIP kernels, but that symbol is not
 # defined in the Py_LIMITED_API include set. Define it (to 0 -> Blackwell
-# fast path stays disabled, correct on gfx942) so the stable-ABI targets
+# fast path stays disabled, correct on all CDNA gfx9xx) so the stable-ABI targets
 # compile. Appended at end-of-file, guarded by if(TARGET ...), so it is
 # order-independent and a no-op when the targets do not exist.
 if(VLLM_GPU_LANG STREQUAL "HIP")
@@ -769,8 +788,8 @@ PY
    export PYTHONPATH="${BUILD_TOOLS}:${PYTHONPATH}"
 
    # ── Compile the vLLM wheel (ONCE) ──────────────────────────────────
-   # Build a wheel with --no-deps so the expensive gfx942 compile triggers
-   # NO dependency resolution (no torch/nvidia pull, no uninstalls).
+   # Build a wheel with --no-deps so the expensive CDNA kernel compile
+   # triggers NO dependency resolution (no torch/nvidia pull, no uninstalls).
    # --no-build-isolation reuses THIS env's build backend so the module's
    # torch (not a fresh torch==2.11.0 from PyPI) drives the compile.
    # VLLM_TARGET_DEVICE forces the ROCm backend; PYTORCH_ROCM_ARCH selects
@@ -953,6 +972,24 @@ if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
 fi
 unset _leaf_dir
 
+# MI300A-APU-only modulefile lines (see IS_APU detection above). Emitted
+# only on an APU; on CDNA discrete GPUs these are inapplicable and omitted.
+if [ "${IS_APU}" = "1" ]; then
+   APU_MODULE_BLOCK=$(cat <<'LUA'
+
+-- MI300A APU: scratch-reclaim workaround (matches the rocm modulefile).
+setenv("HSA_NO_SCRATCH_RECLAIM","1")
+
+-- WARNING (MI300A APU): host RAM and GPU HBM are ONE physical pool.
+-- Do NOT use vLLM --swap-space / --cpu-offload-gb (nor DeepSpeed/FSDP
+-- CPU offload): "offloading" moves data within the same pool and can
+-- OOM/HANG. Prefer --kv-cache-dtype fp8 and a lower --max-model-len.
+LUA
+)
+else
+   APU_MODULE_BLOCK=""
+fi
+
 # The - option suppresses leading tabs in the heredoc body.
 cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${VLLM_MODULE_TOKEN}.lua
 	whatis("vLLM ${VLLM_VERSION} with ROCm support (bound to ${PYTORCH_MODULE_RESOLVED}, torch ${TORCH_VERSION}, ${AMDGPU_GFXMODEL})")
@@ -968,16 +1005,9 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${VLLM_MODULE_TOKEN}.lua
 	prepend_path("PYTHONPATH","${VLLM_SITE}")
 	prepend_path("PATH","${VLLM_BINDIR}")
 
-	-- MI300A APU: scratch-reclaim workaround (matches the rocm modulefile).
-	setenv("HSA_NO_SCRATCH_RECLAIM","1")
-
 	-- Co-locate HF weights/cache with the team's ollama models on /shareddata.
 	setenv("HF_HOME","${HF_HOME_DEFAULT}")
-
-	-- WARNING (MI300A APU): host RAM and GPU HBM are ONE physical pool.
-	-- Do NOT use vLLM --swap-space / --cpu-offload-gb (nor DeepSpeed/FSDP
-	-- CPU offload): "offloading" moves data within the same pool and can
-	-- OOM/HANG. Prefer --kv-cache-dtype fp8 and a lower --max-model-len.
+${APU_MODULE_BLOCK}
 EOF
 
 # ── Refresh the Lmod spider cache ──────────────────────────────────────
