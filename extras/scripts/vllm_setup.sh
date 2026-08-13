@@ -45,6 +45,13 @@ VLLM_REF_USER_SET=0
 # comment where it is applied, below). Default on; disable to re-test on a
 # newer rocm/pytorch/vLLM combo that may no longer need it.
 HIP_VERSION_PATCH=1
+# Also apply the TORCH_HIP_VERSION=0 define to the REGULAR (non-stable-ABI)
+# targets (_C/_moe_C/_rocm_C). Default OFF: on most vLLM refs those targets get
+# the real symbol from torch's full HIP headers (or vLLM's own CMake), and
+# double-defining it is nondeterministic. Turn ON only for older pre-stable-ABI
+# refs (e.g. v0.19.1 on torch 2.10) where vLLM leaves it undefined for `_C` and
+# csrc/activation_kernels.hip fails with "undeclared identifier".
+HIP_VERSION_PATCH_REGULAR=0
 # Apply the atomicAdd half/half2 guard workaround (vllm PR #41802 backport;
 # see the comment where it is applied, below). Default on; it self-gates on
 # the HIP version in-source, so it is a no-op on ROCm <= 7.12 and on vLLM
@@ -114,6 +121,7 @@ usage()
    echo "  --vllm-repo [ VLLM_REPO ] git repo to build vLLM from, default $VLLM_REPO"
    echo "  --vllm-ref [ VLLM_REF ] git tag/branch/commit to build, default v\${VLLM_VERSION}"
    echo "  --hip-version-patch [ 0|1 ] apply the TORCH_HIP_VERSION stable-ABI ROCm compile workaround, default $HIP_VERSION_PATCH (re-evaluate per rocm/torch/vLLM version)"
+   echo "  --hip-version-patch-regular [ 0|1 ] also define TORCH_HIP_VERSION=0 on the regular _C/_moe_C/_rocm_C targets, default $HIP_VERSION_PATCH_REGULAR (only needed on older pre-stable-ABI vLLM, e.g. v0.19.1 on torch 2.10)"
    echo "  --atomicadd-guard-patch [ 0|1 ] apply the atomicAdd half/half2 ROCm>=7.13 guard (vllm PR #41802 backport), default $ATOMICADD_GUARD_PATCH (self-gates in-source; no-op on ROCm<=7.12 or vLLM refs that already carry it)"
    echo "  --pytorch-module [ PYTORCH_MODULE ] pytorch module to load, default $PYTORCH_MODULE"
    echo "  --pytorch-version [ PYTORCH_VERSION ] bound pytorch version; keys the install dir + modulefile (vllm-v\${VLLM_VERSION}-pt\${PYTORCH_VERSION}) so multiple (vllm,pytorch) pairs coexist. Empty (default) -> resolved from the loaded pytorch module token."
@@ -188,6 +196,11 @@ do
       "--hip-version-patch")
           shift
           HIP_VERSION_PATCH=${1}
+          reset-last
+          ;;
+      "--hip-version-patch-regular")
+          shift
+          HIP_VERSION_PATCH_REGULAR=${1}
           reset-last
           ;;
       "--atomicadd-guard-patch")
@@ -674,35 +687,56 @@ PY
    #   major` is 9, so the companion `cc_major >= 10` in the same `&&` already
    #   makes the Blackwell branch dead code. The symbol just has to EXIST for the HIP
    #   compile to parse; `TORCH_HIP_VERSION=0` makes every `>= NNNNN` false,
-   #   selecting the correct non-Blackwell path. Scoped to the two stable-ABI
-   #   targets only (the regular `_C` already has the real symbol).
+   #   selecting the correct non-Blackwell path. Scoped by default to the two
+   #   stable-ABI targets only (the regular `_C` already has the real symbol on
+   #   v0.24.0+; and on v0.10.1/v0.11.0 vLLM's own CMake defines it, e.g.
+   #   "TORCH_HIP_VERSION: 702").
+   #
+   # OLDER PRE-STABLE-ABI REFS: on some older refs (observed: v0.19.1 on torch
+   #   2.10) vLLM leaves TORCH_HIP_VERSION undefined for the regular `_C` target
+   #   too, so csrc/activation_kernels.hip fails with "undeclared identifier".
+   #   For those, pass --hip-version-patch-regular 1 to ALSO define it on the
+   #   regular _C/_moe_C/_rocm_C targets. It is OFF by default because on refs
+   #   where vLLM already defines the symbol, adding a second -D is
+   #   nondeterministic (last -D on the command line wins).
    #
    # RE-EVALUATE when inputs change, e.g. the planned rocm/7.0.0 build once
    #   its pytorch module lands, or a vLLM ref carrying vllm#44648. Re-test
    #   with --hip-version-patch 0; if it compiles clean, drop the workaround.
    if [ "${HIP_VERSION_PATCH}" = "1" ]; then
       _vllm_cml="${VLLM_SRC}/CMakeLists.txt"
+      # Stable-ABI targets always need it; regular targets only when opted in
+      # via --hip-version-patch-regular 1 (older pre-stable-ABI refs, e.g.
+      # v0.19.1, where vLLM leaves TORCH_HIP_VERSION undefined for `_C`).
+      _hip_patch_targets="_C_stable_libtorch _moe_C_stable_libtorch"
+      if [ "${HIP_VERSION_PATCH_REGULAR}" = "1" ]; then
+         _hip_patch_targets="${_hip_patch_targets} _C _moe_C _rocm_C"
+      fi
       if [ -f "${_vllm_cml}" ] && ! grep -q "vllm_setup.sh TORCH_HIP_VERSION workaround" "${_vllm_cml}"; then
-         cat >> "${_vllm_cml}" <<'CMAKE_PATCH'
+         {
+            cat <<'CMAKE_PATCH_HEAD'
 
 # ===== vllm_setup.sh TORCH_HIP_VERSION workaround (appended by installer) =====
 # See vllm_setup.sh for the full rationale. hipify rewrites CUDA_VERSION ->
-# TORCH_HIP_VERSION in the stable-ABI HIP kernels, but that symbol is not
-# defined in the Py_LIMITED_API include set. Define it (to 0 -> Blackwell
-# fast path stays disabled, correct on all CDNA gfx9xx) so the stable-ABI targets
-# compile. Appended at end-of-file, guarded by if(TARGET ...), so it is
-# order-independent and a no-op when the targets do not exist.
+# TORCH_HIP_VERSION in the (stable-ABI, and on older refs regular) HIP kernels,
+# but that symbol is not always defined. Define it (to 0 -> Blackwell fast path
+# stays disabled, correct on all CDNA gfx9xx) so the affected targets compile.
+# Appended at end-of-file, guarded by if(TARGET ...), so it is order-independent
+# and a no-op when the targets do not exist.
 if(VLLM_GPU_LANG STREQUAL "HIP")
-  foreach(_vllm_stable_tgt _C_stable_libtorch _moe_C_stable_libtorch)
-    if(TARGET ${_vllm_stable_tgt})
-      target_compile_definitions(${_vllm_stable_tgt} PRIVATE TORCH_HIP_VERSION=0)
+CMAKE_PATCH_HEAD
+            echo "  foreach(_vllm_hip_tgt ${_hip_patch_targets})"
+            cat <<'CMAKE_PATCH_TAIL'
+    if(TARGET ${_vllm_hip_tgt})
+      target_compile_definitions(${_vllm_hip_tgt} PRIVATE TORCH_HIP_VERSION=0)
     endif()
   endforeach()
 endif()
-CMAKE_PATCH
-         echo "vllm: applied TORCH_HIP_VERSION=0 stable-ABI ROCm CMake workaround (disable with --hip-version-patch 0)"
+CMAKE_PATCH_TAIL
+         } >> "${_vllm_cml}"
+         echo "vllm: applied TORCH_HIP_VERSION=0 ROCm CMake workaround to targets: ${_hip_patch_targets} (disable with --hip-version-patch 0)"
       fi
-      unset _vllm_cml
+      unset _vllm_cml _hip_patch_targets
    else
       echo "vllm: TORCH_HIP_VERSION workaround DISABLED (--hip-version-patch 0)"
    fi
