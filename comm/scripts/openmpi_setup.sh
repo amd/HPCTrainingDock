@@ -1552,6 +1552,31 @@ if [[ "${DRY_RUN}" == "0" ]]; then
       UCX_CMA_NOTE_LINE='whatis("Note: this build sets UCX_TLS=^cma via mca_base_env_list in etc/openmpi-mca-params.conf (ROCm>=10 on MI300A) to keep intra-node GPU-aware MPI off the UCX CMA transport, which EFAULTs on MI300A coherent buffers. Override by setting UCX_TLS in your environment.")'
    fi
 
+   # ── MPI_{C,CXX,F}FLAGS / MPI_{LD,FLD}FLAGS for compiler-agnostic builds ─
+   # Training Makefiles that compile MPI sources with a non-MPI compiler
+   # (e.g. Libraries/Sort builds multinode_zip_sort.hip with hipcc) need
+   # the MPI include/link flags passed explicitly. OpenMPI exposes them via
+   # `mpi{cc,cxx,fort} --showme:compile|link`, but MPICH / Cray-MPICH do NOT
+   # support `--showme` (they use `-compile-info` / `-link-info` with
+   # different output), so a Makefile that hardcodes `--showme` is not
+   # portable across MPI implementations. To decouple those Makefiles from
+   # any one MPI's wrapper interface, we export the flags from the modulefile;
+   # a Makefile then consumes the language-appropriate variable (MPI_CFLAGS
+   # for C, MPI_CXXFLAGS for C++, MPI_FFLAGS for Fortran) plus the matching
+   # link flags (MPI_LDFLAGS for C/C++, MPI_FLDFLAGS for Fortran -- the latter
+   # pulls in the extra Fortran interface libs -lmpi_usempif08 /
+   # -lmpi_usempi_ignore_tkr / -lmpi_mpifh), and works against any MPI whose
+   # module exports the same variables. Fortran's compile flags also add the
+   # module (.mod) dir under lib.
+   #
+   # The values are emitted directly as base-relative Lua expressions in the
+   # modulefile heredocs below (built from `local base = "${OPENMPI_PATH}"`
+   # via pathJoin), so there is no shell-side --showme step here: the flags
+   # follow OpenMPI's fixed install layout and stay correct regardless of
+   # where OPENMPI_PATH lands or whether the wrappers can be run (--dry-run,
+   # cross-compile). Admins adding these to an already-deployed modulefile can
+   # paste the identical `pathJoin(base, ...)` lines unchanged.
+
 # The - option suppresses tabs
    if [[ "${ROCM_VERSION}" == "7.1.0" ]]; then
      # Need the legacy mode enabled as a workaround for a bcast bug
@@ -1574,6 +1599,11 @@ if [[ "${DRY_RUN}" == "0" ]]; then
 	setenv("MPICC","${OPENMPI_PATH}/bin/mpicc")
 	setenv("MPICXX","${OPENMPI_PATH}/bin/mpicxx")
 	setenv("MPIFORT","${OPENMPI_PATH}/bin/mpifort")
+	setenv("MPI_CFLAGS", "-I" .. pathJoin(base, "include"))
+	setenv("MPI_CXXFLAGS", "-I" .. pathJoin(base, "include"))
+	setenv("MPI_FFLAGS", "-I" .. pathJoin(base, "include") .. " -I" .. pathJoin(base, "lib"))
+	setenv("MPI_LDFLAGS", "-L" .. pathJoin(base, "lib") .. " -Wl,-rpath -Wl," .. pathJoin(base, "lib") .. " -Wl,--enable-new-dtags -lmpi")
+	setenv("MPI_FLDFLAGS", "-I" .. pathJoin(base, "include") .. " -I" .. pathJoin(base, "lib") .. " -L" .. pathJoin(base, "lib") .. " -Wl,-rpath -Wl," .. pathJoin(base, "lib") .. " -Wl,--enable-new-dtags -lmpi_usempif08 -lmpi_usempi_ignore_tkr -lmpi_mpifh -lmpi")
 	setenv("HSA_ENABLE_IPC_MODE_LEGACY","1")
 	prereq("${ROCM_MODULE_NAME}")
 	family("MPI")
@@ -1606,6 +1636,11 @@ EOF
 	setenv("MPICC","${OPENMPI_PATH}/bin/mpicc")
 	setenv("MPICXX","${OPENMPI_PATH}/bin/mpicxx")
 	setenv("MPIFORT","${OPENMPI_PATH}/bin/mpifort")
+	setenv("MPI_CFLAGS", "-I" .. pathJoin(base, "include"))
+	setenv("MPI_CXXFLAGS", "-I" .. pathJoin(base, "include"))
+	setenv("MPI_FFLAGS", "-I" .. pathJoin(base, "include") .. " -I" .. pathJoin(base, "lib"))
+	setenv("MPI_LDFLAGS", "-L" .. pathJoin(base, "lib") .. " -Wl,-rpath -Wl," .. pathJoin(base, "lib") .. " -Wl,--enable-new-dtags -lmpi")
+	setenv("MPI_FLDFLAGS", "-I" .. pathJoin(base, "include") .. " -I" .. pathJoin(base, "lib") .. " -L" .. pathJoin(base, "lib") .. " -Wl,-rpath -Wl," .. pathJoin(base, "lib") .. " -Wl,--enable-new-dtags -lmpi_usempif08 -lmpi_usempi_ignore_tkr -lmpi_mpifh -lmpi")
 	setenv("UCC_TLS","^rccl")
 	${UCX_CMA_NOTE_LINE}
 	prereq("${ROCM_MODULE_NAME}")
@@ -1631,6 +1666,11 @@ EOF
 	setenv("MPICC","${OPENMPI_PATH}/bin/mpicc")
 	setenv("MPICXX","${OPENMPI_PATH}/bin/mpicxx")
 	setenv("MPIFORT","${OPENMPI_PATH}/bin/mpifort")
+	setenv("MPI_CFLAGS", "-I" .. pathJoin(base, "include"))
+	setenv("MPI_CXXFLAGS", "-I" .. pathJoin(base, "include"))
+	setenv("MPI_FFLAGS", "-I" .. pathJoin(base, "include") .. " -I" .. pathJoin(base, "lib"))
+	setenv("MPI_LDFLAGS", "-L" .. pathJoin(base, "lib") .. " -Wl,-rpath -Wl," .. pathJoin(base, "lib") .. " -Wl,--enable-new-dtags -lmpi")
+	setenv("MPI_FLDFLAGS", "-I" .. pathJoin(base, "include") .. " -I" .. pathJoin(base, "lib") .. " -L" .. pathJoin(base, "lib") .. " -Wl,-rpath -Wl," .. pathJoin(base, "lib") .. " -Wl,--enable-new-dtags -lmpi_usempif08 -lmpi_usempi_ignore_tkr -lmpi_mpifh -lmpi")
 	${UCX_CMA_NOTE_LINE}
 	prereq("${ROCM_MODULE_NAME}")
 	family("MPI")
