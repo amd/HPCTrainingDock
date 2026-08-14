@@ -2,6 +2,26 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-08-14
+
+- User-facing modules:
+    - miniconda3
+    - miniforge3
+- Modules:
+    - miniconda3/25.3.1
+    - miniforge3/24.9.0
+- Down/drained nodes:
+    + ppac-pl1-s24-30:down
+    + sh5-pl1-s12-36:drain*
+    - ppac-pl1-s24-26:down
+    - ppac-pl1-s24-30:drng
+- /shared/apps/ubuntu/opt:
+    - miniconda3
+    - miniconda3-v25.3.1
+    - miniforge3
+    - miniforge3-v24.9.0
+
+[Full snapshot](archive/AAC6_system_status_2026-08-14.md)
 ## 2026-08-13
 
 - Down/drained nodes:
