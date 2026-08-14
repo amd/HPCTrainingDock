@@ -60,6 +60,18 @@ set -uo pipefail
 : ${QUICK_INSTALLS:="0"}
 : ${REPLACE_EXISTING:="0"}
 : ${KEEP_FAILED_INSTALLS:="0"}  # 1 = preserve partial install dirs / modulefiles for post-mortem
+# BUILD_MINICONDA3 / BUILD_MINIFORGE3: DISABLED for this sweep (2026-08-13).
+# miniconda3 / miniforge3 are no longer installed by the rocm-plus sweep --
+# these default to 0 and are threaded through the curated sbatch --export list
+# below to main_setup.sh (which honours env-level BUILD_<PKG> overrides). With
+# the flag at 0 the leaf scripts (extras/scripts/miniconda3_setup.sh /
+# miniforge3_setup.sh) short-circuit via NOOP_RC=43, so the per-package summary
+# records a SKIPPED(no-op) line rather than silently omitting them. Set to 1
+# (e.g. BUILD_MINICONDA3=1 ./run_rocmplus_install_sweep.sh ...) to re-enable, or
+# pass --packages "... miniconda3 miniforge3 ..." which forces them on in
+# main_setup.sh regardless of these defaults.
+: ${BUILD_MINICONDA3:="0"}
+: ${BUILD_MINIFORGE3:="0"}
 # SKIP_PATCHES: operator opt-out for the rocm-patches step inside
 # main_setup.sh (the install-time patches call, lines ~1651 / ~1670
 # there). Default 0 runs the step; for most ROCm versions rocm_patches.sh
@@ -621,6 +633,8 @@ cat <<EOF
  REPLACE_EXISTING:  ${REPLACE_EXISTING}
  KEEP_FAILED:       ${KEEP_FAILED_INSTALLS}
  SKIP_PATCHES:      ${SKIP_PATCHES}
+ BUILD_MINICONDA3:  ${BUILD_MINICONDA3}   $( (( BUILD_MINICONDA3 == 0 )) && echo "(disabled: miniconda3 not installed by this sweep)" )
+ BUILD_MINIFORGE3:  ${BUILD_MINIFORGE3}   $( (( BUILD_MINIFORGE3 == 0 )) && echo "(disabled: miniforge3 not installed by this sweep)" )
  PACKAGES:          ${PACKAGES_LIST:-<all>}
  PNETCDF_VERSION:   ${PNETCDF_VERSION:-<leaf default>}
  MAX_PARALLEL:      ${MAX_PARALLEL}   $( (( MAX_PARALLEL == 1 )) && echo "(strict serial chain)" || echo "(sliding window: up to ${MAX_PARALLEL} jobs RUNNING simultaneously)")
@@ -718,6 +732,11 @@ for v in "${VERSIONS_ARR[@]}"; do
    EXPORT_VARS+=",REPLACE_EXISTING=${REPLACE_EXISTING}"
    EXPORT_VARS+=",KEEP_FAILED_INSTALLS=${KEEP_FAILED_INSTALLS}"
    EXPORT_VARS+=",SKIP_PATCHES=${SKIP_PATCHES}"
+   # miniconda3 / miniforge3 are turned off for this sweep (see the
+   # BUILD_MINICONDA3 / BUILD_MINIFORGE3 defaults above). Thread them through
+   # so main_setup.sh's env-level BUILD_<PKG> gate short-circuits both leaves.
+   EXPORT_VARS+=",BUILD_MINICONDA3=${BUILD_MINICONDA3}"
+   EXPORT_VARS+=",BUILD_MINIFORGE3=${BUILD_MINIFORGE3}"
    # PACKAGES_LIST may contain spaces; sbatch --export uses commas as separators,
    # so leave the value un-comma'd. Spaces survive verbatim through to the sbatch.
    EXPORT_VARS+=",PACKAGES_LIST=${PACKAGES_LIST}"

@@ -1369,7 +1369,12 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	local mbase = myFileName():gsub("/[^/]*\$",""):gsub("/[^/]*\$",""):gsub("/[^/]*\$","")
 
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
-	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib/rocm_sysdeps/lib"))
+	-- Vendored system libs (rocm_sysdeps); fixes a former "liblib/..." typo
+	-- that pointed at a non-existent path. isDir-guarded so it self-activates
+	-- only on SDKs that actually ship rocm_sysdeps and is a no-op elsewhere.
+	if isDir(pathJoin(base, "lib/rocm_sysdeps/lib")) then
+	   prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib/rocm_sysdeps/lib"))
+	end
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPATH", pathJoin(base, "include"))

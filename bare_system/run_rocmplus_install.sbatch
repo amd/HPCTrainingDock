@@ -56,6 +56,8 @@
 #   REPLACE_EXISTING     0|1   (default 0)
 #   KEEP_FAILED_INSTALLS 0|1   (default 0; 1 = preserve partial install
 #                               artifacts of a failed package for forensics)
+#   BUILD_MINICONDA3     0|1   (default 0; miniconda3 turned off for the sweep)
+#   BUILD_MINIFORGE3     0|1   (default 0; miniforge3 turned off for the sweep)
 #   PACKAGES_LIST        space-separated whitelist (default: empty = all)
 
 set -uo pipefail
@@ -202,6 +204,8 @@ echo " PYTHON_VERSION:   3.${PYTHON_VERSION}"
 echo " QUICK_INSTALLS:   ${QUICK_INSTALLS}"
 echo " REPLACE_EXISTING: ${REPLACE_EXISTING}"
 echo " KEEP_FAILED:      ${KEEP_FAILED_INSTALLS}"
+echo " BUILD_MINICONDA3: ${BUILD_MINICONDA3:-0}  (0 = miniconda3 not installed by this sweep)"
+echo " BUILD_MINIFORGE3: ${BUILD_MINIFORGE3:-0}  (0 = miniforge3 not installed by this sweep)"
 echo " PACKAGES_LIST:    ${PACKAGES_LIST:-<all>}"
 echo " PNETCDF_VERSION:  ${PNETCDF_VERSION:-<leaf default>}"
 echo " ROCMPLUS_FLAVOR:  ${ROCMPLUS_FLAVOR}  (amd -> rocmplus-<v>; cray -> rocmplus-cray-<v>)"
@@ -630,7 +634,20 @@ SITE_ARGS=()
 # (see its `: ${BUILD_INTELLIKIT:="1"}` default), so disable it here for the
 # sweep. IntelliKit should instead be built via the isolated container path
 # (tools/Dockerfile), where its apt deps stay in a throwaway image layer.
+#
+# ── Do NOT build miniconda3 / miniforge3 on this sweep ────────────────
+# These are turned off for the rocm-plus sweep (2026-08-13). The submitter
+# (run_rocmplus_install_sweep.sh) exports BUILD_MINICONDA3 / BUILD_MINIFORGE3
+# (default 0) via the curated --export list; forward them explicitly here so
+# the wiring is visible at the main_setup.sh call site and a direct sbatch
+# invocation (bypassing the submitter) also defaults them off. main_setup.sh
+# honours these env-level BUILD_<PKG> overrides, and the leaf scripts
+# short-circuit via NOOP_RC=43 (recorded as SKIPPED(no-op) in the summary).
+# Set BUILD_MINICONDA3=1 / BUILD_MINIFORGE3=1 in the environment, or pass
+# --packages "... miniconda3 miniforge3 ...", to re-enable.
 BUILD_INTELLIKIT=0 \
+BUILD_MINICONDA3="${BUILD_MINICONDA3:-0}" \
+BUILD_MINIFORGE3="${BUILD_MINIFORGE3:-0}" \
 bare_system/main_setup.sh \
    --rocm-version         "${ROCM_NUMERIC}" \
    --rocm-rc-prefix       "${ROCM_RC_PREFIX}" \

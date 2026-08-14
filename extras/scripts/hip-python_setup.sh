@@ -603,6 +603,73 @@ PY
       fi
    fi
 
+   # ── numba-hip clang-version compatibility shim ──────────────────────
+   # numba-hip pins its expected LLVM/clang major to the rocm-llvm-python
+   # wheel pulled by the `numba-hip[rocm-X-Y-Z]` extra. Test PyPI only
+   # publishes up to rocm-7-2-2 (clang 22), so EVERY therock SDK build
+   # lands rocm-llvm-python 7.2.2 -> LLVM_VERSION_MAJOR=22. TheRock SDKs
+   # >= 7.12 (incl. 10.x) ship a NEWER clang (e.g. 23), so numba-hip's
+   # _setup_libclang() calls get_rocm_path("llvm","lib","clang","22"),
+   # which does not exist, and `from numba import hip` dies with
+   # FileNotFoundError (masked in the regression test by `2>/dev/null`).
+   # There is no newer wheel to pin to, so instead we rewrite the pinned
+   # version constants at the point of use to the clang major ACTUALLY
+   # present in the SDK. Runs for both cached and source-built installs;
+   # idempotent; no-op when the SDK clang already matches the pin.
+   _NUMBA_HIPDEVLIB="${HIP_PYTHON_PATH}/numba-hip/numba/hip/typing_lowering/hipdevicelib/__init__.py"
+   if [ -f "${_NUMBA_HIPDEVLIB}" ]; then
+      ${SUDO} python3 - "${_NUMBA_HIPDEVLIB}" <<'PY'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+MARK = "HPCTrainingDock clang-version shim"
+if MARK in src:
+    print("numba-hip clang shim: already present, skipping:", path)
+else:
+    shim = '''
+# --- HPCTrainingDock clang-version shim ---
+# The LLVM/clang version imported above comes from the rocm-llvm-python
+# wheel, which (on Test PyPI) tops out at clang 22 while TheRock SDKs
+# ship a newer clang. Re-point the version constants at the clang major
+# actually installed in the SDK so the resource-dir lookup in
+# _setup_libclang() below succeeds.
+import os as _hpc_os, glob as _hpc_glob
+try:
+    _hpc_rp = (_hpc_os.environ.get("ROCM_HOME")
+               or _hpc_os.environ.get("ROCM_PATH") or "/opt/rocm")
+    def _hpc_vk(_d):
+        return [int(t) if t.isdigit() else 0
+                for t in _hpc_os.path.basename(_d).split(".")]
+    _hpc_cds = sorted(
+        (_d for _d in _hpc_glob.glob(
+            _hpc_os.path.join(_hpc_rp, "llvm", "lib", "clang", "*"))
+         if _hpc_os.path.isdir(_d)),
+        key=_hpc_vk)
+    if _hpc_cds:
+        _hpc_parts = _hpc_os.path.basename(_hpc_cds[-1]).split(".")
+        _LLVM_VERSION_MAJOR = int(_hpc_parts[0])
+        _LLVM_VERSION_MINOR = int(_hpc_parts[1]) if len(_hpc_parts) > 1 and _hpc_parts[1].isdigit() else 0
+        _LLVM_VERSION_PATCH = int(_hpc_parts[2]) if len(_hpc_parts) > 2 and _hpc_parts[2].isdigit() else 0
+except Exception:
+    pass
+# --- end HPCTrainingDock clang-version shim ---
+'''
+    anchor = "# isort: on"
+    idx = src.find(anchor)
+    if idx == -1:
+        print("numba-hip clang shim: WARNING anchor not found, NOT patched:", path)
+    else:
+        cut = src.index("\n", idx) + 1
+        open(path, "w").write(src[:cut] + shim + src[cut:])
+        print("numba-hip clang shim: patched", path)
+PY
+      # Drop any stale bytecode so the edited source is recompiled.
+      ${SUDO} rm -f "$(dirname "${_NUMBA_HIPDEVLIB}")/__pycache__/__init__."*.pyc 2>/dev/null || true
+   else
+      echo "numba-hip clang shim: ${_NUMBA_HIPDEVLIB} not found; skipping (numba-hip layout may have changed)."
+   fi
+   unset _NUMBA_HIPDEVLIB
+
    # Create a module file for hip-python
    #
    # Modulefile-write sudo: probe the nearest existing ancestor of

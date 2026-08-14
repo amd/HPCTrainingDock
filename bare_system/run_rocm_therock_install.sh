@@ -863,6 +863,15 @@ setenv HSA_NO_SCRATCH_RECLAIM  1
 ${HIPCC_TCL_LINES}
 
 prepend-path LD_LIBRARY_PATH    \$base/lib
+# ROCm >= 7.12 (TheRock) vendors its system libs under lib/rocm_sysdeps/lib
+# with private SONAMEs (librocm_sysdeps_*.so.N). They are NOT in lib/, so
+# consumers that dlopen them at runtime (jax rocm plugin, rocpd, amd-smi)
+# otherwise die with "librocm_sysdeps_elf.so.1: cannot open shared object
+# file". Guard on the directory (NOT a version number) so it self-activates
+# on every SDK that ships sysdeps and is a no-op on those that don't.
+if {[file isdirectory \$base/lib/rocm_sysdeps/lib]} {
+    prepend-path LD_LIBRARY_PATH \$base/lib/rocm_sysdeps/lib
+}
 prepend-path C_INCLUDE_PATH     \$base/include
 prepend-path CPLUS_INCLUDE_PATH \$base/include
 prepend-path CPATH              \$base/include
@@ -895,6 +904,15 @@ local base  = "${INSTALL_DIR}"
 local mbase = "${TOP_MODULE_PATH}"
 
 prepend_path("LD_LIBRARY_PATH",    pathJoin(base, "lib"))
+-- ROCm >= 7.12 (TheRock) vendors its system libs under lib/rocm_sysdeps/lib
+-- with private SONAMEs (librocm_sysdeps_*.so.N). They are NOT in lib/, so
+-- consumers that dlopen them at runtime (jax rocm plugin, rocpd, amd-smi)
+-- otherwise die with "librocm_sysdeps_elf.so.1: cannot open shared object
+-- file". Guard on the directory (NOT a version number) so it self-activates
+-- on every SDK that ships sysdeps and is a no-op on those that don't.
+if isDir(pathJoin(base, "lib/rocm_sysdeps/lib")) then
+  prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib/rocm_sysdeps/lib"))
+end
 prepend_path("C_INCLUDE_PATH",     pathJoin(base, "include"))
 prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 prepend_path("CPATH",              pathJoin(base, "include"))
