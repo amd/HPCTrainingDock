@@ -57,6 +57,20 @@ HIP_VERSION_PATCH_REGULAR=0
 # the HIP version in-source, so it is a no-op on ROCm <= 7.12 and on vLLM
 # refs that already carry the guard. Disable to re-test on a newer vLLM ref.
 ATOMICADD_GUARD_PATCH=1
+# AITER (AMD's optimized ROCm operator library) provides vLLM's fastest
+# fused-MoE/attention/quant kernels. Built from source against the same torch
+# and gfx target as vLLM, into the SAME prefix. Default ON so the performance
+# path ships, but the build is NON-FATAL (a failure leaves a working vLLM
+# without aiter) and vLLM only USES it when VLLM_ROCM_USE_AITER=1 at runtime
+# (the modulefile sets it to 0 as a discoverable "aiter is built" marker).
+# aiter supports only gfx90a/gfx942/gfx950; on any other gfx it is skipped.
+WITH_AITER=1
+AITER_REPO="https://github.com/ROCm/aiter.git"
+# Empty ref => aiter repo default branch (main). Pin per validated combo.
+AITER_REF=""
+# PREBUILD_KERNELS: 0=JIT-only, 1=core, 2=inference, 3=MHA-only. 2 precompiles
+# the inference kernels so there is no first-request JIT stall at serve time.
+AITER_PREBUILD_KERNELS=2
 # vLLM version. Empty => auto-derive from the pytorch module's torch
 # (see the "vLLM version gate" block after arg parsing). Tracked
 # separately so that block can tell "user passed --vllm-version" from
@@ -123,6 +137,10 @@ usage()
    echo "  --hip-version-patch [ 0|1 ] apply the TORCH_HIP_VERSION stable-ABI ROCm compile workaround, default $HIP_VERSION_PATCH (re-evaluate per rocm/torch/vLLM version)"
    echo "  --hip-version-patch-regular [ 0|1 ] also define TORCH_HIP_VERSION=0 on the regular _C/_moe_C/_rocm_C targets, default $HIP_VERSION_PATCH_REGULAR (only needed on older pre-stable-ABI vLLM, e.g. v0.19.1 on torch 2.10)"
    echo "  --atomicadd-guard-patch [ 0|1 ] apply the atomicAdd half/half2 ROCm>=7.13 guard (vllm PR #41802 backport), default $ATOMICADD_GUARD_PATCH (self-gates in-source; no-op on ROCm<=7.12 or vLLM refs that already carry it)"
+   echo "  --with-aiter [ 0|1 ] build AMD AITER kernels into the vLLM prefix, default $WITH_AITER (non-fatal; only gfx90a/gfx942/gfx950; enable at runtime with VLLM_ROCM_USE_AITER=1)"
+   echo "  --aiter-repo [ AITER_REPO ] git repo to build AITER from, default $AITER_REPO"
+   echo "  --aiter-ref [ AITER_REF ] git tag/branch/commit to build AITER at, default the repo's default branch"
+   echo "  --aiter-prebuild-kernels [ 0-3 ] AITER PREBUILD_KERNELS level (0=JIT,1=core,2=inference,3=MHA), default $AITER_PREBUILD_KERNELS"
    echo "  --pytorch-module [ PYTORCH_MODULE ] pytorch module to load, default $PYTORCH_MODULE"
    echo "  --pytorch-version [ PYTORCH_VERSION ] bound pytorch version; keys the install dir + modulefile (vllm-v\${VLLM_VERSION}-pt\${PYTORCH_VERSION}) so multiple (vllm,pytorch) pairs coexist. Empty (default) -> resolved from the loaded pytorch module token."
    echo "  --protect-packages [ names ] extra space-separated ABI/ROCm packages to hard-pin from the pytorch module (appended to the default set)"
@@ -206,6 +224,26 @@ do
       "--atomicadd-guard-patch")
           shift
           ATOMICADD_GUARD_PATCH=${1}
+          reset-last
+          ;;
+      "--with-aiter")
+          shift
+          WITH_AITER=${1}
+          reset-last
+          ;;
+      "--aiter-repo")
+          shift
+          AITER_REPO=${1}
+          reset-last
+          ;;
+      "--aiter-ref")
+          shift
+          AITER_REF=${1}
+          reset-last
+          ;;
+      "--aiter-prebuild-kernels")
+          shift
+          AITER_PREBUILD_KERNELS=${1}
           reset-last
           ;;
       "--pytorch-module")
@@ -948,6 +986,72 @@ PY
       echo "vllm: WARNING amdsmi source not found at ${AMDSMI_SRC}; vLLM may fall back to UnspecifiedPlatform and never use the GPU."
    fi
 
+   # ── AITER: AMD's optimized ROCm kernels (vLLM's default fast paths) ─
+   # Built from source (ROCm/aiter) against the SAME torch + gfx target and
+   # installed into the SAME prefix, so it ships alongside vLLM. NON-FATAL:
+   # any failure here leaves a fully working vLLM without aiter (the engine
+   # only uses aiter when VLLM_ROCM_USE_AITER=1 at runtime). aiter supports
+   # only gfx942 (CDNA3) and gfx950 (CDNA4) per the ROCm/aiter README, so we
+   # build for the aiter-supported SUBSET of PYTORCH_ROCM_ARCH and skip if
+   # none qualify. AITER_USE_SYSTEM_TRITON=1 keeps the pytorch module's
+   # (protected) triton instead of letting aiter pull its own.
+   if [ "${WITH_AITER}" = "1" ]; then
+      AITER_GPU_ARCHS=""
+      _OLD_IFS="${IFS}"; IFS=';'
+      for _a in ${PYTORCH_ROCM_ARCH}; do
+         case "${_a}" in
+            gfx942|gfx950) AITER_GPU_ARCHS="${AITER_GPU_ARCHS:+${AITER_GPU_ARCHS};}${_a}" ;;
+         esac
+      done
+      IFS="${_OLD_IFS}"; unset _OLD_IFS _a
+      if [ -z "${AITER_GPU_ARCHS}" ]; then
+         echo "vllm: AITER skipped -- none of PYTORCH_ROCM_ARCH='${PYTORCH_ROCM_ARCH}' is aiter-supported (gfx942/gfx950)."
+      else
+         echo "vllm: building AITER for GPU_ARCHS=${AITER_GPU_ARCHS} PREBUILD_KERNELS=${AITER_PREBUILD_KERNELS} ref='${AITER_REF:-default}' (non-fatal; this is a second kernel compile)."
+         _aiter_ok=1
+         AITER_SRC="${VLLM_BUILD_ROOT}/aiter-src"
+         _aiter_branch_args=()
+         [ -n "${AITER_REF}" ] && _aiter_branch_args=(--branch "${AITER_REF}")
+         # aiter REQUIRES its git submodules (--recursive in the ROCm/aiter docs).
+         if git clone --depth 1 "${_aiter_branch_args[@]}" --recurse-submodules --shallow-submodules \
+               "${AITER_REPO}" "${AITER_SRC}"; then
+            AITER_WHEELHOUSE="${VLLM_BUILD_ROOT}/aiter-wheelhouse"
+            mkdir -p "${AITER_WHEELHOUSE}"
+            if GPU_ARCHS="${AITER_GPU_ARCHS}" PREBUILD_KERNELS="${AITER_PREBUILD_KERNELS}" \
+               AITER_USE_SYSTEM_TRITON=1 MAX_JOBS="${MAX_JOBS}" \
+               pip3 wheel -v --no-build-isolation --no-deps \
+                  --wheel-dir "${AITER_WHEELHOUSE}" "${AITER_SRC}"; then
+               AITER_WHEEL="$(find "${AITER_WHEELHOUSE}" -maxdepth 1 -name 'aiter-*.whl' 2>/dev/null | head -1)"
+               if [ -n "${AITER_WHEEL}" ]; then
+                  echo "vllm: built $(basename "${AITER_WHEEL}"); installing into the prefix (--no-deps --ignore-installed)"
+                  pip3 install --prefix="${VLLM_PATH}" \
+                     --no-deps --ignore-installed --no-warn-script-location \
+                     "${AITER_WHEEL}" || _aiter_ok=0
+                  # flydsl enables aiter's FlyDSL GEMM/MoE kernels; aiter falls
+                  # back to CK kernels without it, so this is best-effort.
+                  pip3 install --prefix="${VLLM_PATH}" \
+                     --no-deps --ignore-installed --no-warn-script-location --pre flydsl \
+                     || echo "vllm: WARNING flydsl not installed; aiter will use its CK-kernel fallback."
+               else
+                  _aiter_ok=0
+               fi
+            else
+               _aiter_ok=0
+            fi
+         else
+            _aiter_ok=0
+         fi
+         if [ "${_aiter_ok}" = "1" ]; then
+            echo "vllm: AITER built and installed into the prefix."
+         else
+            echo "vllm: WARNING AITER build/install FAILED (non-fatal); vLLM is installed WITHOUT aiter. Pin a known-good --aiter-ref or pass --with-aiter 0."
+         fi
+         unset _aiter_ok _aiter_branch_args
+      fi
+   else
+      echo "vllm: AITER build disabled (--with-aiter 0)."
+   fi
+
    # Resolve the site dir pip created under the prefix. Ubuntu's Debian
    # python uses the posix_local scheme (local/lib/pythonX.Y/dist-packages);
    # a vanilla python would use lib/pythonX.Y/site-packages. Detect either.
@@ -1024,6 +1128,23 @@ else
    APU_MODULE_BLOCK=""
 fi
 
+# AITER modulefile line: emitted only when aiter was actually installed into
+# the prefix (detected, so it is correct on both the source-build and cache-
+# restore paths, and reflects reality even if a non-fatal aiter build failed).
+# Set VLLM_ROCM_USE_AITER=0 so users see aiter IS built and know the knob to
+# flip to 1 to turn on vLLM's aiter fast paths.
+if [ -d "${VLLM_SITE}/aiter" ]; then
+   AITER_MODULE_BLOCK=$(cat <<'LUA'
+
+-- AITER (AMD's optimized ROCm kernels) is BUILT into this install. It is OFF
+-- by default; export VLLM_ROCM_USE_AITER=1 to enable vLLM's aiter fast paths.
+setenv("VLLM_ROCM_USE_AITER","0")
+LUA
+)
+else
+   AITER_MODULE_BLOCK=""
+fi
+
 # The - option suppresses leading tabs in the heredoc body.
 cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${VLLM_MODULE_TOKEN}.lua
 	whatis("vLLM ${VLLM_VERSION} with ROCm support (bound to ${PYTORCH_MODULE_RESOLVED}, torch ${TORCH_VERSION}, ${AMDGPU_GFXMODEL})")
@@ -1041,6 +1162,7 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${VLLM_MODULE_TOKEN}.lua
 
 	-- Co-locate HF weights/cache with the team's ollama models on /shareddata.
 	setenv("HF_HOME","${HF_HOME_DEFAULT}")
+${AITER_MODULE_BLOCK}
 ${APU_MODULE_BLOCK}
 EOF
 

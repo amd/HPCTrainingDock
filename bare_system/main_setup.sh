@@ -71,6 +71,11 @@ SITE_CLI=0
 # with pytorch -- a vllm build with BUILD_PYTORCH=0 would have no torch to
 # layer on.
 : ${BUILD_VLLM:="1"}
+# Build AMD AITER kernels into the vLLM prefix (threaded to vllm_setup.sh
+# --with-aiter). Default on for best ROCm performance; the leaf build is
+# non-fatal and only applies on gfx942/gfx950, so it never breaks a vllm
+# install. Set WITH_AITER=0 to skip the extra kernel compile.
+: ${WITH_AITER:="1"}
 : ${BUILD_CUPY:="1"}
 : ${BUILD_HIP_PYTHON:="1"}
 : ${BUILD_TENSORFLOW:="1"}
@@ -2793,7 +2798,7 @@ for _req_ver in "${_vllm_req_versions[@]}"; do
       DESELECTED_BY[${_label}]="${DESELECTED_BY[vllm]}"
    fi
    run_and_log "${_label}" extras/scripts/vllm_setup.sh ${COMMON_OPTIONS} \
-      --build-vllm ${BUILD_VLLM} ${REPLACE_OPTS} \
+      --build-vllm ${BUILD_VLLM} --with-aiter ${WITH_AITER} ${REPLACE_OPTS} \
       "${_pyt_args[@]}" \
       $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/vllm)
 done
