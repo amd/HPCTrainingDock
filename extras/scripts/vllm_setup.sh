@@ -68,9 +68,13 @@ WITH_AITER=1
 AITER_REPO="https://github.com/ROCm/aiter.git"
 # Empty ref => aiter repo default branch (main). Pin per validated combo.
 AITER_REF=""
-# PREBUILD_KERNELS: 0=JIT-only, 1=core, 2=inference, 3=MHA-only. 2 precompiles
-# the inference kernels so there is no first-request JIT stall at serve time.
-AITER_PREBUILD_KERNELS=2
+# PREBUILD_KERNELS: 0=JIT-only, 1=core, 2=inference, 3=MHA-only. Default 0
+# (JIT): any non-zero level makes aiter's setup.py run its FlyDSL AOT step at
+# build time, which imports flydsl -- but we install flydsl AFTER the aiter
+# wheel, so a prebuild would fail. Raise this only if flydsl is installed first
+# (see the AITER build block). JIT compiles module_aiter_core on first import
+# instead, needing pybind11+ninja at runtime (installed below).
+AITER_PREBUILD_KERNELS=0
 # vLLM version. Empty => auto-derive from the pytorch module's torch
 # (see the "vLLM version gate" block after arg parsing). Tracked
 # separately so that block can tell "user passed --vllm-version" from
@@ -1015,18 +1019,31 @@ PY
          # aiter REQUIRES its git submodules (--recursive in the ROCm/aiter docs).
          if git clone --depth 1 "${_aiter_branch_args[@]}" --recurse-submodules --shallow-submodules \
                "${AITER_REPO}" "${AITER_SRC}"; then
+            # aiter's setup.py prebuild block runs during pip's metadata phase,
+            # where sys.path to 'jit' is not set (No module named 'jit'). Gate
+            # it on the same _is_metadata_only() guard the imports use.
+            sed -i 's/^\([[:space:]]*\)if PREBUILD_KERNELS != 0:/\1if PREBUILD_KERNELS != 0 and not _is_metadata_only():/' "${AITER_SRC}/setup.py"
             AITER_WHEELHOUSE="${VLLM_BUILD_ROOT}/aiter-wheelhouse"
             mkdir -p "${AITER_WHEELHOUSE}"
             if GPU_ARCHS="${AITER_GPU_ARCHS}" PREBUILD_KERNELS="${AITER_PREBUILD_KERNELS}" \
                AITER_USE_SYSTEM_TRITON=1 MAX_JOBS="${MAX_JOBS}" \
                pip3 wheel -v --no-build-isolation --no-deps \
                   --wheel-dir "${AITER_WHEELHOUSE}" "${AITER_SRC}"; then
-               AITER_WHEEL="$(find "${AITER_WHEELHOUSE}" -maxdepth 1 -name 'aiter-*.whl' 2>/dev/null | head -1)"
+               # aiter's dist name is 'amd_aiter', so a wheel is named
+               # amd_aiter-*.whl; match both so a successful build is not
+               # misreported as "no wheel".
+               AITER_WHEEL="$(find "${AITER_WHEELHOUSE}" -maxdepth 1 \( -name 'aiter-*.whl' -o -name 'amd_aiter-*.whl' \) 2>/dev/null | head -1)"
                if [ -n "${AITER_WHEEL}" ]; then
                   echo "vllm: built $(basename "${AITER_WHEEL}"); installing into the prefix (--no-deps --ignore-installed)"
                   pip3 install --prefix="${VLLM_PATH}" \
                      --no-deps --ignore-installed --no-warn-script-location \
                      "${AITER_WHEEL}" || _aiter_ok=0
+                  # JIT runtime deps: in JIT mode the first `import aiter`
+                  # compiles module_aiter_core, needing pybind11 + the ninja
+                  # python module present in the prefix.
+                  pip3 install --prefix="${VLLM_PATH}" \
+                     --no-deps --ignore-installed --no-warn-script-location \
+                     pybind11 ninja
                   # flydsl enables aiter's FlyDSL GEMM/MoE kernels; aiter falls
                   # back to CK kernels without it, so this is best-effort.
                   pip3 install --prefix="${VLLM_PATH}" \
@@ -1086,8 +1103,27 @@ ROCM_PATH_FOR_MODULE="${ROCM_PATH}"
 cd /
 
 # ── Modulefile ───────────────────────────────────────────────────────
-# Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit).
-PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+# Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit), but
+# decided by an actual write-probe of MODULE_PATH's nearest existing ancestor
+# (mirrors the install-path probe above). On a user-owned modules tree (e.g.
+# a user-owned /shared/modulefiles) there is no passwordless sudo, so a blind
+# `sudo tee` would fail; the probe drops to no-sudo when the tree is writable.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+   PKG_SUDO_MOD=""
+else
+   _mprobe="${MODULE_PATH}"
+   while [ ! -e "${_mprobe}" ]; do _mprobe="$(dirname "${_mprobe}")"; done
+   _mtest=$(mktemp --tmpdir="${_mprobe}" .vllm-mod-probe.XXXXXX 2>/dev/null || true)
+   if [ -n "${_mtest}" ] && [ -f "${_mtest}" ]; then
+      rm -f "${_mtest}"
+      PKG_SUDO_MOD=""
+      echo "vllm: module ancestor ${_mprobe} is user-writable (probe succeeded); not using sudo for modulefile"
+   else
+      PKG_SUDO_MOD="sudo"
+      echo "vllm: module ancestor ${_mprobe} not user-writable (probe failed); using sudo for modulefile"
+   fi
+   unset _mprobe _mtest
+fi
 ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
 # Provenance: capture this leaf script's git state for the modulefile
@@ -1139,6 +1175,10 @@ if [ -d "${VLLM_SITE}/aiter" ]; then
 -- AITER (AMD's optimized ROCm kernels) is BUILT into this install. It is OFF
 -- by default; export VLLM_ROCM_USE_AITER=1 to enable vLLM's aiter fast paths.
 setenv("VLLM_ROCM_USE_AITER","0")
+-- Per-user JIT cache: in JIT mode aiter compiles kernels on first import and
+-- would otherwise try to write into the shared, read-only install prefix.
+-- Redirect that to a per-user, per-job scratch dir under /tmp.
+setenv("AITER_JIT_DIR", "/tmp/" .. (os.getenv("USER") or "u") .. "/aiter-jit/" .. (os.getenv("SLURM_JOB_ID") or "interactive"))
 LUA
 )
 else
