@@ -1017,6 +1017,50 @@ else
    fi
    : "${ROCM_PATH_FOR_MODULE:=${ROCM_PATH}}"
 
+   # ── Fix ROCm PJRT plugin discovery list ──────────────────────────────
+   # The jax_plugins/xla_rocm*/__init__.py that ships in the plugin wheel
+   # hardcodes the set of plugin packages it will import rocm_plugin_extension
+   # from, e.g.:
+   #     for pkg_name in ["jax_rocm7_plugin", "jax_rocm60_plugin", "jaxlib.rocm"]:
+   # The plugin wheel's own package name is derived from the ROCm major
+   # (ROCM_VERSION_BAZEL): 6 -> jax_rocm60_plugin, 7 -> jax_rocm7_plugin,
+   # 10 -> jax_rocm10_plugin. ROCm 10's wheel is jax_rocm10_plugin, which is
+   # NOT in the upstream list, so rocm_plugin_extension stays None, the
+   # plugin's initialize() returns before xb.register_plugin("rocm", ...), and
+   # jax only ever sees CPU:
+   #     RuntimeError: Backend 'rocm' is not in the list of known backends: ['cpu','tpu'].
+   # (Validated on sh5-pl1-s12-09, gfx942 present: without this patch
+   # jax.devices() raised the above; with jax_rocm10_plugin prepended it
+   # returned [RocmDevice(id=0)].) Prepend the actually-built package name so
+   # discovery finds it. Idempotent (skips if already present) and
+   # major-agnostic, so it self-corrects for 6/7/10/future majors and is a
+   # no-op for the cached lines that already list the right name.
+   if ls -d ${JAXLIB_PATH}/jax_rocm*_plugin >/dev/null 2>&1; then
+      # EUID-based sudo (canonical PKG_SUDO pattern, matches modulefile write
+      # below): files are root-owned after both the cached tar-extract and the
+      # from-source chown, so a non-root operator needs sudo to edit them.
+      PKG_SUDO_PLUGIN=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+      # the plugin dir that actually carries the native extension .so
+      _jax_plugin_pkg=""
+      for _d in ${JAXLIB_PATH}/jax_rocm*_plugin; do
+         if ls ${_d}/rocm_plugin_extension*.so >/dev/null 2>&1; then
+            _jax_plugin_pkg="$(basename ${_d})"
+            break
+         fi
+      done
+      if [ -n "${_jax_plugin_pkg}" ]; then
+         for _init in ${JAXLIB_PATH}/jax_plugins/xla_rocm*/__init__.py; do
+            [ -f "${_init}" ] || continue
+            if grep -q 'for pkg_name in \[' "${_init}" && ! grep -q "\"${_jax_plugin_pkg}\"" "${_init}"; then
+               echo "[jax] patching plugin discovery list in ${_init}: prepending ${_jax_plugin_pkg}"
+               ${PKG_SUDO_PLUGIN} sed -i "s/for pkg_name in \[/for pkg_name in [\"${_jax_plugin_pkg}\", /" "${_init}"
+            fi
+            # drop stale bytecode so the edited list is what actually imports
+            ${PKG_SUDO_PLUGIN} rm -rf "$(dirname "${_init}")/__pycache__" 2>/dev/null || true
+         done
+      fi
+   fi
+
    # ── Post-install smoke test ──────────────────────────────────────────
    # Catch broken installs at BUILD time instead of in the nightly. Guards
    # the two failure modes observed on Ubuntu 24.04 + ROCm 7.x:
@@ -1069,17 +1113,32 @@ else
       esac
 
       # (3) if a GPU is visible on the build node, try to enumerate a ROCm
-      #     device. Treated as a WARNING (not fatal): transient GPU/driver
-      #     state on a build node shouldn't fail an otherwise-good build, and
-      #     checks (1)+(2) already prove the rocm backend is loadable.
+      #     device. Two outcomes are distinguished here:
+      #       - the 'rocm' backend fails to REGISTER ("not in the list of known
+      #         backends" / "Unable to initialize backend 'rocm'") -> FATAL.
+      #         This is a build defect (e.g. the plugin-discovery list omitted
+      #         this build's jax_rocm*_plugin, patched above); it shipped
+      #         silently once because this check used to only WARN. It cannot
+      #         be transient, so fail the build.
+      #       - any other non-enumeration (rc!=0 without that message) -> WARNING,
+      #         since checks (1)+(2) already proved the backend is loadable and
+      #         this is more likely transient GPU/driver state on the build node.
       if rocminfo 2>/dev/null | grep -q gfx; then
          _out=$(env "${_env[@]}" python3 -c 'import jax; print(jax.devices())' 2>&1); _rc=$?
          echo "${_out}"
          if [ ${_rc} -eq 0 ] && echo "${_out}" | grep -qiE 'rocm|gfx'; then
             echo "[jax smoke test] PASS: import + ROCm device enumeration OK."
+         elif echo "${_out}" | grep -qiE "not in the list of known backends|Unable to initialize backend .rocm."; then
+            echo "[jax smoke test] FATAL: the 'rocm' backend failed to register (rc=${_rc})." >&2
+            echo "  jax sees only CPU/TPU -- this is a build defect, not transient GPU state." >&2
+            echo "  Most often the jax_plugins/xla_rocm*/__init__.py plugin-discovery list does" >&2
+            echo "  not include this build's plugin package (e.g. jax_rocm10_plugin); see the" >&2
+            echo "  discovery-list patch earlier in this script." >&2
+            return 1
          else
             echo "[jax smoke test] WARNING: jax.devices() did not enumerate a ROCm device (rc=${_rc})." >&2
-            echo "  import + plugin checks passed; verify GPU availability on the build node." >&2
+            echo "  import + plugin checks passed and the rocm backend registered, so this looks" >&2
+            echo "  like transient GPU/driver state on the build node -- verify GPU availability." >&2
          fi
       else
          echo "[jax smoke test] PASS (partial): import OK + plugin present; no GPU visible on build node, skipped device check."

@@ -1206,6 +1206,63 @@ else
    echo "[rocm_setup] non-Cray system: emitting Lmod .lua modulefiles"
 fi
 
+# ── rocpd: make the OTF2 output backend an OPTIONAL import ───────────────
+# ROCm 10.1's rocprofiler-sdk rocpd bindings regressed: rocpd/__main__.py's
+# main() eagerly does `from . import otf2`, and rocpd/otf2.py has a top-level
+# `import otf2` -- the EXTERNAL Score-P OTF2 python package, which ROCm does
+# NOT ship. So EVERY rocpd invocation, even `rocpd --version`, crashes with
+# "ModuleNotFoundError: No module named 'otf2'" (Rocprofv3_Rocpd test). ROCm
+# <=7.2.x did not import otf2 from __main__ at all, so they were unaffected.
+# (Validated on rocm-10.1.0a20260815: with otf2 stubbed the shipped
+# `rocpd --version` prints rocm_version: 10.1.0; the OTF2 backend is only
+# needed for `rocpd convert --output-format otf2`.) Guard the top-level import
+# so the submodule loads without the external package and only raises a clear
+# error if OTF2 output is actually requested. Runs post-install for BOTH the
+# cached and fresh-install paths; the tree is root-owned here, hence ${SUDO}.
+# Idempotent (skips once _HAVE_OTF2 is present) and version-agnostic
+# (self-heals wherever the unguarded `import otf2` exists).
+for _rocpd_otf2 in /opt/rocm-${ROCM_VERSION}/lib/python*/site-packages/rocpd/otf2.py \
+                   /opt/rocm-${ROCM_VERSION}/lib/python*/dist-packages/rocpd/otf2.py; do
+   [ -f "${_rocpd_otf2}" ] || continue
+   if grep -q '^import otf2$' "${_rocpd_otf2}" && ! grep -q '_HAVE_OTF2' "${_rocpd_otf2}"; then
+      echo "[rocm_setup] rocpd: guarding optional OTF2 import in ${_rocpd_otf2}"
+      ${SUDO} python3 - "${_rocpd_otf2}" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = ("import os\n"
+       "import otf2\n"
+       "from otf2.enums import LocationType, LocationGroupType, RegionRole, Paradigm\n")
+if old not in s:
+    print("  [rocpd] top-import anchor not found; leaving %s unchanged" % p, file=sys.stderr)
+    sys.exit(0)
+new = ("import os\n"
+       "try:\n"
+       "    import otf2\n"
+       "    from otf2.enums import LocationType, LocationGroupType, RegionRole, Paradigm\n"
+       "    _HAVE_OTF2 = True\n"
+       "except ImportError as _otf2_err:  # OTF2 output backend is optional\n"
+       "    otf2 = None\n"
+       "    LocationType = LocationGroupType = RegionRole = Paradigm = None\n"
+       "    _HAVE_OTF2 = False\n"
+       "    _OTF2_IMPORT_ERROR = _otf2_err\n")
+s = s.replace(old, new, 1)
+anchor = "def write_otf2(importData, config):\n"
+guard = (anchor +
+         "    if not _HAVE_OTF2:\n"
+         "        raise ImportError(\n"
+         "            \"OTF2 output requires the 'otf2' Python package, which is not \"\n"
+         "            \"installed in this ROCm environment. Install it to use \"\n"
+         "            \"--output-format otf2.\"\n"
+         "        ) from _OTF2_IMPORT_ERROR\n")
+if anchor in s:
+    s = s.replace(anchor, guard, 1)
+open(p, "w").write(s)
+print("  [rocpd] patched %s" % p)
+PYEOF
+   fi
+done
+
 # Root of the module tree (before the per-package leaf is appended), used by the
 # Cray branch to place the separate 'amd' (compiler) base module alongside 'rocm'.
 MODULE_ROOT=${MODULE_PATH}

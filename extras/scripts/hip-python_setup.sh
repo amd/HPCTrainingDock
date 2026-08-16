@@ -670,6 +670,49 @@ PY
    fi
    unset _NUMBA_HIPDEVLIB
 
+   # ── numba-hip device-JIT LLVM-skew detection ────────────────────────
+   # numba-hip JIT-compiles a kernel by (1) generating the HIP device
+   # library as LLVM bitcode via AMD COMGR (which uses the ROCm SDK's
+   # LLVM) and (2) linking it IN-PROCESS with the LLVM bundled inside the
+   # rocm-llvm-python wheel. LLVM's bitcode reader is NOT forward
+   # compatible, so when the SDK's LLVM major exceeds the wheel's LLVM
+   # major the link dies with:
+   #   ValueError: ... Unknown attribute kind (NNN)
+   #     (Producer: 'LLVM<sdk>git' Reader: 'LLVM <wheel>git')
+   # Test PyPI tops out at the 7.2.2 wheel (LLVM 22) while ROCm >= 7.13 /
+   # 10.x SDKs ship LLVM 23, and there is no installable matching wheel,
+   # so device JIT simply cannot work there. The clang shim above only
+   # fixes the libclang resource-dir lookup, NOT this bitcode-reader gap.
+   #
+   # Detect the skew here and (below) record it in the modulefile as
+   # NUMBA_HIP_DEVICE_JIT_UNSUPPORTED=1 so the regression test SKIPs the
+   # kernel-execution checks instead of hard-failing. hip-python's
+   # non-JIT functionality is unaffected and its other tests still run.
+   # When the wheel LLVM catches up to the SDK (equal or newer) the skew
+   # is 0 and nothing is marked, so this self-heals with no version list.
+   NUMBA_HIP_JIT_SKEW=0
+   _sdk_clang_major=""
+   for _cd in "${ROCM_PATH}/llvm/lib/clang"/* "${ROCM_PATH}/lib/llvm/lib/clang"/*; do
+      [ -d "${_cd}" ] || continue
+      _m="$(basename "${_cd}")"; _m="${_m%%.*}"
+      case "${_m}" in ''|*[!0-9]*) continue ;; esac
+      if [ -z "${_sdk_clang_major}" ] || [ "${_m}" -gt "${_sdk_clang_major}" ]; then
+         _sdk_clang_major="${_m}"
+      fi
+   done
+   # rocm-llvm-python's LLVM major is a pure-python constant (no native
+   # load needed), read from the freshly installed tree.
+   _wheel_llvm_major="$(PYTHONPATH="${HIP_PYTHON_PATH}/numba-hip:${HIP_PYTHON_PATH}/hip-python" \
+      python3 -c 'from rocm.llvm.config.llvm_config import LLVM_VERSION_MAJOR as m; print(m)' 2>/dev/null || true)"
+   echo "numba-hip device-JIT skew check: SDK LLVM major=${_sdk_clang_major:-unknown}, rocm-llvm-python LLVM major=${_wheel_llvm_major:-unknown}"
+   if [[ "${_sdk_clang_major}" =~ ^[0-9]+$ ]] && [[ "${_wheel_llvm_major}" =~ ^[0-9]+$ ]] \
+      && [ "${_sdk_clang_major}" -gt "${_wheel_llvm_major}" ]; then
+      NUMBA_HIP_JIT_SKEW=1
+      echo "  -> SDK LLVM (${_sdk_clang_major}) is newer than rocm-llvm-python LLVM (${_wheel_llvm_major}):"
+      echo "     numba-hip device JIT is UNSUPPORTED on this SDK; modulefile will mark it skippable."
+   fi
+   unset _cd _m _sdk_clang_major _wheel_llvm_major
+
    # Create a module file for hip-python
    #
    # Modulefile-write sudo: probe the nearest existing ancestor of
@@ -789,6 +832,22 @@ EOF
 	setenv NUMBA_HIP_USE_DEVICE_LIB_CACHE 0
 EOF
    fi
+
+   # Record the device-JIT skew marker (computed above) in the modulefile.
+   # When set, numba-hip_check.sh / numba-hip-cuda-posing_check.sh print a
+   # sentinel that CTest matches via SKIP_REGULAR_EXPRESSION, so the
+   # Numba-HIP tests report SKIPPED (not FAILED) on SDKs whose LLVM is
+   # newer than the rocm-llvm-python wheel. Appended (not baked into the
+   # heredocs) so it is emitted only on skew and self-clears on rebuild.
+   if [ "${NUMBA_HIP_JIT_SKEW}" = "1" ]; then
+      if [ "${_MODFLAVOR}" = "lua" ]; then
+         echo 'setenv("NUMBA_HIP_DEVICE_JIT_UNSUPPORTED","1")' | ${PKG_SUDO_MOD} tee -a "${_MODFILE}" >/dev/null
+      else
+         echo 'setenv NUMBA_HIP_DEVICE_JIT_UNSUPPORTED 1' | ${PKG_SUDO_MOD} tee -a "${_MODFILE}" >/dev/null
+      fi
+      echo "modulefile marked NUMBA_HIP_DEVICE_JIT_UNSUPPORTED=1 (${_MODFILE})"
+   fi
+   unset NUMBA_HIP_JIT_SKEW
    unset _MODFILE _MODFLAVOR _HIP_PYTHON_PROVENANCE ROCM_PREREQ_TCL ROCM_PREREQ_LUA
 
 fi

@@ -960,12 +960,14 @@ PY
    # (Confirmed on this cluster: without amdsmi, current_platform resolved
    # to UnspecifiedPlatform with device_name None; with it, RocmPlatform /
    # is_rocm True and offline generation works.) The pytorch module does
-   # NOT ship amdsmi, so install the ROCm-provided bindings -- pure-Python
-   # plus a bundled libamd_smi.so, ABI-tied to ${ROCM_MODULE_NAME} -- into
-   # the SAME prefix. --no-build-isolation reuses the BUILD_TOOLS setuptools
-   # (no network); --ignore-installed keeps it inside the prefix only.
+   # NOT ship amdsmi, so install the ROCm-provided bindings (ABI-tied to
+   # ${ROCM_MODULE_NAME}) into the SAME prefix. Two ROCm-tree layouts exist:
+   #   - ROCm <=7.x: share/amd_smi is a full pip package (pyproject.toml/
+   #     setup.py + a bundled libamd_smi.so) -> pip build+install (first branch).
+   #   - ROCm 10.1+: share/amd_smi is a BARE pure-Python amdsmi/ dir with no
+   #     build system and no bundled .so -> copy the package in (second branch).
    AMDSMI_SRC="${ROCM_PATH:-}/share/amd_smi"
-   if [ -n "${ROCM_PATH:-}" ] && [ -f "${AMDSMI_SRC}/pyproject.toml" ]; then
+   if [ -n "${ROCM_PATH:-}" ] && { [ -f "${AMDSMI_SRC}/pyproject.toml" ] || [ -f "${AMDSMI_SRC}/setup.py" ]; }; then
       echo "vllm: installing amdsmi bindings from ${AMDSMI_SRC} (ROCm platform detection)"
       # Build from a WRITABLE COPY, never from ${AMDSMI_SRC} directly. pip does
       # an in-tree PEP 517 build (writes build/ + *.egg-info INTO the source
@@ -986,6 +988,30 @@ PY
          --no-build-isolation --no-deps --ignore-installed --no-warn-script-location \
          "${AMDSMI_BUILD}" \
          || send-error "installing amdsmi from ${AMDSMI_SRC} failed; without it vLLM will not detect the ROCm platform."
+   elif [ -n "${ROCM_PATH:-}" ] && [ -f "${AMDSMI_SRC}/amdsmi/__init__.py" ]; then
+      # ROCm 10.1+ dropped the build system from share/amd_smi: it now ships a
+      # BARE pure-Python package dir (share/amd_smi/amdsmi/, no pyproject.toml /
+      # setup.py -- confirmed on rocm-10.1.0a20260815). pip has nothing to build,
+      # so the guard above skipped it and vLLM fell back to UnspecifiedPlatform
+      # (validated on sh5-pl1-s12-09: `import amdsmi` -> ModuleNotFoundError ->
+      # current_platform = UnspecifiedPlatform; with the package importable ->
+      # RocmPlatform, is_rocm True, device AMD_Instinct_MI300A). Copy the package
+      # straight into the vLLM prefix's site/dist-packages. It has no bundled
+      # .so; amdsmi_wrapper.py dlopens libamd_smi.so at runtime, which the
+      # prereq'd rocm module puts on LD_LIBRARY_PATH -- so the copy is guaranteed
+      # ABI-matched to ${ROCM_MODULE_NAME}. The vLLM wheel is already installed
+      # above, so the site dir exists.
+      echo "vllm: installing amdsmi bindings from ${AMDSMI_SRC} (bare pure-Python layout; ROCm platform detection)"
+      _amdsmi_site="$(find "${VLLM_PATH}" -type d \( -name site-packages -o -name dist-packages \) 2>/dev/null | head -1)"
+      if [ -z "${_amdsmi_site}" ]; then
+         send-error "no site/dist-packages under ${VLLM_PATH} to install amdsmi into; vLLM wheel install likely failed."
+      fi
+      rm -rf "${_amdsmi_site}/amdsmi"
+      cp -r "${AMDSMI_SRC}/amdsmi" "${_amdsmi_site}/amdsmi" \
+         || send-error "copying amdsmi package from ${AMDSMI_SRC} failed; without it vLLM will not detect the ROCm platform."
+      # drop any root-owned __pycache__ copied from the ROCm tree so the prefix
+      # stays consistently owned and importable.
+      rm -rf "${_amdsmi_site}/amdsmi/__pycache__"
    else
       echo "vllm: WARNING amdsmi source not found at ${AMDSMI_SRC}; vLLM may fall back to UnspecifiedPlatform and never use the GPU."
    fi
