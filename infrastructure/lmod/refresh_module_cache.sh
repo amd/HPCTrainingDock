@@ -116,31 +116,87 @@ if [ "${FORCE}" -eq 0 ] && [ -f "${CACHE_DIR}/spiderT.lua" ]; then
 fi
 
 echo "[refresh] rebuilding spider cache from ${MODULE_BASE} using ${UPDATER}"
-# The Lmod updater backs up the previous cache with `cp -p` (preserve
-# ownership) before mv'ing the new one into place (install_new_cache() in
-# update_lmod_system_cache_files). On an NFS export with root_squash that
-# `cp -p` cannot preserve ownership and fails with "Operation not supported",
-# which makes the updater return non-zero EVEN WHEN the new spiderT.lua was
-# written correctly by the mv that follows. Under `set -e` that false failure
-# aborts the refresh and callers log a scary "spider-cache refresh failed".
-# So capture the exit code instead of dying on it, then decide success from the
-# cache we actually produced.
+
+# ── build in a LOCAL staging dir, then publish to the NFS cache ──────────
+# update_lmod_system_cache_files installs its freshly-built cache with, in this
+# order (install_new_cache()):  cp -p spiderT.lua spiderT.old.lua (backup) then
+# mv spiderT.new.lua spiderT.lua (swap-in) -- and it runs under its own `set -e`.
+# On this NFS export (vers=3, no ACL support) the backup `cp -p` cannot preserve
+# the file's ACL/mode and exits non-zero with
+#   cp: preserving permissions for '.../spiderT.old.lua': Operation not supported
+# so `set -e` aborts the updater *before* the swap-in mv. That leaves a freshly
+# built but never-installed spiderT.new.lua orphaned in the cache dir while the
+# live spiderT.lua stays stale -- and the old `-s + grep MODULE_ROOT` test could
+# not tell those apart, so such runs reported success while the shared cache
+# silently went stale. (Seen on the build nodes; the cron host, where cp -p
+# happens to succeed, only advanced the cache by luck.)
+#
+# Fix: point the updater at a LOCAL staging dir, where its internal cp -p works
+# and it completes end-to-end. Then validate the staged artefact and publish it
+# into the NFS cache dir with plain cp (no -p -> no ACL preservation to fail) +
+# an atomic same-dir mv. Bump the timestamp *before* publishing so it stays
+# older than the cache (a timestamp newer than spiderT.lua marks the system
+# cache itself stale).
+STAGE="$(mktemp -d "${TMPDIR:-/tmp}/lmod-spider.XXXXXX")"
+trap 'rm -rf "${STAGE}"' EXIT
+# When we drop privileges to spider a group-writable tree (SPIDER_PREFIX set),
+# that account must be able to write the staged cache into STAGE.
+[ "${#SPIDER_PREFIX[@]}" -gt 0 ] && chmod 0777 "${STAGE}"
+
 set +e
-"${SPIDER_PREFIX[@]}" "${UPDATER}" -d "${CACHE_DIR}" -t "${TS}" "${MODULE_BASE}"
+"${SPIDER_PREFIX[@]}" "${UPDATER}" -d "${STAGE}" -t "${STAGE}/timestamp" "${MODULE_BASE}"
 _updater_rc=$?
 set -e
 
-# Validate the real artefact. A healthy cache references actual modulefile
-# locations under ${MODULE_ROOT}; an empty spider yields a valid-Lua-but-empty
-# `spiderT = {}` with no such paths, which is worse than no cache (clients then
-# resolve every module as "unknown"). Fail loudly on that so the exit status is
-# trustworthy and the periodic backstop / next run retries.
-if [ ! -s "${CACHE_DIR}/spiderT.lua" ] || ! grep -q "${MODULE_ROOT}" "${CACHE_DIR}/spiderT.lua" 2>/dev/null; then
-   echo "[refresh] ERROR: spider produced an empty/invalid cache at ${CACHE_DIR}/spiderT.lua (updater rc=${_updater_rc}); it references no modulefiles under ${MODULE_ROOT}." >&2
+# Validate the STAGED artefact (not the live one). A healthy cache references
+# actual modulefile locations under ${MODULE_ROOT}; an empty spider yields a
+# valid-Lua-but-empty `spiderT = {}` with no such paths, which is worse than no
+# cache (clients then resolve every module as "unknown"). Refuse to publish
+# that -- leave the existing live cache untouched for clients.
+if [ ! -s "${STAGE}/spiderT.lua" ] || ! grep -q "${MODULE_ROOT}" "${STAGE}/spiderT.lua" 2>/dev/null; then
+   echo "[refresh] ERROR: spider produced an empty/invalid cache at ${STAGE}/spiderT.lua (updater rc=${_updater_rc}); it references no modulefiles under ${MODULE_ROOT}. Leaving the existing live cache untouched." >&2
    exit 1
 fi
 if [ "${_updater_rc}" -ne 0 ]; then
-   echo "[refresh] note: updater exited ${_updater_rc} -- typically the NFS 'cp -p' backup of spiderT.old.lua under root_squash; the new spiderT.lua is valid, so treating this as success."
+   echo "[refresh] note: staging updater exited ${_updater_rc} (non-fatal on the local staging FS); the staged spiderT.lua is valid, publishing it."
 fi
+
+# Publish helper: plain copy (no ACL/ownership preservation) to a temp name in
+# the target dir, then atomic same-dir rename over the live file.
+_publish() {  # $1=src  $2=dst
+   local _tmp
+   _tmp="$(dirname "${2}")/.$(basename "${2}").$$"
+   cp "${1}" "${_tmp}"
+   chmod 644 "${_tmp}"
+   mv -f "${_tmp}" "${2}"
+}
+
+# Bump the timestamp first so it ends up OLDER than the cache we publish next.
+: > "${TS}"
+
+# Publish the plain-text cache, then the compiled cache(s) built from it.
+_publish "${STAGE}/spiderT.lua" "${CACHE_DIR}/spiderT.lua"
+_have_luac=0
+for _c in "${STAGE}"/spiderT.luac_*; do
+   [ -e "${_c}" ] || continue
+   _publish "${_c}" "${CACHE_DIR}/$(basename "${_c}")"
+   _have_luac=1
+done
+# If this build produced no compiled cache, drop any stale compiled cache in the
+# target: Lmod prefers .luac_* over .lua, so a stale compiled file left next to
+# a fresh .lua would be served in preference to it.
+if [ "${_have_luac}" -eq 0 ]; then
+   rm -f "${CACHE_DIR}"/spiderT.luac_* 2>/dev/null || true
+fi
+
+# Prove THIS rebuild actually landed: no modulefile in the tree may be newer
+# than the cache we just published. This is exactly what a silent no-op used to
+# fail, so catch it here and make the exit status trustworthy.
+_still_newer="$(find "${MODULE_ROOT}" -type f -newer "${CACHE_DIR}/spiderT.lua" -print -quit 2>/dev/null || true)"
+if [ -n "${_still_newer}" ]; then
+   echo "[refresh] ERROR: published spiderT.lua is still older than ${_still_newer}; the cache did not update as expected." >&2
+   exit 1
+fi
+
 echo "[refresh] done:"
-ls -la "${CACHE_DIR}/spiderT.lua" "${TS}" 2>&1 | sed 's/^/[refresh]   /'
+{ ls -la "${CACHE_DIR}/spiderT.lua" "${TS}"; ls -la "${CACHE_DIR}"/spiderT.luac_* 2>/dev/null; } 2>&1 | sed 's/^/[refresh]   /'
