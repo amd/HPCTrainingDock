@@ -24,7 +24,7 @@ WORK_DIR="${HOME}/aim-engine-test"
 : ${KUBECTL_VERSION:=v1.32.2}
 : ${HELM_VERSION:=v3.16.2}
 : ${AMDGPU_DP_URL:=https://raw.githubusercontent.com/ROCm/k8s-device-plugin/master/k8s-ds-amdgpu-dp.yaml}
-# Model image for the inference smoke test (this default is gated -> needs HF_TOKEN).
+# Model image for the inference smoke test (this default is gated, so needs HF_TOKEN).
 : ${AIM_TEST_MODEL_IMAGE:=amdenterpriseai/aim-meta-llama-llama-3-2-1b-instruct:0.11.1}
 # AIM accelerator model used to label the kind node so profile resolution matches
 # (the bare device plugin doesn't set the label a real AMD GPU Operator would).
@@ -152,7 +152,7 @@ echo "[test] amd.com/gpu allocatable = ${n}"
 if [ "${BASE_IMAGE_ONLY}" = "1" ]; then
    if [ "${AUTO_RUN}" = "1" ]; then
       echo ""; echo "[test] base-image-only: minimal serve check (no operator, no prereqs)"
-      "${HERE}/aim_base_check.sh"; exit $?
+      HF_TOKEN="${HF_TOKEN}" "${HERE}/aim_base_check.sh" --image "${AIM_TEST_MODEL_IMAGE}"; exit $?
    fi
    cat <<EOF
 
@@ -167,6 +167,7 @@ EOF
       -e PATH="/aim-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
       -e KUBECONFIG=/etc/kubernetes/admin.conf \
       -e HF_TOKEN="${HF_TOKEN}" \
+      -e AIM_TEST_MODEL_IMAGE="${AIM_TEST_MODEL_IMAGE}" \
       -w /aim-engine \
       "${CLUSTER_NAME}-control-plane" bash --norc -i
    exit 0
@@ -222,35 +223,24 @@ if [ "${AUTO_RUN}" != "1" ]; then
 [test] Node labeled accelerator: ${AIM_GPU_MODEL:-<none: pass --gpu-model>}
 [test] HF token: ${HF_TOKEN:+configured}${HF_TOKEN:-not set (gated models will not download; export HF_TOKEN)}
 [test] Mess it up freely; 'exit' tears the whole cluster down and the host is untouched.
+[test] This kind cluster is the "from zero" foundation; aim_deploy.sh runs levels
+[test] 1-4 on top of it. Pick a level (higher does more, assumes less):
 
-  # 0) optional fast check: serve a model WITHOUT the operator or any prereqs:
-  ./aim_base_check.sh
+  # L1: base-image serve (no operator, no prereqs):
+  ./aim_deploy.sh --level 1
 
-  # 1) expect a preflight failure listing missing add-ons (exit 42):
-  ./aim_engine_setup.sh
+  # L4: install prereqs + AIM Engine, then serve via the operator:
+  ./aim_deploy.sh --level 4
 
-  # 2) install the add-ons, then AIM Engine (expect success):
-  ./aim_engine_setup.sh --install-prereqs 1
-
-  # 3) deploy a model and watch it serve:
-  kubectl apply -f - <<'YAML'
-apiVersion: aim.eai.amd.com/v1alpha2
-kind: AIMService
-metadata:
-  name: aim-smoke
-  namespace: default
-  annotations:
-    aim.eai.amd.com/reconciler-pipeline: profile
-spec:
-  model:
-    image: ${AIM_TEST_MODEL_IMAGE}
-YAML
+  # inspect either way:
   kubectl get aimservice,inferenceservice,pods -n default
 
 EOF
    docker exec -it \
       -e PATH="/aim-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
       -e KUBECONFIG=/etc/kubernetes/admin.conf \
+      -e HF_TOKEN="${HF_TOKEN}" \
+      -e AIM_TEST_MODEL_IMAGE="${AIM_TEST_MODEL_IMAGE}" \
       -w /aim-engine \
       "${CLUSTER_NAME}-control-plane" bash --norc -i
    exit 0

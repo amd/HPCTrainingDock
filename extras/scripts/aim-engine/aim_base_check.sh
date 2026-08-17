@@ -1,19 +1,35 @@
 #!/bin/bash
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-# Minimal, operator-less AIM serving check. Deploys the aim-base image as a plain
-# Deployment + Service, requests one GPU, and confirms the model answers a single
-# request. This is the simplest way to prove a cluster's GPU can serve a model
-# BEFORE committing to the full AIM Engine operator stack (aim_engine_setup.sh).
+# Minimal, operator-less AIM serving check. Runs the SAME runtime container the
+# operator would serve, but as a plain Deployment + Service instead of an
+# AIMService. This proves a cluster's GPU can serve the model BEFORE committing to
+# the full AIM Engine operator stack (aim_engine_setup.sh). By default it deploys
+# the model-specific image (the operator's by-image predictor runs that same
+# image), self-selecting the tuned profile from in-pod GPU detection.
+#
+# Scope: this matches the operator only on the RUNTIME (image, GPU detection,
+# weight download, engine start). It does NOT exercise the operator's profile
+# RESOLUTION, which keys off node labels (aim-accelerator.<MODEL> AND
+# partitioning-scheme.default). A green check here is necessary but not
+# sufficient: the label-driven resolution is validated only by the full operator
+# flow (aim_engine_test.sh --auto-run 1).
 #
 # It needs only its own small prerequisites: a reachable cluster and a node that
-# advertises amd.com/gpu (from the AMD GPU device plugin or GPU Operator). It uses
-# NO CRDs, NO operator, and NO accelerator node labels; the base image detects the
-# GPU in-container. Gated models still require HF_TOKEN, injected as a pod env var.
+# advertises amd.com/gpu. It uses NO CRDs, NO operator, and NO accelerator node
+# labels; the image detects the GPU in-container. Gated models still require
+# HF_TOKEN, injected as a pod env var.
+#
+# Pass a bare base image (amdenterpriseai/aim-base:0.11) together with --model-id
+# to serve an arbitrary Hugging Face model via the generic runtime instead.
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-: ${AIM_BASE_IMAGE:=amdenterpriseai/aim-base:0.11}
-: ${AIM_ID:=meta-llama/Llama-3.2-1B-Instruct}
+# Default to the harness image so the base check and the operator flow serve the
+# identical container; override with --image or AIM_TEST_MODEL_IMAGE.
+: ${IMAGE:=${AIM_TEST_MODEL_IMAGE:-amdenterpriseai/aim-meta-llama-llama-3-2-1b-instruct:0.11.1}}
+# Only needed for a bare base image: the Hugging Face model id to serve (AIM_MODEL_ID).
+# Model-specific images set AIM_ID themselves, so leave this empty for them.
+: ${MODEL_ID:=}
 : ${HF_TOKEN:=}
 : ${NAMESPACE:=default}
 : ${NAME:=aim-base-check}
@@ -26,13 +42,14 @@ KEEP=0
 usage()
 {
    echo "Usage:"
-   echo "  --aim-id [ ORG/MODEL ] model id to serve, default ${AIM_ID}"
+   echo "  --image [ IMAGE ] AIM image to serve, default ${IMAGE}"
+   echo "  --model-id [ ORG/MODEL ] only for a bare aim-base image: HF model to serve"
    echo "  --namespace [ NS ] namespace to deploy into, default ${NAMESPACE}"
    echo "  --name [ NAME ] deployment/service name, default ${NAME}"
    echo "  --keep [ 0|1 ] 1: leave the Deployment/Service running, default 0 (clean up)"
    echo "  --help: print this usage information"
    echo ""
-   echo "Env: HF_TOKEN (gated models), AIM_BASE_IMAGE, AIM_ID, GPU_COUNT, READY_TIMEOUT."
+   echo "Env: HF_TOKEN (gated models), IMAGE, MODEL_ID, GPU_COUNT, READY_TIMEOUT."
    exit 1
 }
 
@@ -41,7 +58,8 @@ reset-last() { last() { send-error "Unsupported argument :: ${1}"; }; }
 
 while [[ $# -gt 0 ]]; do
    case "${1}" in
-      "--aim-id")    shift; AIM_ID=${1}; reset-last ;;
+      "--image")     shift; IMAGE=${1}; reset-last ;;
+      "--model-id")  shift; MODEL_ID=${1}; reset-last ;;
       "--namespace") shift; NAMESPACE=${1}; reset-last ;;
       "--name")      shift; NAME=${1}; reset-last ;;
       "--keep")      shift; KEEP=${1}; reset-last ;;
@@ -65,13 +83,15 @@ done
 
 kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1 || kubectl create namespace "${NAMESPACE}"
 
-hf_env=""
+env_block=$'\n        env:'
+[ -n "${MODEL_ID}" ] && env_block+=$'\n        - name: AIM_MODEL_ID\n          value: "'"${MODEL_ID}"'"'
 if [ -n "${HF_TOKEN}" ]; then
    echo "[base-check] configuring HF_TOKEN secret for gated model access"
    kubectl create secret generic "${NAME}-hf" -n "${NAMESPACE}" \
       --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply -f -
-   hf_env=$'\n        - name: HF_TOKEN\n          valueFrom:\n            secretKeyRef:\n              name: '"${NAME}"$'-hf\n              key: hf-token'
+   env_block+=$'\n        - name: HF_TOKEN\n          valueFrom:\n            secretKeyRef:\n              name: '"${NAME}"$'-hf\n              key: hf-token'
 fi
+[ "${env_block}" = $'\n        env:' ] && env_block=""
 
 cleanup() {
    [ "${KEEP}" = "1" ] && { echo "[base-check] --keep set; leaving ${NAME} running in ${NAMESPACE}"; return; }
@@ -82,7 +102,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "[base-check] deploying ${AIM_BASE_IMAGE} (AIM_ID=${AIM_ID}, amd.com/gpu=${GPU_COUNT})"
+echo "[base-check] deploying ${IMAGE} (amd.com/gpu=${GPU_COUNT}${MODEL_ID:+, AIM_MODEL_ID=${MODEL_ID}})"
 kubectl apply -n "${NAMESPACE}" -f - <<EOF || send-error "deploy failed."
 apiVersion: apps/v1
 kind: Deployment
@@ -100,11 +120,8 @@ spec:
     spec:
       containers:
       - name: ${NAME}
-        image: "${AIM_BASE_IMAGE}"
-        imagePullPolicy: Always
-        env:
-        - name: AIM_ID
-          value: "${AIM_ID}"${hf_env}
+        image: "${IMAGE}"
+        imagePullPolicy: Always${env_block}
         ports:
         - { name: http, containerPort: 8000 }
         resources:
@@ -141,14 +158,20 @@ if ! kubectl rollout status deployment/"${NAME}" -n "${NAMESPACE}" --timeout="${
    echo "[base-check] pod did not become Ready; recent events and logs:"
    kubectl describe deployment/"${NAME}" -n "${NAMESPACE}" | sed -n '/Events:/,$p'
    kubectl logs -n "${NAMESPACE}" "deploy/${NAME}" --tail=50 2>/dev/null || true
-   send-error "the aim-base deployment never became Ready."
+   send-error "the deployment never became Ready."
 fi
 
 kubectl port-forward -n "${NAMESPACE}" "svc/${NAME}" 8000:80 >/dev/null 2>&1 &
 pf=$!; sleep 5
+
+# The served model name is whatever the image resolved; read it from /v1/models.
+served=$(curl -sS http://localhost:8000/v1/models | tr ',' '\n' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -n1)
+[ -z "${served}" ] && served="${MODEL_ID}"
+echo "[base-check] served model id: ${served:-<unknown>}"
+
 resp=$(curl -sS http://localhost:8000/v1/completions \
    -H "Content-Type: application/json" \
-   -d '{"model":"'"${AIM_ID}"'","prompt":"San Francisco is a","max_tokens":7,"temperature":0}')
+   -d '{"model":"'"${served}"'","prompt":"San Francisco is a","max_tokens":7,"temperature":0}')
 
 if echo "${resp}" | grep -q '"choices"'; then
    echo "[base-check] PASS: model served a completion."
