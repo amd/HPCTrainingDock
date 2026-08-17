@@ -150,8 +150,12 @@ if [ -z "${AIM_GPU_MODEL}" ] && command -v rocminfo >/dev/null 2>&1; then
 fi
 NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
 if [ -n "${AIM_GPU_MODEL}" ]; then
-   echo "[test] labeling node ${NODE} as accelerator ${AIM_GPU_MODEL}"
+   echo "[test] labeling node ${NODE} as accelerator ${AIM_GPU_MODEL} (unpartitioned)"
    kubectl label node "${NODE}" "feature.node.kubernetes.io/aim-accelerator.${AIM_GPU_MODEL}=true" --overwrite
+   # v1alpha2 AND-s the model term with a partitioning-scheme term; the default
+   # (unpartitioned) profile requires the 'default' sentinel the AcceleratorDetector
+   # would stamp. Without it every profile reports HardwareNotAvailable.
+   kubectl label node "${NODE}" "feature.node.kubernetes.io/aim-accelerator.partitioning-scheme.default=true" --overwrite
 else
    echo "[test] WARNING GPU model unknown (pass --gpu-model); AIM profile matching will fail for inference."
 fi
