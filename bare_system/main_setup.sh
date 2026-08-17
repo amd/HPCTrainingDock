@@ -106,6 +106,7 @@ SITE_CLI=0
 : ${BUILD_ELPA:="1"}
 : ${BUILD_PETSC:="1"}
 : ${BUILD_HYPRE:="1"}
+: ${BUILD_HEFFTE:="1"}
 : ${BUILD_SCOREP:="1"}
 : ${BUILD_KOKKOS:="1"}
 : ${BUILD_UMPIRE:="1"}
@@ -280,7 +281,7 @@ usage()
    echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf the versioned subdir under \${TOP_INSTALL_PATH} (the version itself lives in the leaf script). Default $REPLACE_EXISTING"
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
    echo "  --skip-patches [0 or 1]:  operator opt-out for the rocm-patches step (rocm/scripts/rocm_patches.sh) AND the hipblaslt-patch step (rocm/scripts/hipblaslt_patch_setup.sh). Default 0 runs both; for most ROCm versions each script self-no-ops via NOOP_RC=43 so the cost is nil. Set to 1 when targeting a tree where the patches overlay would mismatch the runtime (e.g. 7.2.0 / 7.2.1 patches built for a newer userland and running on Ubuntu 22.04 nodes). When skipped, the per-package summary records 'rocm-patches(--skip-patches)' and 'hipblaslt-patch(--skip-patches)' in the DESELECTED bucket. Default $SKIP_PATCHES"
-   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocshmem, rocprof-sys, rocprof-compute, hpctoolkit, uprof, likwid, mdb, intellikit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, vllm, magma, elpa, kokkos, umpire, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre, emacs, turbovnc, google-chrome. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, rocshmem, hpctoolkit, uprof, likwid, mdb, intellikit, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, vllm, magma, elpa, kokkos, umpire, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre, emacs, turbovnc, google-chrome. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Supported for pytorch (keys: aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds)) and ftorch (key: ref (alias ftorch-ref)). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build. NOTE: for ftorch, the VERSION is the BOUND PYTORCH version (install dir + module are keyed on it, and the bind pytorch must already exist -- ftorch=<ver> does NOT build pytorch), while ftorch's OWN upstream git ref is a separate axis set per-token via :ref=<git-ref> (e.g. \"ftorch=2.12.0:ref=0.7\") or sweep-wide via --ftorch-ref; a bare \"ftorch\" binds to the latest existing pytorch module. Similarly for vllm: VERSION is the BOUND PYTORCH version (install/module keyed as vllm-v<vllm-ver>-pt<pytorch-ver>; vLLM's OWN version auto-derives from the bound torch), and a bare \"vllm\" binds to the latest existing pytorch module (vllm=<ver> does NOT build pytorch -- the bind pytorch must already exist)."
+   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocshmem, rocprof-sys, rocprof-compute, hpctoolkit, uprof, likwid, mdb, intellikit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, vllm, magma, elpa, kokkos, umpire, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre, heffte, emacs, turbovnc, google-chrome. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, rocshmem, hpctoolkit, uprof, likwid, mdb, intellikit, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, vllm, magma, elpa, kokkos, umpire, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre, heffte, emacs, turbovnc, google-chrome. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Supported for pytorch (keys: aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds)) and ftorch (key: ref (alias ftorch-ref)). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build. NOTE: for ftorch, the VERSION is the BOUND PYTORCH version (install dir + module are keyed on it, and the bind pytorch must already exist -- ftorch=<ver> does NOT build pytorch), while ftorch's OWN upstream git ref is a separate axis set per-token via :ref=<git-ref> (e.g. \"ftorch=2.12.0:ref=0.7\") or sweep-wide via --ftorch-ref; a bare \"ftorch\" binds to the latest existing pytorch module. Similarly for vllm: VERSION is the BOUND PYTORCH version (install/module keyed as vllm-v<vllm-ver>-pt<pytorch-ver>; vLLM's OWN version auto-derives from the bound torch), and a bare \"vllm\" binds to the latest existing pytorch module (vllm=<ver> does NOT build pytorch -- the bind pytorch must already exist)."
    echo "  --rocm-rc-prefix [ FAMILY ]:  release-candidate family name (e.g. 'therock', 'afar'). Auto-detected from \${ROCM_PATH} basename for rocm-{therock,afar}-* trees. Empty for regular releases. When non-empty, install/module dirs become rocmplus-\${FAMILY}-\${ROCM_VERSION}/ instead of rocmplus-\${ROCM_VERSION}/ -- EXCEPT for FAMILY='afar', where the suffix is rocmplus-afar-\${ROCM_RC_COMPILER}-\${ROCM_VERSION}/ (compiler-AND-rocm-keyed; see --rocm-rc-compiler). Default: auto-detected (empty for regular releases)."
    echo "  --rocm-rc-compiler [ COMPILER ]:  compiler/AFAR release number for AFAR trees (e.g. '22.2.0' for rocm-afar-22.2.0, '23.2.1' for rocm-afar-23.2.1 a.k.a. the TheRock-AFAR drop). Auto-detected from \${ROCM_PATH} basename when ROCM_RC_PREFIX='afar'. Empty for non-afar trees. When non-empty AND ROCM_RC_PREFIX='afar', the rocmplus suffix becomes afar-\${COMPILER}-\${ROCM_VERSION} so two AFAR drops with the same SDK numeric but different compiler releases get distinct rocmplus trees. Default: auto-detected."
    echo "  --rocmplus-flavor [ amd|cray ]:  programming-environment whose downstream tree this build populates. 'amd' (default) -> rocmplus-\${SUFFIX} (PrgEnv-amd-new: AMD compiler + from-source mpich-wrappers). 'cray' -> rocmplus-cray-\${SUFFIX} (PrgEnv-cray-new: CCE + cray-mpich), the separate tree PrgEnv-cray-new modulefiles point at, so a cray build never clobbers the amd-new tree for the same ROCm numeric. Default: amd (byte-identical legacy behavior)."
@@ -814,6 +815,8 @@ declare -A DESELECTED_BY=()
 #   fftw          3:28         4:04         4:01        BUILD (< 20 min)
 #   miniforge3    3:08        n/a          n/a          BUILD (< 20 min)
 #   hypre         3:13         3:08         2:55        BUILD (< 20 min)
+#   heffte        ~1:00        n/a          n/a         BUILD (< 20 min; rocFFT backend,
+#                                                              shallow clone of v2.4.1)
 #   hdf5          2:14         2:16         2:17        BUILD (< 20 min)
 #   mpi4py        1:41         1:41         1:37        BUILD (< 20 min)
 #   kokkos        1:31         0:30        n/a          BUILD (< 20 min)
@@ -941,6 +944,7 @@ declare -A PKG_FLAG=(
    [fftw]=BUILD_FFTW
    [petsc]=BUILD_PETSC
    [hypre]=BUILD_HYPRE
+   [heffte]=BUILD_HEFFTE
    [emacs]=BUILD_EMACS
    [turbovnc]=BUILD_TURBOVNC
    [google-chrome]=BUILD_GOOGLE_CHROME
@@ -1005,6 +1009,7 @@ declare -A PKG_VER_FLAG=(
    [fftw]="--fftw-version"
    [petsc]="--petsc-version"
    [hypre]="--hypre-version"
+   [heffte]="--heffte-version"
    [emacs]="--emacs-version"
    [turbovnc]="--turbovnc-version"
    [google-chrome]="--google-chrome-version"
@@ -1879,7 +1884,7 @@ path_args()
 # package. Migrated = leaf script accepts --install-path as a PARENT
 # directory and appends its own pkg-v${PKG_VERSION} subdir, so
 # main_setup.sh stays version-agnostic. Used by the 14 leaf scripts
-# that own their versions: fftw, hdf5, hypre, kokkos, petsc, pytorch,
+# that own their versions: fftw, hdf5, hypre, heffte, kokkos, petsc, pytorch,
 # cupy, hpctoolkit, jax, magma, netcdf, scorep, miniconda3 / miniforge3
 # (those last two get --install-path inline since their install lives
 # outside ROCMPLUS, under TOP_INSTALL_PATH).
@@ -2523,6 +2528,26 @@ if [ -n "${MPICH_DIR:-}" ] && [ -d "${MPICH_DIR}/bin" ]; then
 fi
 run_and_log_versioned hypre extras/scripts/hypre_setup.sh ${COMMON_OPTIONS} --build-hypre ${BUILD_HYPRE} ${REPLACE_OPTS} ${HYPRE_MPI_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/hypre)
+
+# MPI selection for heffte: same Cray-PE rationale as hdf5/netcdf/fftw/petsc/
+# hypre above. heFFTe builds with MPI (find_package(MPI) -> mpicxx) against
+# the ROCm rocFFT backend. On a Cray that is the from-source mpich-wrappers
+# (PrgEnv MPI); else cray-mpich. The leaf default MPI module is "openmpi"
+# (absent on Cray -> preflight SKIP), so thread the right one. Non-Cray
+# systems (e.g. AAC6 with the ROCm-aware OpenMPI) fall through to the leaf
+# default (openmpi), which is the tested build path.
+HEFFTE_MPI_OPTS=""
+if [ -n "${MPICH_DIR:-}" ] && [ -d "${MPICH_DIR}/bin" ]; then
+   if [ -e "${TOP_MODULE_PATH}/rocmplus-${ROCMPLUS_SUFFIX}/mpich-wrappers/${ROCM_VERSION}" ]; then
+      HEFFTE_MPI_OPTS="--mpi-module mpich-wrappers"
+      echo "heffte: mpich-wrappers detected; building heFFTe against mpich-wrappers (PrgEnv MPI)"
+   else
+      HEFFTE_MPI_OPTS="--mpi-module cray-mpich"
+      echo "heffte: Cray MPICH detected (MPICH_DIR=${MPICH_DIR}); building heFFTe against cray-mpich"
+   fi
+fi
+run_and_log_versioned heffte extras/scripts/heFFTe_setup.sh ${COMMON_OPTIONS} --build-heffte ${BUILD_HEFFTE} ${REPLACE_OPTS} ${HEFFTE_MPI_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/heffte)
 
 # ─── Long-pole ML builds (jax, tensorflow, pytorch, ftorch) ───────────
 #
