@@ -4,9 +4,13 @@ These scripts install and test AMD's AIM (AMD Inference Microservices) Engine, a
 Kubernetes (k8s) operator that serves models on AMD GPUs. Unlike the
 module-based scripts in this repository, we deploy a cluster-scoped operator
 (Custom Resource Definitions plus a Helm chart) through `kubectl` and `helm`;
-there is no Lmod module. We drive everything through a single incremental
-entrypoint, `aim_deploy.sh`, which layers on top of three building-block scripts
-and a `kind`-based test harness.
+there is no Lmod module. These scripts install AIM Engine into a Kubernetes
+cluster that already exists; they do not provision the cluster itself.
+Provisioning a cluster from bare metal, together with storage, networking,
+identity, and a web console, is instead the job of the AMD Enterprise AI
+reference stack (see References), of which AIM Engine is one component. We drive
+everything through a single incremental entrypoint, `aim_deploy.sh`, which layers
+on top of three building-block scripts and a `kind`-based test harness.
 
 ## Incremental deployment
 
@@ -36,8 +40,7 @@ export HF_TOKEN=hf_...            # for gated models (Llama, Gemma)
 
 Creating the cluster itself ("from zero") is deliberately out of scope here: for
 a throwaway cluster we use `aim_engine_test.sh`, and for a real bare-metal
-install we defer to AMD's Cluster Bloom and Cluster Forge (see Relationship to
-the reference stack).
+install we defer to the AMD Enterprise AI reference stack (see References).
 
 ## Building-block scripts
 
@@ -128,20 +131,6 @@ substitutes a bare device plugin and injected labels for the AMD GPU Operator
 (which `kind` cannot easily host), while the prerequisite and operator installs
 that levels 3 and 4 perform are not done by the harness.
 
-## Relationship to the reference stack
-
-AMD's on-premises reference stack installs an entire platform from bare metal
-through Cluster Bloom and Cluster Forge: it creates an RKE2 cluster, installs
-host ROCm, provisions Longhorn storage and MetalLB, and adds the AMD GPU
-Operator, the AI Workbench, the Resource Manager, identity, and GitOps, with AIM
-Engine as one component among many. Our scripts capture only two layers of that:
-the cluster add-ons (`aim_prereqs_setup.sh`) and the AIM Engine operator
-(`aim_engine_setup.sh`), installed into a cluster that already exists. This suits
-a shared cluster we do not own, such as a mixed Slurm and Kubernetes system,
-where standing up a fresh RKE2 cluster and the full platform is neither possible
-nor wanted. For a real from-zero bare-metal install we use the reference stack
-rather than reproducing it here.
-
 ## Known limits
 
 - The kind node uses the bare ROCm device plugin, so the harness injects the
@@ -157,8 +146,15 @@ rather than reproducing it here.
   the small ones are limited.
 - The operator's default caching provisions a PVC per profile and routing needs
   a Gateway or load balancer. On a bare cluster without a default StorageClass or
-  load balancer, the cache PVC stays Pending and the service hangs in Starting;
-  the reference stack supplies these through Longhorn and MetalLB, whereas we
-  assume the existing cluster already provides them.
+  load balancer, the cache PVC stays Pending and the service hangs in Starting.
+  A full platform installer such as the AMD Enterprise AI reference stack (see
+  References) supplies these, for example through Longhorn and MetalLB, whereas
+  we assume the existing cluster already provides them.
 - KServe is installed with defaults. For serving on a real cluster we apply AMD's
   Standard-mode `kserve-values.yaml` (see the AIM KServe configuration docs).
+
+## References
+
+- [AMD Enterprise AI reference stack, on-premises installation](https://enterprise-ai.docs.amd.com/en/latest/platform-infrastructure/on-premises-installation.html)
+- [Cluster Bloom](https://github.com/silogen/cluster-bloom)
+- [Cluster Forge](https://github.com/silogen/cluster-forge)
