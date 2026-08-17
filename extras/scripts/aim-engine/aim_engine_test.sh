@@ -23,8 +23,15 @@ WORK_DIR="${HOME}/aim-engine-test"
 : ${KUBECTL_VERSION:=v1.32.2}
 : ${HELM_VERSION:=v3.16.2}
 : ${AMDGPU_DP_URL:=https://raw.githubusercontent.com/ROCm/k8s-device-plugin/master/k8s-ds-amdgpu-dp.yaml}
-# Model image for the inference smoke test; override with a smaller AIM image.
-: ${AIM_TEST_MODEL_IMAGE:=amdenterpriseai/aim-qwen-qwen3-32b:0.8.5}
+# Model image for the inference smoke test (this default is gated -> needs HF_TOKEN).
+: ${AIM_TEST_MODEL_IMAGE:=amdenterpriseai/aim-meta-llama-llama-3-2-1b-instruct:0.11.1}
+# AIM accelerator model used to label the kind node so profile resolution matches
+# (the bare device plugin doesn't set the label a real AMD GPU Operator would).
+# Auto-detected from rocminfo if empty; override with --gpu-model.
+: ${AIM_GPU_MODEL:=}
+# Hugging Face token for gated models (Llama/Gemma). If set, the harness creates
+# the secret + a default AIMRuntimeConfig that injects HF_TOKEN into the pods.
+: ${HF_TOKEN:=}
 
 usage()
 {
@@ -32,7 +39,11 @@ usage()
    echo "  --auto-run [ 0|1 ] 0: bring up kind+GPU and print manual commands (default);"
    echo "                     1: run preflight/install/idempotency + inference, then clean up"
    echo "  --cluster-name [ NAME ] kind cluster name, default $CLUSTER_NAME"
+   echo "  --gpu-model [ MODEL ] AIM accelerator model to label the node with"
+   echo "                        (e.g. MI355X, MI300X); auto-detected via rocminfo if unset"
    echo "  --help: print this usage information"
+   echo ""
+   echo "Env: HF_TOKEN (gated models), AIM_TEST_MODEL_IMAGE, AIM_GPU_MODEL."
    exit 1
 }
 
@@ -43,6 +54,7 @@ while [[ $# -gt 0 ]]; do
    case "${1}" in
       "--auto-run")     shift; AUTO_RUN=${1}; reset-last ;;
       "--cluster-name") shift; CLUSTER_NAME=${1}; reset-last ;;
+      "--gpu-model")    shift; AIM_GPU_MODEL=${1}; reset-last ;;
       "--help")         usage ;;
       *)                last ${1} ;;
    esac
@@ -130,6 +142,41 @@ done
    || send-error "no amd.com/gpu became allocatable; check the device plugin pod and host GPU."
 echo "[test] amd.com/gpu allocatable = ${n}"
 
+# Label the node with the GPU model so AIM profile resolution matches. A real
+# cluster gets this from the AMD GPU Operator's AcceleratorDetector; the bare
+# device plugin used here does not, so we inject the equivalent label.
+if [ -z "${AIM_GPU_MODEL}" ] && command -v rocminfo >/dev/null 2>&1; then
+   AIM_GPU_MODEL=$(rocminfo 2>/dev/null | grep -m1 -oiE 'MI[0-9]{3}[A-Z]*' | tr 'a-z' 'A-Z')
+fi
+NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+if [ -n "${AIM_GPU_MODEL}" ]; then
+   echo "[test] labeling node ${NODE} as accelerator ${AIM_GPU_MODEL}"
+   kubectl label node "${NODE}" "feature.node.kubernetes.io/aim-accelerator.${AIM_GPU_MODEL}=true" --overwrite
+else
+   echo "[test] WARNING GPU model unknown (pass --gpu-model); AIM profile matching will fail for inference."
+fi
+
+# Optional Hugging Face token for gated models: secret + default AIMRuntimeConfig.
+if [ -n "${HF_TOKEN}" ]; then
+   echo "[test] configuring Hugging Face token (secret + default AIMRuntimeConfig)"
+   kubectl create secret generic hf-token -n default \
+      --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply -f -
+   kubectl apply -f - <<EOF
+apiVersion: aim.eai.amd.com/v1alpha1
+kind: AIMRuntimeConfig
+metadata:
+  name: default
+  namespace: default
+spec:
+  env:
+  - name: HF_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: hf-token
+        key: hf-token
+EOF
+fi
+
 if [ "${AUTO_RUN}" != "1" ]; then
    cat <<EOF
 
@@ -138,6 +185,8 @@ if [ "${AUTO_RUN}" != "1" ]; then
 [test]   scripts:    /aim-engine  (read-only)
 [test]   kubectl/helm: /aim-bin   (on PATH)
 [test]   KUBECONFIG:  /etc/kubernetes/admin.conf (this cluster)
+[test] Node labeled accelerator: ${AIM_GPU_MODEL:-<none: pass --gpu-model>}
+[test] HF token: ${HF_TOKEN:+configured}${HF_TOKEN:-not set (gated models will not download; export HF_TOKEN)}
 [test] Mess it up freely; 'exit' tears the whole cluster down and the host is untouched.
 
   # 1) expect a preflight failure listing missing add-ons (exit 42):
@@ -146,8 +195,20 @@ if [ "${AUTO_RUN}" != "1" ]; then
   # 2) install the add-ons, then AIM Engine (expect success):
   ./aim_engine_setup.sh --install-prereqs 1
 
-  # 3) inspect:
-  kubectl get pods -A
+  # 3) deploy a model and watch it serve:
+  kubectl apply -f - <<'YAML'
+apiVersion: aim.eai.amd.com/v1alpha2
+kind: AIMService
+metadata:
+  name: aim-smoke
+  namespace: default
+  annotations:
+    aim.eai.amd.com/reconciler-pipeline: profile
+spec:
+  model:
+    image: ${AIM_TEST_MODEL_IMAGE}
+YAML
+  kubectl get aimservice,inferenceservice,pods -n default
 
 EOF
    docker exec -it \

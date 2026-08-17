@@ -7,20 +7,20 @@ chart) via `kubectl`/`helm`; there is no Lmod module.
 
 ## Scripts
 
-- `aim_engine_setup.sh` — entrypoint. Preflights the 8 prerequisites, then Helm-
+- `aim_engine_setup.sh`: entrypoint. Preflights the 8 prerequisites, then Helm-
   installs the AIM Engine CRDs + operator. Errors (exit 42) listing gaps if any
   prerequisite is missing. `--install-prereqs 1` runs the prereqs script first;
   `--replace 1` reinstalls over an existing release.
-- `aim_prereqs_setup.sh` — installs 7 cluster add-ons (cert-manager, Gateway
+- `aim_prereqs_setup.sh`: installs 7 cluster add-ons (cert-manager, Gateway
   API, kgateway, KServe, KEDA, keda-otel-add-on, OpenTelemetry Operator). The
   AMD GPU Operator is assumed already present. Versions are env-overridable.
-- `aim_engine_test.sh` — throwaway `kind` (Kubernetes IN Docker) cluster with
+- `aim_engine_test.sh`: throwaway `kind` (Kubernetes IN Docker) cluster with
   real AMD GPU passthrough for end-to-end testing. Requires a GPU host.
 
 ## Real system
 
 Run from a login/management node with `kubectl`/`helm` and a cluster-admin
-kubeconfig (no local GPU needed — GPUs are used by the served pods):
+kubeconfig (no local GPU needed, since GPUs are used by the served pods):
 
 ```bash
 ./aim_engine_setup.sh            # preflight; installs if prerequisites pass
@@ -31,7 +31,14 @@ re-run. `--install-prereqs 1` self-installs the non-GPU add-ons.
 
 ## Test on a GPU host (kind)
 
+The harness brings up the cluster with GPU passthrough, labels the node with the
+detected GPU model so AIM profile resolution matches (a real cluster gets this
+from the AMD GPU Operator; the bare device plugin here does not), and, if
+`HF_TOKEN` is set, wires it in for gated models. Pass `--gpu-model` to override
+detection, and set `AIM_TEST_MODEL_IMAGE` to pick the model.
+
 ```bash
+export HF_TOKEN=hf_...            # needed for gated models (Llama, Gemma)
 ./aim_engine_test.sh             # brings up kind+GPU, drops you into a sandbox shell
 ```
 
@@ -71,9 +78,13 @@ curl -sS http://localhost:8080/v1/chat/completions \
 
 ## Known limits
 
-- The `kind` node uses the bare ROCm device plugin, which advertises
-  `amd.com/gpu` but not the GPU Operator's accelerator-model labels that AIM
-  uses for profile selection — so profile-matched serving needs a real cluster
-  with the AMD GPU Operator.
-- AIM serving profiles target discrete Instinct GPUs (MI300X-class); an MI300A
-  APU may have no matching profile regardless of labels.
+- The `kind` node uses the bare ROCm device plugin, so the harness injects the
+  accelerator-model label itself. Profile resolution still only succeeds if the
+  model image actually ships a profile for that GPU. AIM serving profiles target
+  discrete Instinct GPUs (MI300X, MI325X, MI350X, MI355X); an MI300A APU has no
+  matching profile, so serving there is not expected to work.
+- Gated models (Llama, Gemma) require a Hugging Face token via `HF_TOKEN`, with
+  the account granted access to that model on Hugging Face. Ungated models avoid
+  this but the small ones are limited.
+- KServe is installed with defaults; for serving on a real cluster apply AMD's
+  Standard-mode `kserve-values.yaml` (see the AIM KServe configuration docs).
