@@ -4,8 +4,8 @@ These scripts install and test AMD's AIM (AMD Inference Microservices) Engine, a
 Kubernetes (k8s) operator that serves models on AMD GPUs. Unlike the
 module-based scripts in this repository, we deploy a cluster-scoped operator
 (Custom Resource Definitions plus a Helm chart) through `kubectl` and `helm`;
-there is no Lmod module. Three scripts cover the install, its prerequisites, and
-end-to-end testing.
+there is no Lmod module. Four scripts cover the install, its prerequisites, a
+minimal operator-less serve check, and end-to-end testing.
 
 ## What each script does
 
@@ -36,6 +36,22 @@ Chart versions are overridable through environment variables.
 ./aim_prereqs_setup.sh
 ```
 
+`aim_base_check.sh` is the simplest test: it runs the `aim-base` image as a plain
+Deployment plus Service, requests one GPU, and confirms the model answers a
+single request. It uses no operator, no CRDs, and no accelerator labels, so its
+only assumptions are a reachable cluster and a node advertising `amd.com/gpu`
+(from the AMD GPU device plugin or Operator); the base image detects the GPU
+in-container, and a gated model needs `HF_TOKEN` in the environment. We run it
+before `aim_engine_setup.sh` to prove the hardware can serve a model at all,
+independently of the full operator stack, and it cleans up its own resources on
+exit unless we pass `--keep 1`.
+
+```bash
+export HF_TOKEN=hf_...                                   # for gated models
+./aim_base_check.sh                                      # serve the default model, assert, clean up
+./aim_base_check.sh --aim-id Qwen/Qwen2.5-1.5B-Instruct  # try a different model
+```
+
 `aim_engine_test.sh` stands up a throwaway `kind` (Kubernetes IN Docker) cluster
 with real AMD GPU passthrough so we can exercise the whole flow, including
 inference. It assumes a GPU host with `docker` and the `/dev/kfd` and `/dev/dri`
@@ -45,9 +61,10 @@ resolution matches (a real cluster gets that label from the GPU Operator), and
 when `HF_TOKEN` is set it wires that token in for gated models.
 
 ```bash
-export HF_TOKEN=hf_...              # for gated models (Llama, Gemma)
-./aim_engine_test.sh                # bring up kind + GPU, then drop into a sandbox shell
-./aim_engine_test.sh --auto-run 1   # run install, idempotency, and an inference check, then clean up
+export HF_TOKEN=hf_...                    # for gated models (Llama, Gemma)
+./aim_engine_test.sh                      # bring up kind + GPU, then drop into a sandbox shell
+./aim_engine_test.sh --auto-run 1         # run install, idempotency, and an inference check, then clean up
+./aim_engine_test.sh --base-image-only 1  # skip the operator; run only aim_base_check.sh on the kind cluster
 ```
 
 ## End-to-end test in the sandbox

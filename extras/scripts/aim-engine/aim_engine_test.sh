@@ -16,6 +16,7 @@
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 AUTO_RUN=0
+BASE_IMAGE_ONLY=0
 CLUSTER_NAME="aim-engine-test"
 WORK_DIR="${HOME}/aim-engine-test"
 
@@ -38,6 +39,8 @@ usage()
    echo "Usage:"
    echo "  --auto-run [ 0|1 ] 0: bring up kind+GPU and print manual commands (default);"
    echo "                     1: run preflight/install/idempotency + inference, then clean up"
+   echo "  --base-image-only [ 0|1 ] 1: skip the operator; run only the minimal"
+   echo "                     aim_base_check.sh serve test (fast GPU-serves-a-model check)"
    echo "  --cluster-name [ NAME ] kind cluster name, default $CLUSTER_NAME"
    echo "  --gpu-model [ MODEL ] AIM accelerator model to label the node with"
    echo "                        (e.g. MI355X, MI300X); auto-detected via rocminfo if unset"
@@ -53,6 +56,7 @@ reset-last() { last() { send-error "Unsupported argument :: ${1}"; }; }
 while [[ $# -gt 0 ]]; do
    case "${1}" in
       "--auto-run")     shift; AUTO_RUN=${1}; reset-last ;;
+      "--base-image-only") shift; BASE_IMAGE_ONLY=${1}; reset-last ;;
       "--cluster-name") shift; CLUSTER_NAME=${1}; reset-last ;;
       "--gpu-model")    shift; AIM_GPU_MODEL=${1}; reset-last ;;
       "--help")         usage ;;
@@ -142,6 +146,32 @@ done
    || send-error "no amd.com/gpu became allocatable; check the device plugin pod and host GPU."
 echo "[test] amd.com/gpu allocatable = ${n}"
 
+# Base-image-only path: no operator, so skip the accelerator labels and the
+# AIMRuntimeConfig (both are operator concepts). Bring up the cluster + device
+# plugin above, then hand off to the minimal serve check.
+if [ "${BASE_IMAGE_ONLY}" = "1" ]; then
+   if [ "${AUTO_RUN}" = "1" ]; then
+      echo ""; echo "[test] base-image-only: minimal serve check (no operator, no prereqs)"
+      "${HERE}/aim_base_check.sh"; exit $?
+   fi
+   cat <<EOF
+
+[test] kind cluster '${CLUSTER_NAME}' is UP with amd.com/gpu=${n} (base-image-only).
+[test] Dropping you INTO the Kubernetes node container -- a throwaway sandbox.
+[test] Run the minimal, operator-less serve check:
+  ./aim_base_check.sh
+[test] 'exit' tears the whole cluster down and the host is untouched.
+
+EOF
+   docker exec -it \
+      -e PATH="/aim-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+      -e KUBECONFIG=/etc/kubernetes/admin.conf \
+      -e HF_TOKEN="${HF_TOKEN}" \
+      -w /aim-engine \
+      "${CLUSTER_NAME}-control-plane" bash --norc -i
+   exit 0
+fi
+
 # Label the node with the GPU model so AIM profile resolution matches. A real
 # cluster gets this from the AMD GPU Operator's AcceleratorDetector; the bare
 # device plugin used here does not, so we inject the equivalent label.
@@ -192,6 +222,9 @@ if [ "${AUTO_RUN}" != "1" ]; then
 [test] Node labeled accelerator: ${AIM_GPU_MODEL:-<none: pass --gpu-model>}
 [test] HF token: ${HF_TOKEN:+configured}${HF_TOKEN:-not set (gated models will not download; export HF_TOKEN)}
 [test] Mess it up freely; 'exit' tears the whole cluster down and the host is untouched.
+
+  # 0) optional fast check: serve a model WITHOUT the operator or any prereqs:
+  ./aim_base_check.sh
 
   # 1) expect a preflight failure listing missing add-ons (exit 42):
   ./aim_engine_setup.sh
