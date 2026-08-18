@@ -106,9 +106,19 @@ spec:
   model:
     image: ${AIM_MODEL_IMAGE}
 EOF
-   echo "[deploy] AIMService applied. Track it with:"
-   echo "  kubectl get aimservice,inferenceservice,pods -n ${NAMESPACE}"
-   echo "  kubectl describe aimservice aim-smoke -n ${NAMESPACE}"
+   cat <<EOF
+[deploy] AIMService applied. How to verify level ${LEVEL} succeeded:
+  # 1) AIMService + InferenceService report Ready (may take a while on first pull):
+  kubectl get aimservice,inferenceservice,pods -n ${NAMESPACE}
+  kubectl describe aimservice aim-smoke -n ${NAMESPACE}
+  # 2) small inference (find the predictor service, port-forward, then curl):
+  isvc=\$(kubectl get inferenceservice -n ${NAMESPACE} -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
+  kubectl port-forward -n ${NAMESPACE} svc/\$(basename \$isvc)-predictor 8080:80 &
+  curl -sS localhost:8080/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"aim-smoke","messages":[{"role":"user","content":"Hello!"}]}'
+  # 3) confirm the GPU is in use inside the serving pod:
+  pod=\$(kubectl get pods -n ${NAMESPACE} -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
+  kubectl exec -n ${NAMESPACE} \$pod -- rocm-smi
+EOF
 }
 
 case "${LEVEL}" in

@@ -38,7 +38,9 @@
 : ${MEM_REQUEST:=16Gi}
 : ${CPU_REQUEST:=4}
 : ${READY_TIMEOUT:=1800}   # seconds; first-run weight download can be slow
+: ${PROGRESS_INTERVAL:=15} # seconds between progress lines while waiting
 KEEP=0
+VERBOSE=0
 
 usage()
 {
@@ -48,9 +50,10 @@ usage()
    echo "  --namespace [ NS ] namespace to deploy into, default ${NAMESPACE}"
    echo "  --name [ NAME ] deployment/service name, default ${NAME}"
    echo "  --keep [ 0|1 ] 1: leave the Deployment/Service running, default 0 (clean up)"
+   echo "  --verbose [ 0|1 ] 1: also tail recent pod logs in progress output, default 0"
    echo "  --help: print this usage information"
    echo ""
-   echo "Env: HF_TOKEN (gated models), IMAGE, MODEL_ID, GPU_COUNT, READY_TIMEOUT."
+   echo "Env: HF_TOKEN (gated models), IMAGE, MODEL_ID, GPU_COUNT, READY_TIMEOUT, PROGRESS_INTERVAL."
    exit 1
 }
 
@@ -64,6 +67,7 @@ while [[ $# -gt 0 ]]; do
       "--namespace") shift; NAMESPACE=${1}; reset-last ;;
       "--name")      shift; NAME=${1}; reset-last ;;
       "--keep")      shift; KEEP=${1}; reset-last ;;
+      "--verbose")   shift; VERBOSE=${1}; reset-last ;;
       "--help")      usage ;;
       *)             last ${1} ;;
    esac
@@ -155,12 +159,32 @@ spec:
 EOF
 
 echo "[base-check] waiting for the model to become Ready (weight download can take a while)"
+progress_start=$(date +%s)
+progress_loop()
+{
+   while true; do
+      sleep "${PROGRESS_INTERVAL}"
+      el=$(( $(date +%s) - progress_start ))
+      pod=$(kubectl get pod -n "${NAMESPACE}" -l app="${NAME}" --no-headers 2>/dev/null | head -n1)
+      echo "[base-check] +${el}s :: ${pod:-<no pod scheduled yet>}"
+      if [ "${VERBOSE}" = "1" ]; then
+         kubectl logs -n "${NAMESPACE}" "deploy/${NAME}" --tail=2 2>/dev/null \
+            | sed 's/^/[base-check]   log: /'
+      fi
+   done
+}
+progress_loop &
+progress_pid=$!
+stop-progress() { kill "${progress_pid}" 2>/dev/null; wait "${progress_pid}" 2>/dev/null; }
+
 if ! kubectl rollout status deployment/"${NAME}" -n "${NAMESPACE}" --timeout="${READY_TIMEOUT}s"; then
+   stop-progress
    echo "[base-check] pod did not become Ready; recent events and logs:"
    kubectl describe deployment/"${NAME}" -n "${NAMESPACE}" | sed -n '/Events:/,$p'
    kubectl logs -n "${NAMESPACE}" "deploy/${NAME}" --tail=50 2>/dev/null || true
    send-error "the deployment never became Ready."
 fi
+stop-progress
 
 kubectl port-forward -n "${NAMESPACE}" "svc/${NAME}" 8000:80 >/dev/null 2>&1 &
 pf=$!; sleep 5
@@ -177,6 +201,14 @@ resp=$(curl -sS http://localhost:8000/v1/completions \
 if echo "${resp}" | grep -q '"choices"'; then
    echo "[base-check] PASS: model served a completion."
    echo "${resp}"
+   echo "[base-check] confirming the GPU is in use (rocm-smi in the pod):"
+   kubectl exec -n "${NAMESPACE}" "deploy/${NAME}" -- rocm-smi --showmeminfo vram 2>/dev/null \
+      || kubectl exec -n "${NAMESPACE}" "deploy/${NAME}" -- rocm-smi 2>/dev/null \
+      || echo "[base-check] NOTE: rocm-smi not in image; skipped the GPU-use check."
+   echo "[base-check] level 1 verified: inference returned a completion and the GPU is in use."
+   echo "[base-check] to probe it yourself, re-run with --keep 1 then:"
+   echo "  kubectl exec -n ${NAMESPACE} deploy/${NAME} -- rocm-smi"
+   echo "  kubectl port-forward -n ${NAMESPACE} svc/${NAME} 8000:80 & curl -sS localhost:8000/v1/models"
    exit 0
 else
    echo "[base-check] FAIL: no valid completion. Response: ${resp}"

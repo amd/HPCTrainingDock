@@ -53,6 +53,24 @@ Creating the cluster itself ("from zero") is deliberately out of scope here: for
 a throwaway cluster we use `aim_engine_test.sh`, and for a real bare-metal
 install we defer to the AMD Enterprise AI reference stack (see References).
 
+## Verifying a level succeeded
+
+Each level prints how to confirm it worked once it finishes, so we do not have to
+guess whether the deployment went through. We look for two things: the model
+answers a request, and the GPU is actually in use.
+
+For level 1 the check is automatic: the base-image path serves a small
+completion and then runs `rocm-smi` inside the pod to show the model is resident
+on the GPU, printing a "level 1 verified" line on success. To probe it by hand we
+re-run with `--keep 1` so the Deployment stays up, then port-forward its Service
+and curl `/v1/models`.
+
+For levels 2 to 4 the script prints the exact commands to run against the
+operator-managed service: we watch the `AIMService` and `InferenceService` report
+Ready, port-forward the predictor Service and curl `/v1/chat/completions` for a
+small inference, and exec `rocm-smi` in the serving pod to confirm GPU use. The
+same assertions run automatically in `aim_engine_test.sh --auto-run 1`.
+
 ## Building-block scripts
 
 `aim_engine_setup.sh` installs AIM Engine. It preflights the eight prerequisites
