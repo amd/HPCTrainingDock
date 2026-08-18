@@ -2,6 +2,12 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-08-18
+
+- Down/drained nodes:
+    + ppac-pl1-s24-30:down
+
+[Full snapshot](archive/AAC6_system_status_2026-08-18.md)
 ## 2026-08-17
 
 - Down/drained nodes:
