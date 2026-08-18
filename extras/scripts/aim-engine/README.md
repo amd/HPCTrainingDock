@@ -294,8 +294,12 @@ that levels 3 and 4 perform are not done by the harness.
   harness stands in for that shared storage by installing an in-cluster NFS
   provisioner as the RWX default StorageClass, so the same scripts bind the cache
   PVC unchanged on the throwaway cluster.
-- KServe is installed with defaults. For serving on a real cluster we apply AMD's
-  Standard-mode `kserve-values.yaml` (see the AIM KServe configuration docs).
+- KServe is installed in Standard mode (`RawDeployment`, native Kubernetes
+  Deployments) rather than the Knative-backed Serverless default, since the
+  prerequisites ship Gateway API and kgateway instead of Knative. Override with
+  `KSERVE_DEPLOYMENT_MODE` if needed. For external routing or localmodel tuning
+  on a real cluster we additionally apply AMD's `kserve-values.yaml` (see the AIM
+  KServe configuration docs).
 
 ## References
 

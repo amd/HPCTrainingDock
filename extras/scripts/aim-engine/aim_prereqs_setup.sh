@@ -29,6 +29,9 @@
 # AIM cites a v0.16.1 floor, but the only published 0.16 KServe OCI chart is v0.16.0.
 : ${KSERVE_VERSION:=v0.16.0}
 : ${KSERVE_NAMESPACE:=kserve-system}
+# Standard mode (no Knative). v0.16 accepts the legacy value RawDeployment; the
+# newer 'Standard' alias is rejected in this release.
+: ${KSERVE_DEPLOYMENT_MODE:=RawDeployment}
 : ${KEDA_CHART_VERSION:=2.18.3}
 : ${KEDA_OTEL_VERSION:=v0.1.4}
 : ${OTEL_OPERATOR_VERSION:=0.121.0}
@@ -43,7 +46,7 @@ usage()
    echo ""
    echo "Versions/namespaces are set via env vars: CERT_MANAGER_VERSION,"
    echo "  GATEWAY_API_VERSION, KGATEWAY_VERSION, KSERVE_VERSION, KSERVE_NAMESPACE,"
-   echo "  KEDA_CHART_VERSION, KEDA_OTEL_VERSION, OTEL_OPERATOR_VERSION."
+   echo "  KSERVE_DEPLOYMENT_MODE, KEDA_CHART_VERSION, KEDA_OTEL_VERSION, OTEL_OPERATOR_VERSION."
    exit 1
 }
 
@@ -90,14 +93,18 @@ run helm upgrade --install kgateway \
    oci://cr.kgateway.dev/kgateway-dev/charts/kgateway \
    --version "${KGATEWAY_VERSION}" --namespace kgateway-system --create-namespace
 
-# AIM Engine needs KServe in Standard mode (no Knative) with localmodel
-# disabled; for real clusters apply the values file from the AIM docs
-# (kserve-configuration): add `-f kserve-values.yaml` to the second install.
-echo "== [4/7] KServe ${KSERVE_VERSION} (ns ${KSERVE_NAMESPACE}) =="
+# AIM Engine needs KServe in Standard mode (native Kubernetes Deployments, no
+# Knative), since these prerequisites ship Gateway API + kgateway rather than
+# Knative Serving. Without the mode set, the controller defaults to Serverless
+# and rejects every InferenceService (ServerlessModeRejected: Knative Services
+# not available). For external routing/localmodel tuning a real cluster may also
+# apply AIM's kserve-values.yaml (kserve-configuration docs) via `-f`.
+echo "== [4/7] KServe ${KSERVE_VERSION} (ns ${KSERVE_NAMESPACE}, mode ${KSERVE_DEPLOYMENT_MODE}) =="
 run helm upgrade --install kserve-crd oci://ghcr.io/kserve/charts/kserve-crd \
    --version "${KSERVE_VERSION}" --namespace "${KSERVE_NAMESPACE}" --create-namespace
 run helm upgrade --install kserve oci://ghcr.io/kserve/charts/kserve \
-   --version "${KSERVE_VERSION}" --namespace "${KSERVE_NAMESPACE}" --create-namespace
+   --version "${KSERVE_VERSION}" --namespace "${KSERVE_NAMESPACE}" --create-namespace \
+   --set "kserve.controller.deploymentMode=${KSERVE_DEPLOYMENT_MODE}"
 
 echo "== [5/7] KEDA (chart ${KEDA_CHART_VERSION}) =="
 run helm repo add kedacore https://kedacore.github.io/charts >/dev/null 2>&1 || true
