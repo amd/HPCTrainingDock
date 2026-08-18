@@ -69,6 +69,8 @@ usage()
    echo "  --container-only [ 0|1 ] 1: no Kubernetes at all; run the AIM container"
    echo "                     directly via docker/podman (no sudo, works on cgroup v1)."
    echo "                     Validates GPU serving of an AIM, not the operator/k8s scripts."
+   echo "                     Combine with --auto-run 1 to check and tear down; the"
+   echo "                     default (0) leaves it serving and drops you into a shell."
    echo "  --cluster-name [ NAME ] kind cluster name, default $CLUSTER_NAME"
    echo "  --gpu-model [ MODEL ] AIM accelerator model to label the node with"
    echo "                        (e.g. MI355X, MI300X); auto-detected via rocminfo if unset"
@@ -156,6 +158,14 @@ if [ "${CONTAINER_ONLY}" = "1" ]; then
    if echo "${resp}" | grep -q '"choices"'; then
       echo "[test] PASS: model served a completion."
       echo "${resp}"
+      echo "[test] asking the model 'What is ROCm?' via /v1/chat/completions:"
+      chat=$(curl -sS http://localhost:8000/v1/chat/completions -H 'Content-Type: application/json' \
+         -d '{"model":"'"${served}"'","messages":[{"role":"user","content":"What is ROCm?"}],"max_tokens":200,"temperature":0}')
+      if command -v jq >/dev/null 2>&1; then
+         echo "[test] answer: $(echo "${chat}" | jq -r '.choices[0].message.content')"
+      else
+         echo "${chat}"
+      fi
       echo "[test] confirming vLLM placed its KV cache on the GPU:"
       gpu_metric=$(curl -sS http://localhost:8000/metrics 2>/dev/null | grep -E 'cache_usage_perc' | grep -v '^#' | head -n1)
       if [ -n "${gpu_metric}" ]; then
@@ -165,6 +175,22 @@ if [ "${CONTAINER_ONLY}" = "1" ]; then
       else
          echo "[test] NOTE: no vLLM GPU signal from /metrics or logs; GPU use unconfirmed."
       fi
+      # auto-run: report and tear down. Otherwise leave the model serving and drop
+      # into a shell so we can run our own inference; the EXIT trap removes the
+      # container when that shell exits.
+      [ "${AUTO_RUN}" = "1" ] && exit 0
+      cat <<EOF
+
+[test] The AIM model is serving on http://localhost:8000 (OpenAI-compatible API).
+[test] You are in a shell for manual testing; the container stays up until you exit.
+[test] Try:
+  curl -sS localhost:8000/v1/models
+  curl -sS localhost:8000/v1/chat/completions -H 'Content-Type: application/json' \\
+    -d '{"model":"${served}","messages":[{"role":"user","content":"What is ROCm?"}],"max_tokens":200}'
+[test] 'exit' stops and removes the container.
+
+EOF
+      "${SHELL:-bash}" -i
       exit 0
    fi
    echo "[test] FAIL: no valid completion. Response: ${resp}"; exit 1

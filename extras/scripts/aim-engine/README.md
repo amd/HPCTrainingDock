@@ -221,7 +221,18 @@ that case, and for anyone without sudo, we provide `--container-only`: it skips
 `kind`, `kubectl`, and `helm` and runs the AIM container directly through
 docker/podman with GPU passthrough, serving a small ungated model and confirming
 the GPU is in use. It validates the AIM microservice layer only, not the operator
-or the Kubernetes scripts, but it needs no cluster, no cgroup v2, and no sudo.
+or the Kubernetes scripts, but it needs no cluster, no cgroup v2, and no sudo. Its
+default (`--auto-run 0`) leaves the model serving and drops us into a shell so we
+can send our own requests to `http://localhost:8000`, tearing the container down
+on exit; `--container-only 1 --auto-run 1` instead runs the checks and cleans up.
+In that shell we query the served model directly (the default model id is shown;
+substitute `DIRECT_MODEL_ID` if we overrode it):
+
+```bash
+curl -sS localhost:8000/v1/models
+curl -sS localhost:8000/v1/chat/completions -H 'Content-Type: application/json' \
+  -d '{"model":"Qwen/Qwen2.5-0.5B-Instruct","messages":[{"role":"user","content":"What is ROCm?"}],"max_tokens":200}'
+```
 
 The default (`--auto-run 0`) leaves us in a shell inside the kind node, with the
 scripts at `/aim-engine`, `kubectl`/`helm` on `PATH`, and `KUBECONFIG` already
