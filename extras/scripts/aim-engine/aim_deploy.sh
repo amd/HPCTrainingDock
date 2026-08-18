@@ -31,6 +31,15 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # Ungated model-specific image for the operator levels (2-4), so no token is needed.
 : ${AIM_MODEL_IMAGE:=amdenterpriseai/aim-qwen-qwen3-32b:0.13.0}
 : ${NAMESPACE:=default}
+# Predictor resource floor. AIM Engine merges spec.resources on top of the
+# profile's computed resources (service values win). Auto-generated profiles can
+# omit memory, leaving KServe's 2Gi default, which OOM-kills weight loading for
+# large models. These defaults suit the 32B image above; lower them for smaller
+# models or raise them for bigger ones.
+: ${AIM_CPU_REQUEST:=8}
+: ${AIM_MEM_REQUEST:=64Gi}
+: ${AIM_CPU_LIMIT:=16}
+: ${AIM_MEM_LIMIT:=128Gi}
 : ${HF_TOKEN:=}
 BASE_ARGS=()    # forwarded to aim_base_check.sh on level 1 only
 SETUP_ARGS=()   # forwarded to aim_engine_setup.sh on levels 3 and 4
@@ -54,7 +63,8 @@ usage()
    echo "  --chart [ REF ] (levels 3-4) AIM Engine chart override"
    echo "  --help: print this usage information"
    echo ""
-   echo "Env: HF_TOKEN (gated models), AIM_MODEL_IMAGE."
+   echo "Env: HF_TOKEN (gated models), AIM_MODEL_IMAGE, AIM_CPU_REQUEST,"
+   echo "  AIM_MEM_REQUEST, AIM_CPU_LIMIT, AIM_MEM_LIMIT (predictor resources)."
    exit 1
 }
 
@@ -124,6 +134,13 @@ metadata:
 spec:
   model:
     image: ${AIM_MODEL_IMAGE}
+  resources:
+    requests:
+      cpu: "${AIM_CPU_REQUEST}"
+      memory: ${AIM_MEM_REQUEST}
+    limits:
+      cpu: "${AIM_CPU_LIMIT}"
+      memory: ${AIM_MEM_LIMIT}
   profile:
     selector:
       minimumType: any
