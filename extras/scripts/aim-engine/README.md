@@ -49,6 +49,13 @@ we deliberately point a level at a gated model such as Llama or Gemma.
 ./aim_deploy.sh --level 4         # install prereqs + AIM Engine, then serve
 ```
 
+Options that a level's underlying script understands are exposed directly on
+`aim_deploy.sh` and forwarded for us. On level 1 we pass `--keep` and `--verbose`
+through to `aim_base_check.sh`, and on levels 3 and 4 we pass `--replace`,
+`--aim-version`, `--crds-chart`, and `--chart` through to `aim_engine_setup.sh`.
+For example, we reinstall the operator cleanly while deploying with
+`./aim_deploy.sh --level 3 --replace 1`.
+
 Creating the cluster itself ("from zero") is deliberately out of scope here: for
 a throwaway cluster we use `aim_engine_test.sh`, and for a real bare-metal
 install we defer to the AMD Enterprise AI reference stack (see References).

@@ -32,6 +32,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 : ${AIM_MODEL_IMAGE:=amdenterpriseai/aim-qwen-qwen3-32b:0.13.0}
 : ${NAMESPACE:=default}
 : ${HF_TOKEN:=}
+BASE_ARGS=()    # forwarded to aim_base_check.sh on level 1 only
+SETUP_ARGS=()   # forwarded to aim_engine_setup.sh on levels 3 and 4
 
 usage()
 {
@@ -44,6 +46,12 @@ usage()
    echo "  --model-image [ IMAGE ] AIM model image for levels 2-4, default ${AIM_MODEL_IMAGE}"
    echo "                          (level 1 uses aim_base_check.sh's own ungated default)"
    echo "  --namespace [ NS ] namespace for the AIMService, default ${NAMESPACE}"
+   echo "  --keep [ 0|1 ] (level 1 only) leave the Deployment/Service running"
+   echo "  --verbose [ 0|1 ] (level 1 only) tail recent pod logs while waiting"
+   echo "  --replace [ 0|1 ] (levels 3-4) uninstall an existing AIM Engine release first"
+   echo "  --aim-version [ VER ] (levels 3-4) AIM Engine chart version, default latest"
+   echo "  --crds-chart [ REF ] (levels 3-4) AIM CRDs chart override"
+   echo "  --chart [ REF ] (levels 3-4) AIM Engine chart override"
    echo "  --help: print this usage information"
    echo ""
    echo "Env: HF_TOKEN (gated models), AIM_MODEL_IMAGE."
@@ -58,6 +66,12 @@ while [[ $# -gt 0 ]]; do
       "--level")       shift; LEVEL=${1}; reset-last ;;
       "--model-image") shift; AIM_MODEL_IMAGE=${1}; reset-last ;;
       "--namespace")   shift; NAMESPACE=${1}; reset-last ;;
+      "--keep")        shift; BASE_ARGS+=(--keep "${1}"); reset-last ;;
+      "--verbose")     shift; BASE_ARGS+=(--verbose "${1}"); reset-last ;;
+      "--replace")     shift; SETUP_ARGS+=(--replace "${1}"); reset-last ;;
+      "--aim-version") shift; SETUP_ARGS+=(--aim-version "${1}"); reset-last ;;
+      "--crds-chart")  shift; SETUP_ARGS+=(--crds-chart "${1}"); reset-last ;;
+      "--chart")       shift; SETUP_ARGS+=(--chart "${1}"); reset-last ;;
       "--help")        usage ;;
       *)               last ${1} ;;
    esac
@@ -122,9 +136,9 @@ EOF
 }
 
 case "${LEVEL}" in
-   1) HF_TOKEN="${HF_TOKEN}" exec "${HERE}/aim_base_check.sh" --namespace "${NAMESPACE}" ;;
+   1) HF_TOKEN="${HF_TOKEN}" exec "${HERE}/aim_base_check.sh" --namespace "${NAMESPACE}" "${BASE_ARGS[@]}" ;;
    2) serve_operator ;;
-   3) "${HERE}/aim_engine_setup.sh" || exit $?; serve_operator ;;
-   4) "${HERE}/aim_engine_setup.sh" --install-prereqs 1 || exit $?; serve_operator ;;
+   3) "${HERE}/aim_engine_setup.sh" "${SETUP_ARGS[@]}" || exit $?; serve_operator ;;
+   4) "${HERE}/aim_engine_setup.sh" --install-prereqs 1 "${SETUP_ARGS[@]}" || exit $?; serve_operator ;;
    *) send-error "invalid level '${LEVEL}'; choose 1, 2, 3, or 4." ;;
 esac
