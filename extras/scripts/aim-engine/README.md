@@ -67,16 +67,16 @@ guess whether the deployment went through. We look for two things: the model
 answers a request, and the GPU is actually in use.
 
 For level 1 the check is automatic: the base-image path serves a small
-completion and then runs `rocm-smi` inside the pod to show the model is resident
-on the GPU, printing a "level 1 verified" line on success. To probe it by hand we
-re-run with `--keep 1` so the Deployment stays up, then port-forward its Service
-and curl `/v1/models`.
+completion and then reads vLLM's `/metrics` endpoint for a GPU KV-cache gauge,
+which appears only once the model is resident on the GPU, printing a "level 1
+verified" line on success. To probe it by hand we re-run with `--keep 1` so the
+Deployment stays up, then port-forward its Service and curl `/v1/models`.
 
 For levels 2 to 4 the script prints the exact commands to run against the
 operator-managed service: we watch the `AIMService` and `InferenceService` report
 Ready, port-forward the predictor Service and curl `/v1/chat/completions` for a
-small inference, and exec `rocm-smi` in the serving pod to confirm GPU use. The
-same assertions run automatically in `aim_engine_test.sh --auto-run 1`.
+small inference, and confirm GPU use in the serving pod (`rocm-smi`, or the same
+vLLM `/metrics` gauge). The `--auto-run 1` harness makes these assertions for us.
 
 ## Building-block scripts
 
@@ -144,10 +144,9 @@ advertises `amd.com/gpu`, injects the accelerator labels a real GPU Operator
 would set, and installs an in-cluster NFS provisioner so the default StorageClass
 offers the ReadWriteMany access mode the operator's profile cache needs (a real
 system supplies this through its own shared storage). It does not install the
-prerequisites or the operator itself; those
-remain the job of the levels, which we run on top of it. Its default models are
-ungated; when `HF_TOKEN` is set it wires that token in for the rare case of a
-gated model.
+prerequisites or the operator itself; those remain the job of the levels, which
+we run on top of it. Its default models are ungated; when `HF_TOKEN` is set it
+wires that token in for the rare case of a gated model.
 
 ```bash
 ./aim_engine_test.sh                      # bring up kind + GPU, then drop into a sandbox shell

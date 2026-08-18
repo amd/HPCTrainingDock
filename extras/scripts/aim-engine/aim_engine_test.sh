@@ -44,9 +44,13 @@ WORK_DIR="${HOME}/aim-engine-test"
 # Kubernetes-free (--container-only) path: run the AIM container directly. Small
 # ungated defaults so it is fast and needs no token. Works rootless on cgroup v1.
 : ${DIRECT_IMAGE:=amdenterpriseai/aim-base:0.11}
-: ${DIRECT_MODEL_ID:=Qwen/Qwen2.5-1.5B-Instruct}
-# Default to one GPU: the runtime derives tensor-parallel size from the visible
-# GPU count, which a small model's head count may not divide (e.g. 12 vs 8).
+: ${DIRECT_MODEL_ID:=Qwen/Qwen2.5-0.5B-Instruct}
+# Expose a single GPU so the runtime picks tensor-parallel-size 1: a small model's
+# attention-head count may not divide the full GPU count (e.g. 14 or 12 heads vs
+# 8 GPUs). Env-var masking alone does not constrain AIM's accelerator detection,
+# so we bind-mount just one /dev/dri render node the way Kubernetes does.
+# DIRECT_RENDER_NODE overrides which node; otherwise we take the first one.
+: ${DIRECT_RENDER_NODE:=}
 : ${DIRECT_VISIBLE_DEVICES:=0}
 # AIM accelerator model used to label the kind node so profile resolution matches
 # (the bare device plugin doesn't set the label a real AMD GPU Operator would).
@@ -119,23 +123,41 @@ if [ "${CONTAINER_ONLY}" = "1" ]; then
    envs=(-e "AIM_MODEL_ID=${DIRECT_MODEL_ID}")
    [ -n "${DIRECT_VISIBLE_DEVICES}" ] && envs+=(-e "HIP_VISIBLE_DEVICES=${DIRECT_VISIBLE_DEVICES}" -e "ROCR_VISIBLE_DEVICES=${DIRECT_VISIBLE_DEVICES}")
    [ -n "${HF_TOKEN}" ] && envs+=(-e "HF_TOKEN=${HF_TOKEN}")
+   # Expose one render node so ROCm enumerates a single GPU (TP1); masking via env
+   # vars alone does not, which makes a multi-GPU host pick a TP the model rejects.
+   devs=(--device /dev/kfd)
+   rnode="${DIRECT_RENDER_NODE}"
+   [ -z "${rnode}" ] && rnode=$(ls /dev/dri/renderD* 2>/dev/null | head -n1)
+   if [ -n "${rnode}" ]; then
+      devs+=(--device "${rnode}")
+      echo "[test] exposing a single GPU render node ${rnode} (tensor-parallel-size 1)"
+   else
+      devs+=(--device /dev/dri)
+      echo "[test] WARNING no /dev/dri/renderD* node found; exposing all GPUs (TP may exceed a small model's head count)."
+   fi
    rm_container() { "${RUNTIME}" rm -f "${cname}" >/dev/null 2>&1 || true; }
    trap rm_container EXIT
    echo "[test] container-only: ${RUNTIME} run ${DIRECT_IMAGE} (AIM_MODEL_ID=${DIRECT_MODEL_ID}), no Kubernetes"
    "${RUNTIME}" run -d --name "${cname}" \
-      --device /dev/kfd --device /dev/dri "${grp[@]}" \
+      "${devs[@]}" "${grp[@]}" \
       --security-opt seccomp=unconfined -p 8000:8000 "${envs[@]}" "${DIRECT_IMAGE}" \
       || fatal "failed to start the AIM container with ${RUNTIME}."
    echo "[test] waiting for the model to serve on :8000 (weight download can take a while)"
    ok=0
    start=$(date +%s)
-   for i in $(seq 1 180); do
+   for i in $(seq 1 60); do
       curl -sf http://localhost:8000/v1/models >/dev/null 2>&1 && { ok=1; break; }
+      # Fail fast if the runtime crashed (e.g. a config validation error) instead
+      # of waiting out the whole timeout on a container that will never serve.
+      if [ "$("${RUNTIME}" inspect -f '{{.State.Running}}' "${cname}" 2>/dev/null)" != "true" ]; then
+         "${RUNTIME}" logs --tail 80 "${cname}" 2>&1
+         fatal "the AIM container exited before serving (see logs above)."
+      fi
       last=$("${RUNTIME}" logs --tail 1 "${cname}" 2>&1 | tr -d '\r')
       echo "[test] +$(( $(date +%s) - start ))s waiting :: ${last}"
-      sleep 10
+      sleep 30
    done
-   [ "${ok}" = "1" ] || { "${RUNTIME}" logs --tail 50 "${cname}" 2>&1; fatal "the model never served /v1/models."; }
+   [ "${ok}" = "1" ] || { "${RUNTIME}" logs --tail 80 "${cname}" 2>&1; fatal "the model never served /v1/models."; }
    served=$(curl -sS http://localhost:8000/v1/models | tr ',' '\n' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -n1)
    [ -z "${served}" ] && served="${DIRECT_MODEL_ID}"
    echo "[test] served model id: ${served}"
