@@ -12,6 +12,13 @@ reference stack (see References), of which AIM Engine is one component. We drive
 everything through a single incremental entrypoint, `aim_deploy.sh`, which layers
 on top of three building-block scripts and a `kind`-based test harness.
 
+AMD's stack distinguishes two things that our scripts both cover (see
+References). An AIM (AMD Inference Microservice) is the inference container that
+serves one model and self-selects optimized runtime parameters for the hardware;
+AIM Engine is the Kubernetes operator that deploys and manages those containers
+at scale. We run an AIM container directly at level 1 (through `aim_base_check.sh`),
+and we install and drive AIM Engine at levels 2 to 4.
+
 ## Incremental deployment
 
 `aim_deploy.sh` deploys AIM into a cluster that already exists, one level at a
@@ -160,6 +167,7 @@ that levels 3 and 4 perform are not done by the harness.
 
 ## References
 
+- [AMD Enterprise AI reference stacks overview](https://enterprise-ai.docs.amd.com/en/latest/reference-stacks.html)
 - [AMD Enterprise AI reference stack, on-premises installation](https://enterprise-ai.docs.amd.com/en/latest/platform-infrastructure/on-premises-installation.html)
 - [Cluster Bloom](https://github.com/silogen/cluster-bloom)
 - [Cluster Forge](https://github.com/silogen/cluster-forge)

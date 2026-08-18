@@ -9,6 +9,11 @@
 # amd.com/gpu -- so preflight, install, and inference all run for real. A
 # GPU host is required; there is no no-GPU mode.
 #
+# This exercises both layers: --base-image-only runs an AIM container directly
+# (the microservice), the default flow drives AIM Engine (the operator). For how
+# the two relate, see the reference stacks overview:
+#   https://enterprise-ai.docs.amd.com/en/latest/reference-stacks.html
+#
 # Everything lives in a visible working dir that is removed on exit (when the
 # interactive shell or the auto-run flow ends) so nothing is left in ~.
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------

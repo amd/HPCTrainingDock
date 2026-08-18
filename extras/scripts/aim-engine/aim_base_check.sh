@@ -20,6 +20,10 @@
 # advertises amd.com/gpu. It uses NO CRDs, NO operator, and NO accelerator node
 # labels; the image detects the GPU in-container. HF_TOKEN is used only if set,
 # for the rare case of deliberately choosing a gated model.
+#
+# This runs an AIM container directly (the microservice), not AIM Engine (the
+# operator). For how the two relate, see the reference stacks overview:
+#   https://enterprise-ai.docs.amd.com/en/latest/reference-stacks.html
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 # Ungated by default: generic base image + a small open model, so no token is needed.

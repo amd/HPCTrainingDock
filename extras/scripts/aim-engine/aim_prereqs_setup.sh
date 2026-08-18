@@ -5,6 +5,10 @@
 # the AMD GPU Operator/driver (assumed already present on GPU nodes, the
 # same way the other repo scripts assume base packages are installed).
 #
+# These add-ons back the AIM Engine (operator) layer. For how AIMs and AIM
+# Engine fit the wider stack, see the reference stacks overview:
+#   https://enterprise-ai.docs.amd.com/en/latest/reference-stacks.html
+#
 # Installs (all idempotent via `helm upgrade --install` / `kubectl apply`):
 #   cert-manager, Gateway API CRDs, kgateway, KServe, KEDA,
 #   keda-otel-add-on, OpenTelemetry Operator.

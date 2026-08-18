@@ -4,6 +4,10 @@
 # AIM Engine setup: deploy AMD's AIM (AMD Inference Microservices) Engine
 # Kubernetes operator onto a cluster that is ALREADY running Kubernetes.
 #
+# This is the AIM Engine layer (the operator that manages AIMs). For how AIMs
+# and AIM Engine fit the wider stack, see the reference stacks overview:
+#   https://enterprise-ai.docs.amd.com/en/latest/reference-stacks.html
+#
 # Unlike the module-based *_setup.sh scripts, this installs a cluster-scoped
 # k8s operator (CRDs + Helm chart) via kubectl/helm -- there is no Lmod
 # module. "Success" = AIM CRDs Established + operator pod Running.

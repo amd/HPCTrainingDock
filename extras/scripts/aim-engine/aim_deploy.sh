@@ -16,6 +16,10 @@
 #   L4 prereqs install  : install the 7 add-ons + AIM Engine, then serve (L2).
 #                         Assumes present: the AMD GPU Operator (amd.com/gpu).
 #
+# Level 1 runs an AIM container directly (the microservice); levels 2-4 use AIM
+# Engine (the operator). For how the two relate, see the reference stacks
+# overview: https://enterprise-ai.docs.amd.com/en/latest/reference-stacks.html
+#
 # Cluster creation ("from zero") is intentionally out of scope: use
 # aim_engine_test.sh for a throwaway kind cluster, or AMD's Cluster Bloom/Forge
 # for a real bare-metal install.
