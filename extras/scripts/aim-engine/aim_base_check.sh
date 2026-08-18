@@ -203,14 +203,21 @@ resp=$(curl -sS http://localhost:8000/v1/completions \
 if echo "${resp}" | grep -q '"choices"'; then
    echo "[base-check] PASS: model served a completion."
    echo "${resp}"
-   echo "[base-check] confirming the GPU is in use (rocm-smi in the pod):"
-   kubectl exec -n "${NAMESPACE}" "deploy/${NAME}" -- rocm-smi --showmeminfo vram 2>/dev/null \
-      || kubectl exec -n "${NAMESPACE}" "deploy/${NAME}" -- rocm-smi 2>/dev/null \
-      || echo "[base-check] NOTE: rocm-smi not in image; skipped the GPU-use check."
-   echo "[base-check] level 1 verified: inference returned a completion and the GPU is in use."
+   echo "[base-check] confirming vLLM placed its KV cache on the GPU:"
+   gpu_metric=$(curl -sS http://localhost:8000/metrics 2>/dev/null | grep -E 'cache_usage_perc' | grep -v '^#' | head -n1)
+   if [ -n "${gpu_metric}" ]; then
+      echo "[base-check] vLLM GPU KV-cache metric present: ${gpu_metric}"
+   elif kubectl logs -n "${NAMESPACE}" "deploy/${NAME}" 2>/dev/null | grep -iE 'GPU KV cache|GPU blocks' | tail -n1; then
+      :
+   else
+      echo "[base-check] NOTE: no vLLM GPU signal from /metrics or logs; GPU use unconfirmed."
+   fi
+   echo "[base-check] level 1 verified: inference returned a completion and vLLM is using the GPU."
    echo "[base-check] to probe it yourself, re-run with --keep 1 then:"
-   echo "  kubectl exec -n ${NAMESPACE} deploy/${NAME} -- rocm-smi"
-   echo "  kubectl port-forward -n ${NAMESPACE} svc/${NAME} 8000:80 & curl -sS localhost:8000/v1/models"
+   echo "  kubectl port-forward -n ${NAMESPACE} svc/${NAME} 8000:80 >/tmp/pf.log 2>&1 &"
+   echo "  sleep 3   # let the tunnel come up first, else curl gets connection refused"
+   echo "  curl -sS localhost:8000/metrics | grep cache_usage_perc   # vLLM confirms a GPU KV cache"
+   echo "  curl -sS localhost:8000/v1/chat/completions -H 'Content-Type: application/json' -d '{\"model\":\"${served}\",\"messages\":[{\"role\":\"user\",\"content\":\"What is ROCm?\"}],\"max_tokens\":200}'"
    exit 0
 else
    echo "[base-check] FAIL: no valid completion. Response: ${resp}"

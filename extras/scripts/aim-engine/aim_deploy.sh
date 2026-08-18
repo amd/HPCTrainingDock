@@ -127,8 +127,9 @@ EOF
   kubectl describe aimservice aim-smoke -n ${NAMESPACE}
   # 2) small inference (find the predictor service, port-forward, then curl):
   isvc=\$(kubectl get inferenceservice -n ${NAMESPACE} -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
-  kubectl port-forward -n ${NAMESPACE} svc/\$(basename \$isvc)-predictor 8080:80 &
-  curl -sS localhost:8080/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"aim-smoke","messages":[{"role":"user","content":"Hello!"}]}'
+  kubectl port-forward -n ${NAMESPACE} svc/\$(basename \$isvc)-predictor 8080:80 >/tmp/pf.log 2>&1 &
+  sleep 3   # let the tunnel come up first, else curl gets connection refused
+  curl -sS localhost:8080/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"aim-smoke","messages":[{"role":"user","content":"What is ROCm?"}],"max_tokens":200}'
   # 3) confirm the GPU is in use inside the serving pod:
   pod=\$(kubectl get pods -n ${NAMESPACE} -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
   kubectl exec -n ${NAMESPACE} \$pod -- rocm-smi

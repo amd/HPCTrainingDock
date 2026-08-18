@@ -150,7 +150,19 @@ gated model.
 ./aim_engine_test.sh                      # bring up kind + GPU, then drop into a sandbox shell
 ./aim_engine_test.sh --auto-run 1         # run install, idempotency, and an inference check, then clean up
 ./aim_engine_test.sh --base-image-only 1  # skip the operator; run only the base-image serve check
+./aim_engine_test.sh --container-only 1   # no Kubernetes at all; run the AIM container directly
 ```
+
+The `kind`, `--base-image-only`, and `--auto-run` paths all need a container
+runtime that can host a Kubernetes node. `kind` uses Docker by default and Podman
+when we set the provider, but its rootless Podman path requires cgroup v2, so on a
+cgroup v1 host without root it cannot create a cluster (this is a `kind` and
+rootless-container limitation, not something the scripts can work around). For
+that case, and for anyone without sudo, we provide `--container-only`: it skips
+`kind`, `kubectl`, and `helm` and runs the AIM container directly through
+docker/podman with GPU passthrough, serving a small ungated model and confirming
+the GPU is in use. It validates the AIM microservice layer only, not the operator
+or the Kubernetes scripts, but it needs no cluster, no cgroup v2, and no sudo.
 
 The default (`--auto-run 0`) leaves us in a shell inside the kind node, with the
 scripts at `/aim-engine`, `kubectl`/`helm` on `PATH`, and `KUBECONFIG` already

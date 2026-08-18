@@ -10,8 +10,11 @@
 # GPU host is required; there is no no-GPU mode.
 #
 # This exercises both layers: --base-image-only runs an AIM container directly
-# (the microservice), the default flow drives AIM Engine (the operator). For how
-# the two relate, see the reference stacks overview:
+# (the microservice) on kind, the default flow drives AIM Engine (the operator).
+# --container-only skips Kubernetes entirely and runs the AIM container via
+# docker/podman, so users without sudo (and hosts on cgroup v1, where kind's
+# rootless provider refuses to start) can still validate GPU serving of an AIM.
+# For how AIMs and AIM Engine relate, see the reference stacks overview:
 #   https://enterprise-ai.docs.amd.com/en/latest/reference-stacks.html
 #
 # Everything lives in a visible working dir that is removed on exit (when the
@@ -22,6 +25,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 AUTO_RUN=0
 BASE_IMAGE_ONLY=0
+CONTAINER_ONLY=0
 CLUSTER_NAME="aim-engine-test"
 WORK_DIR="${HOME}/aim-engine-test"
 
@@ -31,6 +35,10 @@ WORK_DIR="${HOME}/aim-engine-test"
 : ${AMDGPU_DP_URL:=https://raw.githubusercontent.com/ROCm/k8s-device-plugin/master/k8s-ds-amdgpu-dp.yaml}
 # Model image for the operator inference smoke test. Ungated by default (no HF_TOKEN needed).
 : ${AIM_TEST_MODEL_IMAGE:=amdenterpriseai/aim-qwen-qwen3-32b:0.13.0}
+# Kubernetes-free (--container-only) path: run the AIM container directly. Small
+# ungated defaults so it is fast and needs no token. Works rootless on cgroup v1.
+: ${DIRECT_IMAGE:=amdenterpriseai/aim-base:0.11}
+: ${DIRECT_MODEL_ID:=Qwen/Qwen2.5-1.5B-Instruct}
 # AIM accelerator model used to label the kind node so profile resolution matches
 # (the bare device plugin doesn't set the label a real AMD GPU Operator would).
 # Auto-detected from rocminfo if empty; override with --gpu-model.
@@ -46,12 +54,16 @@ usage()
    echo "                     1: run preflight/install/idempotency + inference, then clean up"
    echo "  --base-image-only [ 0|1 ] 1: skip the operator; run only the minimal"
    echo "                     aim_base_check.sh serve test (fast GPU-serves-a-model check)"
+   echo "  --container-only [ 0|1 ] 1: no Kubernetes at all; run the AIM container"
+   echo "                     directly via docker/podman (no sudo, works on cgroup v1)."
+   echo "                     Validates GPU serving of an AIM, not the operator/k8s scripts."
    echo "  --cluster-name [ NAME ] kind cluster name, default $CLUSTER_NAME"
    echo "  --gpu-model [ MODEL ] AIM accelerator model to label the node with"
    echo "                        (e.g. MI355X, MI300X); auto-detected via rocminfo if unset"
    echo "  --help: print this usage information"
    echo ""
-   echo "Env: HF_TOKEN (gated models), AIM_TEST_MODEL_IMAGE, AIM_GPU_MODEL."
+   echo "Env: HF_TOKEN (gated models), AIM_TEST_MODEL_IMAGE, AIM_GPU_MODEL,"
+   echo "     DIRECT_IMAGE, DIRECT_MODEL_ID (for --container-only)."
    exit 1
 }
 
@@ -64,6 +76,7 @@ while [[ $# -gt 0 ]]; do
    case "${1}" in
       "--auto-run")     shift; AUTO_RUN=${1}; reset-last ;;
       "--base-image-only") shift; BASE_IMAGE_ONLY=${1}; reset-last ;;
+      "--container-only") shift; CONTAINER_ONLY=${1}; reset-last ;;
       "--cluster-name") shift; CLUSTER_NAME=${1}; reset-last ;;
       "--gpu-model")    shift; AIM_GPU_MODEL=${1}; reset-last ;;
       "--help")         usage ;;
@@ -82,17 +95,70 @@ elif command -v docker >/dev/null 2>&1 && ! docker --version 2>/dev/null | grep 
 elif command -v podman >/dev/null 2>&1; then
    RUNTIME=podman; export KIND_EXPERIMENTAL_PROVIDER=podman
 else
-   fatal "no container runtime found; install Docker or Podman for kind."
-fi
-if [ "${RUNTIME}" = "podman" ]; then
-   [ -f /sys/fs/cgroup/cgroup.controllers ] || fatal \
-"Podman with kind requires cgroup v2, but this host is on cgroup v1.
-Options: use Docker instead, run on a cgroup v2 host, boot with
-systemd.unified_cgroup_hierarchy=1, or use a non-kind cluster (k3s, or
-minikube --driver=none). See https://kind.sigs.k8s.io/docs/user/rootless/"
-   [ "$(id -u)" -eq 0 ] || echo "[test] rootless Podman: if creation fails, retry as root (rootful Podman)."
+   fatal "no container runtime found; install Docker or Podman."
 fi
 echo "[test] container runtime: ${RUNTIME}"
+
+# Kubernetes-free path: run the AIM container directly, no kind/kubectl/helm and
+# no cgroup v2 requirement, so it works rootless on cgroup v1 without sudo. This
+# validates the AIM microservice layer (GPU serves a model), not the operator.
+if [ "${CONTAINER_ONLY}" = "1" ]; then
+   [ -e /dev/kfd ] && [ -d /dev/dri ] || fatal "no AMD GPU on this host (/dev/kfd or /dev/dri missing)."
+   cname="aim-direct-$$"
+   grp=(--group-add video --group-add render)
+   [ "${RUNTIME}" = "podman" ] && grp=(--group-add keep-groups)
+   envs=(-e "AIM_MODEL_ID=${DIRECT_MODEL_ID}")
+   [ -n "${HF_TOKEN}" ] && envs+=(-e "HF_TOKEN=${HF_TOKEN}")
+   rm_container() { "${RUNTIME}" rm -f "${cname}" >/dev/null 2>&1 || true; }
+   trap rm_container EXIT
+   echo "[test] container-only: ${RUNTIME} run ${DIRECT_IMAGE} (AIM_MODEL_ID=${DIRECT_MODEL_ID}), no Kubernetes"
+   "${RUNTIME}" run -d --name "${cname}" \
+      --device /dev/kfd --device /dev/dri "${grp[@]}" \
+      --security-opt seccomp=unconfined -p 8000:8000 "${envs[@]}" "${DIRECT_IMAGE}" \
+      || fatal "failed to start the AIM container with ${RUNTIME}."
+   echo "[test] waiting for the model to serve on :8000 (weight download can take a while)"
+   ok=0
+   for i in $(seq 1 180); do
+      curl -sf http://localhost:8000/v1/models >/dev/null 2>&1 && { ok=1; break; }
+      sleep 10
+   done
+   [ "${ok}" = "1" ] || { "${RUNTIME}" logs --tail 50 "${cname}" 2>&1; fatal "the model never served /v1/models."; }
+   served=$(curl -sS http://localhost:8000/v1/models | tr ',' '\n' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -n1)
+   [ -z "${served}" ] && served="${DIRECT_MODEL_ID}"
+   echo "[test] served model id: ${served}"
+   resp=$(curl -sS http://localhost:8000/v1/completions -H 'Content-Type: application/json' \
+      -d '{"model":"'"${served}"'","prompt":"San Francisco is a","max_tokens":7,"temperature":0}')
+   if echo "${resp}" | grep -q '"choices"'; then
+      echo "[test] PASS: model served a completion."
+      echo "${resp}"
+      echo "[test] confirming vLLM placed its KV cache on the GPU:"
+      gpu_metric=$(curl -sS http://localhost:8000/metrics 2>/dev/null | grep -E 'cache_usage_perc' | grep -v '^#' | head -n1)
+      if [ -n "${gpu_metric}" ]; then
+         echo "[test] vLLM GPU KV-cache metric present: ${gpu_metric}"
+      elif "${RUNTIME}" logs "${cname}" 2>/dev/null | grep -iE 'GPU KV cache|GPU blocks' | tail -n1; then
+         :
+      else
+         echo "[test] NOTE: no vLLM GPU signal from /metrics or logs; GPU use unconfirmed."
+      fi
+      exit 0
+   fi
+   echo "[test] FAIL: no valid completion. Response: ${resp}"; exit 1
+fi
+
+# cgroup v1: kind only rejects it for the ROOTLESS Podman provider; rootful
+# Podman (running as root) still works on cgroup v1 with a deprecation warning
+# (kind issue #3915). So we only hard-fail the non-root case here.
+if [ "${RUNTIME}" = "podman" ] && [ ! -f /sys/fs/cgroup/cgroup.controllers ]; then
+   if [ "$(id -u)" -ne 0 ]; then
+      fatal "Rootless Podman + kind needs cgroup v2, but this host is on cgroup v1,
+so kind cannot create a cluster here without root. For a no-sudo check, run the
+Kubernetes-free container test instead (validates GPU serving of an AIM):
+  ${0} --container-only 1
+The full operator/k8s scripts need Docker, a cgroup v2 host, or an existing
+cluster. See https://kind.sigs.k8s.io/docs/user/rootless/"
+   fi
+   echo "[test] cgroup v1 with rootful Podman: supported by kind ${KIND_VERSION} (expect a deprecation warning)."
+fi
 [ -e /dev/kfd ] && [ -d /dev/dri ] || send-error "no AMD GPU on this host (/dev/kfd or /dev/dri missing)."
 case "$(uname -m)" in
    x86_64|amd64) ARCH=amd64 ;;
