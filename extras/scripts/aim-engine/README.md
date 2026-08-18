@@ -116,9 +116,12 @@ After the install step, the script applies an `AIMService` named `aim-smoke` and
 prints these verification steps:
 
 ```bash
-# 1) watch status; the first image pull and weight download can take many minutes:
-kubectl get aimservice,inferenceservice,pods -n default
-kubectl describe aimservice aim-smoke -n default
+# 1) check that it is Ready with this command (READY True/False plus the reason);
+#    the first image pull and weight download can take many minutes:
+kubectl get aimservice aim-smoke -n default \
+  -o custom-columns='NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status,REASON:.status.conditions[?(@.type=="Ready")].reason'
+# while it is not Ready yet, this one line says why (latest status message):
+kubectl describe aimservice aim-smoke -n default | grep -iE 'reason:|message:' | tail -n2
 # 2) block until Ready, then run a small inference through the predictor:
 kubectl wait --for=condition=Ready aimservice/aim-smoke -n default --timeout=1800s
 isvc=$(kubectl get inferenceservice -n default -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)

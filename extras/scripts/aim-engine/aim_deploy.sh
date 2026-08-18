@@ -130,9 +130,11 @@ spec:
 EOF
    cat <<EOF
 [deploy] AIMService applied. How to verify level ${LEVEL} succeeded:
-  # 1) AIMService + InferenceService report Ready (may take a while on first pull):
-  kubectl get aimservice,inferenceservice,pods -n ${NAMESPACE}
-  kubectl describe aimservice aim-smoke -n ${NAMESPACE}
+  # 1) check that it is Ready with this command (READY True/False plus the reason;
+  #    may take a while on first pull):
+  kubectl get aimservice aim-smoke -n ${NAMESPACE} -o custom-columns='NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status,REASON:.status.conditions[?(@.type=="Ready")].reason'
+  # while it is not Ready yet, this one line says why (latest status message):
+  kubectl describe aimservice aim-smoke -n ${NAMESPACE} | grep -iE 'reason:|message:' | tail -n2
   # 2) wait until Ready (the InferenceService exists only after the weight
   #    download finishes; a bare cluster with no default StorageClass stays
   #    Starting forever), then run a small inference:
