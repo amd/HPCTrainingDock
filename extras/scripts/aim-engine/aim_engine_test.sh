@@ -57,6 +57,8 @@ usage()
 
 send-error() { usage; echo -e "\nError: ${@}"; exit 1; }
 reset-last() { last() { send-error "Unsupported argument :: ${1}"; }; }
+# Environment/runtime failures: print the reason plainly, no usage block.
+fatal() { echo -e "\n[test] ERROR: ${@}" >&2; exit 1; }
 
 while [[ $# -gt 0 ]]; do
    case "${1}" in
@@ -70,7 +72,27 @@ while [[ $# -gt 0 ]]; do
    shift
 done
 
-command -v docker >/dev/null 2>&1 || send-error "docker not found; kind needs a container runtime."
+# Pick a container runtime for kind: real Docker if present, else Podman. kind
+# only uses Podman when KIND_EXPERIMENTAL_PROVIDER=podman, and Podman also needs
+# cgroup v2 (rootless especially); on cgroup v1 kind cannot start a cluster.
+if [ "${KIND_EXPERIMENTAL_PROVIDER}" = "podman" ]; then
+   RUNTIME=podman
+elif command -v docker >/dev/null 2>&1 && ! docker --version 2>/dev/null | grep -qi podman; then
+   RUNTIME=docker
+elif command -v podman >/dev/null 2>&1; then
+   RUNTIME=podman; export KIND_EXPERIMENTAL_PROVIDER=podman
+else
+   fatal "no container runtime found; install Docker or Podman for kind."
+fi
+if [ "${RUNTIME}" = "podman" ]; then
+   [ -f /sys/fs/cgroup/cgroup.controllers ] || fatal \
+"Podman with kind requires cgroup v2, but this host is on cgroup v1.
+Options: use Docker instead, run on a cgroup v2 host, boot with
+systemd.unified_cgroup_hierarchy=1, or use a non-kind cluster (k3s, or
+minikube --driver=none). See https://kind.sigs.k8s.io/docs/user/rootless/"
+   [ "$(id -u)" -eq 0 ] || echo "[test] rootless Podman: if creation fails, retry as root (rootful Podman)."
+fi
+echo "[test] container runtime: ${RUNTIME}"
 [ -e /dev/kfd ] && [ -d /dev/dri ] || send-error "no AMD GPU on this host (/dev/kfd or /dev/dri missing)."
 case "$(uname -m)" in
    x86_64|amd64) ARCH=amd64 ;;
@@ -127,11 +149,12 @@ teardown() {
 if kind get clusters 2>/dev/null | grep -qx "${CLUSTER_NAME}"; then
    echo "[test] reusing existing kind cluster ${CLUSTER_NAME}"
    kind export kubeconfig --name "${CLUSTER_NAME}" --kubeconfig "${KUBECONFIG}" \
-      || send-error "could not export kubeconfig for existing cluster ${CLUSTER_NAME}."
+      || fatal "could not export kubeconfig for existing cluster ${CLUSTER_NAME}."
 else
    echo "[test] creating kind cluster ${CLUSTER_NAME} (GPU passthrough)"
    kind create cluster --name "${CLUSTER_NAME}" --config "${WORK_DIR}/kind-gpu.yaml" \
-      --kubeconfig "${KUBECONFIG}" || send-error "kind create cluster failed."
+      --kubeconfig "${KUBECONFIG}" \
+      || fatal "kind create cluster failed (runtime: ${RUNTIME}); if using Podman, see the cgroup v2 notes above."
 fi
 # From here on any failure/exit tears the cluster (and work dir) down.
 trap teardown EXIT
@@ -168,7 +191,7 @@ if [ "${BASE_IMAGE_ONLY}" = "1" ]; then
 [test] 'exit' tears the whole cluster down and the host is untouched.
 
 EOF
-   docker exec -it \
+   "${RUNTIME}" exec -it \
       -e PATH="/aim-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
       -e KUBECONFIG=/etc/kubernetes/admin.conf \
       -e HF_TOKEN="${HF_TOKEN}" \
@@ -241,7 +264,7 @@ if [ "${AUTO_RUN}" != "1" ]; then
   kubectl get aimservice,inferenceservice,pods -n default
 
 EOF
-   docker exec -it \
+   "${RUNTIME}" exec -it \
       -e PATH="/aim-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
       -e KUBECONFIG=/etc/kubernetes/admin.conf \
       -e HF_TOKEN="${HF_TOKEN}" \

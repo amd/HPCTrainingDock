@@ -99,11 +99,13 @@ fi
 [ "${env_block}" = $'\n        env:' ] && env_block=""
 
 cleanup() {
+   # Always drop the transient port-forward, even with --keep, so it does not
+   # linger holding port 8000 after we exit.
+   [ -n "${pf}" ] && kill "${pf}" >/dev/null 2>&1 || true
    [ "${KEEP}" = "1" ] && { echo "[base-check] --keep set; leaving ${NAME} running in ${NAMESPACE}"; return; }
    echo "[base-check] cleaning up ${NAME} in ${NAMESPACE}"
    kubectl delete deployment,service "${NAME}" -n "${NAMESPACE}" >/dev/null 2>&1 || true
    [ -n "${HF_TOKEN}" ] && kubectl delete secret "${NAME}-hf" -n "${NAMESPACE}" >/dev/null 2>&1 || true
-   [ -n "${pf}" ] && kill "${pf}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
