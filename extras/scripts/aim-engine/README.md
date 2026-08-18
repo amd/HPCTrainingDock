@@ -140,8 +140,11 @@ inference. It assumes a GPU host with `docker` and the `/dev/kfd` and `/dev/dri`
 devices; `kind`, `kubectl`, and `helm` are downloaded as user-local binaries when
 absent. This harness owns only the "from zero" foundation that `aim_deploy.sh`
 does not: it creates the cluster, deploys the ROCm device plugin so a node
-advertises `amd.com/gpu`, and injects the accelerator labels a real GPU Operator
-would set. It does not install the prerequisites or the operator itself; those
+advertises `amd.com/gpu`, injects the accelerator labels a real GPU Operator
+would set, and installs an in-cluster NFS provisioner so the default StorageClass
+offers the ReadWriteMany access mode the operator's profile cache needs (a real
+system supplies this through its own shared storage). It does not install the
+prerequisites or the operator itself; those
 remain the job of the levels, which we run on top of it. Its default models are
 ungated; when `HF_TOKEN` is set it wires that token in for the rare case of a
 gated model.
@@ -209,12 +212,19 @@ that levels 3 and 4 perform are not done by the harness.
   `spec.profile.selector.minimumType: any` on the AIMService we apply, which still
   prefers optimized profiles but allows a generic one so serving proceeds. To
   require tuned profiles only, raise this floor back to `optimized`.
-- The operator's default caching provisions a PVC per profile and routing needs
-  a Gateway or load balancer. On a bare cluster without a default StorageClass or
-  load balancer, the cache PVC stays Pending and the service hangs in Starting.
-  A full platform installer such as the AMD Enterprise AI reference stack (see
-  References) supplies these, for example through Longhorn and MetalLB, whereas
-  we assume the existing cluster already provides them.
+- The operator's default caching provisions a per-profile PVC with a
+  ReadWriteMany (RWX) access mode, so replicas can share one copy of the weights,
+  and routing needs a Gateway or load balancer. A single-node ReadWriteOnce
+  provisioner such as local-path or hostPath cannot satisfy the RWX claim even
+  when it is the default StorageClass, so the cache PVC stays Pending and the
+  service hangs in Starting. The operator path therefore needs an RWX-capable
+  StorageClass (for example NFS, CephFS, or Longhorn) and a load balancer. A full
+  platform installer such as the AMD Enterprise AI reference stack (see
+  References) supplies these, for example through Longhorn and MetalLB, whereas we
+  assume the existing cluster already provides them. The `aim_engine_test.sh`
+  harness stands in for that shared storage by installing an in-cluster NFS
+  provisioner as the RWX default StorageClass, so the same scripts bind the cache
+  PVC unchanged on the throwaway cluster.
 - KServe is installed with defaults. For serving on a real cluster we apply AMD's
   Standard-mode `kserve-values.yaml` (see the AIM KServe configuration docs).
 

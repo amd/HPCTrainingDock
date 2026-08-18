@@ -133,10 +133,13 @@ EOF
   # 1) AIMService + InferenceService report Ready (may take a while on first pull):
   kubectl get aimservice,inferenceservice,pods -n ${NAMESPACE}
   kubectl describe aimservice aim-smoke -n ${NAMESPACE}
-  # 2) small inference (find the predictor service, port-forward, then curl):
+  # 2) wait until Ready (the InferenceService exists only after the weight
+  #    download finishes; a bare cluster with no default StorageClass stays
+  #    Starting forever), then run a small inference:
+  kubectl wait --for=condition=Ready aimservice/aim-smoke -n ${NAMESPACE} --timeout=1800s
   isvc=\$(kubectl get inferenceservice -n ${NAMESPACE} -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
   kubectl port-forward -n ${NAMESPACE} svc/\$(basename \$isvc)-predictor 8080:80 >/tmp/pf.log 2>&1 &
-  sleep 3   # let the tunnel come up first, else curl gets connection refused
+  sleep 3   # let the port-forward come up, else curl gets connection refused
   curl -sS localhost:8080/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"aim-smoke","messages":[{"role":"user","content":"What is ROCm?"}],"max_tokens":200}'
   # 3) confirm the GPU is in use inside the serving pod:
   pod=\$(kubectl get pods -n ${NAMESPACE} -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)

@@ -35,6 +35,12 @@ WORK_DIR="${HOME}/aim-engine-test"
 : ${AMDGPU_DP_URL:=https://raw.githubusercontent.com/ROCm/k8s-device-plugin/master/k8s-ds-amdgpu-dp.yaml}
 # Model image for the operator inference smoke test. Ungated by default (no HF_TOKEN needed).
 : ${AIM_TEST_MODEL_IMAGE:=amdenterpriseai/aim-qwen-qwen3-32b:0.13.0}
+# In-cluster NFS provisioner: gives the throwaway cluster a dynamic ReadWriteMany
+# default StorageClass, mirroring the NFS a real system provides. The AIM cache
+# PVC is RWX, which the single-node local-path default cannot satisfy.
+: ${NFS_CHART_REPO:=https://kubernetes-sigs.github.io/nfs-ganesha-server-and-external-provisioner/}
+: ${NFS_CHART_VERSION:=}
+: ${NFS_STORAGE_SIZE:=100Gi}
 # Kubernetes-free (--container-only) path: run the AIM container directly. Small
 # ungated defaults so it is fast and needs no token. Works rootless on cgroup v1.
 : ${DIRECT_IMAGE:=amdenterpriseai/aim-base:0.11}
@@ -122,8 +128,11 @@ if [ "${CONTAINER_ONLY}" = "1" ]; then
       || fatal "failed to start the AIM container with ${RUNTIME}."
    echo "[test] waiting for the model to serve on :8000 (weight download can take a while)"
    ok=0
+   start=$(date +%s)
    for i in $(seq 1 180); do
       curl -sf http://localhost:8000/v1/models >/dev/null 2>&1 && { ok=1; break; }
+      last=$("${RUNTIME}" logs --tail 1 "${cname}" 2>&1 | tr -d '\r')
+      echo "[test] +$(( $(date +%s) - start ))s waiting :: ${last}"
       sleep 10
    done
    [ "${ok}" = "1" ] || { "${RUNTIME}" logs --tail 50 "${cname}" 2>&1; fatal "the model never served /v1/models."; }
@@ -270,6 +279,30 @@ EOF
       "${CLUSTER_NAME}-control-plane" bash --norc -i
    exit 0
 fi
+
+# Give the throwaway cluster a dynamic ReadWriteMany default StorageClass, the
+# way a real system's NFS would. The AIM operator's per-profile cache PVC is RWX,
+# which the single-node local-path default cannot bind. We install an in-cluster
+# NFS server + provisioner and make 'nfs' the default class BEFORE the operator
+# creates any PVC, so the unmodified deployment scripts stay storage-agnostic.
+echo "[test] installing in-cluster NFS dynamic provisioner (RWX default StorageClass)"
+helm repo add nfs-ganesha "${NFS_CHART_REPO}" >/dev/null 2>&1 || true
+helm repo update >/dev/null 2>&1 || true
+helm upgrade --install nfs-server nfs-ganesha/nfs-server-provisioner \
+   --namespace nfs-server --create-namespace \
+   ${NFS_CHART_VERSION:+--version "${NFS_CHART_VERSION}"} \
+   --set persistence.enabled=true \
+   --set persistence.storageClass=standard \
+   --set persistence.size="${NFS_STORAGE_SIZE}" \
+   --set storageClass.create=true \
+   --set storageClass.name=nfs \
+   --set storageClass.defaultClass=true \
+   --wait --timeout 5m \
+   || fatal "NFS provisioner install failed."
+# Drop local-path's default flag so 'nfs' is the sole default and RWX PVCs bind to it.
+kubectl patch storageclass standard \
+   -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}' >/dev/null 2>&1 || true
+echo "[test] default StorageClass is now 'nfs' (RWX via in-cluster NFS)"
 
 # Label the node with the GPU model so AIM profile resolution matches. A real
 # cluster gets this from the AMD GPU Operator's AcceleratorDetector; the bare
