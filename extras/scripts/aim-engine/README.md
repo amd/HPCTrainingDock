@@ -222,10 +222,12 @@ that case, and for anyone without sudo, we provide `--container-only`: it skips
 docker/podman with GPU passthrough, serving a small ungated model and confirming
 the GPU is in use. It validates the AIM microservice layer only, not the operator
 or the Kubernetes scripts, but it needs no cluster, no cgroup v2, and no sudo. Its
-default (`--auto-run 0`) leaves the model serving and drops us into a shell so we
-can send our own requests to `http://localhost:8000`, tearing the container down
-on exit; `--container-only 1 --auto-run 1` instead runs the checks and cleans up.
-In that shell we query the served model directly (the default model id is shown;
+default (`--auto-run 0`) leaves the model serving and drops us into a shell inside
+the container itself, a throwaway sandbox where nothing we do touches the host and
+everything is discarded on exit, so we can send our own requests to
+`http://localhost:8000` and remove the container by exiting;
+`--container-only 1 --auto-run 1` instead runs the checks and cleans up. In that
+shell we query the served model directly (the default model id is shown;
 substitute `DIRECT_MODEL_ID` if we overrode it):
 
 ```bash

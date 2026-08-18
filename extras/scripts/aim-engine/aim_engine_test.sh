@@ -175,22 +175,23 @@ if [ "${CONTAINER_ONLY}" = "1" ]; then
       else
          echo "[test] NOTE: no vLLM GPU signal from /metrics or logs; GPU use unconfirmed."
       fi
-      # auto-run: report and tear down. Otherwise leave the model serving and drop
-      # into a shell so we can run our own inference; the EXIT trap removes the
-      # container when that shell exits.
+      # auto-run: report and tear down. Otherwise exec INTO the still-serving
+      # container (a throwaway sandbox: edits and deletes stay inside it, the host
+      # is untouched) so we can run our own inference; the EXIT trap removes the
+      # container when the shell exits.
       [ "${AUTO_RUN}" = "1" ] && exit 0
       cat <<EOF
 
 [test] The AIM model is serving on http://localhost:8000 (OpenAI-compatible API).
-[test] You are in a shell for manual testing; the container stays up until you exit.
-[test] Try:
+[test] Dropping you INTO the container: a throwaway sandbox, so nothing you do here
+[test] touches the host, and it is all discarded when you exit. Try:
   curl -sS localhost:8000/v1/models
   curl -sS localhost:8000/v1/chat/completions -H 'Content-Type: application/json' \\
     -d '{"model":"${served}","messages":[{"role":"user","content":"What is ROCm?"}],"max_tokens":200}'
 [test] 'exit' stops and removes the container.
 
 EOF
-      "${SHELL:-bash}" -i
+      "${RUNTIME}" exec -it "${cname}" bash 2>/dev/null || "${RUNTIME}" exec -it "${cname}" sh
       exit 0
    fi
    echo "[test] FAIL: no valid completion. Response: ${resp}"; exit 1
