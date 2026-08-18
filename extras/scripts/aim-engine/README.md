@@ -78,6 +78,63 @@ Ready, port-forward the predictor Service and curl `/v1/chat/completions` for a
 small inference, and confirm GPU use in the serving pod (`rocm-smi`, or the same
 vLLM `/metrics` gauge). The `--auto-run 1` harness makes these assertions for us.
 
+## Testing each level
+
+The commands below reproduce what each level prints, so we can test a level
+without relying on terminal scrollback. They assume the `default` namespace; pass
+`--namespace` to change it.
+
+Level 1 (base-image serve, no operator) self-verifies: it serves a completion,
+reads vLLM's `/metrics` GPU KV-cache gauge, and prints a "level 1 verified" line.
+
+```bash
+./aim_deploy.sh --level 1
+```
+
+To keep it running and probe it by hand, re-run with `--keep 1` and port-forward
+the Service:
+
+```bash
+./aim_deploy.sh --level 1 --keep 1
+kubectl port-forward -n default svc/aim-base-check 8000:80 >/tmp/pf.log 2>&1 &
+sleep 3
+curl -sS localhost:8000/v1/models
+curl -sS localhost:8000/metrics | grep cache_usage_perc
+```
+
+Levels 2 to 4 (operator) differ only in how much they install before serving:
+level 2 assumes the operator and the seven prerequisites, level 3 installs the
+operator, and level 4 installs the prerequisites and the operator. Each preflights
+its preconditions and stops with a clear message if one is missing. We run the
+level, and then verify all three the same way:
+
+```bash
+./aim_deploy.sh --level 4     # or 2, or 3
+```
+
+After the install step, the script applies an `AIMService` named `aim-smoke` and
+prints these verification steps:
+
+```bash
+# 1) watch status; the first image pull and weight download can take many minutes:
+kubectl get aimservice,inferenceservice,pods -n default
+kubectl describe aimservice aim-smoke -n default
+# 2) block until Ready, then run a small inference through the predictor:
+kubectl wait --for=condition=Ready aimservice/aim-smoke -n default --timeout=1800s
+isvc=$(kubectl get inferenceservice -n default -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
+kubectl port-forward -n default svc/$(basename $isvc)-predictor 8080:80 >/tmp/pf.log 2>&1 &
+sleep 3
+curl -sS localhost:8080/v1/chat/completions -H 'Content-Type: application/json' \
+  -d '{"model":"aim-smoke","messages":[{"role":"user","content":"What is ROCm?"}],"max_tokens":200}'
+# 3) confirm the GPU is in use inside the serving pod:
+pod=$(kubectl get pods -n default -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
+kubectl exec -n default $pod -- rocm-smi
+```
+
+If step 2 never reaches Ready, the usual cause is storage: the operator's cache
+PVC needs a ReadWriteMany StorageClass (see Known limits). The throwaway harness
+provides one; on a real cluster we rely on the site's shared storage.
+
 ## Building-block scripts
 
 `aim_engine_setup.sh` installs AIM Engine. It preflights the eight prerequisites

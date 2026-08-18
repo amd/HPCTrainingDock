@@ -45,12 +45,11 @@ WORK_DIR="${HOME}/aim-engine-test"
 # ungated defaults so it is fast and needs no token. Works rootless on cgroup v1.
 : ${DIRECT_IMAGE:=amdenterpriseai/aim-base:0.11}
 : ${DIRECT_MODEL_ID:=Qwen/Qwen2.5-0.5B-Instruct}
-# Expose a single GPU so the runtime picks tensor-parallel-size 1: a small model's
-# attention-head count may not divide the full GPU count (e.g. 14 or 12 heads vs
-# 8 GPUs). Env-var masking alone does not constrain AIM's accelerator detection,
-# so we bind-mount just one /dev/dri render node the way Kubernetes does.
-# DIRECT_RENDER_NODE overrides which node; otherwise we take the first one.
-: ${DIRECT_RENDER_NODE:=}
+# Force tensor-parallel-size 1 so a small model's attention-head count (e.g. 14 or
+# 12) need not divide the host's GPU count (often 8). AIM derives TP from its own
+# accelerator detection, not from device/env visibility, so we set the runtime's
+# AIM_ACCELERATOR_COUNT directly and pin execution to GPU 0.
+: ${DIRECT_GPU_COUNT:=1}
 : ${DIRECT_VISIBLE_DEVICES:=0}
 # AIM accelerator model used to label the kind node so profile resolution matches
 # (the bare device plugin doesn't set the label a real AMD GPU Operator would).
@@ -121,25 +120,16 @@ if [ "${CONTAINER_ONLY}" = "1" ]; then
    grp=(--group-add video --group-add render)
    [ "${RUNTIME}" = "podman" ] && grp=(--group-add keep-groups)
    envs=(-e "AIM_MODEL_ID=${DIRECT_MODEL_ID}")
+   # AIM derives tensor-parallel size from its own accelerator detection, which
+   # device/env visibility does not constrain; set the count it uses directly.
+   [ -n "${DIRECT_GPU_COUNT}" ] && envs+=(-e "AIM_ACCELERATOR_COUNT=${DIRECT_GPU_COUNT}")
    [ -n "${DIRECT_VISIBLE_DEVICES}" ] && envs+=(-e "HIP_VISIBLE_DEVICES=${DIRECT_VISIBLE_DEVICES}" -e "ROCR_VISIBLE_DEVICES=${DIRECT_VISIBLE_DEVICES}")
    [ -n "${HF_TOKEN}" ] && envs+=(-e "HF_TOKEN=${HF_TOKEN}")
-   # Expose one render node so ROCm enumerates a single GPU (TP1); masking via env
-   # vars alone does not, which makes a multi-GPU host pick a TP the model rejects.
-   devs=(--device /dev/kfd)
-   rnode="${DIRECT_RENDER_NODE}"
-   [ -z "${rnode}" ] && rnode=$(ls /dev/dri/renderD* 2>/dev/null | head -n1)
-   if [ -n "${rnode}" ]; then
-      devs+=(--device "${rnode}")
-      echo "[test] exposing a single GPU render node ${rnode} (tensor-parallel-size 1)"
-   else
-      devs+=(--device /dev/dri)
-      echo "[test] WARNING no /dev/dri/renderD* node found; exposing all GPUs (TP may exceed a small model's head count)."
-   fi
    rm_container() { "${RUNTIME}" rm -f "${cname}" >/dev/null 2>&1 || true; }
    trap rm_container EXIT
-   echo "[test] container-only: ${RUNTIME} run ${DIRECT_IMAGE} (AIM_MODEL_ID=${DIRECT_MODEL_ID}), no Kubernetes"
+   echo "[test] container-only: ${RUNTIME} run ${DIRECT_IMAGE} (AIM_MODEL_ID=${DIRECT_MODEL_ID}, AIM_ACCELERATOR_COUNT=${DIRECT_GPU_COUNT}), no Kubernetes"
    "${RUNTIME}" run -d --name "${cname}" \
-      "${devs[@]}" "${grp[@]}" \
+      --device /dev/kfd --device /dev/dri "${grp[@]}" \
       --security-opt seccomp=unconfined -p 8000:8000 "${envs[@]}" "${DIRECT_IMAGE}" \
       || fatal "failed to start the AIM container with ${RUNTIME}."
    echo "[test] waiting for the model to serve on :8000 (weight download can take a while)"
