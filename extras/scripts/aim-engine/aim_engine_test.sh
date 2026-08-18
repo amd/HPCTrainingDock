@@ -39,6 +39,9 @@ WORK_DIR="${HOME}/aim-engine-test"
 # ungated defaults so it is fast and needs no token. Works rootless on cgroup v1.
 : ${DIRECT_IMAGE:=amdenterpriseai/aim-base:0.11}
 : ${DIRECT_MODEL_ID:=Qwen/Qwen2.5-1.5B-Instruct}
+# Default to one GPU: the runtime derives tensor-parallel size from the visible
+# GPU count, which a small model's head count may not divide (e.g. 12 vs 8).
+: ${DIRECT_VISIBLE_DEVICES:=0}
 # AIM accelerator model used to label the kind node so profile resolution matches
 # (the bare device plugin doesn't set the label a real AMD GPU Operator would).
 # Auto-detected from rocminfo if empty; override with --gpu-model.
@@ -63,7 +66,7 @@ usage()
    echo "  --help: print this usage information"
    echo ""
    echo "Env: HF_TOKEN (gated models), AIM_TEST_MODEL_IMAGE, AIM_GPU_MODEL,"
-   echo "     DIRECT_IMAGE, DIRECT_MODEL_ID (for --container-only)."
+   echo "     DIRECT_IMAGE, DIRECT_MODEL_ID, DIRECT_VISIBLE_DEVICES (for --container-only)."
    exit 1
 }
 
@@ -108,6 +111,7 @@ if [ "${CONTAINER_ONLY}" = "1" ]; then
    grp=(--group-add video --group-add render)
    [ "${RUNTIME}" = "podman" ] && grp=(--group-add keep-groups)
    envs=(-e "AIM_MODEL_ID=${DIRECT_MODEL_ID}")
+   [ -n "${DIRECT_VISIBLE_DEVICES}" ] && envs+=(-e "HIP_VISIBLE_DEVICES=${DIRECT_VISIBLE_DEVICES}" -e "ROCR_VISIBLE_DEVICES=${DIRECT_VISIBLE_DEVICES}")
    [ -n "${HF_TOKEN}" ] && envs+=(-e "HF_TOKEN=${HF_TOKEN}")
    rm_container() { "${RUNTIME}" rm -f "${cname}" >/dev/null 2>&1 || true; }
    trap rm_container EXIT
@@ -368,6 +372,9 @@ metadata:
 spec:
   model:
     image: ${AIM_TEST_MODEL_IMAGE}
+  profile:
+    selector:
+      minimumType: any
 EOF
 echo "[test] waiting for the InferenceService to become Ready (model download can take a while)"
 isvc=""

@@ -193,6 +193,22 @@ that levels 3 and 4 perform are not done by the harness.
 - The defaults are ungated and need no token. If we deliberately pick a gated
   model such as Llama or Gemma, it needs a Hugging Face token in `HF_TOKEN` from
   an account granted access to that model.
+- The models used here (for example Qwen2.5-1.5B-Instruct and Qwen3-32B) are
+  ungated convenience picks chosen so the scripts run without a token. They
+  exercise the serving path only; they are not tuned or representative for
+  benchmarking, so we should not read performance or hardware conclusions from
+  them. For performance work we use a model that ships an optimized AIM profile
+  and follow AMD's tuning guidance.
+- The operator ranks each model's published serving profiles by tier and, by
+  default, requires at least an "optimized" (pre-tuned) one. Whether an optimized
+  profile exists is a property of that model's entry in the AIM catalog, not of
+  the GPU: AMD's featured models ship tuned profiles while an ungated community
+  model often ships only a generic one. So the resolver can report
+  `ProfileNotFound` on such a model even though the hardware is fully capable and
+  candidates matched the node. We therefore set
+  `spec.profile.selector.minimumType: any` on the AIMService we apply, which still
+  prefers optimized profiles but allows a generic one so serving proceeds. To
+  require tuned profiles only, raise this floor back to `optimized`.
 - The operator's default caching provisions a PVC per profile and routing needs
   a Gateway or load balancer. On a bare cluster without a default StorageClass or
   load balancer, the cache PVC stays Pending and the service hangs in Starting.

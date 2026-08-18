@@ -60,6 +60,8 @@ usage()
 
 send-error() { usage; echo -e "\nError: ${@}"; exit 1; }
 reset-last() { last() { send-error "Unsupported argument :: ${1}"; }; }
+# State/environment failures: print the reason plainly, no usage block.
+fatal() { echo -e "\n[deploy] ERROR: ${@}" >&2; exit 1; }
 
 while [[ $# -gt 0 ]]; do
    case "${1}" in
@@ -87,7 +89,10 @@ operator_present() { kubectl get crd aimservices.aim.eai.amd.com >/dev/null 2>&1
 # L2 action: wire an optional HF token, apply an AIMService, report how to check it.
 serve_operator()
 {
-   operator_present || send-error "AIM Engine operator not installed; use --level 3 or 4."
+   operator_present || fatal "AIM Engine operator not installed in this cluster (CRD aimservices.aim.eai.amd.com missing).
+Level 2 assumes the operator and its prerequisites are already present. To install:
+  --level 3   install AIM Engine, then serve (assumes the 7 prerequisites)
+  --level 4   install the 7 prerequisites + AIM Engine, then serve (assumes the GPU Operator)"
    if [ -n "${HF_TOKEN}" ]; then
       echo "[deploy] configuring Hugging Face token (secret + default AIMRuntimeConfig)"
       kubectl create secret generic hf-token -n "${NAMESPACE}" \
@@ -108,7 +113,7 @@ spec:
 EOF
    fi
    echo "[deploy] applying AIMService for ${AIM_MODEL_IMAGE}"
-   kubectl apply -f - <<EOF || send-error "AIMService apply failed."
+   kubectl apply -f - <<EOF || fatal "AIMService apply failed."
 apiVersion: aim.eai.amd.com/v1alpha2
 kind: AIMService
 metadata:
@@ -119,6 +124,9 @@ metadata:
 spec:
   model:
     image: ${AIM_MODEL_IMAGE}
+  profile:
+    selector:
+      minimumType: any
 EOF
    cat <<EOF
 [deploy] AIMService applied. How to verify level ${LEVEL} succeeded:
