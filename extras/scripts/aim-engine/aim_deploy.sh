@@ -24,7 +24,8 @@
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 : ${LEVEL:=}
-: ${AIM_MODEL_IMAGE:=amdenterpriseai/aim-meta-llama-llama-3-2-1b-instruct:0.11.1}
+# Ungated model-specific image for the operator levels (2-4), so no token is needed.
+: ${AIM_MODEL_IMAGE:=amdenterpriseai/aim-qwen-qwen3-32b:0.13.0}
 : ${NAMESPACE:=default}
 : ${HF_TOKEN:=}
 
@@ -36,7 +37,8 @@ usage()
    echo "     2: operator serve (AIMService; assumes operator + prereqs installed)"
    echo "     3: install AIM Engine, then serve (assumes the 7 prereqs installed)"
    echo "     4: install prereqs + AIM Engine, then serve (assumes GPU Operator)"
-   echo "  --model-image [ IMAGE ] AIM model image, default ${AIM_MODEL_IMAGE}"
+   echo "  --model-image [ IMAGE ] AIM model image for levels 2-4, default ${AIM_MODEL_IMAGE}"
+   echo "                          (level 1 uses aim_base_check.sh's own ungated default)"
    echo "  --namespace [ NS ] namespace for the AIMService, default ${NAMESPACE}"
    echo "  --help: print this usage information"
    echo ""
@@ -106,7 +108,7 @@ EOF
 }
 
 case "${LEVEL}" in
-   1) HF_TOKEN="${HF_TOKEN}" exec "${HERE}/aim_base_check.sh" --image "${AIM_MODEL_IMAGE}" --namespace "${NAMESPACE}" ;;
+   1) HF_TOKEN="${HF_TOKEN}" exec "${HERE}/aim_base_check.sh" --namespace "${NAMESPACE}" ;;
    2) serve_operator ;;
    3) "${HERE}/aim_engine_setup.sh" || exit $?; serve_operator ;;
    4) "${HERE}/aim_engine_setup.sh" --install-prereqs 1 || exit $?; serve_operator ;;

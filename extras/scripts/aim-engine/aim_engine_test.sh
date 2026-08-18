@@ -24,8 +24,8 @@ WORK_DIR="${HOME}/aim-engine-test"
 : ${KUBECTL_VERSION:=v1.32.2}
 : ${HELM_VERSION:=v3.16.2}
 : ${AMDGPU_DP_URL:=https://raw.githubusercontent.com/ROCm/k8s-device-plugin/master/k8s-ds-amdgpu-dp.yaml}
-# Model image for the inference smoke test (this default is gated, so needs HF_TOKEN).
-: ${AIM_TEST_MODEL_IMAGE:=amdenterpriseai/aim-meta-llama-llama-3-2-1b-instruct:0.11.1}
+# Model image for the operator inference smoke test. Ungated by default (no HF_TOKEN needed).
+: ${AIM_TEST_MODEL_IMAGE:=amdenterpriseai/aim-qwen-qwen3-32b:0.13.0}
 # AIM accelerator model used to label the kind node so profile resolution matches
 # (the bare device plugin doesn't set the label a real AMD GPU Operator would).
 # Auto-detected from rocminfo if empty; override with --gpu-model.
@@ -152,7 +152,7 @@ echo "[test] amd.com/gpu allocatable = ${n}"
 if [ "${BASE_IMAGE_ONLY}" = "1" ]; then
    if [ "${AUTO_RUN}" = "1" ]; then
       echo ""; echo "[test] base-image-only: minimal serve check (no operator, no prereqs)"
-      HF_TOKEN="${HF_TOKEN}" "${HERE}/aim_base_check.sh" --image "${AIM_TEST_MODEL_IMAGE}"; exit $?
+      HF_TOKEN="${HF_TOKEN}" "${HERE}/aim_base_check.sh"; exit $?
    fi
    cat <<EOF
 

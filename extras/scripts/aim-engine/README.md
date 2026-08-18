@@ -32,8 +32,12 @@ scripts below rather than duplicating their logic. The levels are:
   and then serve, assuming only that the cluster's GPU nodes run the AMD GPU
   Operator.
 
+The default models are ungated, so no Hugging Face token is needed: level 1
+serves a small open model (Qwen2.5-1.5B-Instruct) through the base image, and
+levels 2 to 4 serve an ungated model-specific image. A token is required only if
+we deliberately point a level at a gated model such as Llama or Gemma.
+
 ```bash
-export HF_TOKEN=hf_...            # for gated models (Llama, Gemma)
 ./aim_deploy.sh --level 1         # base-image serve, no operator
 ./aim_deploy.sh --level 4         # install prereqs + AIM Engine, then serve
 ```
@@ -71,17 +75,18 @@ test clusters. Chart versions are overridable through environment variables.
 ./aim_prereqs_setup.sh
 ```
 
-`aim_base_check.sh` runs the same runtime container the operator would serve, but
-as a plain Deployment plus Service instead of an `AIMService`, requests one GPU,
-and confirms the model answers a single request. By default it deploys the
-model-specific image (the operator's by-image predictor runs that same image),
-and the image self-selects its tuned profile from in-pod GPU detection. It uses
-no operator, no CRDs, and no accelerator labels, so its only assumptions are a
+`aim_base_check.sh` runs an AIM container as a plain Deployment plus Service
+instead of an `AIMService`, requests one GPU, and confirms the model answers a
+single request. By default it is ungated and needs no token: it runs the generic
+base image with a small open model (Qwen2.5-1.5B-Instruct), which the base image
+serves through a general profile selected from in-pod GPU detection. It uses no
+operator, no CRDs, and no accelerator labels, so its only assumptions are a
 reachable cluster and a node advertising `amd.com/gpu` (from the AMD GPU device
-plugin or Operator); a gated model needs `HF_TOKEN` in the environment. It cleans
-up its own resources on exit unless we pass `--keep 1`. Passing a bare `aim-base`
-image together with `--model-id` serves an arbitrary Hugging Face model through
-the generic runtime.
+plugin or Operator). It cleans up its own resources on exit unless we pass
+`--keep 1`. Pointing `--image` at a model-specific image (and dropping
+`--model-id`) runs the exact container the operator's by-image predictor would
+run, which we use when we want the check to match the operator container for
+container.
 
 This check matches the operator only on the runtime (image, GPU detection, weight
 download, engine start): it does not exercise the operator's profile resolution,
@@ -90,9 +95,9 @@ green result as necessary but not sufficient, since the label-driven resolution
 is validated only by the full operator flow.
 
 ```bash
-./aim_base_check.sh                                             # serve the default image, assert, clean up
-./aim_base_check.sh --image amdenterpriseai/aim-base:0.11 \
-                    --model-id Qwen/Qwen2.5-1.5B-Instruct       # generic runtime, arbitrary model
+./aim_base_check.sh                                            # ungated default, assert, clean up
+./aim_base_check.sh --image amdenterpriseai/aim-qwen-qwen3-32b:0.13.0 \
+                    --model-id ""                              # match the operator's model-specific container
 ```
 
 ## Testing on a throwaway cluster
@@ -105,11 +110,11 @@ absent. This harness owns only the "from zero" foundation that `aim_deploy.sh`
 does not: it creates the cluster, deploys the ROCm device plugin so a node
 advertises `amd.com/gpu`, and injects the accelerator labels a real GPU Operator
 would set. It does not install the prerequisites or the operator itself; those
-remain the job of the levels, which we run on top of it. When `HF_TOKEN` is set
-it wires that token in for gated models.
+remain the job of the levels, which we run on top of it. Its default models are
+ungated; when `HF_TOKEN` is set it wires that token in for the rare case of a
+gated model.
 
 ```bash
-export HF_TOKEN=hf_...                    # for gated models
 ./aim_engine_test.sh                      # bring up kind + GPU, then drop into a sandbox shell
 ./aim_engine_test.sh --auto-run 1         # run install, idempotency, and an inference check, then clean up
 ./aim_engine_test.sh --base-image-only 1  # skip the operator; run only the base-image serve check
@@ -141,9 +146,9 @@ that levels 3 and 4 perform are not done by the harness.
   succeeds only if the model image ships a profile for that GPU. AIM serving
   profiles target discrete Instinct GPUs (MI300X, MI325X, MI350X, MI355X), so an
   MI300A APU has no matching profile and serving there is not expected to work.
-- Gated models such as Llama and Gemma need a Hugging Face token in `HF_TOKEN`,
-  from an account granted access to the model. Ungated models avoid this, but
-  the small ones are limited.
+- The defaults are ungated and need no token. If we deliberately pick a gated
+  model such as Llama or Gemma, it needs a Hugging Face token in `HF_TOKEN` from
+  an account granted access to that model.
 - The operator's default caching provisions a PVC per profile and routing needs
   a Gateway or load balancer. On a bare cluster without a default StorageClass or
   load balancer, the cache PVC stays Pending and the service hangs in Starting.

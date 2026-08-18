@@ -1,12 +1,13 @@
 #!/bin/bash
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-# Minimal, operator-less AIM serving check. Runs the SAME runtime container the
-# operator would serve, but as a plain Deployment + Service instead of an
-# AIMService. This proves a cluster's GPU can serve the model BEFORE committing to
-# the full AIM Engine operator stack (aim_engine_setup.sh). By default it deploys
-# the model-specific image (the operator's by-image predictor runs that same
-# image), self-selecting the tuned profile from in-pod GPU detection.
+# Minimal, operator-less AIM serving check. Runs an AIM container as a plain
+# Deployment + Service instead of an AIMService, to prove a cluster's GPU can
+# serve a model BEFORE committing to the full AIM Engine operator stack
+# (aim_engine_setup.sh). The default is deliberately ungated: the generic base
+# image plus a small open model (Qwen2.5-1.5B-Instruct), so no Hugging Face token
+# is ever required. Point --image at a model-specific image (dropping --model-id)
+# to run the exact container the operator's by-image predictor would run.
 #
 # Scope: this matches the operator only on the RUNTIME (image, GPU detection,
 # weight download, engine start). It does NOT exercise the operator's profile
@@ -17,19 +18,15 @@
 #
 # It needs only its own small prerequisites: a reachable cluster and a node that
 # advertises amd.com/gpu. It uses NO CRDs, NO operator, and NO accelerator node
-# labels; the image detects the GPU in-container. Gated models still require
-# HF_TOKEN, injected as a pod env var.
-#
-# Pass a bare base image (amdenterpriseai/aim-base:0.11) together with --model-id
-# to serve an arbitrary Hugging Face model via the generic runtime instead.
+# labels; the image detects the GPU in-container. HF_TOKEN is used only if set,
+# for the rare case of deliberately choosing a gated model.
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-# Default to the harness image so the base check and the operator flow serve the
-# identical container; override with --image or AIM_TEST_MODEL_IMAGE.
-: ${IMAGE:=${AIM_TEST_MODEL_IMAGE:-amdenterpriseai/aim-meta-llama-llama-3-2-1b-instruct:0.11.1}}
-# Only needed for a bare base image: the Hugging Face model id to serve (AIM_MODEL_ID).
-# Model-specific images set AIM_ID themselves, so leave this empty for them.
-: ${MODEL_ID:=}
+# Ungated by default: generic base image + a small open model, so no token is needed.
+: ${IMAGE:=amdenterpriseai/aim-base:0.11}
+# Model id for a base image (AIM_MODEL_ID). Leave empty when --image is a
+# model-specific image, since those set AIM_ID themselves.
+: ${MODEL_ID:=Qwen/Qwen2.5-1.5B-Instruct}
 : ${HF_TOKEN:=}
 : ${NAMESPACE:=default}
 : ${NAME:=aim-base-check}
