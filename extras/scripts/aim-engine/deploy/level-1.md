@@ -54,14 +54,17 @@ LangChain client pointed at `http://localhost:8000/v1`.
 ## Drive it with an example app
 
 The `icf_4agent` example in the HPCTrainingExamples repository
-(`MLExamples/icf_4agent`) is configured through environment variables, so we
-point it at the endpoint and reuse the served id:
+(`MLExamples/icf_4agent`) is configured through environment variables. The first
+time we build its virtualenv with `create_aivenv.sh` (which `start_app.sh` then
+activates), then we point it at the endpoint and reuse the served id:
 
 ```bash
+cd /path/to/HPCTrainingExamples/MLExamples/icf_4agent
+./create_aivenv.sh
 export ICF_BASE_URL=http://localhost:8000/v1
 export ICF_MODEL="$MODEL"
 export ICF_API_KEY=unused
-cd /path/to/HPCTrainingExamples/MLExamples/icf_4agent && ./start_app.sh
+./start_app.sh
 ```
 
 It reasons best with a capable model such as a gpt-oss variant; the small
