@@ -81,12 +81,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 command -v kubectl >/dev/null 2>&1 || send-error "kubectl not found on PATH."
-# Fetch the node list once and key off whether names come back, not the exit
-# code: transient discovery warnings (e.g. an OIDC token refresh) can make
-# kubectl print nodes yet exit non-zero. Only if none come back do we re-run to
-# capture the real reason (401, expired login, wrong KUBECONFIG), instead of
-# masking it as a missing-GPU error.
-nodes=$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+# Fetch the node list, keying off whether names come back rather than the exit
+# code: on OIDC clusters kubectl's discovery burst intermittently 401s and
+# usually recovers, so we retry a few times. Only if none ever come back do we
+# re-run to capture the real reason (401, expired login, wrong KUBECONFIG),
+# instead of masking it as a missing-GPU error.
+nodes=""
+for _ in 1 2 3 4 5; do
+   nodes=$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+   [ -n "${nodes}" ] && break
+   sleep 2
+done
 [ -n "${nodes}" ] \
    || send-error "cannot reach a Kubernetes cluster (check KUBECONFIG / login) :: $(kubectl get nodes 2>&1 >/dev/null)"
 

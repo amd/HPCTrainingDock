@@ -107,12 +107,17 @@ done
 
 [ -n "${LEVEL}" ] || send-error "select a level with --level [1|2|3|4]."
 command -v kubectl >/dev/null 2>&1 || send-error "kubectl not found on PATH."
-# Key off whether node names come back, not the exit code: transient discovery
-# warnings (e.g. an OIDC token refresh) can make kubectl print nodes yet exit
-# non-zero. Only if none come back do we re-run to capture the real reason.
-if [ -z "$(kubectl get nodes -o name 2>/dev/null)" ]; then
-   send-error "cannot reach a Kubernetes cluster (check KUBECONFIG / login) :: $(kubectl get nodes 2>&1 >/dev/null)"
-fi
+# Key off whether node names come back, not the exit code: on OIDC clusters
+# kubectl's discovery burst intermittently 401s and usually recovers, so we
+# retry a few times before giving up. Only if none ever come back do we re-run
+# to capture the real reason (expired login, wrong KUBECONFIG).
+reachable=""
+for _ in 1 2 3 4 5; do
+   [ -n "$(kubectl get nodes -o name 2>/dev/null)" ] && { reachable=1; break; }
+   sleep 2
+done
+[ -n "${reachable}" ] \
+   || send-error "cannot reach a Kubernetes cluster (check KUBECONFIG / login) :: $(kubectl get nodes 2>&1 >/dev/null)"
 
 operator_present() { kubectl get crd aimservices.aim.eai.amd.com >/dev/null 2>&1; }
 
