@@ -81,14 +81,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 command -v kubectl >/dev/null 2>&1 || send-error "kubectl not found on PATH."
+# An OIDC kubeconfig with an expired token makes the first kubectl call block on
+# an interactive browser re-login; if that cannot open (headless/WSL) it looks
+# like a silent hang. Say so up front, and suggest the manual refresh.
+echo "[base-check] checking cluster access (if this seems to hang, your login likely expired: run 'kubectl get nodes' to re-authenticate, then retry)"
 # Fetch the node list, keying off whether names come back rather than the exit
 # code: on OIDC clusters kubectl's discovery burst intermittently 401s and
 # usually recovers, so we retry a few times. Only if none ever come back do we
 # re-run to capture the real reason (401, expired login, wrong KUBECONFIG),
 # instead of masking it as a missing-GPU error.
 nodes=""
-for _ in 1 2 3 4 5; do
-   nodes=$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+for _ in $(seq 10); do
+   nodes=$(kubectl get nodes --request-timeout=15s -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
    [ -n "${nodes}" ] && break
    sleep 2
 done
@@ -98,7 +102,7 @@ done
 # Prerequisite for this simple check: some node advertises amd.com/gpu.
 gpu_ok=0
 for node in ${nodes}; do
-   q=$(kubectl get node "${node}" -o jsonpath='{.status.allocatable.amd\.com/gpu}' 2>/dev/null)
+   q=$(kubectl get node "${node}" --request-timeout=15s -o jsonpath='{.status.allocatable.amd\.com/gpu}' 2>/dev/null)
    [ -n "${q}" ] && [ "${q}" != "0" ] && { gpu_ok=1; break; }
 done
 [ "${gpu_ok}" = "1" ] \
@@ -111,7 +115,7 @@ env_block=$'\n        env:'
 if [ -n "${HF_TOKEN}" ]; then
    echo "[base-check] configuring HF_TOKEN secret for gated model access"
    kubectl create secret generic "${NAME}-hf" -n "${NAMESPACE}" \
-      --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply --server-side --force-conflicts --validate=false -f -
+      --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply --request-timeout=30s --server-side --force-conflicts --validate=false -f -
    env_block+=$'\n        - name: HF_TOKEN\n          valueFrom:\n            secretKeyRef:\n              name: '"${NAME}"$'-hf\n              key: hf-token'
 fi
 [ "${env_block}" = $'\n        env:' ] && env_block=""
@@ -182,9 +186,9 @@ EOF
 # times: on OIDC clusters those client round-trips intermittently 401 during
 # discovery, so we let the server compute the merge and just retry the one call.
 applied=""
-for _ in 1 2 3 4 5; do
+for _ in $(seq 10); do
    printf '%s\n' "${manifest}" \
-      | kubectl apply --server-side --force-conflicts --validate=false -n "${NAMESPACE}" -f - && { applied=1; break; }
+      | kubectl apply --request-timeout=30s --server-side --force-conflicts --validate=false -n "${NAMESPACE}" -f - && { applied=1; break; }
    sleep 2
 done
 [ -n "${applied}" ] || send-error "deploy failed."

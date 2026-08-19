@@ -53,6 +53,15 @@ kubeconfig's exec args to paste the returned code back instead. Without the
 plugin, `kubectl` cannot obtain a token and the scripts report that the cluster
 is unreachable.
 
+The token expires after a while, so an occasional re-login is normal. When it
+lapses, the next `kubectl` call (including a script's first one) blocks waiting
+for a fresh browser login, which on a headless host looks like a silent hang.
+If a run seems to stall before printing anything, refresh the login by running
+`kubectl get nodes` on its own (complete the browser step) and then re-run. On a
+flaky OIDC control plane individual requests may also be rejected at random with
+`Unauthorized`; the deploy retries each server-side apply so it rides over those
+without failing the run.
+
 ## Choosing a namespace
 
 On a multi-tenant cluster we must have access to a project and pass its name as

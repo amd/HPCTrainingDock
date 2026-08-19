@@ -14,8 +14,12 @@ we export the kubeconfig once so later `kubectl` commands use it too:
 
 ```bash
 export KUBECONFIG=~/Downloads/kubeconfig.yaml
-./aim_deploy.sh --level 1 --keep 1
+./aim_deploy.sh --level 1 --keep 1 --namespace <your-namespace>
 ```
+
+On a shared cluster we pass `--namespace` for a project we can write to (see
+[Choosing a namespace](README.md#choosing-a-namespace)); where `default` is
+writable we omit it.
 
 It waits for Ready (the first pull and weight download take a few minutes),
 serves a test completion, confirms vLLM placed its KV cache on the GPU, and
@@ -23,13 +27,21 @@ leaves `aim-base-check` running.
 
 ## Use the served model
 
-The script's own port-forward is transient, so we open our own and query the
-OpenAI-compatible endpoint, reading the model id from `/v1/models` rather than
-hardcoding it:
+The script's own port-forward is transient, so we open our own against the
+namespace we deployed into and query the OpenAI-compatible endpoint, reading the
+model id from `/v1/models` rather than hardcoding it. On a flaky OIDC control
+plane a lone port-forward can be rejected and exit immediately (`Exit 1`), so we
+retry until the tunnel answers:
 
 ```bash
-kubectl port-forward -n default svc/aim-base-check 8000:80 >/tmp/pf.log 2>&1 &
-sleep 3
+NS=<your-namespace>
+for _ in $(seq 10); do
+  kubectl port-forward -n "$NS" svc/aim-base-check 8000:80 >/tmp/pf.log 2>&1 &
+  pf=$!
+  sleep 3
+  curl -sf localhost:8000/v1/models >/dev/null 2>&1 && break
+  kill "$pf" 2>/dev/null
+done
 MODEL=$(curl -sS localhost:8000/v1/models | grep -o '"id":"[^"]*"' | head -n1 | cut -d'"' -f4)
 curl -sS localhost:8000/v1/chat/completions -H 'Content-Type: application/json' \
   -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"What is ROCm?\"}],\"max_tokens\":200}"
@@ -61,7 +73,7 @@ To serve a larger open model, set the id the base check reads (inherited by the
 underlying script); a gated model also needs `HF_TOKEN`:
 
 ```bash
-MODEL_ID="Qwen/Qwen2.5-7B-Instruct" ./aim_deploy.sh --level 1 --keep 1
+MODEL_ID="Qwen/Qwen2.5-7B-Instruct" ./aim_deploy.sh --level 1 --keep 1 --namespace <your-namespace>
 ```
 
 For a model-specific AIM image and the operator path, use [level 4](level-4.md).
@@ -69,8 +81,8 @@ For a model-specific AIM image and the operator path, use [level 4](level-4.md).
 ## Clean up
 
 ```bash
-kill %1 2>/dev/null
-kubectl delete deployment,service aim-base-check -n default
+kill "$pf" 2>/dev/null
+kubectl delete deployment,service aim-base-check -n "$NS"
 ```
 
 Level 1 matches the operator only on the runtime (image, GPU detection, weight

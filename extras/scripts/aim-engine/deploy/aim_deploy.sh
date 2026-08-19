@@ -107,13 +107,17 @@ done
 
 [ -n "${LEVEL}" ] || send-error "select a level with --level [1|2|3|4]."
 command -v kubectl >/dev/null 2>&1 || send-error "kubectl not found on PATH."
+# An OIDC kubeconfig with an expired token makes the first kubectl call block on
+# an interactive browser re-login; if that cannot open (headless/WSL) it looks
+# like a silent hang. Say so up front, and suggest the manual refresh.
+echo "[deploy] checking cluster access (if this seems to hang, your login likely expired: run 'kubectl get nodes' to re-authenticate, then retry)"
 # Key off whether node names come back, not the exit code: on OIDC clusters
 # kubectl's discovery burst intermittently 401s and usually recovers, so we
 # retry a few times before giving up. Only if none ever come back do we re-run
 # to capture the real reason (expired login, wrong KUBECONFIG).
 reachable=""
-for _ in 1 2 3 4 5; do
-   [ -n "$(kubectl get nodes -o name 2>/dev/null)" ] && { reachable=1; break; }
+for _ in $(seq 10); do
+   [ -n "$(kubectl get nodes --request-timeout=15s -o name 2>/dev/null)" ] && { reachable=1; break; }
    sleep 2
 done
 [ -n "${reachable}" ] \
@@ -131,8 +135,8 @@ Level 2 assumes the operator and its prerequisites are already present. To insta
    if [ -n "${HF_TOKEN}" ]; then
       echo "[deploy] configuring Hugging Face token (secret + default AIMRuntimeConfig)"
       kubectl create secret generic hf-token -n "${NAMESPACE}" \
-         --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply --server-side --force-conflicts --validate=false -f -
-      kubectl apply --server-side --force-conflicts --validate=false -f - <<EOF
+         --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply --request-timeout=30s --server-side --force-conflicts --validate=false -f -
+      kubectl apply --request-timeout=30s --server-side --force-conflicts --validate=false -f - <<EOF
 apiVersion: aim.eai.amd.com/v1alpha1
 kind: AIMRuntimeConfig
 metadata:
@@ -178,9 +182,9 @@ EOF
    # times: on OIDC clusters those client round-trips intermittently 401 during
    # discovery, so we let the server compute the merge and just retry the call.
    applied=""
-   for _ in 1 2 3 4 5; do
+   for _ in $(seq 10); do
       printf '%s\n' "${aimservice}" \
-         | kubectl apply --server-side --force-conflicts --validate=false -f - && { applied=1; break; }
+         | kubectl apply --request-timeout=30s --server-side --force-conflicts --validate=false -f - && { applied=1; break; }
       sleep 2
    done
    [ -n "${applied}" ] || fatal "AIMService apply failed."
