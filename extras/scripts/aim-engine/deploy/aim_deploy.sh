@@ -126,8 +126,8 @@ Level 2 assumes the operator and its prerequisites are already present. To insta
    if [ -n "${HF_TOKEN}" ]; then
       echo "[deploy] configuring Hugging Face token (secret + default AIMRuntimeConfig)"
       kubectl create secret generic hf-token -n "${NAMESPACE}" \
-         --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply -f -
-      kubectl apply -f - <<EOF
+         --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply --validate=false -f -
+      kubectl apply --validate=false -f - <<EOF
 apiVersion: aim.eai.amd.com/v1alpha1
 kind: AIMRuntimeConfig
 metadata:
@@ -143,7 +143,10 @@ spec:
 EOF
    fi
    echo "[deploy] applying AIMService for ${AIM_MODEL_IMAGE}"
-   kubectl apply -f - <<EOF || fatal "AIMService apply failed."
+   # --validate=false skips kubectl's client-side OpenAPI schema download, which
+   # on some OIDC clusters intermittently 401s during discovery; the server
+   # still validates the object on apply.
+   kubectl apply --validate=false -f - <<EOF || fatal "AIMService apply failed."
 apiVersion: aim.eai.amd.com/v1alpha2
 kind: AIMService
 metadata:

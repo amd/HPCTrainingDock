@@ -53,6 +53,30 @@ kubeconfig's exec args to paste the returned code back instead. Without the
 plugin, `kubectl` cannot obtain a token and the scripts report that the cluster
 is unreachable.
 
+## Choosing a namespace
+
+On a multi-tenant cluster we must have access to a project and pass its name as
+the namespace with `--namespace`, or the deploy will not work. Our identity is
+usually authorized only in that project's namespace, not `default`, but the
+scripts default to `default`, so a run without `--namespace` fails while
+retrieving or creating objects even though `kubectl get nodes` and `kubectl get
+ns` succeed: cluster-scoped reads are allowed but namespaced writes are not, and
+some clusters report the denial as `Unauthorized` rather than `Forbidden`. Find
+a namespace we can deploy into and pass it with `--namespace`:
+
+```bash
+for ns in $(kubectl get ns -o name | cut -d/ -f2); do
+   kubectl auth can-i create deployments -n "$ns" >/dev/null 2>&1 && echo "can deploy in: $ns"
+done
+./aim_deploy.sh --level 1 --keep 1 --namespace <namespace>
+```
+
+If nothing prints, our identity has no namespace yet and an administrator must
+grant one. If a namespace exists but access is still denied, its RoleBinding may
+name an identity (an email or a group) that differs from the one the API server
+derives from our token's OIDC claims, which is a cluster-side fix rather than a
+kubeconfig change.
+
 ## Forwarded options and tokens
 
 `aim_deploy.sh` forwards a level's flags to its underlying script: `--keep` and

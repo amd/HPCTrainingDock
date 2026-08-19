@@ -106,7 +106,7 @@ env_block=$'\n        env:'
 if [ -n "${HF_TOKEN}" ]; then
    echo "[base-check] configuring HF_TOKEN secret for gated model access"
    kubectl create secret generic "${NAME}-hf" -n "${NAMESPACE}" \
-      --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply -f -
+      --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply --validate=false -f -
    env_block+=$'\n        - name: HF_TOKEN\n          valueFrom:\n            secretKeyRef:\n              name: '"${NAME}"$'-hf\n              key: hf-token'
 fi
 [ "${env_block}" = $'\n        env:' ] && env_block=""
@@ -123,7 +123,10 @@ cleanup() {
 trap cleanup EXIT
 
 echo "[base-check] deploying ${IMAGE} (amd.com/gpu=${GPU_COUNT}${MODEL_ID:+, AIM_MODEL_ID=${MODEL_ID}})"
-kubectl apply -n "${NAMESPACE}" -f - <<EOF || send-error "deploy failed."
+# --validate=false skips kubectl's client-side OpenAPI schema download, which on
+# some OIDC clusters intermittently 401s during discovery; the server still
+# validates the object on apply.
+kubectl apply --validate=false -n "${NAMESPACE}" -f - <<EOF || send-error "deploy failed."
 apiVersion: apps/v1
 kind: Deployment
 metadata:
