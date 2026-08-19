@@ -22,6 +22,9 @@
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# The deployment scripts this harness exercises live in the sibling deploy/ dir.
+DEPLOY_DIR="$(cd "${HERE}/../deploy" 2>/dev/null && pwd -P)"
+[ -n "${DEPLOY_DIR}" ] || { echo "[test] ERROR: expected sibling deploy/ dir at ${HERE}/../deploy" >&2; exit 1; }
 
 AUTO_RUN=0
 BASE_IMAGE_ONLY=0
@@ -250,7 +253,7 @@ nodes:
     containerPath: /dev/kfd
   - hostPath: /dev/dri
     containerPath: /dev/dri
-  - hostPath: ${HERE}
+  - hostPath: ${DEPLOY_DIR}
     containerPath: /aim-engine
     readOnly: true
   - hostPath: ${BIN_DIR}
@@ -298,7 +301,7 @@ echo "[test] amd.com/gpu allocatable = ${n}"
 if [ "${BASE_IMAGE_ONLY}" = "1" ]; then
    if [ "${AUTO_RUN}" = "1" ]; then
       echo ""; echo "[test] base-image-only: minimal serve check (no operator, no prereqs)"
-      HF_TOKEN="${HF_TOKEN}" "${HERE}/aim_base_check.sh"; exit $?
+      HF_TOKEN="${HF_TOKEN}" "${DEPLOY_DIR}/aim_base_check.sh"; exit $?
    fi
    cat <<EOF
 
@@ -423,16 +426,16 @@ fi
 FAILED=0
 
 echo ""; echo "[test] STEP 1: preflight with no prereqs (expect exit 42)"
-"${HERE}/aim_engine_setup.sh"; rc=$?
+"${DEPLOY_DIR}/aim_engine_setup.sh"; rc=$?
 if [ "${rc}" -eq 42 ]; then echo "[test] PASS: missing prerequisites reported."
 else echo "[test] FAIL: expected exit 42, got ${rc}."; FAILED=1; fi
 
 echo ""; echo "[test] STEP 2: install prereqs + AIM Engine (expect success)"
-if "${HERE}/aim_engine_setup.sh" --install-prereqs 1; then echo "[test] PASS: installed."
+if "${DEPLOY_DIR}/aim_engine_setup.sh" --install-prereqs 1; then echo "[test] PASS: installed."
 else echo "[test] FAIL: install did not succeed."; FAILED=1; fi
 
 echo ""; echo "[test] STEP 3: idempotency (re-run, expect success)"
-if "${HERE}/aim_engine_setup.sh"; then echo "[test] PASS: idempotent."
+if "${DEPLOY_DIR}/aim_engine_setup.sh"; then echo "[test] PASS: idempotent."
 else echo "[test] FAIL: second run did not succeed."; FAILED=1; fi
 
 echo ""; echo "[test] STEP 4: inference smoke test (${AIM_TEST_MODEL_IMAGE})"
