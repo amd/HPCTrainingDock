@@ -81,11 +81,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 command -v kubectl >/dev/null 2>&1 || send-error "kubectl not found on PATH."
-kubectl get nodes >/dev/null 2>&1 || send-error "cannot reach a Kubernetes cluster (check KUBECONFIG)."
+# Fetch the node list once and key off whether names come back, not the exit
+# code: transient discovery warnings (e.g. an OIDC token refresh) can make
+# kubectl print nodes yet exit non-zero. Only if none come back do we re-run to
+# capture the real reason (401, expired login, wrong KUBECONFIG), instead of
+# masking it as a missing-GPU error.
+nodes=$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+[ -n "${nodes}" ] \
+   || send-error "cannot reach a Kubernetes cluster (check KUBECONFIG / login) :: $(kubectl get nodes 2>&1 >/dev/null)"
 
 # Prerequisite for this simple check: some node advertises amd.com/gpu.
 gpu_ok=0
-for node in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}'); do
+for node in ${nodes}; do
    q=$(kubectl get node "${node}" -o jsonpath='{.status.allocatable.amd\.com/gpu}' 2>/dev/null)
    [ -n "${q}" ] && [ "${q}" != "0" ] && { gpu_ok=1; break; }
 done
