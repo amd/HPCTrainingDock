@@ -212,10 +212,22 @@ progress_loop &
 progress_pid=$!
 stop-progress() { kill "${progress_pid}" 2>/dev/null; wait "${progress_pid}" 2>/dev/null; }
 
-if ! kubectl rollout status deployment/"${NAME}" -n "${NAMESPACE}" --timeout="${READY_TIMEOUT}s"; then
+# Poll for readiness instead of `kubectl rollout status`: on a flaky OIDC cluster
+# that single watch call can catch a transient 401 and exit early, which would
+# look like a failed rollout. Treat an empty/failed read as "not ready yet" and
+# only give up once READY_TIMEOUT actually elapses.
+deadline=$(( $(date +%s) + READY_TIMEOUT ))
+ready=""
+while [ "$(date +%s)" -lt "${deadline}" ]; do
+   avail=$(kubectl get deployment "${NAME}" -n "${NAMESPACE}" --request-timeout=15s \
+             -o jsonpath='{.status.availableReplicas}' 2>/dev/null)
+   [ "${avail}" = "1" ] && { ready=1; break; }
+   sleep "${PROGRESS_INTERVAL}"
+done
+if [ -z "${ready}" ]; then
    stop-progress
-   echo "[base-check] pod did not become Ready; recent events and logs:"
-   kubectl describe deployment/"${NAME}" -n "${NAMESPACE}" | sed -n '/Events:/,$p'
+   echo "[base-check] pod did not become Ready within ${READY_TIMEOUT}s; recent events and logs:"
+   kubectl describe deployment/"${NAME}" -n "${NAMESPACE}" 2>/dev/null | sed -n '/Events:/,$p'
    kubectl logs -n "${NAMESPACE}" "deploy/${NAME}" --tail=50 2>/dev/null || true
    send-error "the deployment never became Ready."
 fi
