@@ -217,8 +217,26 @@ if ! kubectl rollout status deployment/"${NAME}" -n "${NAMESPACE}" --timeout="${
 fi
 stop-progress
 
-kubectl port-forward -n "${NAMESPACE}" "svc/${NAME}" 8000:80 >/dev/null 2>&1 &
-pf=$!; sleep 5
+# Bring up the port-forward and wait until the endpoint actually answers. On a
+# slow or flaky cluster the tunnel can take longer than a fixed sleep to bind, or
+# die on a transient auth blip, so we poll /v1/models and re-establish if the
+# forwarder has exited. Keep its log so a real failure is visible.
+pf_log=$(mktemp)
+pf=""
+serve_ok=""
+for _ in $(seq 1 12); do
+   if [ -z "${pf}" ] || ! kill -0 "${pf}" 2>/dev/null; then
+      kubectl port-forward -n "${NAMESPACE}" "svc/${NAME}" 8000:80 >"${pf_log}" 2>&1 &
+      pf=$!
+   fi
+   sleep 5
+   curl -sf http://localhost:8000/v1/models >/dev/null 2>&1 && { serve_ok=1; break; }
+done
+if [ -z "${serve_ok}" ]; then
+   echo "[base-check] could not reach http://localhost:8000 via port-forward; port-forward log:"
+   sed 's/^/[base-check]   pf: /' "${pf_log}" 2>/dev/null
+   send-error "port-forward to the served endpoint failed."
+fi
 
 # The served model name is whatever the image resolved; read it from /v1/models.
 served=$(curl -sS http://localhost:8000/v1/models | tr ',' '\n' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -n1)
