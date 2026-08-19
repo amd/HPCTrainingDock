@@ -307,9 +307,13 @@ that levels 3 and 4 perform are not done by the harness.
   applies its `2Gi` default and the predictor is OOM-killed (exit 137) the moment
   it starts loading weights. We therefore set an explicit `spec.resources` floor
   on the AIMService, sized for the default 32B image and overridable via
-  `AIM_CPU_REQUEST`, `AIM_MEM_REQUEST`, `AIM_CPU_LIMIT`, and `AIM_MEM_LIMIT`. AIM
-  Engine merges these on top of the profile's computed resources, with our values
-  winning, so lower them for smaller models to keep the pod schedulable.
+  `AIM_CPU_REQUEST`, `AIM_MEM_REQUEST`, `AIM_CPU_LIMIT`, and `AIM_MEM_LIMIT`.
+  Important: AIM Engine replaces the requests/limits maps wholesale rather than
+  deep-merging, so `spec.resources` must restate every key it needs, including
+  `amd.com/gpu`. We set it to `AIM_ACCELERATOR_COUNT`; omitting it drops the GPU
+  limit, the pod gets no isolated device, and on a bare-passthrough node the
+  container then sees every host GPU (which breaks in-container `rocminfo`). Lower
+  the memory for smaller models to keep the pod schedulable.
 - The AIM Engine service controller does not always re-queue an AIMService when
   its `AIMProfileCache` object reaches Ready, so the service can sit in `Starting`
   with a stale `ProfileCacheNotReady` message even though the cache is done. Since
@@ -321,22 +325,20 @@ that levels 3 and 4 perform are not done by the harness.
   (or `kubectl -n aim-system rollout restart deploy/aim-engine-controller-manager`).
   This is an operator bug, so we also track it upstream rather than treating the
   workaround as permanent.
-- On the `kind` harness we observed the operator's multi-GPU (`tp2`) predictor
-  crash-loop with `rocminfo` returning non-zero ("Get GPU arch from rocminfo
-  failed"), even though the model weights had downloaded. This is not a GPU access
-  problem: `rocminfo` succeeds in a standalone pod of the same image on the same
-  node, as root, with `/dev/kfd` and the render nodes present, at both one and two
-  GPUs. The failure was specific to the operator's multi-GPU predictor pod, so the
-  deploy scripts default the smoke test to a single-GPU profile
-  (`AIM_ACCELERATOR_COUNT=1`, i.e. tensor-parallel size 1), which is the predictor
-  configuration we verified end to end. Raise `AIM_ACCELERATOR_COUNT` to exercise
-  multi-GPU profiles. If a multi-GPU predictor still fails `rocminfo`, capture the
-  injected environment to root-cause it (a stray `*_VISIBLE_DEVICES` is the prime
-  suspect):
+- We saw the operator's predictor crash-loop with `rocminfo` returning non-zero
+  ("Get GPU arch from rocminfo failed"), even after the weights downloaded. This
+  was not a GPU access or driver problem (`rocminfo` succeeds in a standalone pod
+  of the same image on the same node, at one and two GPUs). The cause was the
+  resource-override behavior in the bullet above: our early `spec.resources` block
+  set only cpu and memory, which dropped `amd.com/gpu` from the predictor, so the
+  device plugin never isolated a GPU and the container saw all host GPUs, an
+  uncontrolled device set that `rocminfo` cannot enumerate. Restating
+  `amd.com/gpu` in `spec.resources` fixes it. If a predictor still fails
+  `rocminfo`, first confirm its GPU allocation is what you expect:
 
 ```bash
 pod=$(kubectl get pods -n default -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
-kubectl get "$pod" -n default -o jsonpath='{range .spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}'
+kubectl get "$pod" -n default -o jsonpath='{.spec.containers[0].resources}'; echo
 ```
 
 ## References

@@ -31,11 +31,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # Ungated model-specific image for the operator levels (2-4), so no token is needed.
 : ${AIM_MODEL_IMAGE:=amdenterpriseai/aim-qwen-qwen3-32b:0.13.0}
 : ${NAMESPACE:=default}
-# Predictor resource floor. AIM Engine merges spec.resources on top of the
-# profile's computed resources (service values win). Auto-generated profiles can
-# omit memory, leaving KServe's 2Gi default, which OOM-kills weight loading for
-# large models. These defaults suit the 32B image above; lower them for smaller
-# models or raise them for bigger ones.
+# Predictor resource floor. AIM Engine merges spec.resources over the profile's
+# computed resources but replaces the requests/limits maps wholesale, so we must
+# restate every key we care about: memory (auto-generated profiles omit it,
+# leaving KServe's 2Gi default that OOM-kills weight loading) AND amd.com/gpu
+# (omitting it drops the GPU limit, so the pod gets no isolated device and, on a
+# bare-passthrough node, sees every host GPU, which breaks in-container rocminfo).
+# The GPU count tracks AIM_ACCELERATOR_COUNT. Defaults suit the 32B image above.
 : ${AIM_CPU_REQUEST:=8}
 : ${AIM_MEM_REQUEST:=64Gi}
 : ${AIM_CPU_LIMIT:=16}
@@ -147,9 +149,11 @@ spec:
     requests:
       cpu: "${AIM_CPU_REQUEST}"
       memory: ${AIM_MEM_REQUEST}
+      amd.com/gpu: "${AIM_ACCELERATOR_COUNT}"
     limits:
       cpu: "${AIM_CPU_LIMIT}"
       memory: ${AIM_MEM_LIMIT}
+      amd.com/gpu: "${AIM_ACCELERATOR_COUNT}"
   profile:
     selector:
       acceleratorCount: ${AIM_ACCELERATOR_COUNT}
