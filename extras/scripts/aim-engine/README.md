@@ -40,7 +40,9 @@ for the modes, including a Kubernetes-free path for hosts without Docker or
 ## Prerequisites
 
 - Deploy: `kubectl` and `helm` on `PATH`, and a cluster whose GPU nodes run the
-  AMD GPU Operator. Installing cluster-scoped components needs cluster-admin.
+  AMD GPU Operator. Installing cluster-scoped components needs cluster-admin. A
+  kubeconfig that authenticates through OIDC also needs the kubelogin plugin (see
+  [`deploy/README.md`](deploy/README.md)).
 - Test: a GPU host with `docker` and the `/dev/kfd` and `/dev/dri` devices;
   `kind`, `kubectl`, and `helm` are fetched as user-local binaries if absent.
 

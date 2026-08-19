@@ -33,7 +33,10 @@
 : ${MODEL_ID:=Qwen/Qwen2.5-1.5B-Instruct}
 : ${HF_TOKEN:=}
 : ${NAMESPACE:=default}
-: ${NAME:=aim-base-check}
+# Plain assignment, not ": ${NAME:=...}", so a stray NAME in the environment
+# cannot shadow it (only the --name flag overrides). Kubernetes names must be
+# lowercase RFC1123, which a hostname-derived value would violate.
+NAME="aim-base-check"
 : ${GPU_COUNT:=1}
 : ${MEM_REQUEST:=16Gi}
 : ${CPU_REQUEST:=4}

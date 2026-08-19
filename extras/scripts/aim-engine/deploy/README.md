@@ -44,6 +44,15 @@ Our own later `kubectl` commands need it too, so it is simplest to `export
 KUBECONFIG=~/Downloads/kubeconfig.yaml` once. All four scripts accept
 `--kubeconfig` and show it under `--help`.
 
+A kubeconfig that authenticates through an OIDC provider (common on managed
+clusters) runs an exec credential plugin such as `kubectl oidc-login`, which
+needs the kubelogin plugin installed on `PATH` as `kubectl-oidc_login`. The
+first `kubectl` call then performs a browser login: on a headless host we open
+the URL it prints manually, or add `--grant-type=authcode-keyboard` to the
+kubeconfig's exec args to paste the returned code back instead. Without the
+plugin, `kubectl` cannot obtain a token and the scripts report that the cluster
+is unreachable.
+
 ## Forwarded options and tokens
 
 `aim_deploy.sh` forwards a level's flags to its underlying script: `--keep` and
