@@ -2,6 +2,40 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-08-19
+
+- Down/drained nodes:
+    - ppac-pl1-s24-30:down
+- /shared/apps/ubuntu/opt:
+    - rocm-6.3.0
+    - rocm-6.3.1
+    - rocm-6.3.2
+    - rocm-6.3.3
+    - rocm-6.3.4
+    - rocm-6.4.0
+    - rocm-6.4.1
+    - rocm-6.4.2
+    - rocm-6.4.3
+    - rocm-patches-6.3.0
+    - rocm-patches-6.3.1
+    - rocm-patches-6.3.2
+    - rocm-patches-6.3.3
+    - rocm-patches-6.3.4
+    - rocm-patches-6.4.0
+    - rocm-patches-6.4.1
+    - rocm-patches-6.4.2
+    - rocm-patches-6.4.3
+    - rocmplus-6.3.0
+    - rocmplus-6.3.1
+    - rocmplus-6.3.2
+    - rocmplus-6.3.3
+    - rocmplus-6.3.4
+    - rocmplus-6.4.0
+    - rocmplus-6.4.1
+    - rocmplus-6.4.2
+    - rocmplus-6.4.3
+
+[Full snapshot](archive/AAC6_system_status_2026-08-19.md)
 ## 2026-08-18
 
 - Down/drained nodes:
