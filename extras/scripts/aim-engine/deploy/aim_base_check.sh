@@ -111,7 +111,7 @@ env_block=$'\n        env:'
 if [ -n "${HF_TOKEN}" ]; then
    echo "[base-check] configuring HF_TOKEN secret for gated model access"
    kubectl create secret generic "${NAME}-hf" -n "${NAMESPACE}" \
-      --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply --validate=false -f -
+      --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply --server-side --force-conflicts -f -
    env_block+=$'\n        - name: HF_TOKEN\n          valueFrom:\n            secretKeyRef:\n              name: '"${NAME}"$'-hf\n              key: hf-token'
 fi
 [ "${env_block}" = $'\n        env:' ] && env_block=""
@@ -128,10 +128,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "[base-check] deploying ${IMAGE} (amd.com/gpu=${GPU_COUNT}${MODEL_ID:+, AIM_MODEL_ID=${MODEL_ID}})"
-# --validate=false skips kubectl's client-side OpenAPI schema download, which on
-# some OIDC clusters intermittently 401s during discovery; the server still
-# validates the object on apply.
-kubectl apply --validate=false -n "${NAMESPACE}" -f - <<EOF || send-error "deploy failed."
+manifest=$(cat <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -180,6 +177,17 @@ spec:
   - { name: http, port: 80, targetPort: 8000 }
   selector: { app: ${NAME} }
 EOF
+)
+# Server-side apply (no client-side GET or OpenAPI download), retried a few
+# times: on OIDC clusters those client round-trips intermittently 401 during
+# discovery, so we let the server compute the merge and just retry the one call.
+applied=""
+for _ in 1 2 3 4 5; do
+   printf '%s\n' "${manifest}" \
+      | kubectl apply --server-side --force-conflicts -n "${NAMESPACE}" -f - && { applied=1; break; }
+   sleep 2
+done
+[ -n "${applied}" ] || send-error "deploy failed."
 
 echo "[base-check] waiting for the model to become Ready (weight download can take a while)"
 progress_start=$(date +%s)

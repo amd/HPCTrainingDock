@@ -131,8 +131,8 @@ Level 2 assumes the operator and its prerequisites are already present. To insta
    if [ -n "${HF_TOKEN}" ]; then
       echo "[deploy] configuring Hugging Face token (secret + default AIMRuntimeConfig)"
       kubectl create secret generic hf-token -n "${NAMESPACE}" \
-         --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply --validate=false -f -
-      kubectl apply --validate=false -f - <<EOF
+         --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply --server-side --force-conflicts -f -
+      kubectl apply --server-side --force-conflicts -f - <<EOF
 apiVersion: aim.eai.amd.com/v1alpha1
 kind: AIMRuntimeConfig
 metadata:
@@ -148,10 +148,7 @@ spec:
 EOF
    fi
    echo "[deploy] applying AIMService for ${AIM_MODEL_IMAGE}"
-   # --validate=false skips kubectl's client-side OpenAPI schema download, which
-   # on some OIDC clusters intermittently 401s during discovery; the server
-   # still validates the object on apply.
-   kubectl apply --validate=false -f - <<EOF || fatal "AIMService apply failed."
+   aimservice=$(cat <<EOF
 apiVersion: aim.eai.amd.com/v1alpha2
 kind: AIMService
 metadata:
@@ -176,6 +173,17 @@ spec:
       acceleratorCount: ${AIM_ACCELERATOR_COUNT}
       minimumType: any
 EOF
+)
+   # Server-side apply (no client-side GET or OpenAPI download), retried a few
+   # times: on OIDC clusters those client round-trips intermittently 401 during
+   # discovery, so we let the server compute the merge and just retry the call.
+   applied=""
+   for _ in 1 2 3 4 5; do
+      printf '%s\n' "${aimservice}" \
+         | kubectl apply --server-side --force-conflicts -f - && { applied=1; break; }
+      sleep 2
+   done
+   [ -n "${applied}" ] || fatal "AIMService apply failed."
    # AIM Engine sometimes fails to re-queue the AIMService when its AIMProfileCache
    # object reaches Ready, leaving it parked in Starting with no InferenceService.
    # A detached one-shot watcher forces a reconcile (annotation bump) once the cache
