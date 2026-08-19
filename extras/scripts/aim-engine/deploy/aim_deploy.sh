@@ -131,8 +131,8 @@ Level 2 assumes the operator and its prerequisites are already present. To insta
    if [ -n "${HF_TOKEN}" ]; then
       echo "[deploy] configuring Hugging Face token (secret + default AIMRuntimeConfig)"
       kubectl create secret generic hf-token -n "${NAMESPACE}" \
-         --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply --server-side --force-conflicts -f -
-      kubectl apply --server-side --force-conflicts -f - <<EOF
+         --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply --server-side --force-conflicts --validate=false -f -
+      kubectl apply --server-side --force-conflicts --validate=false -f - <<EOF
 apiVersion: aim.eai.amd.com/v1alpha1
 kind: AIMRuntimeConfig
 metadata:
@@ -180,7 +180,7 @@ EOF
    applied=""
    for _ in 1 2 3 4 5; do
       printf '%s\n' "${aimservice}" \
-         | kubectl apply --server-side --force-conflicts -f - && { applied=1; break; }
+         | kubectl apply --server-side --force-conflicts --validate=false -f - && { applied=1; break; }
       sleep 2
    done
    [ -n "${applied}" ] || fatal "AIMService apply failed."

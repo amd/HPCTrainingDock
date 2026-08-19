@@ -111,7 +111,7 @@ env_block=$'\n        env:'
 if [ -n "${HF_TOKEN}" ]; then
    echo "[base-check] configuring HF_TOKEN secret for gated model access"
    kubectl create secret generic "${NAME}-hf" -n "${NAMESPACE}" \
-      --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply --server-side --force-conflicts -f -
+      --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply --server-side --force-conflicts --validate=false -f -
    env_block+=$'\n        - name: HF_TOKEN\n          valueFrom:\n            secretKeyRef:\n              name: '"${NAME}"$'-hf\n              key: hf-token'
 fi
 [ "${env_block}" = $'\n        env:' ] && env_block=""
@@ -184,7 +184,7 @@ EOF
 applied=""
 for _ in 1 2 3 4 5; do
    printf '%s\n' "${manifest}" \
-      | kubectl apply --server-side --force-conflicts -n "${NAMESPACE}" -f - && { applied=1; break; }
+      | kubectl apply --server-side --force-conflicts --validate=false -n "${NAMESPACE}" -f - && { applied=1; break; }
    sleep 2
 done
 [ -n "${applied}" ] || send-error "deploy failed."
