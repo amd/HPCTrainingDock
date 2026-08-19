@@ -51,6 +51,7 @@ usage()
    echo "  --name [ NAME ] deployment/service name, default ${NAME}"
    echo "  --keep [ 0|1 ] 1: leave the Deployment/Service running, default 0 (clean up)"
    echo "  --verbose [ 0|1 ] 1: also tail recent pod logs in progress output, default 0"
+   echo "  --kubeconfig [ PATH ] kubeconfig to use for this run (exports KUBECONFIG)"
    echo "  --help: print this usage information"
    echo ""
    echo "Env: HF_TOKEN (gated models), IMAGE, MODEL_ID, GPU_COUNT, READY_TIMEOUT, PROGRESS_INTERVAL."
@@ -68,6 +69,7 @@ while [[ $# -gt 0 ]]; do
       "--name")      shift; NAME=${1}; reset-last ;;
       "--keep")      shift; KEEP=${1}; reset-last ;;
       "--verbose")   shift; VERBOSE=${1}; reset-last ;;
+      "--kubeconfig") shift; [ -f "${1}" ] || send-error "kubeconfig file not found :: ${1}"; export KUBECONFIG="${1}"; reset-last ;;
       "--help")      usage ;;
       *)             last ${1} ;;
    esac

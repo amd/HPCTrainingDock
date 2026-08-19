@@ -127,8 +127,11 @@ kubectl wait --for=condition=Ready aimservice/aim-smoke -n default --timeout=180
 isvc=$(kubectl get inferenceservice -n default -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
 kubectl port-forward -n default svc/$(basename $isvc)-predictor 8080:80 >/tmp/pf.log 2>&1 &
 sleep 3
+# vLLM registers the model under its real id (the image / HF repo name), not the
+# AIMService name, so we read it from /v1/models rather than hardcoding it:
+model=$(curl -sS localhost:8080/v1/models | grep -o '"id":"[^"]*"' | head -n1 | cut -d'"' -f4)
 curl -sS localhost:8080/v1/chat/completions -H 'Content-Type: application/json' \
-  -d '{"model":"aim-smoke","messages":[{"role":"user","content":"What is ROCm?"}],"max_tokens":200}'
+  -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"What is ROCm?\"}],\"max_tokens\":200}"
 # 3) confirm the GPU is in use inside the serving pod:
 pod=$(kubectl get pods -n default -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
 kubectl exec -n default $pod -- rocm-smi

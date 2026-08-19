@@ -42,6 +42,7 @@ usage()
 {
    echo "Usage:"
    echo "  --dry-run [ 0|1 ] print the actions without applying, default $DRY_RUN"
+   echo "  --kubeconfig [ PATH ] kubeconfig to use for this run (exports KUBECONFIG)"
    echo "  --help: print this usage information"
    echo ""
    echo "Versions/namespaces are set via env vars: CERT_MANAGER_VERSION,"
@@ -56,6 +57,7 @@ reset-last() { last() { send-error "Unsupported argument :: ${1}"; }; }
 while [[ $# -gt 0 ]]; do
    case "${1}" in
       "--dry-run") shift; DRY_RUN=${1}; reset-last ;;
+      "--kubeconfig") shift; [ -f "${1}" ] || send-error "kubeconfig file not found :: ${1}"; export KUBECONFIG="${1}"; reset-last ;;
       "--help")    usage ;;
       *)           last ${1} ;;
    esac

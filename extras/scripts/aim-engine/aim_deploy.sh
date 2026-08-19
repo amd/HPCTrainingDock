@@ -63,6 +63,8 @@ usage()
    echo "     4: install prereqs + AIM Engine, then serve (assumes GPU Operator)"
    echo "  --model-image [ IMAGE ] AIM model image for levels 2-4, default ${AIM_MODEL_IMAGE}"
    echo "                          (level 1 uses aim_base_check.sh's own ungated default)"
+   echo "  --kubeconfig [ PATH ] kubeconfig to use for this run (exports KUBECONFIG;"
+   echo "                        inherited by the setup scripts this dispatches to)"
    echo "  --namespace [ NS ] namespace for the AIMService, default ${NAMESPACE}"
    echo "  --keep [ 0|1 ] (level 1 only) leave the Deployment/Service running"
    echo "  --verbose [ 0|1 ] (level 1 only) tail recent pod logs while waiting"
@@ -87,6 +89,7 @@ fatal() { echo -e "\n[deploy] ERROR: ${@}" >&2; exit 1; }
 while [[ $# -gt 0 ]]; do
    case "${1}" in
       "--level")       shift; LEVEL=${1}; reset-last ;;
+      "--kubeconfig")  shift; [ -f "${1}" ] || send-error "kubeconfig file not found :: ${1}"; export KUBECONFIG="${1}"; reset-last ;;
       "--model-image") shift; AIM_MODEL_IMAGE=${1}; reset-last ;;
       "--namespace")   shift; NAMESPACE=${1}; reset-last ;;
       "--keep")        shift; BASE_ARGS+=(--keep "${1}"); reset-last ;;
@@ -194,7 +197,9 @@ EOF
   isvc=\$(kubectl get inferenceservice -n ${NAMESPACE} -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
   kubectl port-forward -n ${NAMESPACE} svc/\$(basename \$isvc)-predictor 8080:80 >/tmp/pf.log 2>&1 &
   sleep 3   # let the port-forward come up, else curl gets connection refused
-  curl -sS localhost:8080/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"aim-smoke","messages":[{"role":"user","content":"What is ROCm?"}],"max_tokens":200}'
+  # vLLM serves the model under its real id (image / HF repo name), not aim-smoke:
+  model=\$(curl -sS localhost:8080/v1/models | grep -o '"id":"[^"]*"' | head -n1 | cut -d'"' -f4)
+  curl -sS localhost:8080/v1/chat/completions -H 'Content-Type: application/json' -d "{\"model\":\"\$model\",\"messages\":[{\"role\":\"user\",\"content\":\"What is ROCm?\"}],\"max_tokens\":200}"
   # 3) confirm the GPU is in use inside the serving pod:
   pod=\$(kubectl get pods -n ${NAMESPACE} -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
   kubectl exec -n ${NAMESPACE} \$pod -- rocm-smi
