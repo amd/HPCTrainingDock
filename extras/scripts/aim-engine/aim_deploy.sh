@@ -40,6 +40,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 : ${AIM_MEM_REQUEST:=64Gi}
 : ${AIM_CPU_LIMIT:=16}
 : ${AIM_MEM_LIMIT:=128Gi}
+# GPU count the resolved profile should use (tensor-parallel size). 1 keeps the
+# smoke test on a single GPU, the predictor configuration we verified end to end;
+# raise it (2, 4, 8) for multi-GPU profiles. If resolution reports ProfileNotFound
+# the model may not ship a profile at this count, so try another value.
+: ${AIM_ACCELERATOR_COUNT:=1}
+# One-shot auto-nudge that clears an AIM Engine reconcile gap (see below). 0 off.
+: ${AIM_AUTO_NUDGE:=1}
 : ${HF_TOKEN:=}
 BASE_ARGS=()    # forwarded to aim_base_check.sh on level 1 only
 SETUP_ARGS=()   # forwarded to aim_engine_setup.sh on levels 3 and 4
@@ -64,7 +71,9 @@ usage()
    echo "  --help: print this usage information"
    echo ""
    echo "Env: HF_TOKEN (gated models), AIM_MODEL_IMAGE, AIM_CPU_REQUEST,"
-   echo "  AIM_MEM_REQUEST, AIM_CPU_LIMIT, AIM_MEM_LIMIT (predictor resources)."
+   echo "  AIM_MEM_REQUEST, AIM_CPU_LIMIT, AIM_MEM_LIMIT (predictor resources),"
+   echo "  AIM_ACCELERATOR_COUNT (GPU/tensor-parallel size, default 1),"
+   echo "  AIM_AUTO_NUDGE (0 disables the reconcile-stall auto-nudge)."
    exit 1
 }
 
@@ -143,8 +152,29 @@ spec:
       memory: ${AIM_MEM_LIMIT}
   profile:
     selector:
+      acceleratorCount: ${AIM_ACCELERATOR_COUNT}
       minimumType: any
 EOF
+   # AIM Engine sometimes fails to re-queue the AIMService when its AIMProfileCache
+   # object reaches Ready, leaving it parked in Starting with no InferenceService.
+   # A detached one-shot watcher forces a reconcile (annotation bump) once the cache
+   # is Ready, so users need not nudge by hand. Disable with AIM_AUTO_NUDGE=0.
+   if [ "${AIM_AUTO_NUDGE}" = "1" ]; then
+      (
+         for _ in $(seq 1 240); do
+            sleep 15
+            kubectl get inferenceservice -n "${NAMESPACE}" \
+               -l aim.eai.amd.com/service.name=aim-smoke -o name 2>/dev/null | grep -q . && exit 0
+            kubectl get aimprofilecache -n "${NAMESPACE}" \
+               -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null \
+               | grep -q '^True$' \
+               && kubectl annotate aimservice aim-smoke -n "${NAMESPACE}" \
+                    kick="$(date +%s)" --overwrite >/dev/null 2>&1
+         done
+      ) >/tmp/aim-nudge.log 2>&1 &
+      disown 2>/dev/null || true
+      echo "[deploy] auto-nudge watcher running (pid $!): forces one reconcile when the profile cache is Ready. Disable with AIM_AUTO_NUDGE=0."
+   fi
    cat <<EOF
 [deploy] AIMService applied. How to verify level ${LEVEL} succeeded:
   # 1) check that it is Ready with this command (READY True/False plus the reason;
@@ -153,8 +183,9 @@ EOF
   # while it is not Ready yet, this one line says why (latest status message):
   kubectl describe aimservice aim-smoke -n ${NAMESPACE} | grep -iE 'reason:|message:' | tail -n2
   # 2) wait until Ready (the InferenceService exists only after the weight
-  #    download finishes; a bare cluster with no default StorageClass stays
-  #    Starting forever), then run a small inference:
+  #    download finishes and the auto-nudge above clears the reconcile stall; a
+  #    bare cluster with no default StorageClass stays Starting forever), then
+  #    run a small inference:
   kubectl wait --for=condition=Ready aimservice/aim-smoke -n ${NAMESPACE} --timeout=1800s
   isvc=\$(kubectl get inferenceservice -n ${NAMESPACE} -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
   kubectl port-forward -n ${NAMESPACE} svc/\$(basename \$isvc)-predictor 8080:80 >/tmp/pf.log 2>&1 &

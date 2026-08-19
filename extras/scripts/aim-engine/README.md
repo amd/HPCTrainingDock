@@ -311,39 +311,32 @@ that levels 3 and 4 perform are not done by the harness.
   Engine merges these on top of the profile's computed resources, with our values
   winning, so lower them for smaller models to keep the pod schedulable.
 - The AIM Engine service controller does not always re-queue an AIMService when
-  its `AIMProfileCache` reaches Ready, so the service can sit in `Starting` with a
-  stale `ProfileCacheNotReady` message even though the cache is done. Forcing one
-  reconcile clears it, for example
+  its `AIMProfileCache` object reaches Ready, so the service can sit in `Starting`
+  with a stale `ProfileCacheNotReady` message even though the cache is done. Since
+  this reproduces on clean runs, `aim_deploy.sh` starts a one-shot background
+  watcher that forces a single reconcile (an annotation bump) once the cache is
+  Ready, so a user does not have to nudge by hand. Disable it with
+  `AIM_AUTO_NUDGE=0`. The manual equivalents remain as a fallback:
   `kubectl annotate aimservice aim-smoke -n default kick="$(date +%s)" --overwrite`
-  (or, failing that, `kubectl -n aim-system rollout restart deploy/aim-engine-controller-manager`).
-  We do not bake this into the scripts, since it works around an operator bug
-  rather than a recipe gap.
-- On the `kind` harness the operator's KServe predictor may fail to start with
-  `rocminfo` returning non-zero ("Get GPU arch from rocminfo failed"), after the
-  PCI device is already detected. The predictor runs with no restrictive
-  `securityContext` (verified: empty pod and container security contexts), so this
-  is not a pod-permissions problem. It reflects the harness's bare GPU passthrough
-  not fully reproducing what a real AMD GPU Operator provides: KFD topology access
-  for the pod, and a container ROCm build matched to the host `amdgpu` driver.
-  Model-specific AIM images pin a recent ROCm (for example 7.2.3 in
-  `aim-qwen-qwen3-32b:0.13.0`) that must match the host driver, whereas the older
-  base image used by level 1 serves on the same node. On a real GPU Operator
-  cluster the predictor gets proper device access and this does not occur, so it
-  is a harness limitation, not a deploy-recipe defect. To root-cause it on the
-  harness, run `rocminfo` in a throwaway GPU pod of the same image and read its
-  real error and device list:
+  (or `kubectl -n aim-system rollout restart deploy/aim-engine-controller-manager`).
+  This is an operator bug, so we also track it upstream rather than treating the
+  workaround as permanent.
+- On the `kind` harness we observed the operator's multi-GPU (`tp2`) predictor
+  crash-loop with `rocminfo` returning non-zero ("Get GPU arch from rocminfo
+  failed"), even though the model weights had downloaded. This is not a GPU access
+  problem: `rocminfo` succeeds in a standalone pod of the same image on the same
+  node, as root, with `/dev/kfd` and the render nodes present, at both one and two
+  GPUs. The failure was specific to the operator's multi-GPU predictor pod, so the
+  deploy scripts default the smoke test to a single-GPU profile
+  (`AIM_ACCELERATOR_COUNT=1`, i.e. tensor-parallel size 1), which is the predictor
+  configuration we verified end to end. Raise `AIM_ACCELERATOR_COUNT` to exercise
+  multi-GPU profiles. If a multi-GPU predictor still fails `rocminfo`, capture the
+  injected environment to root-cause it (a stray `*_VISIBLE_DEVICES` is the prime
+  suspect):
 
 ```bash
-cat > ~/rp.json <<'JSON'
-{"apiVersion":"v1","kind":"Pod",
-"metadata":{"name":"rocm-probe","namespace":"default"},
-"spec":{"restartPolicy":"Never","containers":[{
-"name":"rocm-probe","image":"amdenterpriseai/aim-qwen-qwen3-32b:0.13.0",
-"command":["sh","-c","rocminfo; echo EXIT=$?; ls -l /dev/kfd /dev/dri 2>&1"],
-"resources":{"limits":{"amd.com/gpu":"1"}}}]}}
-JSON
-kubectl apply -f ~/rp.json && sleep 10 && kubectl logs -n default rocm-probe
-kubectl delete -f ~/rp.json --wait=false
+pod=$(kubectl get pods -n default -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
+kubectl get "$pod" -n default -o jsonpath='{range .spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}'
 ```
 
 ## References
