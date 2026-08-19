@@ -44,13 +44,14 @@ usage()
    echo "  --replace [ 0|1 ] uninstall an existing AIM Engine release first, default $REPLACE"
    echo "  --kubeconfig [ PATH ] kubeconfig to use for this run (exports KUBECONFIG)"
    echo "  --help: print this usage information"
-   exit 1
 }
 
+# Print the reason AFTER the usage block (usage() does not exit) so it is the
+# last line the user sees, then fail.
 send-error()
 {
    usage
-   echo -e "\nError: ${@}"
+   echo -e "\nError: ${@}" >&2
    exit 1
 }
 
@@ -68,7 +69,7 @@ while [[ $# -gt 0 ]]; do
       "--install-prereqs")  shift; INSTALL_PREREQS=${1}; reset-last ;;
       "--replace")          shift; REPLACE=${1}; reset-last ;;
       "--kubeconfig")       shift; [ -f "${1}" ] || send-error "kubeconfig file not found :: ${1}"; export KUBECONFIG="${1}"; reset-last ;;
-      "--help")             usage ;;
+      "--help")             usage; exit 0 ;;
       *)                    last ${1} ;;
    esac
    shift

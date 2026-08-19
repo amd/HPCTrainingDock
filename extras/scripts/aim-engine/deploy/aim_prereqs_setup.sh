@@ -48,17 +48,18 @@ usage()
    echo "Versions/namespaces are set via env vars: CERT_MANAGER_VERSION,"
    echo "  GATEWAY_API_VERSION, KGATEWAY_VERSION, KSERVE_VERSION, KSERVE_NAMESPACE,"
    echo "  KSERVE_DEPLOYMENT_MODE, KEDA_CHART_VERSION, KEDA_OTEL_VERSION, OTEL_OPERATOR_VERSION."
-   exit 1
 }
 
-send-error() { usage; echo -e "\nError: ${@}"; exit 1; }
+# Print the reason AFTER the usage block (usage() does not exit) so it is the
+# last line the user sees, then fail.
+send-error() { usage; echo -e "\nError: ${@}" >&2; exit 1; }
 reset-last() { last() { send-error "Unsupported argument :: ${1}"; }; }
 
 while [[ $# -gt 0 ]]; do
    case "${1}" in
       "--dry-run") shift; DRY_RUN=${1}; reset-last ;;
       "--kubeconfig") shift; [ -f "${1}" ] || send-error "kubeconfig file not found :: ${1}"; export KUBECONFIG="${1}"; reset-last ;;
-      "--help")    usage ;;
+      "--help")    usage; exit 0 ;;
       *)           last ${1} ;;
    esac
    shift

@@ -81,10 +81,11 @@ usage()
    echo ""
    echo "Env: HF_TOKEN (gated models), AIM_TEST_MODEL_IMAGE, AIM_GPU_MODEL,"
    echo "     DIRECT_IMAGE, DIRECT_MODEL_ID, DIRECT_VISIBLE_DEVICES (for --container-only)."
-   exit 1
 }
 
-send-error() { usage; echo -e "\nError: ${@}"; exit 1; }
+# Print the reason AFTER the usage block (usage() does not exit) so it is the
+# last line the user sees, then fail.
+send-error() { usage; echo -e "\nError: ${@}" >&2; exit 1; }
 reset-last() { last() { send-error "Unsupported argument :: ${1}"; }; }
 # Environment/runtime failures: print the reason plainly, no usage block.
 fatal() { echo -e "\n[test] ERROR: ${@}" >&2; exit 1; }
@@ -96,7 +97,7 @@ while [[ $# -gt 0 ]]; do
       "--container-only") shift; CONTAINER_ONLY=${1}; reset-last ;;
       "--cluster-name") shift; CLUSTER_NAME=${1}; reset-last ;;
       "--gpu-model")    shift; AIM_GPU_MODEL=${1}; reset-last ;;
-      "--help")         usage ;;
+      "--help")         usage; exit 0 ;;
       *)                last ${1} ;;
    esac
    shift

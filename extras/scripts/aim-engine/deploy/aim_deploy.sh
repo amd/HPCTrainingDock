@@ -78,10 +78,11 @@ usage()
    echo "  AIM_MEM_REQUEST, AIM_CPU_LIMIT, AIM_MEM_LIMIT (predictor resources),"
    echo "  AIM_ACCELERATOR_COUNT (GPU/tensor-parallel size, default 1),"
    echo "  AIM_AUTO_NUDGE (0 disables the reconcile-stall auto-nudge)."
-   exit 1
 }
 
-send-error() { usage; echo -e "\nError: ${@}"; exit 1; }
+# Print the reason AFTER the usage block (usage() does not exit) so it is the
+# last line the user sees, then fail.
+send-error() { usage; echo -e "\nError: ${@}" >&2; exit 1; }
 reset-last() { last() { send-error "Unsupported argument :: ${1}"; }; }
 # State/environment failures: print the reason plainly, no usage block.
 fatal() { echo -e "\n[deploy] ERROR: ${@}" >&2; exit 1; }
@@ -98,7 +99,7 @@ while [[ $# -gt 0 ]]; do
       "--aim-version") shift; SETUP_ARGS+=(--aim-version "${1}"); reset-last ;;
       "--crds-chart")  shift; SETUP_ARGS+=(--crds-chart "${1}"); reset-last ;;
       "--chart")       shift; SETUP_ARGS+=(--chart "${1}"); reset-last ;;
-      "--help")        usage ;;
+      "--help")        usage; exit 0 ;;
       *)               last ${1} ;;
    esac
    shift
