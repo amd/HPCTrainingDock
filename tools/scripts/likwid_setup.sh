@@ -48,7 +48,7 @@ AMDGPU_GFXMODEL_INPUT=""
 MODULE_PATH=/etc/lmod/modules/ROCmPlus/likwid
 BUILD_LIKWID=0
 ROCM_VERSION=6.2.0
-LIKWID_VERSION="5.5.1"
+LIKWID_VERSION="5.5.2"
 LIKWID_PATH=/opt/rocmplus-${ROCM_VERSION}/likwid-v${LIKWID_VERSION}
 LIKWID_PATH_INPUT=""
 # --install-path: parent dir; the script appends likwid-v${LIKWID_VERSION}
@@ -67,6 +67,16 @@ ROCMPLUS_PATH_INPUT=""
 # the canonical template description.
 REPLACE=0
 KEEP_FAILED_INSTALLS=0
+# Counter access mode for the likwid build: auto|perf_event|accessdaemon.
+#   auto (default): pick perf_event when this node has no MSR device
+#     (/dev/cpu/0/msr absent -- e.g. the MI300A APU compute nodes here) or
+#     on a non-root user-writable install; otherwise keep likwid's
+#     accessdaemon/MSR default.
+#   perf_event / accessdaemon: force that mode regardless of autodetect.
+# perf_event reads the core PMU via the Linux perf_event subsystem, which
+# is the only mode that returns counters (FLOPS_DP etc.) on a node with no
+# MSR device. Overridable from the environment.
+: ${LIKWID_ACCESSMODE:="auto"}
 SUDO="sudo"
 
 if [  -f /.singularity.d/Singularity ]; then
@@ -285,6 +295,7 @@ echo "LIKWID_PATH: $LIKWID_PATH"
 echo "MODULE_PATH: $MODULE_PATH"
 echo "REPLACE: $REPLACE"
 echo "KEEP_FAILED_INSTALLS: $KEEP_FAILED_INSTALLS"
+echo "LIKWID_ACCESSMODE: $LIKWID_ACCESSMODE"
 echo "==================================="
 echo ""
 
@@ -409,8 +420,8 @@ if true; then
       #     ROCPROFILER_MODE_* / rocprofiler_open, reached via
       #     #include <rocprofiler.h> under ROCPROFILERINCLUDE (default
       #     $(ROCM_HOME)/include/rocprofiler). This is what the latest TAGGED
-      #     release (v5.5.1, 2025-12-23) builds. Numeric ROCm 6.4.x / 7.0.x /
-      #     7.1.x / 7.2.x still ship this classic v1 header, so the v5.5.1 tag
+      #     release (v5.5.2, 2026-08-19) builds. Numeric ROCm 6.4.x / 7.0.x /
+      #     7.1.x / 7.2.x still ship this classic v1 header, so the v5.5.2 tag
       #     builds rocmon fine there.
       #
       #   * v3 rocprofiler-sdk API -- #include <rocprofiler-sdk/...>. ROCm 7.x
@@ -487,22 +498,55 @@ if true; then
             ;;
       esac
 
-      # Access mode: likwid's default `accessdaemon` builds a setuid-root
-      # helper (likwid-accessD) and `make install` chowns it to root +
-      # chmod 4755 -- which requires root. On a user-writable, non-root
-      # install (this Cray has no passwordless sudo and a user-owned tree)
-      # that `install -o root` step fails. When we cannot install setuid
-      # (not EUID 0 and no working sudo), switch to perf_event access mode
-      # and disable the daemon/freq setuid tools so `make install`
-      # succeeds; likwid-perfctr then reads counters via the Linux
-      # perf_event interface. Root installs keep the accessdaemon default.
+      # ── Counter access mode: perf_event vs the default accessdaemon/MSR ──
+      # likwid's default ACCESSMODE=accessdaemon reads the core PMU through a
+      # setuid-root helper (likwid-accessD) that pokes /dev/cpu/*/msr. That
+      # path returns NO core counters (FLOPS_DP etc. come back empty) on a
+      # node with no MSR device -- e.g. the MI300A APU compute nodes here,
+      # where the `msr` kernel module isn't loaded and /dev/cpu/0/msr is
+      # absent. perf_event mode reads the same counters via the Linux
+      # perf_event subsystem, which needs no MSR device. It is also the only
+      # mode that can `make install` on a non-root, user-writable tree (the
+      # setuid accessD install `install -o root ... chmod 4755` needs root).
+      #
+      # Choose perf_event when ANY of: LIKWID_ACCESSMODE=perf_event (operator
+      # override) | no MSR device present | non-root user-writable install.
+      # Otherwise keep the accessdaemon default (or honor an explicit
+      # LIKWID_ACCESSMODE=accessdaemon).
+      _likwid_no_msr=0
+      [ -e /dev/cpu/0/msr ] || _likwid_no_msr=1
+      _likwid_perf_event=0 _likwid_mode_reason=""
+      case "${LIKWID_ACCESSMODE}" in
+         perf_event)
+            _likwid_perf_event=1; _likwid_mode_reason="LIKWID_ACCESSMODE=perf_event (forced)" ;;
+         accessdaemon)
+            _likwid_perf_event=0; _likwid_mode_reason="LIKWID_ACCESSMODE=accessdaemon (forced)" ;;
+         *)
+            if [ "${_likwid_no_msr}" = "1" ]; then
+               _likwid_perf_event=1; _likwid_mode_reason="no MSR device (/dev/cpu/0/msr absent)"
+            elif [ "${EUID:-$(id -u)}" -ne 0 ] && [ -z "${SUDO}" ]; then
+               _likwid_perf_event=1; _likwid_mode_reason="non-root user-writable install"
+            else
+               _likwid_mode_reason="MSR device present, root/sudo install"
+            fi
+            ;;
+      esac
+      if [ "${_likwid_perf_event}" = "1" ]; then
+         echo "likwid: ACCESSMODE=perf_event [reason: ${_likwid_mode_reason}]"
+         sed -i -e '/^ACCESSMODE/s/accessdaemon/perf_event/' config.mk
+      else
+         echo "likwid: ACCESSMODE=accessdaemon [reason: ${_likwid_mode_reason}]"
+      fi
+      # Setuid accessDaemon/freq helpers install as root (chown root + chmod
+      # 4755); on a non-root, user-writable tree that step fails, so drop
+      # them there. (In perf_event mode they are unused anyway.)
       if [ "${EUID:-$(id -u)}" -ne 0 ] && [ -z "${SUDO}" ]; then
-         echo "likwid: non-root user-writable install -> ACCESSMODE=perf_event, BUILDDAEMON/BUILDFREQ=false (no setuid daemon)"
-         sed -i -e '/^ACCESSMODE/s/accessdaemon/perf_event/' \
-                -e '/^BUILDDAEMON/s/true/false/' \
+         echo "likwid: non-root user-writable install -> BUILDDAEMON/BUILDFREQ=false (no setuid helpers)"
+         sed -i -e '/^BUILDDAEMON/s/true/false/' \
                 -e '/^BUILDFREQ/s/true/false/' \
                 config.mk
       fi
+      unset _likwid_no_msr _likwid_perf_event _likwid_mode_reason
 
       export ROCM_HOME=${ROCM_PATH}
       make -j
@@ -519,7 +563,11 @@ if true; then
          ${SUDO} chmod go-w ${LIKWID_PATH}
       fi
 
-      module unload ${ROCM_MODULE_NAME}
+      # NOTE: the ROCm module stays loaded past this point on purpose. The
+      # GPU-ENABLED/CPU-ONLY probe below needs ${ROCM_PATH} populated to find
+      # the rocprofiler headers; unloading here (as we used to) wiped
+      # ${ROCM_PATH} and made every build mislabel itself CPU-ONLY even when
+      # rocmon was compiled in. We unload at the very end instead.
 
    fi
 
@@ -670,5 +718,10 @@ EOF
 	}
 EOF
    fi
+
+   # Unload the ROCm module we loaded for the build + GPU-tag probe. Done
+   # here (not right after `make install`) so ${ROCM_PATH} stayed populated
+   # for the GPU-ENABLED/CPU-ONLY detection above.
+   [ -n "${ROCM_MODULE_NAME:-}" ] && module unload ${ROCM_MODULE_NAME} 2>/dev/null || true
 
 fi
