@@ -29,9 +29,9 @@ leaves `aim-base-check` running.
 
 The script's own port-forward is transient, so we open our own against the
 namespace we deployed into and query the OpenAI-compatible endpoint, reading the
-model id from `/v1/models` rather than hardcoding it. On a flaky OIDC control
-plane a lone port-forward can be rejected and exit immediately (`Exit 1`), so we
-retry until the tunnel answers:
+model id from `/v1/models` rather than hardcoding it. We wrap the port-forward in
+a short retry so a transient auth hiccup while the tunnel establishes (which some
+OIDC clusters show) does not leave us with a dead endpoint:
 
 ```bash
 NS=<your-namespace>

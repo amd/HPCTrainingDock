@@ -276,7 +276,11 @@ if echo "${resp}" | grep -q '"choices"'; then
       echo "[base-check] NOTE: no vLLM GPU signal from /metrics or logs; GPU use unconfirmed."
    fi
    echo "[base-check] level 1 verified: inference returned a completion and vLLM is using the GPU."
-   echo "[base-check] to probe it yourself, re-run with --keep 1 then:"
+   if [ "${KEEP}" = "1" ]; then
+      echo "[base-check] the deployment is left running (--keep 1); probe it with:"
+   else
+      echo "[base-check] to probe it yourself, re-run with --keep 1 then:"
+   fi
    echo "  kubectl port-forward -n ${NAMESPACE} svc/${NAME} 8000:80 >/tmp/pf.log 2>&1 &"
    echo "  sleep 3   # let the tunnel come up first, else curl gets connection refused"
    echo "  curl -sS localhost:8000/metrics | grep cache_usage_perc   # vLLM confirms a GPU KV cache"
