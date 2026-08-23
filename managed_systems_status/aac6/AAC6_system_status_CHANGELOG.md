@@ -2,6 +2,26 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-08-23
+
+- AAC6 man pages:
+    + aac6_att
+    + aac6_cachegrind
+    + aac6_hpctoolkit
+    + aac6_likwid
+    + aac6_perf
+    + aac6_rocbudai
+    + aac6_roc-optiq
+    + aac6_rocprof-compute
+    + aac6_rocprofiler-systems
+    + aac6_rocprofv3
+    + aac6_roofline-extractor
+    + aac6_scorep
+    + aac6_uprof
+- Down/drained nodes:
+    + ppac-pl1-s24-30:down
+
+[Full snapshot](archive/AAC6_system_status_2026-08-23.md)
 ## 2026-08-22
 
 - Down/drained nodes:
