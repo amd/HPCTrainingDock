@@ -104,6 +104,88 @@ example `./aim_deploy.sh --level 3 --replace 1`). The default models are ungated
 so no token is needed; a gated model such as Llama or Gemma needs `HF_TOKEN`
 exported.
 
+## Model catalog
+
+The AIM catalog is AMD's set of prebuilt, pre-tuned inference containers, one
+per model, published on Docker Hub under `amdenterpriseai/aim-*` and browsable at
+the [AMD Enterprise AI catalog](https://enterprise-ai.docs.amd.com/en/latest/aims/catalog/models.html).
+Each image bundles the model plus validated profiles (tuned runtime settings) for
+the discrete Instinct GPUs, so the operator can pick optimal parameters for our
+hardware automatically. The deploy default (`AIM_MODEL_IMAGE`,
+`amdenterpriseai/aim-qwen-qwen3-32b:0.13.0`) is one such catalog image; serve a
+different one on levels 2 to 4 with `--model-image`:
+
+```bash
+./aim_deploy.sh --level 2 --namespace "$NAMESPACE" --model-image amdenterpriseai/aim-deepseek-ai-deepseek-r1:0.13.0
+```
+
+On a cluster that already has AIM Engine, the operator republishes the catalog as
+cluster-scoped `AIMClusterModel` objects, so we list what *this* cluster offers
+(rather than the full public catalog) with:
+
+```bash
+kubectl get aimclustermodels
+```
+
+## Customizing runtime parameters
+
+Levels 2 to 4 (the operator path) are the lever for tuning. The image's profile
+sets runtime parameters automatically, and we override per service through
+`spec.profileOverrides.engineArgs`, which shallow-merges over the profile and is
+passed verbatim to the inference-engine CLI (vLLM today, but the field is
+engine-agnostic, so the context window is `max-model-len`), and `spec.env` for
+environment variables. This works for any catalog model.
+
+The deploy bakes overrides in for us, so they survive re-runs (which regenerate
+the `AIMService`). For scalar engine args, `--max-model-len` sets the context
+window and `--engine-arg KEY=VALUE` (repeatable, or the space-separated
+`AIM_ENGINE_ARGS` env var) passes any other; both feed
+`spec.profileOverrides.engineArgs`. For a 16k context with a memory cap:
+
+```bash
+./aim_deploy.sh --level 2 --namespace "$NAMESPACE" \
+  --max-model-len 16384 --engine-arg gpu-memory-utilization=0.9
+```
+
+Those shortcuts only cover scalar `key=value` engine args. For engine args that
+are flags or take list/object values, and for any other `spec` field — `env`,
+`resources`, `replicas`, `profileOverrides.containerEnv`, adapters, autoscaling —
+pass `--overrides-file`, a YAML merge patch applied over the generated
+`AIMService` on every run (`engineArgs` is `x-kubernetes-preserve-unknown-fields`,
+so it accepts arbitrarily typed values here). Merge semantics are RFC 7386: nested maps merge by
+key; lists and scalars replace wholesale. For example, `overrides.yaml`:
+
+```yaml
+spec:
+  replicas: 2
+  env:
+  - name: VLLM_USE_V1
+    value: "1"
+  resources:
+    limits:
+      memory: 200Gi
+```
+
+```bash
+./aim_deploy.sh --level 2 --namespace "$NAMESPACE" --overrides-file overrides.yaml
+```
+
+To change an already-running service without redeploying, patch it directly
+instead (a later `aim_deploy.sh` run overwrites this, so prefer the flags above
+for anything durable):
+
+```bash
+kubectl patch aimservice aim-smoke -n "$NAMESPACE" --type merge \
+  -p '{"spec":{"profileOverrides":{"engineArgs":{"max-model-len":"16384"}}}}'
+```
+
+Tensor-parallel size (GPUs per replica) is `AIM_ACCELERATOR_COUNT` on the deploy
+(it sets both the profile selector and the GPU resource), and replicas scale with
+`spec.replicas`. Level 1 has none of this: it runs the container as a plain
+Deployment with no profile machinery, so customization is limited to whatever
+environment variables the image honors. Use level 1 for a first-contact GPU check
+and levels 2 to 4 when we want tuned, managed serving.
+
 ## Building-block scripts
 
 `aim_deploy.sh` is a thin wrapper over three scripts we can also run directly:

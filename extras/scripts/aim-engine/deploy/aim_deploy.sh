@@ -47,9 +47,23 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # raise it (2, 4, 8) for multi-GPU profiles. If resolution reports ProfileNotFound
 # the model may not ship a profile at this count, so try another value.
 : ${AIM_ACCELERATOR_COUNT:=1}
+# Inference-engine arg overrides baked into spec.profileOverrides.engineArgs, so they
+# survive re-runs (which regenerate the AIMService) without a manual kubectl patch.
+# AIM_MAX_MODEL_LEN is a shortcut for the max-model-len (context window) key; add
+# any other key=value pairs to AIM_ENGINE_ARGS (space-separated) or with repeated
+# --engine-arg. Only emitted on the operator levels (2-4), where a profile exists.
+: ${AIM_MAX_MODEL_LEN:=}
+: ${AIM_ENGINE_ARGS:=}
+# Path to a YAML merge patch applied over the generated AIMService on every run,
+# for any spec field the shortcuts above do not reach (env, resources, replicas,
+# containerEnv, adapters, autoscaling, ...). Re-applied each run, so it too
+# survives regeneration. Merge semantics are RFC 7386: nested maps merge by key,
+# lists and scalars replace wholesale.
+: ${AIM_OVERRIDES_FILE:=}
 # One-shot auto-nudge that clears an AIM Engine reconcile gap (see below). 0 off.
 : ${AIM_AUTO_NUDGE:=1}
 : ${HF_TOKEN:=}
+ENGINE_ARGS=()  # key=value engine-arg overrides collected from env and flags
 BASE_ARGS=()    # forwarded to aim_base_check.sh on level 1 only
 SETUP_ARGS=()   # forwarded to aim_engine_setup.sh on levels 3 and 4
 
@@ -63,6 +77,11 @@ usage()
    echo "     4: install prereqs + AIM Engine, then serve (assumes GPU Operator)"
    echo "  --model-image [ IMAGE ] AIM model image for levels 2-4, default ${AIM_MODEL_IMAGE}"
    echo "                          (level 1 uses aim_base_check.sh's own ungated default)"
+   echo "  --max-model-len [ N ] (levels 2-4) context window; shortcut for --engine-arg max-model-len=N"
+   echo "  --engine-arg [ KEY=VALUE ] (levels 2-4) inference-engine arg override, repeatable;"
+   echo "                             baked into spec.profileOverrides.engineArgs (survives re-runs)"
+   echo "  --overrides-file [ PATH ] (levels 2-4) YAML merge patch applied over the AIMService"
+   echo "                            each run, for any spec field the flags above do not reach"
    echo "  --kubeconfig [ PATH ] kubeconfig to use for this run (exports KUBECONFIG;"
    echo "                        inherited by the setup scripts this dispatches to)"
    echo "  --namespace [ NS ] namespace for the AIMService, default ${NAMESPACE}"
@@ -77,7 +96,9 @@ usage()
    echo "Env: HF_TOKEN (gated models), AIM_MODEL_IMAGE, AIM_CPU_REQUEST,"
    echo "  AIM_MEM_REQUEST, AIM_CPU_LIMIT, AIM_MEM_LIMIT (predictor resources),"
    echo "  AIM_ACCELERATOR_COUNT (GPU/tensor-parallel size, default 1),"
-   echo "  AIM_AUTO_NUDGE (0 disables the reconcile-stall auto-nudge)."
+   echo "  AIM_MAX_MODEL_LEN (context window), AIM_ENGINE_ARGS (space-separated"
+   echo "  key=value engine-arg overrides), AIM_OVERRIDES_FILE (YAML merge patch"
+   echo "  over the AIMService), AIM_AUTO_NUDGE (0 disables the auto-nudge)."
 }
 
 # Colored, spaced status output; disabled when stdout is not a TTY so redirected
@@ -101,6 +122,9 @@ while [[ $# -gt 0 ]]; do
       "--level")       shift; LEVEL=${1}; reset-last ;;
       "--kubeconfig")  shift; [ -f "${1}" ] || send-error "kubeconfig file not found :: ${1}"; export KUBECONFIG="${1}"; reset-last ;;
       "--model-image") shift; AIM_MODEL_IMAGE=${1}; reset-last ;;
+      "--max-model-len") shift; AIM_MAX_MODEL_LEN=${1}; reset-last ;;
+      "--engine-arg")  shift; [[ "${1}" == *=* ]] || send-error "--engine-arg expects KEY=VALUE :: ${1}"; ENGINE_ARGS+=("${1}"); reset-last ;;
+      "--overrides-file") shift; [ -f "${1}" ] || send-error "overrides file not found :: ${1}"; AIM_OVERRIDES_FILE="${1}"; reset-last ;;
       "--namespace")   shift; NAMESPACE=${1}; reset-last ;;
       "--keep")        shift; BASE_ARGS+=(--keep "${1}"); reset-last ;;
       "--verbose")     shift; BASE_ARGS+=(--verbose "${1}"); reset-last ;;
@@ -160,6 +184,24 @@ spec:
         key: hf-token
 EOF
    fi
+   # Assemble engine-arg overrides from the shortcut, the space-separated env var,
+   # and any --engine-arg flags, then render a spec.profileOverrides.engineArgs
+   # block. Values are quoted and passed verbatim to the inference-engine CLI (vLLM
+   # today; the field is engine-agnostic). Empty when no
+   # overrides are set, so the manifest is unchanged for a plain run.
+   [ -n "${AIM_MAX_MODEL_LEN}" ] && ENGINE_ARGS+=("max-model-len=${AIM_MAX_MODEL_LEN}")
+   for kv in ${AIM_ENGINE_ARGS}; do
+      [[ "${kv}" == *=* ]] || fatal "AIM_ENGINE_ARGS entries must be KEY=VALUE :: ${kv}"
+      ENGINE_ARGS+=("${kv}")
+   done
+   profile_overrides=""
+   if [ "${#ENGINE_ARGS[@]}" -gt 0 ]; then
+      profile_overrides=$'  profileOverrides:\n    engineArgs:\n'
+      for kv in "${ENGINE_ARGS[@]}"; do
+         profile_overrides+="      ${kv%%=*}: \"${kv#*=}\""$'\n'
+      done
+      say "baking engine-arg overrides into profileOverrides: ${ENGINE_ARGS[*]}"
+   fi
    say "applying AIMService for ${AIM_MODEL_IMAGE}"
    aimservice=$(cat <<EOF
 apiVersion: aim.eai.amd.com/v1alpha2
@@ -185,6 +227,7 @@ spec:
     selector:
       acceleratorCount: ${AIM_ACCELERATOR_COUNT}
       minimumType: any
+${profile_overrides}
 EOF
 )
    # Server-side apply (no client-side GET or OpenAPI download), retried a few
@@ -197,6 +240,18 @@ EOF
       sleep 2
    done
    [ -n "${applied}" ] || fatal "AIMService apply failed."
+   # Overlay the user's YAML merge patch (any spec field) on top of the base apply.
+   # Applied every run so it survives regeneration; same retry rationale as above.
+   if [ -n "${AIM_OVERRIDES_FILE}" ]; then
+      say "applying overrides from ${AIM_OVERRIDES_FILE}"
+      patched=""
+      for _ in $(seq 10); do
+         kubectl patch aimservice aim-smoke -n "${NAMESPACE}" --request-timeout=30s \
+            --type merge --patch-file "${AIM_OVERRIDES_FILE}" && { patched=1; break; }
+         sleep 2
+      done
+      [ -n "${patched}" ] || fatal "AIMService overrides patch failed."
+   fi
    # AIM Engine sometimes fails to re-queue the AIMService when its AIMProfileCache
    # object reaches Ready, leaving it parked in Starting with no InferenceService.
    # A detached one-shot watcher forces a reconcile (annotation bump) once the cache
