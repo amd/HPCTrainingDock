@@ -10,21 +10,22 @@ levels 3 and 4 reuse.
 
 ## Run
 
-First point `KUBECONFIG` at the cluster's kubeconfig, substituting our own path
-for the placeholder (skip if we are already pointed at the cluster), and confirm
-it resolves to a real file:
+First export the two values every later command reuses: `KUBECONFIG` (substitute
+our own path for the placeholder; skip if we are already pointed at the cluster)
+and `NAMESPACE`, a project we can write to on a shared cluster (see
+[Choosing a namespace](README.md#choosing-a-namespace); use `default` where it is
+writable). We then confirm the kubeconfig resolves to a real file:
 
 ```bash
 export KUBECONFIG=/path/to/your/kubeconfig
+export NAMESPACE=<your-namespace>
 echo "${KUBECONFIG}"; test -s "${KUBECONFIG}" && echo "kubeconfig found" || echo "set KUBECONFIG to a real file"
 ```
 
-Then run the level, passing `--namespace` for a project we can write to on a
-shared cluster (see [Choosing a namespace](README.md#choosing-a-namespace));
-where `default` is writable we omit it:
+Then run the level:
 
 ```bash
-./aim_deploy.sh --level 2 --namespace <your-namespace>
+./aim_deploy.sh --level 2 --namespace "$NAMESPACE"
 ```
 
 It applies an `AIMService` named `aim-smoke` (ungated model-specific image by
@@ -38,15 +39,14 @@ query the predictor, reading the model id from `/v1/models` (vLLM registers it
 under the image or Hugging Face repo name, not the `AIMService` name):
 
 ```bash
-NS=<your-namespace>   # the namespace we deployed into; use default if we omitted --namespace
-kubectl get aimservice aim-smoke -n "$NS" \
+kubectl get aimservice aim-smoke -n "$NAMESPACE" \
   -o custom-columns='NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status,REASON:.status.conditions[?(@.type=="Ready")].reason'
 # while not Ready, this says why:
-kubectl describe aimservice aim-smoke -n "$NS" | grep -iE 'reason:|message:' | tail -n2
+kubectl describe aimservice aim-smoke -n "$NAMESPACE" | grep -iE 'reason:|message:' | tail -n2
 
-kubectl wait --for=condition=Ready aimservice/aim-smoke -n "$NS" --timeout=1800s
-isvc=$(kubectl get inferenceservice -n "$NS" -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
-kubectl port-forward -n "$NS" svc/$(basename $isvc)-predictor 8080:80 >/tmp/pf.log 2>&1 &
+kubectl wait --for=condition=Ready aimservice/aim-smoke -n "$NAMESPACE" --timeout=1800s
+isvc=$(kubectl get inferenceservice -n "$NAMESPACE" -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
+kubectl port-forward -n "$NAMESPACE" svc/$(basename $isvc)-predictor 8080:80 >/tmp/pf.log 2>&1 &
 sleep 3
 model=$(curl -sS localhost:8080/v1/models | grep -o '"id":"[^"]*"' | head -n1 | cut -d'"' -f4)
 curl -sS localhost:8080/v1/chat/completions -H 'Content-Type: application/json' \
@@ -68,9 +68,9 @@ cd /path/to/HPCTrainingExamples/MLExamples/icf_4agent && ./start_app.sh
 ## Confirm the GPU and clean up
 
 ```bash
-pod=$(kubectl get pods -n "$NS" -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
-kubectl exec -n "$NS" $pod -- rocm-smi
-kubectl delete aimservice aim-smoke -n "$NS"
+pod=$(kubectl get pods -n "$NAMESPACE" -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
+kubectl exec -n "$NAMESPACE" $pod -- rocm-smi
+kubectl delete aimservice aim-smoke -n "$NAMESPACE"
 ```
 
 If it never reaches Ready, the usual cause is storage: the cache PVC needs a

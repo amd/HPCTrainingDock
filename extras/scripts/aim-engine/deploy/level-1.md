@@ -10,24 +10,23 @@ advertising `amd.com/gpu`, and the default model is small and ungated
 
 A plain `--level 1` deploys, proves inference, then deletes everything on exit;
 `--keep 1` leaves the Deployment and Service up so we can use them. From a laptop
-we first point `KUBECONFIG` at the cluster's kubeconfig, substituting our own
-path for the placeholder, so later `kubectl` commands inherit it, and confirm it
-resolves to a real file:
+we first export the two values every later command reuses: `KUBECONFIG`
+(substitute our own path for the placeholder) so `kubectl` inherits it, and
+`NAMESPACE`, a project we can write to on a shared cluster (see
+[Choosing a namespace](README.md#choosing-a-namespace); use `default` where it is
+writable). We then confirm the kubeconfig resolves to a real file:
 
 ```bash
 export KUBECONFIG=/path/to/your/kubeconfig
+export NAMESPACE=<your-namespace>
 echo "${KUBECONFIG}"; test -s "${KUBECONFIG}" && echo "kubeconfig found" || echo "set KUBECONFIG to a real file"
 ```
 
 Then run the level:
 
 ```bash
-./aim_deploy.sh --level 1 --keep 1 --namespace <your-namespace>
+./aim_deploy.sh --level 1 --keep 1 --namespace "$NAMESPACE"
 ```
-
-On a shared cluster we pass `--namespace` for a project we can write to (see
-[Choosing a namespace](README.md#choosing-a-namespace)); where `default` is
-writable we omit it.
 
 It waits for Ready (the first pull and weight download take a few minutes),
 serves a test completion, confirms vLLM placed its KV cache on the GPU, and
@@ -42,9 +41,8 @@ a short retry so a transient auth hiccup while the tunnel establishes (which som
 OIDC clusters show) does not leave us with a dead endpoint:
 
 ```bash
-NS=<your-namespace>
 for _ in $(seq 10); do
-  kubectl port-forward -n "$NS" svc/aim-base-check 8000:80 >/tmp/pf.log 2>&1 &
+  kubectl port-forward -n "$NAMESPACE" svc/aim-base-check 8000:80 >/tmp/pf.log 2>&1 &
   pf=$!
   sleep 3
   curl -sf localhost:8000/v1/models >/dev/null 2>&1 && break
@@ -84,7 +82,7 @@ To serve a larger open model, set the id the base check reads (inherited by the
 underlying script); a gated model also needs `HF_TOKEN`:
 
 ```bash
-MODEL_ID="Qwen/Qwen2.5-7B-Instruct" ./aim_deploy.sh --level 1 --keep 1 --namespace <your-namespace>
+MODEL_ID="Qwen/Qwen2.5-7B-Instruct" ./aim_deploy.sh --level 1 --keep 1 --namespace "$NAMESPACE"
 ```
 
 For a model-specific AIM image and the operator path, use [level 4](level-4.md).
@@ -93,7 +91,7 @@ For a model-specific AIM image and the operator path, use [level 4](level-4.md).
 
 ```bash
 kill "$pf" 2>/dev/null
-kubectl delete deployment,service aim-base-check -n "$NS"
+kubectl delete deployment,service aim-base-check -n "$NAMESPACE"
 ```
 
 Level 1 matches the operator only on the runtime (image, GPU detection, weight
