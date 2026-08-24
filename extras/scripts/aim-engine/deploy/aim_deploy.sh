@@ -80,12 +80,21 @@ usage()
    echo "  AIM_AUTO_NUDGE (0 disables the reconcile-stall auto-nudge)."
 }
 
+# Colored, spaced status output; disabled when stdout is not a TTY so redirected
+# or piped logs stay plain.
+if [ -t 1 ]; then
+   C_TAG=$'\033[1;36m'; C_HEAD=$'\033[1;36m'; C_ERR=$'\033[1;31m'; C_OFF=$'\033[0m'
+else
+   C_TAG=''; C_HEAD=''; C_ERR=''; C_OFF=''
+fi
+say() { echo -e "${C_TAG}[deploy]${C_OFF} ${*}"; }
+
 # Print the reason AFTER the usage block (usage() does not exit) so it is the
 # last line the user sees, then fail.
 send-error() { usage; echo -e "\nError: ${@}" >&2; exit 1; }
 reset-last() { last() { send-error "Unsupported argument :: ${1}"; }; }
 # State/environment failures: print the reason plainly, no usage block.
-fatal() { echo -e "\n[deploy] ERROR: ${@}" >&2; exit 1; }
+fatal() { echo -e "\n${C_ERR}[deploy] ERROR:${C_OFF} ${@}" >&2; exit 1; }
 
 while [[ $# -gt 0 ]]; do
    case "${1}" in
@@ -110,7 +119,7 @@ command -v kubectl >/dev/null 2>&1 || send-error "kubectl not found on PATH."
 # An OIDC kubeconfig with an expired token makes the first kubectl call block on
 # an interactive browser re-login; if that cannot open (headless/WSL) it looks
 # like a silent hang. Say so up front, and suggest the manual refresh.
-echo "[deploy] checking cluster access (if this seems to hang, your login likely expired: run 'kubectl get nodes' to re-authenticate, then retry)"
+say "checking cluster access (if this hangs, your login likely expired: run 'kubectl get nodes' to re-authenticate, then retry)"
 # Key off whether node names come back, not the exit code: on OIDC clusters
 # kubectl's discovery burst intermittently 401s and usually recovers, so we
 # retry a few times before giving up. Only if none ever come back do we re-run
@@ -133,7 +142,7 @@ Level 2 assumes the operator and its prerequisites are already present. To insta
   --level 3   install AIM Engine, then serve (assumes the 7 prerequisites)
   --level 4   install the 7 prerequisites + AIM Engine, then serve (assumes the GPU Operator)"
    if [ -n "${HF_TOKEN}" ]; then
-      echo "[deploy] configuring Hugging Face token (secret + default AIMRuntimeConfig)"
+      say "configuring Hugging Face token (secret + default AIMRuntimeConfig)"
       kubectl create secret generic hf-token -n "${NAMESPACE}" \
          --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply --request-timeout=30s --server-side --force-conflicts --validate=false -f -
       kubectl apply --request-timeout=30s --server-side --force-conflicts --validate=false -f - <<EOF
@@ -151,7 +160,7 @@ spec:
         key: hf-token
 EOF
    fi
-   echo "[deploy] applying AIMService for ${AIM_MODEL_IMAGE}"
+   say "applying AIMService for ${AIM_MODEL_IMAGE}"
    aimservice=$(cat <<EOF
 apiVersion: aim.eai.amd.com/v1alpha2
 kind: AIMService
@@ -210,32 +219,33 @@ EOF
          done
       ) >/tmp/aim-nudge.log 2>&1 &
       disown 2>/dev/null || true
-      echo "[deploy] auto-nudge watcher running (pid $!): forces reconciles until the AIMService clears the known cache-ready stall. Disable with AIM_AUTO_NUDGE=0."
+      say "auto-nudge watcher running (pid $!): clears the known cache-ready stall. Disable with AIM_AUTO_NUDGE=0."
    fi
+   echo ""
+   say "AIMService applied. Verify level ${LEVEL}:"
+   echo ""
+   echo -e "${C_HEAD}1) Check readiness${C_OFF} (first pull can take many minutes):"
    cat <<EOF
-[deploy] AIMService applied. How to verify level ${LEVEL} succeeded:
-  # 1) check that it is Ready with this command (READY True/False plus the reason;
-  #    may take a while on first pull):
   kubectl get aimservice aim-smoke -n ${NAMESPACE} -o custom-columns='NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status,REASON:.status.conditions[?(@.type=="Ready")].reason'
-  # while it is not Ready yet, this one line says why (latest status message):
   kubectl describe aimservice aim-smoke -n ${NAMESPACE} | grep -iE 'reason:|message:' | tail -n2
-  # 2) wait until Ready (the InferenceService exists only after the weight
-  #    download finishes and the auto-nudge above clears the reconcile stall; a
-  #    bare cluster with no default StorageClass stays Starting forever), then
-  #    run a small inference:
+EOF
+   echo ""
+   echo -e "${C_HEAD}2) Wait for Ready, then run an inference${C_OFF} (served under the real model id, not aim-smoke):"
+   cat <<EOF
   kubectl wait --for=condition=Ready aimservice/aim-smoke -n ${NAMESPACE} --timeout=1800s
-  # find the predictor Service by label (no need to read the InferenceService,
-  # which a namespaced identity may lack RBAC to list):
   svc=\$(kubectl get svc -n ${NAMESPACE} -l aim.eai.amd.com/service.name=aim-smoke,component=predictor -o name | head -n1)
   kubectl port-forward -n ${NAMESPACE} \$svc 8080:80 >/tmp/pf.log 2>&1 &
-  sleep 3   # let the port-forward come up, else curl gets connection refused
-  # vLLM serves the model under its real id (image / HF repo name), not aim-smoke:
+  sleep 3
   model=\$(curl -sS localhost:8080/v1/models | grep -o '"id":"[^"]*"' | head -n1 | cut -d'"' -f4)
   curl -sS localhost:8080/v1/chat/completions -H 'Content-Type: application/json' -d "{\"model\":\"\$model\",\"messages\":[{\"role\":\"user\",\"content\":\"What is ROCm?\"}],\"max_tokens\":200}"
-  # 3) confirm the GPU is in use inside the serving pod:
+EOF
+   echo ""
+   echo -e "${C_HEAD}3) Confirm the GPU is in use${C_OFF}:"
+   cat <<EOF
   pod=\$(kubectl get pods -n ${NAMESPACE} -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
   kubectl exec -n ${NAMESPACE} \$pod -- rocm-smi
 EOF
+   echo ""
 }
 
 case "${LEVEL}" in

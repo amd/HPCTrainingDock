@@ -65,6 +65,15 @@ usage()
 send-error() { usage; echo -e "\nError: ${@}" >&2; exit 1; }
 reset-last() { last() { send-error "Unsupported argument :: ${1}"; }; }
 
+# Colored, spaced status output; disabled when stdout is not a TTY so redirected
+# or piped logs stay plain.
+if [ -t 1 ]; then
+   C_TAG=$'\033[1;36m'; C_HEAD=$'\033[1;36m'; C_OK=$'\033[1;32m'; C_ERR=$'\033[1;31m'; C_OFF=$'\033[0m'
+else
+   C_TAG=''; C_HEAD=''; C_OK=''; C_ERR=''; C_OFF=''
+fi
+say() { echo -e "${C_TAG}[base-check]${C_OFF} ${*}"; }
+
 while [[ $# -gt 0 ]]; do
    case "${1}" in
       "--image")     shift; IMAGE=${1}; reset-last ;;
@@ -84,7 +93,7 @@ command -v kubectl >/dev/null 2>&1 || send-error "kubectl not found on PATH."
 # An OIDC kubeconfig with an expired token makes the first kubectl call block on
 # an interactive browser re-login; if that cannot open (headless/WSL) it looks
 # like a silent hang. Say so up front, and suggest the manual refresh.
-echo "[base-check] checking cluster access (if this seems to hang, your login likely expired: run 'kubectl get nodes' to re-authenticate, then retry)"
+say "checking cluster access (if this hangs, your login likely expired: run 'kubectl get nodes' to re-authenticate, then retry)"
 # Fetch the node list, keying off whether names come back rather than the exit
 # code: on OIDC clusters kubectl's discovery burst intermittently 401s and
 # usually recovers, so we retry a few times. Only if none ever come back do we
@@ -113,7 +122,7 @@ kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1 || kubectl create namespace
 env_block=$'\n        env:'
 [ -n "${MODEL_ID}" ] && env_block+=$'\n        - name: AIM_MODEL_ID\n          value: "'"${MODEL_ID}"'"'
 if [ -n "${HF_TOKEN}" ]; then
-   echo "[base-check] configuring HF_TOKEN secret for gated model access"
+   say "configuring HF_TOKEN secret for gated model access"
    kubectl create secret generic "${NAME}-hf" -n "${NAMESPACE}" \
       --from-literal=hf-token="${HF_TOKEN}" --dry-run=client -o yaml | kubectl apply --request-timeout=30s --server-side --force-conflicts --validate=false -f -
    env_block+=$'\n        - name: HF_TOKEN\n          valueFrom:\n            secretKeyRef:\n              name: '"${NAME}"$'-hf\n              key: hf-token'
@@ -124,14 +133,14 @@ cleanup() {
    # Always drop the transient port-forward, even with --keep, so it does not
    # linger holding port 8000 after we exit.
    [ -n "${pf}" ] && kill "${pf}" >/dev/null 2>&1 || true
-   [ "${KEEP}" = "1" ] && { echo "[base-check] --keep set; leaving ${NAME} running in ${NAMESPACE}"; return; }
-   echo "[base-check] cleaning up ${NAME} in ${NAMESPACE}"
+   [ "${KEEP}" = "1" ] && { say "--keep set; leaving ${NAME} running in ${NAMESPACE}"; return; }
+   say "cleaning up ${NAME} in ${NAMESPACE}"
    kubectl delete deployment,service "${NAME}" -n "${NAMESPACE}" >/dev/null 2>&1 || true
    [ -n "${HF_TOKEN}" ] && kubectl delete secret "${NAME}-hf" -n "${NAMESPACE}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
-echo "[base-check] deploying ${IMAGE} (amd.com/gpu=${GPU_COUNT}${MODEL_ID:+, AIM_MODEL_ID=${MODEL_ID}})"
+say "deploying ${IMAGE} (amd.com/gpu=${GPU_COUNT}${MODEL_ID:+, AIM_MODEL_ID=${MODEL_ID}})"
 manifest=$(cat <<EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -193,7 +202,7 @@ for _ in $(seq 10); do
 done
 [ -n "${applied}" ] || send-error "deploy failed."
 
-echo "[base-check] waiting for the model to become Ready (weight download can take a while)"
+say "waiting for the model to become Ready (weight download can take a while)"
 progress_start=$(date +%s)
 progress_loop()
 {
@@ -201,7 +210,7 @@ progress_loop()
       sleep "${PROGRESS_INTERVAL}"
       el=$(( $(date +%s) - progress_start ))
       pod=$(kubectl get pod -n "${NAMESPACE}" -l app="${NAME}" --no-headers 2>/dev/null | head -n1)
-      echo "[base-check] +${el}s :: ${pod:-<no pod scheduled yet>}"
+      say "+${el}s :: ${pod:-<no pod scheduled yet>}"
       if [ "${VERBOSE}" = "1" ]; then
          kubectl logs -n "${NAMESPACE}" "deploy/${NAME}" --tail=2 2>/dev/null \
             | sed 's/^/[base-check]   log: /'
@@ -226,7 +235,7 @@ while [ "$(date +%s)" -lt "${deadline}" ]; do
 done
 if [ -z "${ready}" ]; then
    stop-progress
-   echo "[base-check] pod did not become Ready within ${READY_TIMEOUT}s; recent events and logs:"
+   say "${C_ERR}pod did not become Ready within ${READY_TIMEOUT}s${C_OFF}; recent events and logs:"
    kubectl describe deployment/"${NAME}" -n "${NAMESPACE}" 2>/dev/null | sed -n '/Events:/,$p'
    kubectl logs -n "${NAMESPACE}" "deploy/${NAME}" --tail=50 2>/dev/null || true
    send-error "the deployment never became Ready."
@@ -249,7 +258,7 @@ for _ in $(seq 1 12); do
    curl -sf http://localhost:8000/v1/models >/dev/null 2>&1 && { serve_ok=1; break; }
 done
 if [ -z "${serve_ok}" ]; then
-   echo "[base-check] could not reach http://localhost:8000 via port-forward; port-forward log:"
+   say "${C_ERR}could not reach http://localhost:8000 via port-forward${C_OFF}; port-forward log:"
    sed 's/^/[base-check]   pf: /' "${pf_log}" 2>/dev/null
    send-error "port-forward to the served endpoint failed."
 fi
@@ -257,36 +266,41 @@ fi
 # The served model name is whatever the image resolved; read it from /v1/models.
 served=$(curl -sS http://localhost:8000/v1/models | tr ',' '\n' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -n1)
 [ -z "${served}" ] && served="${MODEL_ID}"
-echo "[base-check] served model id: ${served:-<unknown>}"
+say "served model id: ${served:-<unknown>}"
 
 resp=$(curl -sS http://localhost:8000/v1/completions \
    -H "Content-Type: application/json" \
    -d '{"model":"'"${served}"'","prompt":"San Francisco is a","max_tokens":7,"temperature":0}')
 
 if echo "${resp}" | grep -q '"choices"'; then
-   echo "[base-check] PASS: model served a completion."
+   say "${C_OK}PASS:${C_OFF} model served a completion."
    echo "${resp}"
-   echo "[base-check] confirming vLLM placed its KV cache on the GPU:"
+   say "confirming vLLM placed its KV cache on the GPU:"
    gpu_metric=$(curl -sS http://localhost:8000/metrics 2>/dev/null | grep -E 'cache_usage_perc' | grep -v '^#' | head -n1)
    if [ -n "${gpu_metric}" ]; then
-      echo "[base-check] vLLM GPU KV-cache metric present: ${gpu_metric}"
+      say "vLLM GPU KV-cache metric present: ${gpu_metric}"
    elif kubectl logs -n "${NAMESPACE}" "deploy/${NAME}" 2>/dev/null | grep -iE 'GPU KV cache|GPU blocks' | tail -n1; then
       :
    else
-      echo "[base-check] NOTE: no vLLM GPU signal from /metrics or logs; GPU use unconfirmed."
+      say "NOTE: no vLLM GPU signal from /metrics or logs; GPU use unconfirmed."
    fi
-   echo "[base-check] level 1 verified: inference returned a completion and vLLM is using the GPU."
+   echo ""
+   say "${C_OK}Level 1 verified${C_OFF}: inference returned a completion and vLLM is using the GPU."
+   echo ""
    if [ "${KEEP}" = "1" ]; then
-      echo "[base-check] the deployment is left running (--keep 1); probe it with:"
+      echo -e "${C_HEAD}Probe the running deployment${C_OFF} (left up by --keep 1):"
    else
-      echo "[base-check] to probe it yourself, re-run with --keep 1 then:"
+      echo -e "${C_HEAD}Probe it yourself${C_OFF} (re-run with --keep 1 first):"
    fi
-   echo "  kubectl port-forward -n ${NAMESPACE} svc/${NAME} 8000:80 >/tmp/pf.log 2>&1 &"
-   echo "  sleep 3   # let the tunnel come up first, else curl gets connection refused"
-   echo "  curl -sS localhost:8000/metrics | grep cache_usage_perc   # vLLM confirms a GPU KV cache"
-   echo "  curl -sS localhost:8000/v1/chat/completions -H 'Content-Type: application/json' -d '{\"model\":\"${served}\",\"messages\":[{\"role\":\"user\",\"content\":\"What is ROCm?\"}],\"max_tokens\":200}'"
+   cat <<EOF
+  kubectl port-forward -n ${NAMESPACE} svc/${NAME} 8000:80 >/tmp/pf.log 2>&1 &
+  sleep 3
+  curl -sS localhost:8000/metrics | grep cache_usage_perc
+  curl -sS localhost:8000/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"${served}","messages":[{"role":"user","content":"What is ROCm?"}],"max_tokens":200}'
+EOF
+   echo ""
    exit 0
 else
-   echo "[base-check] FAIL: no valid completion. Response: ${resp}"
+   say "${C_ERR}FAIL:${C_OFF} no valid completion. Response: ${resp}"
    exit 1
 fi
