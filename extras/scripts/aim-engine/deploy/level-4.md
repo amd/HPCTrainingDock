@@ -5,11 +5,23 @@ installs AIM Engine, and serves, assuming only that the GPU nodes run the AMD GP
 Operator. It needs cluster-admin, since it creates cluster-scoped resources for
 both.
 
+First point `KUBECONFIG` at the cluster's kubeconfig, substituting our own path
+for the placeholder (skip if we are already pointed at the cluster), and confirm
+it resolves to a real file:
+
 ```bash
-export KUBECONFIG=~/Downloads/kubeconfig.yaml   # from a laptop; skip if already pointed at the cluster
-./aim_deploy.sh --level 4
+export KUBECONFIG=/path/to/your/kubeconfig
+echo "${KUBECONFIG}"; test -s "${KUBECONFIG}" && echo "kubeconfig found" || echo "set KUBECONFIG to a real file"
+```
+
+Then run the level, passing `--namespace` for the project the `AIMService`
+should land in (see [Choosing a namespace](README.md#choosing-a-namespace));
+where `default` is writable we omit it:
+
+```bash
+./aim_deploy.sh --level 4 --namespace <your-namespace>
 # serve a specific image (gated images also need HF_TOKEN exported):
-./aim_deploy.sh --level 4 --model-image amdenterpriseai/aim-qwen-qwen3-32b:0.13.0
+./aim_deploy.sh --level 4 --namespace <your-namespace> --model-image amdenterpriseai/aim-qwen-qwen3-32b:0.13.0
 ```
 
 This runs `aim_engine_setup.sh --install-prereqs 1` (which runs

@@ -33,16 +33,25 @@ no-operator flow for a first-contact GPU check.
 
 ## Supplying a kubeconfig
 
-From a machine not already pointed at the cluster, pass `--kubeconfig`, which
-exports `KUBECONFIG` for the run and is inherited by the setup scripts:
+From a machine not already pointed at the cluster, first set `KUBECONFIG` to the
+path of the kubeconfig an administrator gave us, substituting our own path for
+the placeholder below. We then confirm the variable is set and resolves to a
+real file before running anything, since a wrong path leaves `kubectl` falling
+back to `localhost:8080` and reporting the cluster as unreachable:
 
 ```bash
-./aim_deploy.sh --level 4 --kubeconfig ~/Downloads/kubeconfig.yaml
+export KUBECONFIG=/path/to/your/kubeconfig
+echo "${KUBECONFIG}"; test -s "${KUBECONFIG}" && echo "kubeconfig found" || echo "set KUBECONFIG to a real file"
 ```
 
-Our own later `kubectl` commands need it too, so it is simplest to `export
-KUBECONFIG=~/Downloads/kubeconfig.yaml` once. All four scripts accept
-`--kubeconfig` and show it under `--help`.
+Exporting it once means our own later `kubectl` commands inherit it too. To pass
+it per run instead, all four scripts accept `--kubeconfig`, which exports
+`KUBECONFIG` for that run and is inherited by the setup scripts (they show it
+under `--help`):
+
+```bash
+./aim_deploy.sh --level 4 --kubeconfig /path/to/your/kubeconfig
+```
 
 A kubeconfig that authenticates through an OIDC provider (common on managed
 clusters) runs an exec credential plugin such as `kubectl oidc-login`, which

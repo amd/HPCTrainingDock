@@ -7,9 +7,21 @@ separately (for example by a platform team via GitOps) but installing the
 operator is our job. It needs cluster-admin, since it creates cluster-scoped
 CRDs.
 
+First point `KUBECONFIG` at the cluster's kubeconfig, substituting our own path
+for the placeholder (skip if we are already pointed at the cluster), and confirm
+it resolves to a real file:
+
 ```bash
-export KUBECONFIG=~/Downloads/kubeconfig.yaml   # from a laptop; skip if already pointed at the cluster
-./aim_deploy.sh --level 3
+export KUBECONFIG=/path/to/your/kubeconfig
+echo "${KUBECONFIG}"; test -s "${KUBECONFIG}" && echo "kubeconfig found" || echo "set KUBECONFIG to a real file"
+```
+
+Then run the level, passing `--namespace` for the project the `AIMService`
+should land in (see [Choosing a namespace](README.md#choosing-a-namespace));
+where `default` is writable we omit it:
+
+```bash
+./aim_deploy.sh --level 3 --namespace <your-namespace>
 # add --replace 1 to reinstall cleanly over an existing release
 ```
 

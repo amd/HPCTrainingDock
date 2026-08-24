@@ -10,10 +10,18 @@ advertising `amd.com/gpu`, and the default model is small and ungated
 
 A plain `--level 1` deploys, proves inference, then deletes everything on exit;
 `--keep 1` leaves the Deployment and Service up so we can use them. From a laptop
-we export the kubeconfig once so later `kubectl` commands use it too:
+we first point `KUBECONFIG` at the cluster's kubeconfig, substituting our own
+path for the placeholder, so later `kubectl` commands inherit it, and confirm it
+resolves to a real file:
 
 ```bash
-export KUBECONFIG=~/Downloads/kubeconfig.yaml
+export KUBECONFIG=/path/to/your/kubeconfig
+echo "${KUBECONFIG}"; test -s "${KUBECONFIG}" && echo "kubeconfig found" || echo "set KUBECONFIG to a real file"
+```
+
+Then run the level:
+
+```bash
 ./aim_deploy.sh --level 1 --keep 1 --namespace <your-namespace>
 ```
 
