@@ -375,45 +375,200 @@ else
 
    # ── Native deps for accordo + nexus ───────────────────────────────
    # accordo and nexus compile C++ (via KernelDB) during pip install and
-   # need cmake + libdwarf-dev + libzstd-dev (libdwarf-devel/libzstd-devel
-   # on Fedora/RHEL). Mirrors upstream install/tools/install.sh's
-   # check_system_deps. Only install when one of those tools is selected.
+   # need cmake + the libdwarf headers/lib + the libzstd dev headers
+   # (mirrors upstream install/tools/install.sh's check_system_deps). Only
+   # relevant when one of those tools is selected.
    #
    # NOTE: cmake is intentionally NOT installed here -- this image ships a
    # pip-installed cmake under /usr/local pinned to a specific version, and
    # an apt cmake would shadow/conflict with it. We assume cmake is already
-   # on PATH; only the dwarf/zstd dev headers are installed via the package
-   # manager.
+   # on PATH.
+   PRIVATE_LIBDWARF_LIBDIR=""   # set below iff we staged a private libdwarf.so.1 to ship in the module
+   PRIVATE_LIBELF_LIBDIR=""     # set below iff we staged a private libelf.so.1  to ship in the module
    if [[ " ${INTELLIKIT_TOOLS} " == *" accordo "* ]] || [[ " ${INTELLIKIT_TOOLS} " == *" nexus "* ]]; then
       if ! command -v cmake >/dev/null 2>&1; then
          echo "WARNING: cmake not found on PATH; accordo/nexus C++ build needs it"
          echo "         (expected pip-installed cmake under /usr/local)."
       fi
-      # Installing system packages needs root. When we have no sudo
-      # authority (SUDO cleared by the writability probe on a user-owned
-      # tree) and are not root, attempting `dnf/apt install` would abort
-      # the whole build under `set -e` on a non-root permission error.
-      # In that case skip the package-manager step and rely on the headers
-      # already being present (verified on this Cray: libdwarf-devel /
-      # libzstd-devel are part of the RHEL 9 image); warn so a genuinely
-      # missing header still surfaces a clear cause at the C++ compile.
+
+      # ── libdwarf: provided PRIVATELY, NOT installed system-wide ──────
+      # KernelDB (pulled in by accordo + nexus) does `target_link_libraries(
+      # ... dwarf ...)` and includes <libdwarf.h>, so it needs the libdwarf
+      # headers at build time and its .so records NEEDED=libdwarf.so.1. The
+      # naive `apt-get install libdwarf-dev` drags in the libdwarf1 RUNTIME
+      # package, dropping libdwarf.so.1 into /usr/lib on this SHARED build
+      # host. That distro libdwarf then gets linked into TAU's libTAUsh
+      # (NEEDED=libdwarf.so.1 -- a soname absent from TAU's own bundled
+      # libdwarf.so.0 AND from the compute nodes), which breaks
+      # `module load tau` cluster-wide (see
+      # tau_setup.sh:preflight_no_distro_libdwarf). To avoid that regression
+      # we DOWNLOAD the .deb (no root) and unpack it ONLY into a private
+      # prefix: KernelDB's build is pointed at those headers/libs, and
+      # libdwarf.so.1 is shipped inside the intellikit module tree (put on
+      # LD_LIBRARY_PATH by the modulefile). /usr/lib is never touched and
+      # ldconfig is never run, so TAU and the rest of the host are
+      # unaffected.
+      # Escape hatch (e.g. an isolated container build where writing
+      # /usr/lib is harmless): INTELLIKIT_ALLOW_SYSTEM_LIBDWARF=1 restores
+      # the old `apt-get install libdwarf-dev`.
+      if [ "${INTELLIKIT_ALLOW_SYSTEM_LIBDWARF:-0}" = "1" ]; then
+         echo "intellikit: INTELLIKIT_ALLOW_SYSTEM_LIBDWARF=1 -- installing distro libdwarf system-wide (may break TAU on a shared host)."
+         if [ -z "${SUDO}" ] && [ "${EUID:-$(id -u)}" -ne 0 ]; then
+            echo "intellikit: no sudo authority; assuming libdwarf dev headers already present."
+         elif command -v apt-get >/dev/null 2>&1; then
+            ${SUDO} apt-get update || true
+            ${SUDO} DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -q -y libdwarf-dev || \
+               echo "WARNING: 'apt-get install libdwarf-dev' failed."
+         elif command -v dnf >/dev/null 2>&1; then
+            ${SUDO} dnf install -y libdwarf-devel || echo "WARNING: 'dnf install libdwarf-devel' failed."
+         elif command -v yum >/dev/null 2>&1; then
+            ${SUDO} yum install -y libdwarf-devel || echo "WARNING: 'yum install libdwarf-devel' failed."
+         fi
+      elif command -v apt-get >/dev/null 2>&1; then
+         DWARF_PREFIX="${INTELLIKIT_BUILD_ROOT}/libdwarf-prefix"
+         echo "intellikit: staging a private libdwarf + libelf (no system install) under ${DWARF_PREFIX}"
+         # download-only + dpkg-extract in a subshell so a failure here just
+         # warns (the per-tool loop tolerates accordo/nexus failing); the
+         # `if ( ... )` swallows the non-zero rc so `set -e` won't abort.
+         #
+         # libelf1 + libelf-dev come along for the ride: KernelDB's
+         # addressMap.cc does `#include <gelf.h>` and links `-lelf`, so the
+         # elfutils dev headers (gelf.h / libelf.h) and the libelf.so ->
+         # libelf.so.1 dev symlink are needed at build time. Unlike libdwarf,
+         # libelf.so.1 is a ubiquitous system soname (elfutils is a core dep),
+         # so a distro install would be harmless -- but we stage it privately
+         # anyway to keep the shared host 100% untouched and to make the
+         # shipped module self-contained (the staged libdwarf.so.1 itself
+         # records NEEDED=libelf.so.1, so shipping libelf alongside guarantees
+         # both resolve from the module's own lib/ regardless of the node).
+         # The elfutils RUNTIME package was renamed libelf1 -> libelf1t64 in
+         # Ubuntu 24.04 (the 64-bit time_t transition); 22.04 and RHEL still
+         # call it libelf1. We fetch it BEST-EFFORT (try both names, `|| true`)
+         # rather than probing apt-cache first: on some compute nodes the
+         # runtime's `main` index entry isn't resolvable at this point even
+         # though libelf-dev downloads fine, so a hard require would either
+         # abort the subshell's `set -e` (killing the working libdwarf staging)
+         # or silently skip the header export. The mandatory trio (libdwarf1 +
+         # libdwarf-dev + libelf-dev) MUST download; the runtime libelf is
+         # optional here because libelf.so.1 is a ubiquitous system soname and
+         # the libelf block below backfills the private lib dir from the host
+         # copy when the .deb wasn't fetched.
+         if ( set -e
+               mkdir -p "${DWARF_PREFIX}/dl"
+               cd "${DWARF_PREFIX}/dl"
+               # apt-get download fetches the .deb(s) to CWD; it needs no
+               # root and registers nothing with dpkg or ldconfig.
+               apt-get download libdwarf1 libdwarf-dev libelf-dev
+               # runtime libelf: 24.04 name first, then the legacy one; never
+               # fatal (the system libelf.so.1 backstops it below).
+               apt-get download libelf1t64 2>/dev/null || apt-get download libelf1 2>/dev/null || true
+               for _deb in *.deb; do dpkg -x "${_deb}" "${DWARF_PREFIX}"; done ); then
+            LIBDWARF_INC="${DWARF_PREFIX}/usr/include/libdwarf"
+            LIBDWARF_SO1="$(ls "${DWARF_PREFIX}"/usr/lib/*/libdwarf.so.1 2>/dev/null | head -1 || true)"
+            LIBDWARF_LIBDIR=""
+            [ -n "${LIBDWARF_SO1}" ] && LIBDWARF_LIBDIR="$(dirname "${LIBDWARF_SO1}")"
+            if [ -f "${LIBDWARF_INC}/libdwarf.h" ] && [ -n "${LIBDWARF_LIBDIR}" ]; then
+               echo "intellikit: private libdwarf headers -> ${LIBDWARF_INC}"
+               echo "intellikit: private libdwarf lib     -> ${LIBDWARF_LIBDIR}"
+               # Header discovery: KernelDB's find_path(LIBDWARF_INCLUDE_DIR
+               # NAMES libdwarf.h dwarf.h ...) consults the CMAKE_INCLUDE_PATH
+               # env var; -DLIBDWARF_INCLUDE_DIR (forwarded to the sub-build by
+               # scikit-build-core via the CMAKE_ARGS env var) pins it too.
+               export CMAKE_INCLUDE_PATH="${LIBDWARF_INC}${CMAKE_INCLUDE_PATH:+:${CMAKE_INCLUDE_PATH}}"
+               export CPATH="${LIBDWARF_INC}${CPATH:+:${CPATH}}"
+               # Link discovery: KernelDB links a bare `-ldwarf`; the clang/
+               # hipcc driver resolves that against LIBRARY_PATH.
+               export LIBRARY_PATH="${LIBDWARF_LIBDIR}${LIBRARY_PATH:+:${LIBRARY_PATH}}"
+               export CMAKE_ARGS="${CMAKE_ARGS:+${CMAKE_ARGS} }-DLIBDWARF_INCLUDE_DIR=${LIBDWARF_INC}"
+               PRIVATE_LIBDWARF_LIBDIR="${LIBDWARF_LIBDIR}"
+            else
+               echo "WARNING: private libdwarf staging incomplete (headers/lib not found under ${DWARF_PREFIX});"
+               echo "         accordo/nexus C++ build may fail. Pure-python tools are unaffected."
+            fi
+
+            # ── libelf (gelf.h) from the same private prefix ──────────────
+            # KernelDB's addressMap.cc does `#include <gelf.h>` (compile) and
+            # links `-lelf` (link). Two independent needs, handled separately
+            # so a missing runtime .deb never suppresses the header export
+            # (the bug in the first cut): 
+            #
+            #  (1) HEADER: elfutils dev headers land at the include ROOT
+            #      (usr/include/gelf.h, usr/include/libelf.h), NOT a subdir, so
+            #      we add ${DWARF_PREFIX}/usr/include to CPATH/CMAKE_INCLUDE_PATH
+            #      whenever gelf.h is present. This alone fixes the compile.
+            #  (2) LINK: libelf-dev ships a libelf.so -> libelf.so.1 dev symlink
+            #      in the private usr/lib/<triplet> dir (already on LIBRARY_PATH
+            #      via LIBDWARF_LIBDIR), but the runtime object libelf.so.1 may
+            #      not have been fetched (its package name varies / may be
+            #      unresolvable on the node). If the private libelf.so.1 is
+            #      absent, symlink the ubiquitous SYSTEM libelf.so.1 into the
+            #      private dir so the dev symlink resolves and `-lelf` links.
+            LIBELF_INC="${DWARF_PREFIX}/usr/include"
+            if [ -f "${LIBELF_INC}/gelf.h" ]; then
+               echo "intellikit: private libelf headers  -> ${LIBELF_INC} (gelf.h)"
+               export CMAKE_INCLUDE_PATH="${LIBELF_INC}${CMAKE_INCLUDE_PATH:+:${CMAKE_INCLUDE_PATH}}"
+               export CPATH="${LIBELF_INC}${CPATH:+:${CPATH}}"
+               # Resolve/complete the private libelf runtime for linking+shipping.
+               _elf_libdir="${LIBDWARF_LIBDIR}"
+               [ -n "${_elf_libdir}" ] || _elf_libdir="$(ls -d "${DWARF_PREFIX}"/usr/lib/* 2>/dev/null | head -1 || true)"
+               if [ -n "${_elf_libdir}" ] && [ ! -e "${_elf_libdir}/libelf.so.1" ]; then
+                  _sys_elf="$(ls /usr/lib/*/libelf.so.1 /lib/*/libelf.so.1 /usr/lib/libelf.so.1 2>/dev/null | head -1 || true)"
+                  if [ -n "${_sys_elf}" ]; then
+                     echo "intellikit: private libelf.so.1 not fetched; backfilling from system ${_sys_elf}"
+                     ln -sf "${_sys_elf}" "${_elf_libdir}/libelf.so.1"
+                  fi
+               fi
+               if [ -n "${_elf_libdir}" ] && [ -e "${_elf_libdir}/libelf.so.1" ]; then
+                  echo "intellikit: private libelf lib      -> ${_elf_libdir}"
+                  PRIVATE_LIBELF_LIBDIR="${_elf_libdir}"
+               else
+                  echo "WARNING: no libelf.so.1 (private or system); accordo/nexus link of -lelf may fail."
+               fi
+            else
+               echo "WARNING: private libelf headers incomplete (gelf.h not found under ${DWARF_PREFIX});"
+               echo "         accordo/nexus C++ build may fail on '#include <gelf.h>'. Pure-python tools are unaffected."
+            fi
+         else
+            echo "WARNING: could not download/unpack libdwarf privately (is apt-get download available/online?);"
+            echo "         accordo/nexus C++ build may fail for lack of libdwarf. Pure-python tools are unaffected."
+         fi
+      elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
+         # RHEL/Fedora ship libdwarf 0.x (soname libdwarf.so.0/.so.2, headers
+         # under /usr/include/libdwarf-0) -- a DIFFERENT soname than Ubuntu's
+         # libdwarf.so.1, so installing it does NOT trigger the TAU
+         # libdwarf.so.1 regression described above (the shared TAU build
+         # host is Ubuntu). Keep the historical system install here, guarded
+         # by sudo/root.
+         if [ -z "${SUDO}" ] && [ "${EUID:-$(id -u)}" -ne 0 ]; then
+            echo "intellikit: no sudo authority; assuming libdwarf-devel already present (RHEL)."
+         else
+            _DWARF_PM=dnf; command -v dnf >/dev/null 2>&1 || _DWARF_PM=yum
+            ${SUDO} ${_DWARF_PM} install -y libdwarf-devel || \
+               echo "WARNING: '${_DWARF_PM} install libdwarf-devel' failed; accordo/nexus may not build."
+         fi
+      else
+         echo "WARNING: no apt-get/dnf/yum found; ensure libdwarf headers+lib are present"
+         echo "         or the accordo/nexus C++ build will fail."
+      fi
+
+      # ── libzstd dev headers (system package) ─────────────────────────
+      # Unlike libdwarf, libzstd's runtime (libzstd1) is already part of the
+      # base system on every target here, so installing the -dev headers
+      # introduces no novel runtime soname and cannot cause the TAU-style
+      # regression. Guarded by sudo/root; assume-present when we have neither.
       if [ -z "${SUDO}" ] && [ "${EUID:-$(id -u)}" -ne 0 ]; then
-         echo "intellikit: no sudo authority; skipping system-dep install."
-         echo "            Assuming libdwarf/libzstd dev headers are already present"
-         echo "            (accordo/nexus C++ build will fail later if they are not)."
+         echo "intellikit: no sudo authority; skipping libzstd dev-header install (assuming present)."
       elif command -v apt-get >/dev/null 2>&1; then
          ${SUDO} apt-get update || true
          # DEBIAN_FRONTEND=noninteractive + NEEDRESTART_MODE=a so the
          # post-install needrestart prompt can't block the build (repo
          # convention; see scorep_setup.sh / hpctoolkit_setup.sh).
-         ${SUDO} DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -q -y libdwarf-dev libzstd-dev
+         ${SUDO} DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -q -y libzstd-dev || \
+            echo "WARNING: 'apt-get install libzstd-dev' failed; accordo/nexus may not build."
       elif command -v dnf >/dev/null 2>&1; then
-         ${SUDO} dnf install -y libdwarf-devel libzstd-devel
+         ${SUDO} dnf install -y libzstd-devel || echo "WARNING: 'dnf install libzstd-devel' failed."
       elif command -v yum >/dev/null 2>&1; then
-         ${SUDO} yum install -y libdwarf-devel libzstd-devel
-      else
-         echo "WARNING: no apt-get/dnf/yum found; ensure libdwarf-dev, libzstd-dev"
-         echo "         are present or the accordo/nexus C++ build will fail."
+         ${SUDO} yum install -y libzstd-devel || echo "WARNING: 'yum install libzstd-devel' failed."
       fi
    fi
 
@@ -659,6 +814,40 @@ PYEOF
          -exec sed -i "1s|^#!.*python3.*\$|#!/usr/bin/env ${PYVER}|" {} + 2>/dev/null || true
    fi
 
+   # ── Ship the private libdwarf.so.1 inside the install tree ────────
+   # When we staged a private libdwarf (apt path, above), KernelDB's
+   # extension records NEEDED=libdwarf.so.1 but we deliberately never
+   # installed a system libdwarf. Drop the runtime soname into
+   # ${INTELLIKIT_PATH}/lib (the modulefile adds it to LD_LIBRARY_PATH) so
+   # accordo/nexus resolve libdwarf.so.1 at load time without any distro
+   # libdwarf on the host. cp -a preserves the libdwarf.so.1 ->
+   # libdwarf.so.1.0.0 symlink chain; the subsequent chown/chmod locks it
+   # down with the rest of the tree.
+   if [ -n "${PRIVATE_LIBDWARF_LIBDIR:-}" ] && [ -e "${PRIVATE_LIBDWARF_LIBDIR}/libdwarf.so.1" ]; then
+      echo "intellikit: shipping libdwarf.so.1 into ${INTELLIKIT_PATH}/lib (from ${PRIVATE_LIBDWARF_LIBDIR})"
+      ${SUDO} mkdir -p "${INTELLIKIT_PATH}/lib"
+      ${SUDO} cp -a "${PRIVATE_LIBDWARF_LIBDIR}"/libdwarf.so.1* "${INTELLIKIT_PATH}/lib/" || \
+         echo "WARNING: failed to stage libdwarf.so.1 into ${INTELLIKIT_PATH}/lib"
+   fi
+
+   # ── Ship the private libelf.so.1 inside the install tree ──────────
+   # KernelDB links `-lelf`, so its extension records NEEDED=libelf.so.1,
+   # and the shipped libdwarf.so.1 itself depends on libelf.so.1. libelf.so.1
+   # is normally present on every node, but shipping it here (same
+   # LD_LIBRARY_PATH dir) makes the module self-contained even on a stripped
+   # node. Only fires when we staged libelf privately (apt path, above).
+   if [ -n "${PRIVATE_LIBELF_LIBDIR:-}" ] && [ -e "${PRIVATE_LIBELF_LIBDIR}/libelf.so.1" ]; then
+      echo "intellikit: shipping libelf.so.1 into ${INTELLIKIT_PATH}/lib (from ${PRIVATE_LIBELF_LIBDIR})"
+      ${SUDO} mkdir -p "${INTELLIKIT_PATH}/lib"
+      # libelf.so.1 may be a symlink to a versioned real object (libelf-<ver>.so
+      # when the .deb was fetched) OR an absolute symlink into /usr/lib (the
+      # system-backfill case). cp -aL DEREFERENCES it, writing a single real
+      # file named libelf.so.1 -- which is exactly the soname the KernelDB
+      # extension records as NEEDED, so no symlink chain has to be preserved.
+      ${SUDO} cp -aL "${PRIVATE_LIBELF_LIBDIR}/libelf.so.1" "${INTELLIKIT_PATH}/lib/" || \
+         echo "WARNING: failed to stage libelf.so.1 into ${INTELLIKIT_PATH}/lib"
+   fi
+
    if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
       ${SUDO} find $INTELLIKIT_PATH -type f -execdir chown root:root "{}" +
       ${SUDO} find $INTELLIKIT_PATH -type d -execdir chown root:root "{}" +
@@ -766,6 +955,7 @@ if [ "${MODFLAVOR}" = "lua" ]; then
 	${ROCM_PREREQ_LUA}
 	prepend_path("PYTHONPATH","${INTELLIKIT_PATH}")
 	prepend_path("PATH","${INTELLIKIT_PATH}/bin")
+	prepend_path("LD_LIBRARY_PATH","${INTELLIKIT_PATH}/lib")
 	setenv("INTELLIKIT_HOME","${INTELLIKIT_PATH}")
 	EOF
 else
@@ -781,6 +971,7 @@ else
 	prereq ${ROCM_PREREQ_TCL}
 	prepend-path PYTHONPATH "${INTELLIKIT_PATH}"
 	prepend-path PATH "${INTELLIKIT_PATH}/bin"
+	prepend-path LD_LIBRARY_PATH "${INTELLIKIT_PATH}/lib"
 	setenv INTELLIKIT_HOME "${INTELLIKIT_PATH}"
 	EOF
 fi
