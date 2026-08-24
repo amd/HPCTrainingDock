@@ -194,19 +194,23 @@ EOF
    # is Ready, so users need not nudge by hand. Disable with AIM_AUTO_NUDGE=0.
    if [ "${AIM_AUTO_NUDGE}" = "1" ]; then
       (
+         # Gate only on the AIMService's own conditions: a namespaced identity that
+         # cannot list aimprofilecache/inferenceservice (common on multi-tenant
+         # clusters) can still read these, so the nudge fires regardless of RBAC.
          for _ in $(seq 1 240); do
             sleep 15
-            kubectl get inferenceservice -n "${NAMESPACE}" \
-               -l aim.eai.amd.com/service.name=aim-smoke -o name 2>/dev/null | grep -q . && exit 0
-            kubectl get aimprofilecache -n "${NAMESPACE}" \
-               -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null \
-               | grep -q '^True$' \
-               && kubectl annotate aimservice aim-smoke -n "${NAMESPACE}" \
-                    kick="$(date +%s)" --overwrite >/dev/null 2>&1
+            conds=$(kubectl get aimservice aim-smoke -n "${NAMESPACE}" \
+               -o jsonpath='{range .status.conditions[*]}|{.type}={.status}{end}|' 2>/dev/null)
+            case "${conds}" in
+               *"|Ready=True|"*) exit 0 ;;                 # serving; nothing left to do
+               *InferenceServicePodsReady=*) exit 0 ;;     # InferenceService exists; stall already cleared
+            esac
+            kubectl annotate aimservice aim-smoke -n "${NAMESPACE}" \
+               kick="$(date +%s)" --overwrite >/dev/null 2>&1
          done
       ) >/tmp/aim-nudge.log 2>&1 &
       disown 2>/dev/null || true
-      echo "[deploy] auto-nudge watcher running (pid $!): forces one reconcile when the profile cache is Ready. Disable with AIM_AUTO_NUDGE=0."
+      echo "[deploy] auto-nudge watcher running (pid $!): forces reconciles until the AIMService clears the known cache-ready stall. Disable with AIM_AUTO_NUDGE=0."
    fi
    cat <<EOF
 [deploy] AIMService applied. How to verify level ${LEVEL} succeeded:
@@ -220,8 +224,10 @@ EOF
   #    bare cluster with no default StorageClass stays Starting forever), then
   #    run a small inference:
   kubectl wait --for=condition=Ready aimservice/aim-smoke -n ${NAMESPACE} --timeout=1800s
-  isvc=\$(kubectl get inferenceservice -n ${NAMESPACE} -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
-  kubectl port-forward -n ${NAMESPACE} svc/\$(basename \$isvc)-predictor 8080:80 >/tmp/pf.log 2>&1 &
+  # find the predictor Service by label (no need to read the InferenceService,
+  # which a namespaced identity may lack RBAC to list):
+  svc=\$(kubectl get svc -n ${NAMESPACE} -l aim.eai.amd.com/service.name=aim-smoke,component=predictor -o name | head -n1)
+  kubectl port-forward -n ${NAMESPACE} \$svc 8080:80 >/tmp/pf.log 2>&1 &
   sleep 3   # let the port-forward come up, else curl gets connection refused
   # vLLM serves the model under its real id (image / HF repo name), not aim-smoke:
   model=\$(curl -sS localhost:8080/v1/models | grep -o '"id":"[^"]*"' | head -n1 | cut -d'"' -f4)

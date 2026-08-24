@@ -45,8 +45,10 @@ kubectl get aimservice aim-smoke -n "$NAMESPACE" \
 kubectl describe aimservice aim-smoke -n "$NAMESPACE" | grep -iE 'reason:|message:' | tail -n2
 
 kubectl wait --for=condition=Ready aimservice/aim-smoke -n "$NAMESPACE" --timeout=1800s
-isvc=$(kubectl get inferenceservice -n "$NAMESPACE" -l aim.eai.amd.com/service.name=aim-smoke -o name | head -n1)
-kubectl port-forward -n "$NAMESPACE" svc/$(basename $isvc)-predictor 8080:80 >/tmp/pf.log 2>&1 &
+# find the predictor Service by label (no need to read the InferenceService,
+# which a namespaced identity may lack RBAC to list):
+svc=$(kubectl get svc -n "$NAMESPACE" -l aim.eai.amd.com/service.name=aim-smoke,component=predictor -o name | head -n1)
+kubectl port-forward -n "$NAMESPACE" "$svc" 8080:80 >/tmp/pf.log 2>&1 &
 sleep 3
 model=$(curl -sS localhost:8080/v1/models | grep -o '"id":"[^"]*"' | head -n1 | cut -d'"' -f4)
 curl -sS localhost:8080/v1/chat/completions -H 'Content-Type: application/json' \
@@ -73,5 +75,8 @@ kubectl exec -n "$NAMESPACE" $pod -- rocm-smi
 kubectl delete aimservice aim-smoke -n "$NAMESPACE"
 ```
 
-If it never reaches Ready, the usual cause is storage: the cache PVC needs a
-ReadWriteMany StorageClass (see Known limits in [`deploy/README.md`](README.md)).
+If it never reaches Ready, two causes are common. Storage: the cache PVC needs a
+ReadWriteMany StorageClass. Or the reconcile stall: the download finished but the
+service stays `Progressing` because the controller did not re-queue on the cache
+becoming Ready, cleared with one `kubectl annotate ... kick=...` nudge. Both are
+covered under Known limits in [`deploy/README.md`](README.md).

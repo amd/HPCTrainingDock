@@ -166,9 +166,18 @@ read the id from `/v1/models` rather than hardcoding it.
   GPU limit, the pod gets no isolated device, and in-container `rocminfo` then
   sees every host GPU and fails.
 - The service controller does not always re-queue an `AIMService` when its
-  `AIMProfileCache` reaches Ready, so it can sit in `Starting` with a stale
-  message. `aim_deploy.sh` runs a one-shot watcher that forces one reconcile once
-  the cache is Ready (disable with `AIM_AUTO_NUDGE=0`). This is an operator bug we
-  track upstream.
+  `AIMProfileCache` reaches Ready, so it can sit in `Starting` with `READY False`
+  and reason `Progressing` even though the weight download has finished. This is
+  an operator bug we track upstream. `aim_deploy.sh` runs a detached watcher that
+  forces a reconcile (an annotation bump) until the service moves past the stall,
+  gating only on the `AIMService`'s own conditions so it still works for a
+  namespaced identity that cannot read the cache object (disable with
+  `AIM_AUTO_NUDGE=0`). If the watcher is not running (the deploy shell exited, or
+  we applied the `AIMService` by hand) and a service stays `Progressing` after the
+  download completes, we clear it with one manual nudge:
+
+  ```bash
+  kubectl annotate aimservice aim-smoke -n "$NAMESPACE" kick="$(date +%s)" --overwrite
+  ```
 
 For an overview of both directories, see the [top-level README](../README.md).
