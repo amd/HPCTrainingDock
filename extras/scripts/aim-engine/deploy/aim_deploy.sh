@@ -246,6 +246,11 @@ EOF
   kubectl exec -n ${NAMESPACE} \$pod -- rocm-smi
 EOF
    echo ""
+   echo -e "${C_HEAD}4) Clean up when done${C_OFF}:"
+   cat <<EOF
+  kubectl delete aimservice aim-smoke -n ${NAMESPACE}
+EOF
+   echo ""
 }
 
 case "${LEVEL}" in

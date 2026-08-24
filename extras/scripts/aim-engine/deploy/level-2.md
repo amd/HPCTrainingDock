@@ -58,13 +58,17 @@ curl -sS localhost:8080/v1/chat/completions -H 'Content-Type: application/json' 
 ## Drive it with an example app
 
 Point the `icf_4agent` example (HPCTrainingExamples, `MLExamples/icf_4agent`) at
-the predictor and reuse the served id; levels 3 and 4 reach the same endpoint:
+the predictor and reuse the served id; levels 3 and 4 reach the same endpoint.
+The first time we build its virtualenv with `create_aivenv.sh` (which
+`start_app.sh` then activates):
 
 ```bash
+cd /path/to/HPCTrainingExamples/MLExamples/icf_4agent
+./create_aivenv.sh
 export ICF_BASE_URL=http://localhost:8080/v1
 export ICF_MODEL="$model"
 export ICF_API_KEY=unused
-cd /path/to/HPCTrainingExamples/MLExamples/icf_4agent && ./start_app.sh
+./start_app.sh
 ```
 
 ## Confirm the GPU and clean up

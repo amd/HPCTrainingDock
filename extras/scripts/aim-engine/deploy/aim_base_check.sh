@@ -299,6 +299,13 @@ if echo "${resp}" | grep -q '"choices"'; then
   curl -sS localhost:8000/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"${served}","messages":[{"role":"user","content":"What is ROCm?"}],"max_tokens":200}'
 EOF
    echo ""
+   if [ "${KEEP}" = "1" ]; then
+      echo -e "${C_HEAD}Clean up when done${C_OFF}:"
+      cat <<EOF
+  kubectl delete deployment,service ${NAME} -n ${NAMESPACE}
+EOF
+      echo ""
+   fi
    exit 0
 else
    say "${C_ERR}FAIL:${C_OFF} no valid completion. Response: ${resp}"
