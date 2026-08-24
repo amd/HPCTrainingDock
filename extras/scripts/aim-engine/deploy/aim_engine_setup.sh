@@ -78,6 +78,16 @@ done
 command -v kubectl >/dev/null 2>&1 || send-error "kubectl not found on PATH."
 command -v helm    >/dev/null 2>&1 || send-error "helm not found on PATH."
 kubectl cluster-info >/dev/null 2>&1 || send-error "cannot reach a Kubernetes cluster (check KUBECONFIG / context)."
+# If AIM Engine is already installed (its CRD is present), there is nothing for
+# levels 3/4 to install. Say so and skip the install path: serving needs only
+# namespaced access, so a caller without cluster-admin can still proceed (when
+# invoked through aim_deploy.sh it continues to the serve step after this
+# returns). --replace forces a reinstall, so it does not short-circuit.
+if [ "${REPLACE}" != "1" ] && kubectl get crd aimservices.aim.eai.amd.com >/dev/null 2>&1; then
+   echo "[aim] AIM Engine is already installed on this cluster; skipping install."
+   echo "[aim] nothing for levels 3/4 to do here (level 2 serves directly); pass --replace 1 to reinstall."
+   exit 0
+fi
 # CRDs + cluster-scoped RBAC require cluster-admin (the k8s 'sudo').
 kubectl auth can-i create customresourcedefinitions.apiextensions.k8s.io >/dev/null 2>&1 \
    || send-error "current context lacks cluster-admin (cannot create CRDs); AIM Engine needs cluster-admin."
