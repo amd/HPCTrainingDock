@@ -21,6 +21,11 @@ AIM Engine at levels 2 to 4.
 - [`test/`](test/README.md): `aim_engine_test.sh`, which stands up a disposable
   `kind` cluster with real AMD GPU passthrough, runs the `deploy/` scripts on it
   end to end, and discards everything on exit.
+- [`rocbudai/`](rocbudai/README.md): a thin client that points AMD-HPC's
+  [rocBudAI](https://github.com/AMD-HPC/rocBudAI) profiling assistant (an
+  opencode TUI) at a model already served by `deploy/`, instead of running one
+  locally with ollama. Consumes the served `/v1` endpoint and ships an optional
+  `module load rocbudai` experience.
 
 ## Test first
 

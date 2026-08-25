@@ -1,0 +1,86 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "enabled_providers": ["aim"],
+  "provider": {
+    "aim": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "AIM Engine",
+      "options": {
+        "baseURL": "__BASE_URL__",
+        "apiKey": "__API_KEY__"
+      },
+      "models": {
+        "__MODEL_ID__": {
+          "name": "__MODEL_ID__",
+          "tool_call": true,
+          "limit": {
+            "context": __CONTEXT__,
+            "output": __OUTPUT__
+          }
+        }
+      }
+    }
+  },
+  "model": "aim/__MODEL_ID__",
+  "autoupdate": false,
+  "share": "disabled",
+  "instructions": __INSTRUCTIONS_JSON__,
+  "permission": {
+    "edit": "ask",
+    "webfetch": "ask",
+    "bash": {
+      "*": "ask",
+
+      "pwd": "allow",
+      "hostname": "allow",
+      "whoami": "allow",
+      "id": "allow",
+      "date": "allow",
+      "echo *": "allow",
+
+      "ls": "allow",
+      "ls *": "allow",
+      "cat *": "allow",
+      "head *": "allow",
+      "tail *": "allow",
+      "wc *": "allow",
+      "stat *": "allow",
+      "file *": "allow",
+      "grep *": "allow",
+      "rg *": "allow",
+      "find *": "allow",
+      "tree *": "allow",
+
+      "module list": "allow",
+      "module avail": "allow",
+      "module avail *": "allow",
+      "module spider *": "allow",
+      "module show *": "allow",
+      "module --version": "allow",
+
+      "rocbudai-name-session": "allow",
+      "rocbudai-name-session *": "allow",
+
+      "module purge": "deny",
+      "module purge *": "deny",
+      "module reset": "deny",
+      "module reset *": "deny",
+
+      "*…*": "deny",
+      "*&-&*": "deny",
+      "*...": "deny",
+
+      "rocm-smi": "allow",
+      "rocm-smi *": "allow",
+      "/opt/rocm/bin/rocm-smi": "allow",
+      "/opt/rocm/bin/rocm-smi *": "allow",
+      "rocminfo": "allow",
+      "rocminfo *": "allow",
+
+      "nvidia-smi": "allow",
+      "lscpu": "allow",
+      "free *": "allow",
+      "df *": "allow"
+    }
+  }
+}
