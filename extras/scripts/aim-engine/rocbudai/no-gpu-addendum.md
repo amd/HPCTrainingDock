@@ -1,5 +1,5 @@
 <!--
-  rocBudAI AIM-client runtime addendum. setup_rocbudai_aim.sh appends this to
+  rocBudAI AIM-client runtime addendum. The patched rocbudai-tui appends this to
   opencode's "instructions" AFTER the arch persona when the agent host has no
   local GPU, so it overrides the persona's local-execution guidance.
 -->
