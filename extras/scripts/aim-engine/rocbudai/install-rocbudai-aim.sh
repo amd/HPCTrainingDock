@@ -38,8 +38,17 @@ FORCE=0
 DRY_RUN=0
 DEPLOY_ARGS=()
 
-err()  { echo "[install-rocbudai-aim] error: $*" >&2; }
-info() { echo "[install-rocbudai-aim] $*"; }
+# Colored, spaced status output; disabled when stdout is not a TTY so redirected
+# or piped logs stay plain.
+if [ -t 1 ]; then
+    C_TAG=$'\033[1;36m'; C_HEAD=$'\033[1;36m'; C_ERR=$'\033[1;31m'; C_OFF=$'\033[0m'
+else
+    C_TAG=''; C_HEAD=''; C_ERR=''; C_OFF=''
+fi
+
+err()  { echo -e "${C_ERR}[install-rocbudai-aim] error:${C_OFF} $*" >&2; }
+info() { echo -e "${C_TAG}[install-rocbudai-aim]${C_OFF} $*"; }
+head() { echo -e "${C_HEAD}$*${C_OFF}"; }
 run()  { if [[ $DRY_RUN -eq 1 ]]; then echo "  + $*"; else "$@"; fi; }
 
 usage() {
@@ -198,9 +207,15 @@ else
     err "opencode not found on PATH; install it (npm i -g opencode-ai@1.14.28) before launching."
 fi
 
-# Write the modulefile.
+# Write the modulefile. Drop rocBudAI's stock modulefiles (the ollama-based
+# rocbudai/dev and any default-version markers) so `module use` exposes only the
+# AIM client we generate below.
 MODDIR="${PREFIX}/modulefiles/rocbudai"
 MODFILE="${MODDIR}/aim.lua"
+if [[ -d "${MODDIR}" ]]; then
+    info "removing rocBudAI's stock modulefiles (keeping only rocbudai/aim)"
+    run find "${MODDIR}" -mindepth 1 -maxdepth 1 ! -name 'aim.lua' -exec rm -rf {} +
+fi
 info "writing modulefile ${MODFILE}"
 if [[ $DRY_RUN -eq 1 ]]; then
     echo "  + generate ${MODFILE} (backend=aim, arch=${GFX_ARCH:-asked at launch}, trusted=${TRUSTED})"
@@ -270,15 +285,15 @@ else
 fi
 
 echo
-info "done. Everything was installed under: ${PREFIX}"
+info "done. Everything was installed under: ${C_HEAD}${PREFIX}${C_OFF}"
 echo "  To remove this install later: rm -rf ${PREFIX}"
 echo
-info "To use it:"
+head "To use it:"
 echo "  module use ${PREFIX}/modulefiles"
 echo "  cd <your-project-dir>"
 echo "  module load rocbudai"
 if [[ -n "${NAMESPACE}" ]]; then
     echo
-    echo "Authenticate kubectl once first (clears any OIDC login prompt):"
+    head "Authenticate kubectl once first (clears any OIDC login prompt):"
     echo "  kubectl get svc -n ${NAMESPACE}"
 fi

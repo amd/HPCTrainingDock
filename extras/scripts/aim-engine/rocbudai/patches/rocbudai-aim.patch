@@ -123,7 +123,7 @@ diff --git a/bin/rocbudai-tui b/bin/rocbudai-tui
 index 778167a..d7a914b 100755
 --- a/bin/rocbudai-tui
 +++ b/bin/rocbudai-tui
-@@ -109,6 +109,193 @@ err() { echo "[rocbudai-tui] error: $*" >&2; }
+@@ -109,6 +109,194 @@ err() { echo "[rocbudai-tui] error: $*" >&2; }
  warn() { echo "[rocbudai-tui] warning: $*" >&2; }
  info() { echo "[rocbudai-tui] $*"; }
  
@@ -292,6 +292,7 @@ index 778167a..d7a914b 100755
 +tpl = json.load(open(os.environ["ROCBUDAI_T"]))
 +model = os.environ["ROCBUDAI_M"]
 +tpl["model"] = f"aim/{model}"
++tpl["small_model"] = f"aim/{model}"
 +tpl["provider"] = {
 +    "aim": {
 +        "npm": "@ai-sdk/openai-compatible",
@@ -419,13 +420,16 @@ index 778167a..d7a914b 100755
      # Seed prompt = first user turn the model sees. opencode's `--prompt`
      # is rendered as a visible user message in the chat history (there is
      # no hidden / system-message injection in the TUI). We use the visible
-@@ -1140,7 +1341,11 @@ if [[ -n "$ROCBUDAI_OPENCODE_PORT" && "${ROCBUDAI_NUDGE_DISABLE:-0}" != "1" \
+@@ -1140,7 +1341,14 @@ if [[ -n "$ROCBUDAI_OPENCODE_PORT" && "${ROCBUDAI_NUDGE_DISABLE:-0}" != "1" \
      disown "$ROCBUDAI_WATCHER_PID" 2>/dev/null || true
  fi
  
 -ollama launch opencode --model "${ROCBUDAI_MODEL}" -y -- "${OPENCODE_EXTRA_ARGS[@]}" || true
 +if aim_active; then
-+    "${ROCBUDAI_OPENCODE_BIN}" "${OPENCODE_EXTRA_ARGS[@]}" || true
++    # Force the model on the CLI so it beats any global opencode config
++    # (~/.opencode/*, ~/.config/opencode/*) that would otherwise override the
++    # project opencode.json and send prompts to opencode's Zen cloud instead.
++    "${ROCBUDAI_OPENCODE_BIN}" --model "aim/${ROCBUDAI_MODEL}" "${OPENCODE_EXTRA_ARGS[@]}" || true
 +else
 +    ollama launch opencode --model "${ROCBUDAI_MODEL}" -y -- "${OPENCODE_EXTRA_ARGS[@]}" || true
 +fi

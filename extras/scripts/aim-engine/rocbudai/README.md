@@ -85,35 +85,20 @@ or more. The launcher reads the served `max_model_len` and warns when it is smal
 
 ## Quick start
 
-Install once, then use `module load rocbudai` from any project directory. There
-are two ways to reach the model.
+Install once, then use `module load rocbudai` from any project directory.
 
-With a routable endpoint (Ingress, LoadBalancer, NodePort, or a port-forward you
-already run), pass it directly and no `kubectl` is involved:
-
-```bash
-./install-rocbudai-aim.sh --endpoint http://localhost:8080/v1
-```
-
-Otherwise let the launcher port-forward to the predictor. This path uses
-`kubectl`, so first point it at your cluster and confirm it is authenticated: if
-`kubectl` is not logged in, endpoint discovery waits on it and appears to hang.
-
-```bash
-export KUBECONFIG=/path/to/your/kubeconfig
-kubectl get svc -n <your-namespace>     # completes any OIDC login prompt
-./install-rocbudai-aim.sh --namespace <your-namespace>
-```
-
-On a headless login node (no local browser, the usual case here) the OIDC
-`authcode` flow redirects to `http://localhost:8000`, which the node cannot open.
-SSH to the node forwarding that callback port so the redirect reaches the login
-server on the node, then run `kubectl` in the same session and open the printed
-URL in your laptop browser:
+Step 1: authenticate `kubectl`. The launcher port-forwards to the predictor, so
+`kubectl` must be pointed at your cluster and logged in first; otherwise endpoint
+discovery waits on it and appears to hang. On a headless login node (no local
+browser, the usual case here) the OIDC `authcode` flow redirects to
+`http://localhost:8000`, which the node cannot open. SSH to the node forwarding
+that callback port so the redirect reaches the login server on the node, then run
+`kubectl` in that same session and open the printed URL in your laptop browser:
 
 ```bash
 ssh -L 8000:localhost:8000 <user>@<login-node>
 # then, in that same session on the node:
+export KUBECONFIG=/path/to/your/kubeconfig
 kubectl get svc -n <your-namespace>     # open the printed URL in your browser
 ```
 
@@ -121,9 +106,24 @@ Match the forwarded port to kubelogin's `--listen-address` if it is not the
 default `8000` (check `kubectl config view`). Avoid
 `--grant-type=authcode-keyboard`: it relies on the out-of-band redirect
 (`urn:ietf:wg:oauth:2.0:oob`), which recent Keycloak rejects with
-"Invalid parameter: redirect_uri".
+"Invalid parameter: redirect_uri". If `kubectl` runs on a host with its own
+browser, the SSH forward is unnecessary.
 
-Either way the installer prints the two lines that finish setup:
+Step 2: install. Pass the namespace and the Slurm partition `rocbudai-submit`
+should dispatch GPU jobs to (find it with `sinfo -o "%P %G"`):
+
+```bash
+./install-rocbudai-aim.sh --namespace <your-namespace> --submit-partition <gpu-partition>
+```
+
+If instead you already have a routable endpoint (Ingress, LoadBalancer, NodePort,
+or a port-forward you run yourself), skip `kubectl` entirely and pass it directly:
+
+```bash
+./install-rocbudai-aim.sh --endpoint http://localhost:8080/v1 --submit-partition <gpu-partition>
+```
+
+The installer prints the two lines that finish setup:
 
 ```bash
 module use $HOME/rocbudai-aim/modulefiles
