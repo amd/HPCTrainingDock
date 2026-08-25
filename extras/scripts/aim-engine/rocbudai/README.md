@@ -105,6 +105,24 @@ kubectl get svc -n <your-namespace>     # completes any OIDC login prompt
 ./install-rocbudai-aim.sh --namespace <your-namespace>
 ```
 
+On a headless login node (no local browser, the usual case here) the OIDC
+`authcode` flow redirects to `http://localhost:8000`, which the node cannot open.
+SSH to the node forwarding that callback port so the redirect reaches the login
+server on the node, then run `kubectl` in the same session and open the printed
+URL in your laptop browser:
+
+```bash
+ssh -L 8000:localhost:8000 <user>@<login-node>
+# then, in that same session on the node:
+kubectl get svc -n <your-namespace>     # open the printed URL in your browser
+```
+
+Match the forwarded port to kubelogin's `--listen-address` if it is not the
+default `8000` (check `kubectl config view`). Avoid
+`--grant-type=authcode-keyboard`: it relies on the out-of-band redirect
+(`urn:ietf:wg:oauth:2.0:oob`), which recent Keycloak rejects with
+"Invalid parameter: redirect_uri".
+
 Either way the installer prints the two lines that finish setup:
 
 ```bash
