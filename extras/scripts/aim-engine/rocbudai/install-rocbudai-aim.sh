@@ -74,22 +74,24 @@ Serving (delegated to deploy/aim_deploy.sh --level 2; requires --namespace):
 EOF
 }
 
+need() { [[ $# -ge 2 && -n "$2" ]] || { err "$1 requires a value"; exit 2; }; }
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --prefix)        PREFIX="$2"; shift 2 ;;
-        --gfx-arch)      GFX_ARCH="$2"; shift 2 ;;
-        --namespace)     NAMESPACE="$2"; shift 2 ;;
-        --endpoint)      ENDPOINT="$2"; shift 2 ;;
-        --submit-partition) SUBMIT_PARTITION="$2"; shift 2 ;;
+        --prefix)        need "$@"; PREFIX="$2"; shift 2 ;;
+        --gfx-arch)      need "$@"; GFX_ARCH="$2"; shift 2 ;;
+        --namespace)     need "$@"; NAMESPACE="$2"; shift 2 ;;
+        --endpoint)      need "$@"; ENDPOINT="$2"; shift 2 ;;
+        --submit-partition) need "$@"; SUBMIT_PARTITION="$2"; shift 2 ;;
         --trust)         ASSERT_TRUST=1; shift ;;
-        --rocbudai-ref)  ROCBUDAI_REF="$2"; shift 2 ;;
-        --rocbudai-src)  ROCBUDAI_SRC="$2"; shift 2 ;;
+        --rocbudai-ref)  need "$@"; ROCBUDAI_REF="$2"; shift 2 ;;
+        --rocbudai-src)  need "$@"; ROCBUDAI_SRC="$2"; shift 2 ;;
         --force)         FORCE=1; shift ;;
         --dry-run)       DRY_RUN=1; shift ;;
         --deploy)        DO_DEPLOY=1; shift ;;
-        --model-image)   DEPLOY_ARGS+=(--model-image "$2"); shift 2 ;;
-        --max-model-len) DEPLOY_ARGS+=(--max-model-len "$2"); shift 2 ;;
-        --engine-arg)    DEPLOY_ARGS+=(--engine-arg "$2"); shift 2 ;;
+        --model-image)   need "$@"; DEPLOY_ARGS+=(--model-image "$2"); shift 2 ;;
+        --max-model-len) need "$@"; DEPLOY_ARGS+=(--max-model-len "$2"); shift 2 ;;
+        --engine-arg)    need "$@"; DEPLOY_ARGS+=(--engine-arg "$2"); shift 2 ;;
         --help|-h)       usage; exit 0 ;;
         *)               err "unknown argument: $1"; usage; exit 2 ;;
     esac
@@ -268,7 +270,10 @@ else
 fi
 
 echo
-info "done. To use it:"
+info "done. Everything was installed under: ${PREFIX}"
+echo "  To remove this install later: rm -rf ${PREFIX}"
+echo
+info "To use it:"
 echo "  module use ${PREFIX}/modulefiles"
 echo "  cd <your-project-dir>"
 echo "  module load rocbudai"
