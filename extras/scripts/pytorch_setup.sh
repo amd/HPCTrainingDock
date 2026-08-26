@@ -1941,26 +1941,23 @@ else
 
       # Buidling Deep Speed
 
+      # With DS_BUILD_OPS=0 as the base, every op defaults to "off", so we only
+      # explicitly enable the training ops we want precompiled. The inference-v2
+      # kernels (transformer_inference, inference_core_ops, cutlass_ops,
+      # spatial_inference, ragged_*) and other NVIDIA-only / legacy ops stay off
+      # automatically and do not build on ROCm -- listing them =0 was redundant.
+      # Targeting the detected gfx arch avoids compiling for unused
+      # architectures and speeds up the build.
+      PYTORCH_ROCM_ARCH=${AMDGPU_GFXMODEL} \
+      DS_BUILD_OPS=0 \
       DS_BUILD_AIO=1 \
-      DS_BUILD_CCL_COMM=0 \
       DS_BUILD_CPU_ADAM=1 \
       DS_BUILD_CPU_LION=1 \
-      DS_BUILD_EVOFORMER_ATTN=0 \
       DS_BUILD_FUSED_ADAM=1 \
       DS_BUILD_FUSED_LION=1 \
       DS_BUILD_FUSED_LAMB=1 \
       DS_BUILD_QUANTIZER=1 \
       DS_BUILD_RANDOM_LTD=1 \
-      DS_BUILD_TRANSFORMER=1 \
-      DS_BUILD_STOCHASTIC_TRANSFORMER=1 \
-      DS_BUILD_SPARSE_ATTN=0 \
-      DS_BUILD_TRANSFORMER_INFERENCE=0 \
-      DS_BUILD_INFERENCE_CORE_OPS=0 \
-      DS_BUILD_SPATIAL_INFERENCE=0 \
-      DS_BUILD_CUTLASS_OPS=0 \
-      DS_BUILD_RAGGED_OPS=0 \
-      DS_BUILD_RAGGED_DEVICE_OPS=0 \
-      DS_BUILD_OPS=0 \
       pip3 install --upgrade deepspeed einops psutil pydantic==2.11.9 hjson pydantic-core==2.33.2 msgpack typing_inspection annotated_types py-cpuinfo --no-cache-dir --target=$DEEPSPEED_PATH --no-build-isolation --no-deps
 
       # ── Shebang rewrite (wheel branch) ─────────────────────────────
@@ -4383,26 +4380,23 @@ print('  torch.cuda.is_available() =', torch.cuda.is_available())
 
       # Building Deep Speed
 
+      # With DS_BUILD_OPS=0 as the base, every op defaults to "off", so we only
+      # explicitly enable the training ops we want precompiled. The inference-v2
+      # kernels (transformer_inference, inference_core_ops, cutlass_ops,
+      # spatial_inference, ragged_*) and other NVIDIA-only / legacy ops stay off
+      # automatically and do not build on ROCm -- listing them =0 was redundant.
+      # Targeting the detected gfx arch avoids compiling for unused
+      # architectures and speeds up the build.
+      PYTORCH_ROCM_ARCH=${AMDGPU_GFXMODEL} \
+      DS_BUILD_OPS=0 \
       DS_BUILD_AIO=1 \
-      DS_BUILD_CCL_COMM=0 \
       DS_BUILD_CPU_ADAM=1 \
       DS_BUILD_CPU_LION=1 \
-      DS_BUILD_EVOFORMER_ATTN=0 \
       DS_BUILD_FUSED_ADAM=1 \
       DS_BUILD_FUSED_LION=1 \
       DS_BUILD_FUSED_LAMB=1 \
       DS_BUILD_QUANTIZER=1 \
       DS_BUILD_RANDOM_LTD=1 \
-      DS_BUILD_TRANSFORMER=1 \
-      DS_BUILD_STOCHASTIC_TRANSFORMER=1 \
-      DS_BUILD_SPARSE_ATTN=0 \
-      DS_BUILD_TRANSFORMER_INFERENCE=0 \
-      DS_BUILD_INFERENCE_CORE_OPS=0 \
-      DS_BUILD_SPATIAL_INFERENCE=0 \
-      DS_BUILD_CUTLASS_OPS=0 \
-      DS_BUILD_RAGGED_OPS=0 \
-      DS_BUILD_RAGGED_DEVICE_OPS=0 \
-      DS_BUILD_OPS=0 \
       pip3 install --upgrade deepspeed einops psutil pydantic==2.11.9 hjson pydantic-core==2.33.2 msgpack typing_inspection annotated_types py-cpuinfo --no-cache-dir --target=$DEEPSPEED_PATH --no-build-isolation --no-deps
 
       # ── Shebang rewrite (source-build branch satellites) ───────────
