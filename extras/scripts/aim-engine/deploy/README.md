@@ -57,10 +57,11 @@ A kubeconfig that authenticates through an OIDC provider (common on managed
 clusters) runs an exec credential plugin such as `kubectl oidc-login`, which
 needs the kubelogin plugin installed on `PATH` as `kubectl-oidc_login`. The
 first `kubectl` call then performs a browser login: on a headless host we open
-the URL it prints manually, or add `--grant-type=authcode-keyboard` to the
-kubeconfig's exec args to paste the returned code back instead. Without the
-plugin, `kubectl` cannot obtain a token and the scripts report that the cluster
-is unreachable.
+the URL it prints manually, forwarding the OIDC callback port over SSH when the
+redirect targets a `localhost` address. Avoid `--grant-type=authcode-keyboard` as
+a shortcut: some providers (recent Keycloak) reject its out-of-band redirect with
+"Invalid parameter: redirect_uri". Without the plugin, `kubectl` cannot obtain a
+token and the scripts report that the cluster is unreachable.
 
 The token expires after a while, so an occasional re-login is normal. When it
 lapses, the next `kubectl` call (including a script's first one) blocks waiting

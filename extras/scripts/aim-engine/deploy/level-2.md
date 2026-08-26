@@ -24,7 +24,8 @@ It applies an `AIMService` named `aim-smoke` (ungated model-specific image by
 default) with a resource floor and a single-GPU selector, and starts a one-shot
 watcher that clears a known reconcile stall. It then prints the steps below. To
 serve a different catalog model pass `--model-image`, and to tune parameters such
-as the context window see
+as the context window, weight/KV-cache precision, and GPU count (via
+`AIM_ACCELERATOR_COUNT`) see
 [Model catalog](README.md#model-catalog) and
 [Customizing runtime parameters](README.md#customizing-runtime-parameters). To
 replace the running model with another or take it down, see

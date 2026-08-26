@@ -68,10 +68,9 @@ opencode's phone-home suppression and `share: disabled`, an advisory host-egress
 probe, and, with `--deep`, that the predictor Service is a ClusterIP (not a
 publicly reachable LoadBalancer or NodePort).
 
-This is a defensible ceiling, not a proof: on a host you control nothing can stop
-you from setting an env var, so the assertion is the human judgment and the checks
-are what make it verifiable. Cluster admins are trusted, and login nodes often
-have open egress; the checks catch obvious leaks rather than a determined one.
+This is a defensible ceiling, not a proof: the assertion is the human judgment and
+the checks make it verifiable, catching obvious leaks rather than a determined
+insider (cluster admins are trusted, and login nodes often have open egress).
 
 ## Prerequisites
 
@@ -97,11 +96,11 @@ Install once, then use `module load rocbudai` from any project directory.
 
 Step 1: authenticate `kubectl`. The launcher port-forwards to the predictor, so
 `kubectl` must be pointed at your cluster and logged in first; otherwise endpoint
-discovery waits on it and appears to hang. On a headless login node (no local
-browser, the usual case here) the OIDC `authcode` flow redirects to
-`http://localhost:8000`, which the node cannot open. SSH to the node forwarding
-that callback port so the redirect reaches the login server on the node, then run
-`kubectl` in that same session and open the printed URL in your laptop browser:
+discovery waits on it and appears to hang. On a headless login node the OIDC
+browser login redirects to a `localhost` callback the node cannot open, so SSH in
+with that port forwarded, run `kubectl` in the same session, and open the printed
+URL in your laptop browser (match the forwarded port to kubelogin's
+`--listen-address`, default `8000`):
 
 ```bash
 ssh -L 8000:localhost:8000 <user>@<login-node>
@@ -110,12 +109,9 @@ export KUBECONFIG=/path/to/your/kubeconfig
 kubectl get svc -n <your-namespace>     # open the printed URL in your browser
 ```
 
-Match the forwarded port to kubelogin's `--listen-address` if it is not the
-default `8000` (check `kubectl config view`). Avoid
-`--grant-type=authcode-keyboard`: it relies on the out-of-band redirect
-(`urn:ietf:wg:oauth:2.0:oob`), which recent Keycloak rejects with
-"Invalid parameter: redirect_uri". If `kubectl` runs on a host with its own
-browser, the SSH forward is unnecessary.
+If `kubectl` runs on a host with its own browser, the SSH forward is unnecessary.
+See [Supplying a kubeconfig](../deploy/README.md#supplying-a-kubeconfig) for the
+kubelogin plugin and OIDC details.
 
 Step 2: install. Pass the namespace and the Slurm partition `rocbudai-submit`
 should dispatch GPU jobs to (find it with `sinfo -o "%P %G"`):
@@ -200,21 +196,79 @@ single-arch site that prefers to pin one default (baked into the modulefile as
 
 ## Serving the model at install time
 
-If the model is not yet served, pass `--deploy` (with `--namespace`) and the
-installer delegates to [`../deploy/aim_deploy.sh --level 2`](../deploy/level-2.md),
-forwarding every serving knob so we never duplicate deploy logic:
+If the model is not yet served, pass `--deploy` (with `--namespace`) and one run
+both stands the model up and installs the client. The installer delegates serving
+to [`../deploy/aim_deploy.sh --level 2`](../deploy/level-2.md), forwarding
+`--model-image`, `--max-model-len`, and repeatable `--engine-arg KEY=VALUE`
+one-to-one and inheriting its `AIM_ACCELERATOR_COUNT`, `AIM_ENGINE_ARGS`, and
+`AIM_MAX_MODEL_LEN` environment variables. Without `--model-image` the deploy
+default is a small smoke model (`amdenterpriseai/aim-qwen-qwen3-32b`), so name the
+model you actually want.
+
+Both examples below assume you have authenticated `kubectl` (Quick start, step 1).
+Set `AIM_ACCELERATOR_COUNT` to the GPU count the model's profile needs (a wrong
+count reports `ProfileNotFound`); find the image, tag, and supported counts with
+`kubectl get aimclustermodels` or the
+[Model catalog](../deploy/README.md#model-catalog), and see
+[Customizing runtime parameters](../deploy/README.md#customizing-runtime-parameters)
+for every knob.
+
+### gpt-oss-120b with custom parameters
+
+Serve gpt-oss-120b, tuning precision and GPU memory but leaving the context window
+at the image default (no `--max-model-len`). The opencode `limit` the launcher
+writes (see [How it works](#how-it-works)) makes long sessions auto-compact
+instead of overflowing, so the default window is fine and the earlier
+`max_tokens must be at least 1` error does not recur:
 
 ```bash
-./install-rocbudai-aim.sh --namespace <ns> --deploy \
-    --model-image amdenterpriseai/aim-gpt-oss-120b:<tag> --max-model-len 65536
+AIM_ACCELERATOR_COUNT=<gpus> ./install-rocbudai-aim.sh --namespace <ns> --deploy \
+    --submit-partition <gpu-partition> \
+    --model-image amdenterpriseai/aim-gpt-oss-120b:<tag> \
+    --engine-arg gpu-memory-utilization=0.90 \
+    --engine-arg kv-cache-dtype=fp8
 ```
 
-`--model-image`, `--max-model-len`, and repeatable `--engine-arg KEY=VALUE` map
-one-to-one onto `aim_deploy.sh`, and its `AIM_ACCELERATOR_COUNT`,
-`AIM_ENGINE_ARGS`, and `AIM_MAX_MODEL_LEN` environment variables are inherited as
-documented there. Without `--deploy` the installer configures the client only and
-never mutates a running model; the AIMService model is immutable once created, so
-switching models means deleting and recreating it (see
+### Mistral Large from scratch with custom parameters
+
+Serve a larger model with a custom context and precision — Mistral Large (native
+FP8, up to 256k context). `--max-model-len` is the context window (raise toward
+`262144` for the native 256k); `kv-cache-dtype=fp8` keeps that large context in
+HBM:
+
+```bash
+AIM_ACCELERATOR_COUNT=<gpus> ./install-rocbudai-aim.sh --namespace <ns> --deploy \
+    --submit-partition <gpu-partition> \
+    --model-image amdenterpriseai/aim-mistral-large:<tag> \
+    --max-model-len 131072 \
+    --engine-arg kv-cache-dtype=fp8 \
+    --engine-arg gpu-memory-utilization=0.90
+```
+
+### After deploying: wait for Ready, then load
+
+`--deploy` applies the `AIMService` and returns immediately; the client install
+finishes right away too, but the model then pulls and loads its weights, which
+takes minutes. **Wait for it to reach Ready before `module load`**, or the
+launcher's endpoint probe times out. Verify with the readiness step from
+[Level 2 → Verify and run an inference](../deploy/level-2.md#verify-and-run-an-inference):
+
+```bash
+kubectl wait --for=condition=Ready aimservice/aim-smoke -n <ns> --timeout=1800s
+```
+
+Then finish with the `module use` / `module load` lines the installer printed (see
+[Quick start](#quick-start)) and load the module from your project directory.
+
+Only scalar `key=value` engine args reach the installer — object-valued knobs such
+as a serve-time `override-generation-config` temperature default are not scalars,
+so set those by deploying directly with `aim_deploy.sh --overrides-file` (see
+[Customizing runtime parameters](../deploy/README.md#customizing-runtime-parameters)),
+or just set temperature per request from the client.
+
+Without `--deploy` the installer configures the client only and never mutates a
+running model; the `AIMService` model is immutable once created, so switching
+models means deleting and recreating it (see
 [Switching or stopping the served model](../deploy/README.md#switching-or-stopping-the-served-model)).
 
 ## Air-gapped and shared installs
