@@ -128,6 +128,24 @@ cluster-scoped `AIMClusterModel` objects, so we list what *this* cluster offers
 kubectl get aimclustermodels
 ```
 
+Two values from this catalog go into a deploy: the image **tag** and the GPU
+**count** (`AIM_ACCELERATOR_COUNT`). The tag is the AIM
+release version and is uniform across images in a release (the default is
+`:0.13.0`), so read it from the `image:` field:
+
+```bash
+kubectl get aimclustermodel <name> -o yaml    # image: has the tag; profiles list the valid GPU counts
+```
+
+The count is not free-form: each image ships validated **profiles**, one per (GPU
+type × accelerator count), and the operator resolves the profile by AND-ing your
+GPU type and count, so a count with no matching profile is what raises
+`ProfileNotFound`. Read the supported counts from the same `-o yaml` (or the
+per-model page in the [AMD Enterprise AI catalog](https://enterprise-ai.docs.amd.com/en/latest/aims/catalog/models.html)):
+a large model such as Mistral Large usually offers only a full-node profile (8
+GPUs), while a smaller one like gpt-oss-120b commonly has lower-count profiles
+too. Do not assume the count; read it for the specific image.
+
 ## Switching or stopping the served model
 
 `aim_deploy.sh` manages a single `AIMService` named `aim-smoke`, so re-running it

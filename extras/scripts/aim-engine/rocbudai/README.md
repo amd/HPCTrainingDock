@@ -221,12 +221,17 @@ default is a small smoke model (`amdenterpriseai/aim-qwen-qwen3-32b`), so name t
 model you actually want.
 
 Both examples below assume you have authenticated `kubectl` (Quick start, step 1).
-Set `AIM_ACCELERATOR_COUNT` to the GPU count the model's profile needs (a wrong
-count reports `ProfileNotFound`); find the image, tag, and supported counts with
-`kubectl get aimclustermodels` or the
-[Model catalog](../deploy/README.md#model-catalog), and see
+The `<tag>` in `--model-image` is the AIM release version, and
+`AIM_ACCELERATOR_COUNT` must match a GPU count the image ships a profile for (a
+wrong count reports `ProfileNotFound`). You get both the same way: list what the
+cluster serves with `kubectl get aimclustermodels`, then read the exact tag and
+the valid counts from `kubectl get aimclustermodel <name> -o yaml`. The
+[Model catalog](../deploy/README.md#model-catalog) section walks through reading a
+tag and the supported counts; see
 [Customizing runtime parameters](../deploy/README.md#customizing-runtime-parameters)
-for every knob.
+for every other knob. The two examples below already fill in the tag and count
+from the current catalog, so you can run them as-is; confirm they still match your
+cluster before deploying.
 
 ### gpt-oss-120b with custom parameters
 
@@ -237,28 +242,35 @@ instead of overflowing, so the default window is fine and the earlier
 `max_tokens must be at least 1` error does not recur:
 
 ```bash
-AIM_ACCELERATOR_COUNT=<gpus> ./install-rocbudai-aim.sh --namespace <ns> --deploy \
+AIM_ACCELERATOR_COUNT=1 ./install-rocbudai-aim.sh --namespace <ns> --deploy \
     --submit-partition <gpu-partition> \
-    --model-image amdenterpriseai/aim-gpt-oss-120b:<tag> \
+    --model-image amdenterpriseai/aim-openai-gpt-oss-120b:0.11.1 \
     --engine-arg gpu-memory-utilization=0.90 \
     --engine-arg kv-cache-dtype=fp8
 ```
 
+`AIM_ACCELERATOR_COUNT=1` matches gpt-oss-120b's single-GPU MI300X profile (the
+image also ships 2/4/8-GPU profiles for more throughput). The weights are already
+mxfp4, so the precision knob here is the fp8 KV cache.
+
 ### Mistral Large from scratch with custom parameters
 
-Serve a larger model with a custom context and precision — Mistral Large (native
-FP8, up to 256k context). `--max-model-len` is the context window (raise toward
-`262144` for the native 256k); `kv-cache-dtype=fp8` keeps that large context in
-HBM:
+Serve a larger model with a custom context and precision — Mistral Large 3 (675B
+MoE, 41B active, native FP8). `--max-model-len` sets the context window (`131072`
+= 128k here; raise it only if the model's native context is larger);
+`kv-cache-dtype=fp8` keeps that large context in HBM:
 
 ```bash
-AIM_ACCELERATOR_COUNT=<gpus> ./install-rocbudai-aim.sh --namespace <ns> --deploy \
+AIM_ACCELERATOR_COUNT=8 ./install-rocbudai-aim.sh --namespace <ns> --deploy \
     --submit-partition <gpu-partition> \
-    --model-image amdenterpriseai/aim-mistral-large:<tag> \
+    --model-image amdenterpriseai/aim-mistralai-mistral-large-3-675b-instruct-2512:0.10.0 \
     --max-model-len 131072 \
     --engine-arg kv-cache-dtype=fp8 \
     --engine-arg gpu-memory-utilization=0.90
 ```
+
+Mistral Large 3 ships only an 8-GPU fp8 profile (tp8) on every Instinct GPU, so
+`AIM_ACCELERATOR_COUNT=8` is required — a smaller count reports `ProfileNotFound`.
 
 ### After deploying: wait for Ready, then load
 
