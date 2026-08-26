@@ -127,14 +127,40 @@ cluster-scoped `AIMClusterModel` objects, so we list what *this* cluster offers
 kubectl get aimclustermodels
 ```
 
+## Switching or stopping the served model
+
+`aim_deploy.sh` manages a single `AIMService` named `aim-smoke`, so re-running it
+with a different `--model-image` replaces the current model rather than adding a
+second: the server-side apply updates `spec.model.image` in place and the
+operator rolls the predictor onto the new image. That is enough when the new
+model fits within the GPUs the old one already holds.
+
+When the new model needs those GPUs (for example moving from a single-GPU model
+to one whose only profile wants a full eight-GPU node), we free them first by
+deleting the running service and waiting for its pods to terminate, then deploy
+the replacement:
+
+```bash
+kubectl delete aimservice aim-smoke -n "$NAMESPACE"
+kubectl wait --for=delete pod -n "$NAMESPACE" \
+  -l aim.eai.amd.com/service.name=aim-smoke --timeout=300s
+./aim_deploy.sh --level 2 --namespace "$NAMESPACE" --model-image <new-image>
+```
+
+Deleting the `AIMService` also stops serving outright, which is how we take a
+model down when we are done with it. Running two models at once is a separate
+case: it needs two services with distinct names, and since the script always
+uses `aim-smoke` we apply the second one by hand, copying the manifest that
+`serve_operator` emits and changing `metadata.name`.
+
 ## Customizing runtime parameters
 
-Levels 2 to 4 (the operator path) are the lever for tuning. The image's profile
-sets runtime parameters automatically, and we override per service through
-`spec.profileOverrides.engineArgs`, which shallow-merges over the profile and is
-passed verbatim to the inference-engine CLI (vLLM today, but the field is
-engine-agnostic, so the context window is `max-model-len`), and `spec.env` for
-environment variables. This works for any catalog model.
+Levels 2 to 4 (the operator path) are where we tune, and this works for any
+catalog model. The image's profile sets runtime parameters automatically; we
+override per service through `spec.profileOverrides.engineArgs`, which
+shallow-merges over the profile and is passed verbatim to the inference-engine
+CLI (vLLM today, but the field is engine-agnostic, so the context window is
+`max-model-len`), and `spec.env` for environment variables.
 
 The deploy bakes overrides in for us, so they survive re-runs (which regenerate
 the `AIMService`). For scalar engine args, `--max-model-len` sets the context
@@ -170,9 +196,24 @@ spec:
 ./aim_deploy.sh --level 2 --namespace "$NAMESPACE" --overrides-file overrides.yaml
 ```
 
-To change an already-running service without redeploying, patch it directly
-instead (a later `aim_deploy.sh` run overwrites this, so prefer the flags above
-for anything durable):
+These parameters fall into two groups with different change costs. Engine and
+resource settings (the context window `max-model-len`, weight and KV-cache
+precision, `gpu-memory-utilization`, GPU count, replicas) are read when the vLLM
+process starts, so changing any of them — by re-running `aim_deploy.sh`, editing
+an `--overrides-file`, or patching the object — rolls the predictor pod and
+reloads the weights: effectively a once-per-deploy cost of minutes for a large
+model.
+
+Sampling parameters (temperature, `top_p`, `max_tokens`) travel in each
+`/v1/chat/completions` request, so a client changes them live with no restart. We
+can bake serve-time defaults with the object-valued `override-generation-config`
+engine arg, passed through `--overrides-file` since it is not a scalar (for
+example `{"temperature": 0.2}`). Changing that default rolls the pod like any
+other engine arg, but an individual request always overrides it without one.
+
+To change the live spec of a running service (still rolling the predictor when
+the change is an engine arg), patch it directly; a later `aim_deploy.sh` run
+overwrites this, so prefer the flags above for anything durable:
 
 ```bash
 kubectl patch aimservice aim-smoke -n "$NAMESPACE" --type merge \
@@ -229,13 +270,12 @@ read the id from `/v1/models` rather than hardcoding it.
   model can report `ProfileNotFound` even on capable hardware. We set
   `spec.profile.selector.minimumType: any` to allow a generic profile; raise it
   back to `optimized` to require tuned ones.
-- The operator's cache PVC is ReadWriteMany so replicas share one copy of the
-  weights, and routing needs a Gateway or load balancer. A ReadWriteOnce default
-  (such as local-path) leaves the PVC Pending and the service in Starting, so the
-  operator path needs an RWX StorageClass (NFS, CephFS, or Longhorn) and a load
-  balancer, which we assume the cluster provides. The
-  [test harness](../test/README.md) supplies both with an in-cluster NFS
-  provisioner.
+- The operator's cache PVC is ReadWriteMany so replicas share one weight copy,
+  and routing needs a Gateway or load balancer. A ReadWriteOnce default
+  (local-path) leaves the PVC Pending and the service Starting, so the operator
+  path needs an RWX StorageClass (NFS, CephFS, or Longhorn) and a load balancer,
+  which we assume the cluster provides; the [test harness](../test/README.md)
+  supplies both via an in-cluster NFS provisioner.
 - KServe runs in Standard mode (`RawDeployment`), not the Knative-backed
   Serverless default, since the prerequisites ship Gateway API and kgateway.
   Override with `KSERVE_DEPLOYMENT_MODE`.

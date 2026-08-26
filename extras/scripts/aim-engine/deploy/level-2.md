@@ -10,21 +10,13 @@ levels 3 and 4 reuse.
 
 ## Run
 
-First export the two values every later command reuses: `KUBECONFIG` (substitute
-our own path for the placeholder; skip if we are already pointed at the cluster)
-and `NAMESPACE`, a project we can write to on a shared cluster (see
-[Choosing a namespace](README.md#choosing-a-namespace); use `default` where it is
-writable). We then confirm the kubeconfig resolves to a real file:
+Set `KUBECONFIG` and `NAMESPACE` first (see
+[Supplying a kubeconfig](README.md#supplying-a-kubeconfig) and
+[Choosing a namespace](README.md#choosing-a-namespace)), then run the level:
 
 ```bash
 export KUBECONFIG=/path/to/your/kubeconfig
 export NAMESPACE=<your-namespace>
-echo "${KUBECONFIG}"; test -s "${KUBECONFIG}" && echo "kubeconfig found" || echo "set KUBECONFIG to a real file"
-```
-
-Then run the level:
-
-```bash
 ./aim_deploy.sh --level 2 --namespace "$NAMESPACE"
 ```
 
@@ -34,7 +26,9 @@ watcher that clears a known reconcile stall. It then prints the steps below. To
 serve a different catalog model pass `--model-image`, and to tune parameters such
 as the context window see
 [Model catalog](README.md#model-catalog) and
-[Customizing runtime parameters](README.md#customizing-runtime-parameters).
+[Customizing runtime parameters](README.md#customizing-runtime-parameters). To
+replace the running model with another or take it down, see
+[Switching or stopping the served model](README.md#switching-or-stopping-the-served-model).
 
 ## Verify and run an inference
 

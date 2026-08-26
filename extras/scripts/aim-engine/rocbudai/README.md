@@ -38,6 +38,14 @@ the AIM backend is active the launcher:
    permission policy inherited from the stock template), and launches raw opencode
    rather than `ollama launch`.
 
+One thing the stock path gets for free that the AIM path must set explicitly:
+opencode already knows the stock ollama model from its bundled models.dev
+registry, but the AIM model is served by a custom provider it has no metadata
+for. So the launcher declares the served `max_model_len` as that model's `limit`
+in `opencode.json`. That is what lets opencode auto-compact the history and cap
+output tokens; without it opencode can compute and send a negative `max_tokens`
+once the window fills, which vLLM rejects (`max_tokens must be at least 1`).
+
 Everything else, the persona seeding and the whole session machinery, is stock
 rocBudAI running unmodified. Because we drive raw opencode, which honors
 `OPENCODE_CONFIG`, the recipe needs none of the global-`AGENTS.md` workaround the
@@ -206,7 +214,8 @@ one-to-one onto `aim_deploy.sh`, and its `AIM_ACCELERATOR_COUNT`,
 `AIM_ENGINE_ARGS`, and `AIM_MAX_MODEL_LEN` environment variables are inherited as
 documented there. Without `--deploy` the installer configures the client only and
 never mutates a running model; the AIMService model is immutable once created, so
-switching models means deleting and recreating it.
+switching models means deleting and recreating it (see
+[Switching or stopping the served model](../deploy/README.md#switching-or-stopping-the-served-model)).
 
 ## Air-gapped and shared installs
 

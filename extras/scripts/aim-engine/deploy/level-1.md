@@ -9,22 +9,14 @@ advertising `amd.com/gpu`, and the default model is small and ungated
 ## Run and keep it serving
 
 A plain `--level 1` deploys, proves inference, then deletes everything on exit;
-`--keep 1` leaves the Deployment and Service up so we can use them. From a laptop
-we first export the two values every later command reuses: `KUBECONFIG`
-(substitute our own path for the placeholder) so `kubectl` inherits it, and
-`NAMESPACE`, a project we can write to on a shared cluster (see
-[Choosing a namespace](README.md#choosing-a-namespace); use `default` where it is
-writable). We then confirm the kubeconfig resolves to a real file:
+`--keep 1` leaves the Deployment and Service up so we can use them. Set
+`KUBECONFIG` and `NAMESPACE` first (see
+[Supplying a kubeconfig](README.md#supplying-a-kubeconfig) and
+[Choosing a namespace](README.md#choosing-a-namespace)), then run the level:
 
 ```bash
 export KUBECONFIG=/path/to/your/kubeconfig
 export NAMESPACE=<your-namespace>
-echo "${KUBECONFIG}"; test -s "${KUBECONFIG}" && echo "kubeconfig found" || echo "set KUBECONFIG to a real file"
-```
-
-Then run the level:
-
-```bash
 ./aim_deploy.sh --level 1 --keep 1 --namespace "$NAMESPACE"
 ```
 

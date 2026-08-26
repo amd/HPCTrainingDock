@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # End-to-end correctness harness for the AIM Engine scripts on a throwaway
 # `kind` (Kubernetes IN Docker) cluster with REAL AMD GPU passthrough.
 #
@@ -19,7 +19,7 @@
 #
 # Everything lives in a visible working dir that is removed on exit (when the
 # interactive shell or the auto-run flow ends) so nothing is left in ~.
-# ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # The deployment scripts this harness exercises live in the sibling deploy/ dir.
@@ -86,19 +86,18 @@ usage()
 # Print the reason AFTER the usage block (usage() does not exit) so it is the
 # last line the user sees, then fail.
 send-error() { usage; echo -e "\nError: ${@}" >&2; exit 1; }
-reset-last() { last() { send-error "Unsupported argument :: ${1}"; }; }
 # Environment/runtime failures: print the reason plainly, no usage block.
 fatal() { echo -e "\n[test] ERROR: ${@}" >&2; exit 1; }
 
 while [[ $# -gt 0 ]]; do
    case "${1}" in
-      "--auto-run")     shift; AUTO_RUN=${1}; reset-last ;;
-      "--base-image-only") shift; BASE_IMAGE_ONLY=${1}; reset-last ;;
-      "--container-only") shift; CONTAINER_ONLY=${1}; reset-last ;;
-      "--cluster-name") shift; CLUSTER_NAME=${1}; reset-last ;;
-      "--gpu-model")    shift; AIM_GPU_MODEL=${1}; reset-last ;;
+      "--auto-run")     shift; AUTO_RUN=${1} ;;
+      "--base-image-only") shift; BASE_IMAGE_ONLY=${1} ;;
+      "--container-only") shift; CONTAINER_ONLY=${1} ;;
+      "--cluster-name") shift; CLUSTER_NAME=${1} ;;
+      "--gpu-model")    shift; AIM_GPU_MODEL=${1} ;;
       "--help")         usage; exit 0 ;;
-      *)                last ${1} ;;
+      *)                send-error "Unsupported argument :: ${1}" ;;
    esac
    shift
 done

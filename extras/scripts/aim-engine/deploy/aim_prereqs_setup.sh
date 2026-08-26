@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # Install the cluster-scoped add-ons that AIM Engine depends on, EXCEPT
 # the AMD GPU Operator/driver (assumed already present on GPU nodes, the
 # same way the other repo scripts assume base packages are installed).
@@ -20,7 +20,7 @@
 # registry (2026-08-17). AIM floors: KServe v0.16.1, Gateway API v1.3.0,
 # kgateway v2.0+, cert-manager v1.16+, KEDA 2.18+, OTel Operator 0.101+.
 # Override any of these via environment.
-# ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 
 # Pinned versions (override via environment).
 : ${CERT_MANAGER_VERSION:=v1.16.2}
@@ -53,14 +53,13 @@ usage()
 # Print the reason AFTER the usage block (usage() does not exit) so it is the
 # last line the user sees, then fail.
 send-error() { usage; echo -e "\nError: ${@}" >&2; exit 1; }
-reset-last() { last() { send-error "Unsupported argument :: ${1}"; }; }
 
 while [[ $# -gt 0 ]]; do
    case "${1}" in
-      "--dry-run") shift; DRY_RUN=${1}; reset-last ;;
-      "--kubeconfig") shift; [ -f "${1}" ] || send-error "kubeconfig file not found :: ${1}"; export KUBECONFIG="${1}"; reset-last ;;
+      "--dry-run") shift; DRY_RUN=${1} ;;
+      "--kubeconfig") shift; [ -f "${1}" ] || send-error "kubeconfig file not found :: ${1}"; export KUBECONFIG="${1}" ;;
       "--help")    usage; exit 0 ;;
-      *)           last ${1} ;;
+      *)           send-error "Unsupported argument :: ${1}" ;;
    esac
    shift
 done

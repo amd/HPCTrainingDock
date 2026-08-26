@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # AIM Engine setup: deploy AMD's AIM (AMD Inference Microservices) Engine
 # Kubernetes operator onto a cluster that is ALREADY running Kubernetes.
 #
@@ -18,7 +18,7 @@
 # is missing, prints the gap list and exits (MISSING_PREREQ_RC). Pass
 # --install-prereqs 1 to run the sibling aim_prereqs_setup.sh first (which
 # installs the add-ons EXCEPT the GPU Operator/driver, assumed present).
-# ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
@@ -55,22 +55,17 @@ send-error()
    exit 1
 }
 
-reset-last()
-{
-   last() { send-error "Unsupported argument :: ${1}"; }
-}
-
 while [[ $# -gt 0 ]]; do
    case "${1}" in
-      "--namespace")        shift; AIM_NAMESPACE=${1}; reset-last ;;
-      "--aim-version")      shift; AIM_VERSION=${1}; reset-last ;;
-      "--crds-chart")       shift; AIM_CRDS_CHART=${1}; reset-last ;;
-      "--chart")            shift; AIM_CHART=${1}; reset-last ;;
-      "--install-prereqs")  shift; INSTALL_PREREQS=${1}; reset-last ;;
-      "--replace")          shift; REPLACE=${1}; reset-last ;;
-      "--kubeconfig")       shift; [ -f "${1}" ] || send-error "kubeconfig file not found :: ${1}"; export KUBECONFIG="${1}"; reset-last ;;
+      "--namespace")        shift; AIM_NAMESPACE=${1} ;;
+      "--aim-version")      shift; AIM_VERSION=${1} ;;
+      "--crds-chart")       shift; AIM_CRDS_CHART=${1} ;;
+      "--chart")            shift; AIM_CHART=${1} ;;
+      "--install-prereqs")  shift; INSTALL_PREREQS=${1} ;;
+      "--replace")          shift; REPLACE=${1} ;;
+      "--kubeconfig")       shift; [ -f "${1}" ] || send-error "kubeconfig file not found :: ${1}"; export KUBECONFIG="${1}" ;;
       "--help")             usage; exit 0 ;;
-      *)                    last ${1} ;;
+      *)                    send-error "Unsupported argument :: ${1}" ;;
    esac
    shift
 done

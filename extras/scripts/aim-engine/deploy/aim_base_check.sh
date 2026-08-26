@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # Minimal, operator-less AIM serving check. Runs an AIM container as a plain
 # Deployment + Service instead of an AIMService, to prove a cluster's GPU can
 # serve a model BEFORE committing to the full AIM Engine operator stack
@@ -24,7 +24,7 @@
 # This runs an AIM container directly (the microservice), not AIM Engine (the
 # operator). For how the two relate, see the reference stacks overview:
 #   https://enterprise-ai.docs.amd.com/en/latest/reference-stacks.html
-# ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 
 # Ungated by default: generic base image + a small open model, so no token is needed.
 : ${IMAGE:=amdenterpriseai/aim-base:0.11}
@@ -63,7 +63,6 @@ usage()
 # Print the reason AFTER the usage block (usage() does not exit) so it is the
 # last line the user sees, then fail.
 send-error() { usage; echo -e "\nError: ${@}" >&2; exit 1; }
-reset-last() { last() { send-error "Unsupported argument :: ${1}"; }; }
 
 # Colored, spaced status output; disabled when stdout is not a TTY so redirected
 # or piped logs stay plain.
@@ -76,29 +75,26 @@ say() { echo -e "${C_TAG}[base-check]${C_OFF} ${*}"; }
 
 while [[ $# -gt 0 ]]; do
    case "${1}" in
-      "--image")     shift; IMAGE=${1}; reset-last ;;
-      "--model-id")  shift; MODEL_ID=${1}; reset-last ;;
-      "--namespace") shift; NAMESPACE=${1}; reset-last ;;
-      "--name")      shift; NAME=${1}; reset-last ;;
-      "--keep")      shift; KEEP=${1}; reset-last ;;
-      "--verbose")   shift; VERBOSE=${1}; reset-last ;;
-      "--kubeconfig") shift; [ -f "${1}" ] || send-error "kubeconfig file not found :: ${1}"; export KUBECONFIG="${1}"; reset-last ;;
+      "--image")     shift; IMAGE=${1} ;;
+      "--model-id")  shift; MODEL_ID=${1} ;;
+      "--namespace") shift; NAMESPACE=${1} ;;
+      "--name")      shift; NAME=${1} ;;
+      "--keep")      shift; KEEP=${1} ;;
+      "--verbose")   shift; VERBOSE=${1} ;;
+      "--kubeconfig") shift; [ -f "${1}" ] || send-error "kubeconfig file not found :: ${1}"; export KUBECONFIG="${1}" ;;
       "--help")      usage; exit 0 ;;
-      *)             last ${1} ;;
+      *)             send-error "Unsupported argument :: ${1}" ;;
    esac
    shift
 done
 
 command -v kubectl >/dev/null 2>&1 || send-error "kubectl not found on PATH."
-# An OIDC kubeconfig with an expired token makes the first kubectl call block on
-# an interactive browser re-login; if that cannot open (headless/WSL) it looks
-# like a silent hang. Say so up front, and suggest the manual refresh.
+# An expired OIDC token makes the first kubectl call block on a browser re-login;
+# on a headless host that looks like a silent hang, so warn up front.
 say "checking cluster access (if this hangs, your login likely expired: run 'kubectl get nodes' to re-authenticate, then retry)"
-# Fetch the node list, keying off whether names come back rather than the exit
-# code: on OIDC clusters kubectl's discovery burst intermittently 401s and
-# usually recovers, so we retry a few times. Only if none ever come back do we
-# re-run to capture the real reason (401, expired login, wrong KUBECONFIG),
-# instead of masking it as a missing-GPU error.
+# Key off returned node names, not the exit code: OIDC discovery bursts 401 then
+# recover, so retry; only if none ever come back do we surface the real reason
+# (expired login, wrong KUBECONFIG) instead of masking it as a missing GPU.
 nodes=""
 for _ in $(seq 10); do
    nodes=$(kubectl get nodes --request-timeout=15s -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
@@ -191,9 +187,8 @@ spec:
   selector: { app: ${NAME} }
 EOF
 )
-# Server-side apply (no client-side GET or OpenAPI download), retried a few
-# times: on OIDC clusters those client round-trips intermittently 401 during
-# discovery, so we let the server compute the merge and just retry the one call.
+# Server-side apply (no client-side GET or OpenAPI download) so the server
+# computes the merge; retried because OIDC discovery round-trips can 401.
 applied=""
 for _ in $(seq 10); do
    printf '%s\n' "${manifest}" \

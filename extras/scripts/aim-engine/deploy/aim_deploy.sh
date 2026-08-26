@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # Incremental AIM deployment into an EXISTING Kubernetes cluster. Pick a level:
 # higher levels assume less is already installed and do more, and each level
 # preflights its preconditions before acting. This is a thin dispatcher over the
@@ -23,7 +23,7 @@
 # Cluster creation ("from zero") is intentionally out of scope: use
 # aim_engine_test.sh for a throwaway kind cluster, or AMD's Cluster Bloom/Forge
 # for a real bare-metal install.
-# ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
@@ -113,41 +113,37 @@ say() { echo -e "${C_TAG}[deploy]${C_OFF} ${*}"; }
 # Print the reason AFTER the usage block (usage() does not exit) so it is the
 # last line the user sees, then fail.
 send-error() { usage; echo -e "\nError: ${@}" >&2; exit 1; }
-reset-last() { last() { send-error "Unsupported argument :: ${1}"; }; }
 # State/environment failures: print the reason plainly, no usage block.
 fatal() { echo -e "\n${C_ERR}[deploy] ERROR:${C_OFF} ${@}" >&2; exit 1; }
 
 while [[ $# -gt 0 ]]; do
    case "${1}" in
-      "--level")       shift; LEVEL=${1}; reset-last ;;
-      "--kubeconfig")  shift; [ -f "${1}" ] || send-error "kubeconfig file not found :: ${1}"; export KUBECONFIG="${1}"; reset-last ;;
-      "--model-image") shift; AIM_MODEL_IMAGE=${1}; reset-last ;;
-      "--max-model-len") shift; AIM_MAX_MODEL_LEN=${1}; reset-last ;;
-      "--engine-arg")  shift; [[ "${1}" == *=* ]] || send-error "--engine-arg expects KEY=VALUE :: ${1}"; ENGINE_ARGS+=("${1}"); reset-last ;;
-      "--overrides-file") shift; [ -f "${1}" ] || send-error "overrides file not found :: ${1}"; AIM_OVERRIDES_FILE="${1}"; reset-last ;;
-      "--namespace")   shift; NAMESPACE=${1}; reset-last ;;
-      "--keep")        shift; BASE_ARGS+=(--keep "${1}"); reset-last ;;
-      "--verbose")     shift; BASE_ARGS+=(--verbose "${1}"); reset-last ;;
-      "--replace")     shift; SETUP_ARGS+=(--replace "${1}"); reset-last ;;
-      "--aim-version") shift; SETUP_ARGS+=(--aim-version "${1}"); reset-last ;;
-      "--crds-chart")  shift; SETUP_ARGS+=(--crds-chart "${1}"); reset-last ;;
-      "--chart")       shift; SETUP_ARGS+=(--chart "${1}"); reset-last ;;
+      "--level")       shift; LEVEL=${1} ;;
+      "--kubeconfig")  shift; [ -f "${1}" ] || send-error "kubeconfig file not found :: ${1}"; export KUBECONFIG="${1}" ;;
+      "--model-image") shift; AIM_MODEL_IMAGE=${1} ;;
+      "--max-model-len") shift; AIM_MAX_MODEL_LEN=${1} ;;
+      "--engine-arg")  shift; [[ "${1}" == *=* ]] || send-error "--engine-arg expects KEY=VALUE :: ${1}"; ENGINE_ARGS+=("${1}") ;;
+      "--overrides-file") shift; [ -f "${1}" ] || send-error "overrides file not found :: ${1}"; AIM_OVERRIDES_FILE="${1}" ;;
+      "--namespace")   shift; NAMESPACE=${1} ;;
+      "--keep")        shift; BASE_ARGS+=(--keep "${1}") ;;
+      "--verbose")     shift; BASE_ARGS+=(--verbose "${1}") ;;
+      "--replace")     shift; SETUP_ARGS+=(--replace "${1}") ;;
+      "--aim-version") shift; SETUP_ARGS+=(--aim-version "${1}") ;;
+      "--crds-chart")  shift; SETUP_ARGS+=(--crds-chart "${1}") ;;
+      "--chart")       shift; SETUP_ARGS+=(--chart "${1}") ;;
       "--help")        usage; exit 0 ;;
-      *)               last ${1} ;;
+      *)               send-error "Unsupported argument :: ${1}" ;;
    esac
    shift
 done
 
 [ -n "${LEVEL}" ] || send-error "select a level with --level [1|2|3|4]."
 command -v kubectl >/dev/null 2>&1 || send-error "kubectl not found on PATH."
-# An OIDC kubeconfig with an expired token makes the first kubectl call block on
-# an interactive browser re-login; if that cannot open (headless/WSL) it looks
-# like a silent hang. Say so up front, and suggest the manual refresh.
+# An expired OIDC token makes the first kubectl call block on a browser re-login;
+# on a headless host that looks like a silent hang, so warn up front.
 say "checking cluster access (if this hangs, your login likely expired: run 'kubectl get nodes' to re-authenticate, then retry)"
-# Key off whether node names come back, not the exit code: on OIDC clusters
-# kubectl's discovery burst intermittently 401s and usually recovers, so we
-# retry a few times before giving up. Only if none ever come back do we re-run
-# to capture the real reason (expired login, wrong KUBECONFIG).
+# Key off returned node names, not the exit code: OIDC discovery bursts 401 then
+# recover, so retry; only if none ever come back do we surface the real reason.
 reachable=""
 for _ in $(seq 10); do
    [ -n "$(kubectl get nodes --request-timeout=15s -o name 2>/dev/null)" ] && { reachable=1; break; }
@@ -230,9 +226,8 @@ spec:
 ${profile_overrides}
 EOF
 )
-   # Server-side apply (no client-side GET or OpenAPI download), retried a few
-   # times: on OIDC clusters those client round-trips intermittently 401 during
-   # discovery, so we let the server compute the merge and just retry the call.
+   # Server-side apply (no client-side GET or OpenAPI download) so the server
+   # computes the merge; retried because OIDC discovery round-trips can 401.
    applied=""
    for _ in $(seq 10); do
       printf '%s\n' "${aimservice}" \
