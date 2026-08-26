@@ -113,6 +113,21 @@ If `kubectl` runs on a host with its own browser, the SSH forward is unnecessary
 See [Supplying a kubeconfig](../deploy/README.md#supplying-a-kubeconfig) for the
 kubelogin plugin and OIDC details.
 
+Confirm a model is already serving (skip if you plan to `--deploy` one below, see
+[Serving the model at install time](#serving-the-model-at-install-time)):
+
+```bash
+kubectl get aimservices -n <your-namespace>            # an AIMService that is Ready
+kubectl get svc -n <your-namespace> -l component=predictor
+```
+
+You do not pick the model by name: the launcher reads the served id from the
+predictor's `/v1/models` and uses it. When a namespace has **more than one**
+predictor Service it selects the first one it lists, which may not be the one you
+want. To pin a specific model, either export `ROCBUDAI_AIM_SERVICE=<predictor-svc>`
+before `module load rocbudai`, or install with `--endpoint http://host:port/v1`
+pointing straight at it (skips the port-forward and the auto-pick).
+
 Step 2: install. Pass the namespace and the Slurm partition `rocbudai-submit`
 should dispatch GPU jobs to (find it with `sinfo -o "%P %G"`):
 
