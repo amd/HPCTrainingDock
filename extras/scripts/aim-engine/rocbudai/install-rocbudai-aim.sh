@@ -287,6 +287,16 @@ fi
 echo
 info "done. Everything was installed under: ${C_HEAD}${PREFIX}${C_OFF}"
 echo "  To remove this install later: rm -rf ${PREFIX}"
+if [[ "${DO_DEPLOY}" == "1" ]]; then
+    echo
+    head "Wait for the model to be Ready before 'module load' (large models download"
+    head "many GB and take several minutes; the launcher fails if it is not up yet):"
+    echo "  kubectl get aimservice aim-smoke -n ${NAMESPACE} \\"
+    echo "    -o custom-columns='READY:.status.conditions[?(@.type==\"Ready\")].status,REASON:.status.conditions[?(@.type==\"Ready\")].reason'"
+    echo "  kubectl logs -n ${NAMESPACE} \$(kubectl get pods -n ${NAMESPACE} -o name | grep download | head -n1) --tail=5   # first-pull progress"
+    echo "  kubectl wait --for=condition=Ready aimservice/aim-smoke -n ${NAMESPACE} --timeout=2400s"
+fi
+
 echo
 head "To use it:"
 echo "  module use ${PREFIX}/modulefiles"

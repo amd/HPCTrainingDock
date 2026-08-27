@@ -253,39 +253,80 @@ AIM_ACCELERATOR_COUNT=1 ./install-rocbudai-aim.sh --namespace <ns> --deploy \
 image also ships 2/4/8-GPU profiles for more throughput). The weights are already
 mxfp4, so the precision knob here is the fp8 KV cache.
 
-### Mistral Large from scratch with custom parameters
+### Mixtral-8x22B from scratch with custom parameters
 
-Serve a larger model with a custom context and precision — Mistral Large 3 (675B
-MoE, 41B active, native FP8). `--max-model-len` sets the context window (`131072`
-= 128k here; raise it only if the model's native context is larger);
-`kv-cache-dtype=fp8` keeps that large context in HBM:
+Serve a larger multi-GPU mixture-of-experts model — Mixtral-8x22B (141B total,
+~39B active, fp16, 64k native context). It runs tensor-parallel across several
+GPUs, so set `AIM_ACCELERATOR_COUNT` to a count the image ships a profile for. Its
+profile defaults `max-model-len` to only 32k, which the ~28k-token persona plus an
+output-token reservation overflows — vLLM then hard-errors on the request (`the
+model's context length is only 32768 tokens`), not just a warning — so raise it to
+the 64k native window with `--max-model-len`. `kv-cache-dtype=fp8` shrinks the KV
+cache (fine with fp16 weights) and `gpu-memory-utilization` caps HBM use:
 
 ```bash
-AIM_ACCELERATOR_COUNT=8 ./install-rocbudai-aim.sh --namespace <ns> --deploy \
+AIM_ACCELERATOR_COUNT=4 ./install-rocbudai-aim.sh --namespace <ns> --deploy \
     --submit-partition <gpu-partition> \
-    --model-image amdenterpriseai/aim-mistralai-mistral-large-3-675b-instruct-2512:0.10.0 \
-    --max-model-len 131072 \
+    --model-image amdenterpriseai/aim-mistralai-mixtral-8x22b-instruct-v0-1:0.11.1 \
+    --max-model-len 65536 \
     --engine-arg kv-cache-dtype=fp8 \
     --engine-arg gpu-memory-utilization=0.90
 ```
 
-Mistral Large 3 ships only an 8-GPU fp8 profile (tp8) on every Instinct GPU, so
-`AIM_ACCELERATOR_COUNT=8` is required — a smaller count reports `ProfileNotFound`.
+Mixtral-8x22B ships fp16 profiles at 4 and 8 GPUs (tp4/tp8) on the discrete
+Instinct GPUs, so `AIM_ACCELERATOR_COUNT` must be `4` or `8` — another count
+reports `ProfileNotFound`. 64k is Mixtral's native ceiling; do not set
+`--max-model-len` higher or the engine refuses to start.
 
 ### After deploying: wait for Ready, then load
 
-`--deploy` applies the `AIMService` and returns immediately; the client install
-finishes right away too, but the model then pulls and loads its weights, which
-takes minutes. **Wait for it to reach Ready before `module load`**, or the
-launcher's endpoint probe times out. Verify with the readiness step from
-[Level 2 → Verify and run an inference](../deploy/level-2.md#verify-and-run-an-inference):
+`--deploy` applies the `AIMService` and returns immediately, and the client
+install finishes right away too — but the model still has to **download and load
+its weights before it can serve**. For a large model this is not a few seconds:
+Mixtral-8x22B pulls ~280 GB, and some models exceed 600 GB, so the first deploy
+can take many minutes. **Wait for the service to reach Ready before `module
+load`**, or the launcher finds no predictor and exits with `no predictor Service
+found`.
+
+Check progress without blocking:
 
 ```bash
-kubectl wait --for=condition=Ready aimservice/aim-smoke -n <ns> --timeout=1800s
+# READY flips False (Progressing) -> True once it can serve:
+kubectl get aimservice aim-smoke -n <ns> \
+  -o custom-columns='READY:.status.conditions[?(@.type=="Ready")].status,REASON:.status.conditions[?(@.type=="Ready")].reason'
+# first-pull download progress for big models (prints "Progress: NN% (bytes)"):
+kubectl logs -n <ns> $(kubectl get pods -n <ns> -o name | grep download | head -n1) --tail=5
 ```
 
-Then finish with the `module use` / `module load` lines the installer printed (see
-[Quick start](#quick-start)) and load the module from your project directory.
+Or block until it is Ready (raise the timeout for very large models):
+
+```bash
+kubectl wait --for=condition=Ready aimservice/aim-smoke -n <ns> --timeout=2400s
+```
+
+If it stays `Progressing` long after the download finishes, check the predictor
+pod — a `CrashLoopBackOff` means it starts but the engine aborts:
+
+```bash
+kubectl get pods -n <ns>                          # look for a ...-predictor-... pod
+kubectl logs -n <ns> <predictor-pod> --previous --tail=40
+```
+
+A log line like `Specified profile ID '...' not found` (with `Model-specific
+profiles: 0`) means the image tag does not actually ship the profile its catalog
+metadata advertises — the deploy cannot succeed on that tag. Pick a different tag
+or model that is `READY` in `kubectl get aimclustermodels` (not every published
+tag is complete; confirm the one you name serves before relying on it).
+
+If instead the service goes Ready but the TUI rejects prompts with `the model's
+context length is only <N> tokens`, the profile's default `max-model-len` is
+smaller than the ~28k-token persona needs. Redeploy with `--max-model-len` set to
+the model's native window (see the Mixtral example below).
+
+See [Level 2 → Verify and run an inference](../deploy/level-2.md#verify-and-run-an-inference)
+for the full readiness and smoke-test steps. Then finish with the `module use` /
+`module load` lines the installer printed (see [Quick start](#quick-start)) and load
+the module from your project directory.
 
 Only scalar `key=value` engine args reach the installer — object-valued knobs such
 as a serve-time `override-generation-config` temperature default are not scalars,
