@@ -1081,6 +1081,37 @@ if [[ "${SKIP_PATCHES}" != "1" && "${MODULES_ONLY}" != "1" ]]; then
    unset _patches_sh
 fi
 
+# ---------------- Phase 6b: ROCm 10.x rocprofv3 serializer guard -------
+# ROCm >= 10.x on MI300A hard-crashes the node when rocprofv3 does per-kernel-
+# dispatch GPU-queue interception CONCURRENTLY across the node's GPUs (measured
+# firmware-first uncorrected-cache MCA; evidence + reproducer /shared/rocm-sweep).
+# The fix is a PATH shim that serializes concurrent profiling to one session per
+# node via flock -- single-session profiling (roofline/counters/traces) is
+# unaffected. We install it and PATH-prepend it in THIS modulefile so every new
+# 10.x nightly is protected automatically. Gated on 10.x; NON-FATAL (a guard
+# failure never fails the build -- the tree-wide deployer is the backstop).
+case "${ROCM_NUMERIC}" in
+   10.*)
+      _guard_apply="$(dirname "${LEAF_SCRIPT_PATH}")/rocm10_rocprofv3_guard.sh"
+      if [ -x "${_guard_apply}" ]; then
+         echo ""
+         echo "============================================================"
+         echo "  Phase 6b: apply ROCm-10.x rocprofv3 serializer guard"
+         echo "============================================================"
+         if [ -n "${SUDO}" ]; then _guard_sudo="--sudo"; else _guard_sudo="--no-sudo"; fi
+         "${_guard_apply}" \
+            --modulefile "${MODULE_FILE}" \
+            --guard-dir  "${TOP_INSTALL_PATH}/rocm10-guard/bin" \
+            "${_guard_sudo}" \
+            || echo "WARNING: rocprofv3 guard apply failed for ${ROCM_NUMERIC} (non-fatal; run bare_system/rocm10_rocprofv3_guard.sh or /shared/rocm-sweep/guard_deploy.sh to backfill)" >&2
+         unset _guard_sudo
+      else
+         echo "WARNING: rocprofv3 guard applier not found (${_guard_apply}); ROCm 10.x node-crash guard NOT applied (non-fatal)" >&2
+      fi
+      ;;
+esac
+unset _guard_apply
+
 # ---------------- shared-location perms --------------------------------
 # NIGHTLY MODE: the rolling test tree is owned root:${NIGHTLY_GROUP} with
 # group-rw / no-other perms (setgid dirs) -- NOT world-readable -- so only the

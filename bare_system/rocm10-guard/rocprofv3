@@ -1,0 +1,86 @@
+#!/bin/bash
+# ---------------------------------------------------------------------------
+# ROCm-10.x rocprofv3 GUARDRAIL  (v2: PMC serializer, 2026-08-27)
+#
+# CANONICAL SOURCE. This copy is version-controlled in HPCTrainingDock and is
+# installed by the nightly ROCm build (bare_system/rocm10_rocprofv3_guard.sh,
+# invoked from run_rocm_therock_install.sh Phase 5b) as well as by the manual
+# tree-wide deployer /shared/rocm-sweep/guard_deploy.sh. Keep edits here.
+#
+# MEASURED root cause (/shared/rocm-sweep): under ROCm >= 10.0.0a20260729 on
+# MI300A (gfx942 APU), running rocprofv3 profiling that does PER-KERNEL-DISPATCH
+# GPU-queue interception CONCURRENTLY across the GPUs of one node triggers a
+# firmware-first FATAL uncorrected-cache MCA that HARD-RESETS the node.
+# Measured crash rates under 4-GPU concurrency:
+#   --pmc / counter collection : CRASH (reliable)
+#   --kernel-trace             : CRASH (4/5 runs)
+#   --hip-trace (host API only): SURVIVED (3/3)
+# The SAME concurrent --pmc wrapped in a node-level flock SURVIVED, and isolated
+# single-session profiling is safe (33 iters). So serializing profiling to one
+# session at a time per node prevents the crash while preserving functionality.
+#
+# This shim therefore does NOT block anything. It SERIALIZES any rocprofv3 run
+# that profiles a workload (has a `--` app launch or --pid attach) to one
+# session at a time per node, via a node-global flock. Roofline/counter/trace
+# profiling all keep working on ROCm 10.x; concurrent sessions just queue. It is
+# a no-op for info/avail/help commands, for non-MI300A hosts, and for ROCm<=7.x.
+# (Over-serializes the safe host-API-only --hip-trace case too; that is a
+# negligible throughput cost in exchange for guaranteed node stability.)
+#
+# Escape hatches:
+#   ROCPROFV3_NOLOCK=1         -> do not serialize (risky; concurrent = crash)
+#   ROCPROFV3_LOCK_WAIT=N      -> max seconds to wait for the node lock
+#                                 (default 3600). On timeout the run is refused
+#                                 (exit 75) rather than risk a concurrent crash.
+#   ROCPROFV3_LOCK_VERBOSE=1   -> log a line to stderr when serializing/waiting.
+# ---------------------------------------------------------------------------
+set -u
+self_dir="$(cd "$(dirname "$0")" && pwd)"
+
+# --- locate the REAL rocprofv3 (never this shim) ---------------------------
+real=""
+if [ -n "${ROCM_PATH:-}" ] && [ -x "${ROCM_PATH}/bin/rocprofv3" ]; then
+    real="${ROCM_PATH}/bin/rocprofv3"
+else
+    real="$(PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx "$self_dir" | paste -sd:)" command -v rocprofv3 2>/dev/null)"
+fi
+[ -n "$real" ] || { echo "rocprofv3-guard: cannot find real rocprofv3 (ROCM_PATH=${ROCM_PATH:-unset})" >&2; exit 127; }
+
+is_mi300a(){ grep -qxi '0x74a0' /sys/bus/pci/devices/*/device 2>/dev/null; }
+is_rocm10(){ case "${ROCM_PATH:-}" in *rocm-10.*) return 0;; *) return 1;; esac; }
+
+# --- does this invocation actually profile a workload? --------------------
+# Any run that launches an app (`--`) or attaches to one (--pid/--attach-pid)
+# does live GPU profiling and must be serialized. Info/avail/help/version
+# commands (no workload) are passed straight through.
+profiles_workload(){
+    local a
+    for a in "$@"; do
+        case "$a" in
+            --) return 0;;
+            --pid|--pid=*|--attach-pid|--attach-pid=*) return 0;;
+        esac
+    done
+    return 1
+}
+
+if is_rocm10 && is_mi300a && [ -z "${ROCPROFV3_NOLOCK:-}${ROCPROFV3_PMC_NOLOCK:-}" ] && profiles_workload "$@"; then
+    lockdir=/tmp/rocprofv3-pmc
+    lock="$lockdir/pmc.node.lock"
+    mkdir -p "$lockdir" 2>/dev/null; chmod 1777 "$lockdir" 2>/dev/null || true
+    [ -e "$lock" ] || ( umask 000; : > "$lock" ) 2>/dev/null || true
+    # Open O_RDONLY so the advisory LOCK_EX works even on another user's file.
+    if exec {LKFD}<"$lock" 2>/dev/null; then
+        [ -n "${ROCPROFV3_LOCK_VERBOSE:-}" ] && echo "rocprofv3-guard: serializing GPU profiling on $(hostname -s) (node lock)" >&2
+        if ! flock -w "${ROCPROFV3_LOCK_WAIT:-${ROCPROFV3_PMC_LOCK_WAIT:-3600}}" -x "$LKFD"; then
+            echo "rocprofv3-guard: timed out waiting for the node profiling lock; refusing CONCURRENT rocprofv3 profiling (ROCm10/MI300A node-crash guard). Retry, or set ROCPROFV3_LOCK_WAIT higher. See /shared/rocm-sweep." >&2
+            exit 75
+        fi
+        # Parent shell holds LKFD for the child's lifetime; lock frees on exit.
+        "$real" "$@"; rc=$?
+        exit $rc
+    fi
+    # Could not open the lock file: fail safe by still running (best effort).
+fi
+
+exec "$real" "$@"
