@@ -238,8 +238,11 @@ cluster before deploying.
 Serve gpt-oss-120b, tuning precision and GPU memory but leaving the context window
 at the image default (no `--max-model-len`). The opencode `limit` the launcher
 writes (see [How it works](#how-it-works)) makes long sessions auto-compact
-instead of overflowing, so the default window is fine and the earlier
-`max_tokens must be at least 1` error does not recur:
+instead of overflowing, so the default window still runs and the earlier
+`max_tokens must be at least 1` error does not recur. Note the default profile
+window here is only 32k; opencode compacts as a fraction of it, so this compacts
+sooner than the stock path (which sees gpt-oss's full 128k). For stock-equivalent
+headroom, add `--max-model-len 131072` as in the next example.
 
 ```bash
 AIM_ACCELERATOR_COUNT=1 ./install-rocbudai-aim.sh --namespace <ns> --deploy \
@@ -253,38 +256,40 @@ AIM_ACCELERATOR_COUNT=1 ./install-rocbudai-aim.sh --namespace <ns> --deploy \
 image also ships 2/4/8-GPU profiles for more throughput). The weights are already
 mxfp4, so the precision knob here is the fp8 KV cache.
 
-### Mixtral-8x22B from scratch with custom parameters
+### gpt-oss-120b with the full context window and more GPUs
 
-Serve a larger multi-GPU mixture-of-experts model — Mixtral-8x22B (141B total,
-~39B active, fp16, 64k native context). It runs tensor-parallel across several
-GPUs, so set `AIM_ACCELERATOR_COUNT` to a count the image ships a profile for. Its
-profile defaults `max-model-len` to only 32k, which the ~28k-token persona plus an
-output-token reservation overflows — vLLM then hard-errors on the request (`the
-model's context length is only 32768 tokens`), not just a warning — so raise it to
-the 64k native window with `--max-model-len`. `kv-cache-dtype=fp8` shrinks the KV
-cache (fine with fp16 weights) and `gpu-memory-utilization` caps HBM use:
+Same model, but raise the context window to gpt-oss-120b's native ceiling and scale
+to multiple GPUs. The profile here defaults `max-model-len` to only 32k (read it as
+`max_model_len` from `/v1/models`), and the launcher hands that number to opencode as
+the model's context `limit`. opencode auto-compacts as a fraction of that limit, so a
+32k window makes it compact much sooner than the stock rocBudAI path, where opencode
+sees gpt-oss's full 128k from its bundled metadata. Set `--max-model-len 131072` to
+match that budget (the ~28k-token persona then leaves ample room), and pick a
+supported GPU count for `AIM_ACCELERATOR_COUNT`. `kv-cache-dtype=fp8` shrinks the KV
+cache and `gpu-memory-utilization` caps HBM use:
 
 ```bash
 AIM_ACCELERATOR_COUNT=4 ./install-rocbudai-aim.sh --namespace <ns> --deploy \
     --submit-partition <gpu-partition> \
-    --model-image amdenterpriseai/aim-mistralai-mixtral-8x22b-instruct-v0-1:0.11.1 \
-    --max-model-len 65536 \
+    --model-image amdenterpriseai/aim-openai-gpt-oss-120b:0.11.1 \
+    --max-model-len 131072 \
     --engine-arg kv-cache-dtype=fp8 \
     --engine-arg gpu-memory-utilization=0.90
 ```
 
-Mixtral-8x22B ships fp16 profiles at 4 and 8 GPUs (tp4/tp8) on the discrete
-Instinct GPUs, so `AIM_ACCELERATOR_COUNT` must be `4` or `8` — another count
-reports `ProfileNotFound`. 64k is Mixtral's native ceiling; do not set
-`--max-model-len` higher or the engine refuses to start.
+`AIM_ACCELERATOR_COUNT` must be a count the image ships a profile for (1/2/4/8
+here) — another count reports `ProfileNotFound`. 131072 is gpt-oss-120b's native
+ceiling; do not set `--max-model-len` higher or the engine refuses to start. One
+MI355X (288 GB) holds the mxfp4 weights plus a 128k fp8 KV cache, so even a
+single-GPU deploy can serve the full window.
 
 ### After deploying: wait for Ready, then load
 
 `--deploy` applies the `AIMService` and returns immediately, and the client
 install finishes right away too — but the model still has to **download and load
 its weights before it can serve**. For a large model this is not a few seconds:
-Mixtral-8x22B pulls ~280 GB, and some models exceed 600 GB, so the first deploy
-can take many minutes. **Wait for the service to reach Ready before `module
+gpt-oss-120b pulls tens of GB, and some catalog models exceed 600 GB, so the first
+deploy can take many minutes. **Wait for the service to reach Ready before `module
 load`**, or the launcher finds no predictor and exits with `no predictor Service
 found`.
 
@@ -320,8 +325,8 @@ tag is complete; confirm the one you name serves before relying on it).
 
 If instead the service goes Ready but the TUI rejects prompts with `the model's
 context length is only <N> tokens`, the profile's default `max-model-len` is
-smaller than the ~28k-token persona needs. Redeploy with `--max-model-len` set to
-the model's native window (see the Mixtral example below).
+smaller than the ~28k-token persona needs. Redeploy with `--max-model-len` raised
+toward the model's native window (see the larger-context example above).
 
 See [Level 2 → Verify and run an inference](../deploy/level-2.md#verify-and-run-an-inference)
 for the full readiness and smoke-test steps. Then finish with the `module use` /
