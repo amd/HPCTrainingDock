@@ -177,7 +177,7 @@ Usage: $0 [opts]
   --top-install-path PATH       SDK extract destination; default ${TOP_INSTALL_PATH}
   --top-module-path  PATH       Lmod root for modulefile; default ${TOP_MODULE_PATH}
   --url-base URL                tarball listing/download base; default ${URL_BASE}
-                                (use https://rocm.nightlies.amd.com/tarball
+                                (use https://nightly.repo.amd.com/rocm/tarball
                                  for nightlies, https://rocm.prereleases.amd.com/tarball
                                  for prereleases, etc. See
                                  https://github.com/ROCm/TheRock/blob/main/dockerfiles/install_rocm_tarball.sh)
@@ -282,7 +282,7 @@ fi
 
 # ---------------- Nightly mode auto-detection + group prerequisite ----
 # Nightly mode is inferred from the tarball url-base: the nightlies channel
-# (https://rocm.nightlies.amd.com/tarball) yields a *nightlies* URL. In this
+# (https://nightly.repo.amd.com/rocm/tarball) yields a *nightlies* URL. In this
 # mode we (a) name the install/module after the datestamped tarball version
 # (ACTUAL_VERSION, e.g. 7.14.0a20260612) rather than the .info/version base
 # (7.14.0), so successive nightlies of the same base coexist, and (b) own the

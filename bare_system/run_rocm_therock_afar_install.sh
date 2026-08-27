@@ -9,7 +9,7 @@
 #   * AFAR proper          (rocm-afar-<BUILD>-drop-<REL>-<DISTRO>.tar.bz2)
 #                          - handled by run_rocm_afar_install.sh
 #   * TheRock proper       (therock-dist-linux-<FAMILY>-<NUMERIC>.tar.gz
-#                          at rocm.nightlies.amd.com/tarball-multi-arch/)
+#                          at nightly.repo.amd.com/rocm/tarball-multi-arch/)
 #                          - handled by run_rocm_therock_install.sh
 #                          - this channel is partially-implemented; legacy
 #                            URL_BASE (repo.amd.com/rocm/tarball) is dead

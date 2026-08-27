@@ -71,7 +71,11 @@ ROCMPLUS_PATH_INPUT=""
 # a real, reproducible version. Pass --roc-optiq-version main to build from
 # the current main branch instead. The checkout logic below tries the
 # v<version>-optiq tag first, then a few common fallbacks.
-ROC_OPTIQ_VERSION="0.5.0"
+#
+# 1.0.0 is the first non-beta ("ROCm Optiq 1.0.0", tag v1.0.0-optiq; the
+# release assets carry the 1.0.0.2 build number). It ships an important fix
+# for occasional hangs, so it supersedes the 0.5.0 beta as the default pin.
+ROC_OPTIQ_VERSION="1.0.0"
 # --replace 1: rm -rf prior install dir + ${ROC_OPTIQ_VERSION}.lua before build.
 # --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
 REPLACE=0

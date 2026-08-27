@@ -106,7 +106,7 @@ SITE=""
                                           # https://repo.amd.com/rocm/tarball/ for the full list.
 # THEROCK_URL_BASE: tarball listing/download base forwarded to the leaf
 # run_rocm_therock_install.sh --url-base. Empty => leaf default (stable
-# repo.amd.com). Set to https://rocm.nightlies.amd.com/tarball for nightlies,
+# repo.amd.com). Set to https://nightly.repo.amd.com/rocm/tarball for nightlies,
 # https://rocm.prereleases.amd.com/tarball for prereleases, etc. Applies to
 # therock-X.Y[.Z] tokens only (the therock-afar-* channel is repo.radeon.com
 # and is intentionally unaffected). Nightly tarballs carry a datestamp suffix
@@ -256,7 +256,7 @@ Usage: $0 [opts]
    --therock-url-base URL        tarball listing/download base forwarded to the leaf
                                  TheRock installer's --url-base (therock-* tokens only).
                                  Default: unset -> leaf default (stable repo.amd.com).
-                                 For nightlies use https://rocm.nightlies.amd.com/tarball
+                                 For nightlies use https://nightly.repo.amd.com/rocm/tarball
                                  (prereleases: https://rocm.prereleases.amd.com/tarball).
                                  Pass a bare therock-X.Y token; discovery resolves it to
                                  the latest datestamped nightly (e.g. 7.14.0a20260612).
