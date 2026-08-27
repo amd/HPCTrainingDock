@@ -4737,7 +4737,13 @@ cat <<-EOF | ${SUDO} tee ${PYTORCH_TUNOP_MODULEFILE}
 	whatis("Triton (post-build wheel): ${TRITON_VERSION}")
 	whatis("FlashAttention: ${FLASHATTENTION_VERSION}")
 
-	load("pytorch")
+	-- Load the EXACT matching plain build (pytorch/<this-version>), NOT a
+	-- bare load("pytorch"). A bare load resolves to the pytorch FAMILY
+	-- default -- Lmod picks the highest version in this dir -- so e.g.
+	-- pytorch/2.7.1_tunableop_enabled would pull pytorch/2.12.0 instead of
+	-- 2.7.1. Pinning the full version keeps the tunableop variant matched to
+	-- its own build.
+	load("pytorch/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}")
 	setenv("PYTORCH_TUNABLEOP_ENABLED","1")
 EOF
 
@@ -4810,16 +4816,22 @@ module-whatis "AOTriton: ${AOTRITON_VERSION}"
 module-whatis "Triton (post-build wheel): ${TRITON_VERSION}"
 module-whatis "FlashAttention: ${FLASHATTENTION_VERSION}"
 
-module load pytorch
+# Load the EXACT matching plain build (pytorch/<this-version>), NOT a bare
+# `module load pytorch`. The bare form would select the pytorch family
+# default (via the .modulerc below), which is not necessarily THIS build's
+# version when multiple pytorch versions share the dir, and it risks
+# resolving to the _tunableop_enabled sibling -> self-recursion. Pinning
+# the full version matches the variant to its own build.
+module load pytorch/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}
 setenv PYTORCH_TUNABLEOP_ENABLED "1"
 EOF
-# Tcl Environment Modules has no implicit "highest version" default like
-# Lmod: with both ${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX} and its
-# _tunableop_enabled sibling present, a bare `module load pytorch` would
-# pick the _tunableop_enabled file, whose own `module load pytorch` then
-# re-resolves to itself -> infinite recursion / hang. Emit a .modulerc that
-# pins the plain build as the default so bare loads (and the tunableop
-# file's inner `module load pytorch`) resolve to it.
+# Classic Tcl Environment Modules has no implicit "highest version"
+# default like Lmod. Emit a .modulerc pinning THIS plain build as the
+# family default so a user-facing bare `module load pytorch` resolves to a
+# real plain build instead of erroring or selecting the _tunableop_enabled
+# sibling. NOTE: the tunableop modulefile no longer relies on this default
+# -- it loads its exact matching sibling (pytorch/<ver>) directly (above),
+# which also removes the old bare-load self-recursion hazard.
 cat <<EOF | ${SUDO} tee ${MODULE_PATH}/.modulerc
 #%Module1.0
 module-version $(basename ${MODULE_PATH})/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX} default
