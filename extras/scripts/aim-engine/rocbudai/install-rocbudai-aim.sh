@@ -270,6 +270,11 @@ elif [[ "${MODULE_FLAVOR}" == "lua" ]]; then
         echo "local root = \"${PREFIX}\""
         echo 'prepend_path("PATH", pathJoin(root, "bin"))'
         echo 'setenv("ROCBUDAI_ROOT", root)'
+        echo
+        echo "-- Point the agent's knowledge base at the cloned default KB; honour a user export."
+        echo 'if os.getenv("ROCBUDAI_KB_INPUTS_DIR") == nil or os.getenv("ROCBUDAI_KB_INPUTS_DIR") == "" then'
+        echo '    setenv("ROCBUDAI_KB_INPUTS_DIR", pathJoin(root, "share/rocbudai/kb"))'
+        echo "end"
         [[ -n "${OPENCODE_BIN}" ]] && echo "setenv(\"ROCBUDAI_OPENCODE_BIN\", \"${OPENCODE_BIN}\")"
         [[ -n "${OPENCODE_DIR}" ]] && echo "setenv(\"ROCBUDAI_OPENCODE_DIR\", \"${OPENCODE_DIR}\")"
         echo
@@ -337,6 +342,11 @@ else
         echo "set root \"${PREFIX}\""
         echo "prepend-path PATH \$root/bin"
         echo "setenv ROCBUDAI_ROOT \$root"
+        echo
+        echo "# Point the agent's knowledge base at the cloned default KB; honour a user export."
+        echo "if {![info exists env(ROCBUDAI_KB_INPUTS_DIR)] || \$env(ROCBUDAI_KB_INPUTS_DIR) eq {}} {"
+        echo "    setenv ROCBUDAI_KB_INPUTS_DIR \$root/share/rocbudai/kb"
+        echo "}"
         [[ -n "${OPENCODE_BIN}" ]] && echo "setenv ROCBUDAI_OPENCODE_BIN \"${OPENCODE_BIN}\""
         [[ -n "${OPENCODE_DIR}" ]] && echo "setenv ROCBUDAI_OPENCODE_DIR \"${OPENCODE_DIR}\""
         echo
