@@ -521,14 +521,14 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
          #   * Required --gfxversion=<suffix>  (see ROCM_PREVIEW_REPO below)
          #   * Different install root          (/opt/rocm/core-X.Y/ vs /opt/rocm-X.Y.Z/)
          #
-         # VERSION-AWARE REPO SELECTION (ROCM_PREVIEW_REPO): GA 7.14+ is
-         # published ONLY on the multi-arch repo repo.amd.com/rocm/packages-multi-arch
-         # with per-target package suffixes (e.g. amdrocm-core-sdk7.14-gfx942).
-         # The older 7.12/7.13 preview lives on repo.amd.com/rocm/packages with
-         # gfx-FAMILY suffixes (e.g. amdrocm-core-sdk7.13-gfx94x) and has no 7.14.
-         # So we pick packages-multi-arch (+ specific gfx target) for >= 7.14 and
-         # packages (+ gfx family) for 7.12/7.13. Both share the same
-         # amdrocm-core-sdk<X.Y>-<suffix> meta-package naming.
+         # VERSION-AWARE REPO SELECTION: the amdrocm-core-sdk<X.Y>-<suffix> meta
+         # name is shared across all streams, but the HOST, PATH and signing-key
+         # differ by version. 7.12/7.13 live on repo.amd.com/rocm/packages (gfx
+         # FAMILY suffixes, e.g. amdrocm-core-sdk7.13-gfx94x); 7.14 on repo.amd.com/
+         # rocm/packages-multi-arch (specific gfx target); 10.0+ on the redesigned
+         # stable.repo.amd.com/rocm/core/packages (specific gfx target, new key
+         # path). The full coordinate table + sort -V gates are in the
+         # ROCM_PREVIEW_HOST/REPO_PATH/GPG_URL block below.
          #
          # We layer compatibility symlinks at the end so the rest of this
          # script (modulefile generation, amdclang autodetection, etc.) and
@@ -546,16 +546,45 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
          # compute them ONCE here; the apt (Ubuntu) and dnf (RHEL) branches below
          # share the resulting ROCM_PREVIEW_REPO / ROCM_PREVIEW_GFX / ROCM_PREVIEW_META.
          #
-         # Repo by version (see header comment): GA 7.14+ -> packages-multi-arch
-         # (specific gfx target); 7.12/7.13 -> packages (gfx family). sort -V:
-         # ROCM_VERSION >= 7.14 iff 7.14 is the first line of
-         # `printf '7.14\n<ver>\n' | sort -V`.
-         if [ "$(printf '%s\n' "7.14" "${ROCM_VERSION}" | sort -V | head -n1)" = "7.14" ]; then
+         # Repo COORDINATES by version. THREE regimes now exist, differing in
+         # host, path AND signing-key URL (sort -V gates: ROCM_VERSION >= V iff
+         # V is the first line of `printf 'V\n<ver>\n' | sort -V`):
+         #   * 7.12/7.13 preview -> repo.amd.com/rocm/packages
+         #                          key rocm/packages/gpg/rocm.gpg, gfx FAMILY suffix
+         #   * 7.14 GA (multi)   -> repo.amd.com/rocm/packages-multi-arch
+         #                          key rocm/packages-multi-arch/gpg/rocm.gpg, SPECIFIC gfx
+         #   * >= 10.0 GA (core) -> stable.repo.amd.com/rocm/core/packages
+         #                          key rocm/gpg/packages.gpg, SPECIFIC gfx
+         # The 10.0 "unified / ROCm Core SDK" GA moved OFF repo.amd.com/rocm/
+         # packages-multi-arch (which tops out at 7.14) to the redesigned
+         # stable.repo.amd.com/rocm/core/packages tree with a new signing-key path
+         # (rocm/gpg/packages.gpg). Bare repo.amd.com 403s on the core/ path; the
+         # stable.repo.amd.com host is required. The meta-package name is unchanged
+         # (amdrocm-core-sdk<X.Y>-<gfx>, e.g. amdrocm-core-sdk10.0-gfx942) and the
+         # install still drops into /opt/rocm/core-<X.Y>. Prior to this branch the
+         # >=7.14 path pointed 10.0.0 at packages-multi-arch and apt 404'd the
+         # (real, but elsewhere-published) package -- see slurm-19226-rocm-sweep.out.
+         # Ref: https://rocm.docs.amd.com/en/docs-10.0.0/install/rocm.html
+         ROCM_PREVIEW_SPECIFIC_GFX=0
+         if [ "$(printf '%s\n' "10.0" "${ROCM_VERSION}" | sort -V | head -n1)" = "10.0" ]; then
+            ROCM_PREVIEW_REPO="core/packages"
+            ROCM_PREVIEW_HOST="stable.repo.amd.com"
+            ROCM_PREVIEW_REPO_PATH="rocm/core/packages"
+            ROCM_PREVIEW_GPG_URL="https://stable.repo.amd.com/rocm/gpg/packages.gpg"
+            ROCM_PREVIEW_SPECIFIC_GFX=1
+         elif [ "$(printf '%s\n' "7.14" "${ROCM_VERSION}" | sort -V | head -n1)" = "7.14" ]; then
             ROCM_PREVIEW_REPO="packages-multi-arch"
+            ROCM_PREVIEW_HOST="repo.amd.com"
+            ROCM_PREVIEW_REPO_PATH="rocm/packages-multi-arch"
+            ROCM_PREVIEW_GPG_URL="https://repo.amd.com/rocm/packages-multi-arch/gpg/rocm.gpg"
+            ROCM_PREVIEW_SPECIFIC_GFX=1
          else
             ROCM_PREVIEW_REPO="packages"
+            ROCM_PREVIEW_HOST="repo.amd.com"
+            ROCM_PREVIEW_REPO_PATH="rocm/packages"
+            ROCM_PREVIEW_GPG_URL="https://repo.amd.com/rocm/packages/gpg/rocm.gpg"
          fi
-         echo "[rocm_setup] preview: using repo repo.amd.com/rocm/${ROCM_PREVIEW_REPO} for ROCm ${ROCM_VERSION}"
+         echo "[rocm_setup] preview: using repo https://${ROCM_PREVIEW_HOST}/${ROCM_PREVIEW_REPO_PATH} for ROCm ${ROCM_VERSION}"
 
          # AMDGPU_GFXMODEL is a semicolon-separated list like "gfx942" or
          # "gfx942;gfx90a". Use the first ;-separated target as the install gfx;
@@ -577,8 +606,11 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
          if [ -z "${_first_gfx}" ]; then
             send-error "ROCm ${ROCM_VERSION} preview: AMDGPU_GFXMODEL is empty; cannot pick gfx package suffix"
          fi
-         if [ "${ROCM_PREVIEW_REPO}" = "packages-multi-arch" ]; then
+         if [ "${ROCM_PREVIEW_SPECIFIC_GFX}" = "1" ]; then
             # Specific target verbatim (e.g. gfx942, gfx950, gfx90a, gfx1100).
+            # Both packages-multi-arch (7.14) and core/packages (10.0+) tag their
+            # packages with the exact gfx target -- verified amdrocm-core-sdk10.0-gfx942
+            # exists in stable.repo.amd.com/rocm/core/packages/ubuntu2404.
             ROCM_PREVIEW_GFX="${_first_gfx}"
          else
             case "${_first_gfx}" in
@@ -640,7 +672,7 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
             # key is the same across packages/ and packages-multi-arch/, but we
             # fetch it from the selected repo for consistency.
             ${SUDO} mkdir --parents --mode=0755 /etc/apt/keyrings
-            wget -q -O - "https://repo.amd.com/rocm/${ROCM_PREVIEW_REPO}/gpg/rocm.gpg" \
+            wget -q -O - "${ROCM_PREVIEW_GPG_URL}" \
                | gpg --dearmor \
                | ${SUDO} tee /etc/apt/keyrings/amdrocm.gpg > /dev/null
 
@@ -648,11 +680,11 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
             # (instinct/radeon/ryzen, x86_64); packages-multi-arch/ carries the
             # GA 7.14+ tree (per-target suffixes). We pin arch=amd64 for our
             # x86_64 HPC builds either way.
-            echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/${ROCM_PREVIEW_REPO}/${ROCM_AMD_DIST_TAG} stable main" \
+            echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://${ROCM_PREVIEW_HOST}/${ROCM_PREVIEW_REPO_PATH}/${ROCM_AMD_DIST_TAG} stable main" \
                | ${SUDO} tee /etc/apt/sources.list.d/amdrocm-preview.list > /dev/null
             ${PKG_SUDO} apt-get update
 
-            echo "[rocm_setup] preview: apt-get install ${ROCM_PREVIEW_META} (bypassing broken amdgpu-install 31.30)"
+            echo "[rocm_setup] preview: apt-get install ${ROCM_PREVIEW_META} (installing the meta-package directly, bypassing amdgpu-install)"
             ${PKG_SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -q -y \
                "${ROCM_PREVIEW_META}"
 
@@ -689,22 +721,22 @@ INSTALL_PATH=/opt/rocm-${ROCM_VERSION}
                *) send-error "ROCm ${ROCM_VERSION} preview: unsupported RHEL-family version ${DISTRO_VERSION}; supported majors: 8 / 9 / 10" ;;
             esac
 
-            # Register the dnf repo at repo.amd.com. gpgcheck=1 verifies package
-            # signatures against the ASCII-armored key (same key across packages/
-            # and packages-multi-arch/); dnf -y auto-imports it on first use.
+            # Register the dnf repo (host/path/key resolved above per stream).
+            # gpgcheck=1 verifies package signatures against the ASCII-armored key
+            # (ROCM_PREVIEW_GPG_URL); dnf -y auto-imports it on first use.
             ${SUDO} tee /etc/yum.repos.d/amdrocm-preview.repo > /dev/null <<AMDROCM_PREVIEW_REPO
 [amdrocm-preview]
 name=AMD ROCm ${ROCM_PREVIEW_REPO} (${ROCM_AMD_DIST_TAG})
-baseurl=https://repo.amd.com/rocm/${ROCM_PREVIEW_REPO}/${ROCM_AMD_DIST_TAG}/x86_64
+baseurl=https://${ROCM_PREVIEW_HOST}/${ROCM_PREVIEW_REPO_PATH}/${ROCM_AMD_DIST_TAG}/x86_64
 enabled=1
 priority=50
 gpgcheck=1
-gpgkey=https://repo.amd.com/rocm/${ROCM_PREVIEW_REPO}/gpg/rocm.gpg
+gpgkey=${ROCM_PREVIEW_GPG_URL}
 AMDROCM_PREVIEW_REPO
             cat /etc/yum.repos.d/amdrocm-preview.repo
             ${PKG_SUDO} dnf clean expire-cache >/dev/null 2>&1 || true
 
-            echo "[rocm_setup] preview: dnf install ${ROCM_PREVIEW_META} (bypassing broken amdgpu-install 31.30)"
+            echo "[rocm_setup] preview: dnf install ${ROCM_PREVIEW_META} (installing the meta-package directly, bypassing amdgpu-install)"
             ${PKG_SUDO} dnf install -y "${ROCM_PREVIEW_META}"
 
          else
