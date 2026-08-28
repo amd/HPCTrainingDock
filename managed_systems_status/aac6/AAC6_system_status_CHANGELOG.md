@@ -2,6 +2,18 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-08-28
+
+- Kernel: 6.8.0-100-generic → 6.8.0-138-generic
+- ROCm versions:
+    + 10.0.0
+- Modules:
+    + rocm/10.0.0
+- Down/drained nodes:
+    + sh5-pl1-s12-09:down*
+    - ppac-pl1-s24-26:down
+
+[Full snapshot](archive/AAC6_system_status_2026-08-28.md)
 ## 2026-08-27
 
 - Down/drained nodes:
