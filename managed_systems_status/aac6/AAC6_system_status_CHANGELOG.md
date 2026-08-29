@@ -2,6 +2,13 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-08-29
+
+- Down/drained nodes:
+    - sh5-pl1-s12-09:down*
+    - sh5-pl1-s12-36:drain*
+
+[Full snapshot](archive/AAC6_system_status_2026-08-29.md)
 ## 2026-08-28
 
 - Kernel: 6.8.0-100-generic → 6.8.0-138-generic
