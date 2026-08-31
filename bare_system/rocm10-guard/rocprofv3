@@ -77,6 +77,10 @@ if is_rocm10 && is_mi300a && [ -z "${ROCPROFV3_NOLOCK:-}${ROCPROFV3_PMC_NOLOCK:-
             exit 75
         fi
         # Parent shell holds LKFD for the child's lifetime; lock frees on exit.
+        # Mark the serialized child so the node watcher (rocprof-watch) can
+        # positively attribute this run to the guard. This is a SECOND signal
+        # beyond lock-ancestry and survives daemonize/reparent (env is inherited).
+        export ROCPROFV3_GUARDED=1
         "$real" "$@"; rc=$?
         exit $rc
     fi

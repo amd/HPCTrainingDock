@@ -877,7 +877,7 @@ for v in "${VERSIONS[@]}"; do
    # ── TheRock branch: download + extract, no docker/make/patches ───
    # TheRock releases are pre-built distro-agnostic ROCm SDK tarballs
    # at https://repo.amd.com/rocm/tarball/ (legacy URL_BASE) OR
-   # https://nightly.repo.amd.com/rocm/tarball-multi-arch/ (current upstream
+   # https://nightly.repo.amd.com/rocm/core/tarball/ (current upstream
    # channel; see RELEASES.md on github.com/ROCm/TheRock). The helper
    # handles URL auto-discovery (X.Y -> X.Y.0 extension + listing
    # fallback for alpha/RC tarballs), extracts directly into the install
