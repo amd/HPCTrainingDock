@@ -2,6 +2,58 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-09-03
+
+- Down/drained nodes:
+    + ppac-pl1-s24-16:down
+    + ppac-pl1-s24-30:down
+- /shared/apps/ubuntu/opt:
+    - rocm-7.0.0
+    - rocm-7.0.1
+    - rocm-7.0.2
+    - rocm-7.1.0
+    - rocm-7.1.1
+    - rocm-7.12.0
+    - rocm-7.13.0
+    - rocm-7.2.0
+    - rocm-7.2.2
+    - rocm-7.2.3
+    - rocm-7.2.4
+    - rocm-afar-22.1.0
+    - rocm-afar-22.2.0
+    - rocm-afar-23.1.0
+    - rocm-afar-23.2.1
+    - rocm-patches-7.0.0
+    - rocm-patches-7.0.1
+    - rocm-patches-7.0.2
+    - rocm-patches-7.1.0
+    - rocm-patches-7.1.1
+    - rocm-patches-7.13.0
+    - rocm-patches-7.2.0
+    - rocm-patches-7.2.2
+    - rocm-patches-7.2.3
+    - rocm-patches-7.2.4
+    - rocm-patches-afar-22.1.0
+    - rocm-patches-afar-22.2.0
+    - rocm-patches-afar-23.1.0
+    - rocm-patches-afar-23.2.1
+    - rocmplus-7.0.0
+    - rocmplus-7.0.1
+    - rocmplus-7.0.2
+    - rocmplus-7.1.0
+    - rocmplus-7.1.1
+    - rocmplus-7.12.0
+    - rocmplus-7.13.0
+    - rocmplus-7.2.0
+    - rocmplus-7.2.2
+    - rocmplus-7.2.3
+    - rocmplus-7.2.4
+    - rocmplus-afar-22.1.0-7.1.0
+    - rocmplus-afar-22.2.0-7.2.0
+    - rocmplus-afar-23.1.0-7.12.0
+    - rocmplus-afar-23.2.1-7.13.0
+
+[Full snapshot](archive/AAC6_system_status_2026-09-03.md)
 ## 2026-09-01
 
 - Down/drained nodes:
