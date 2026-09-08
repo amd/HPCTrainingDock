@@ -415,6 +415,13 @@ rocm_version_to_patches() {
       # cluster; the libomp symlink is a few-millisecond no-op; the
       # rocprof-compute nuitka build (~10-30 min) runs last.
       7.13.0)           echo "rocprof-sys-1.6.0 rocprof-sys-instrument-libomp rocprof-compute" ;;
+      # 7.14.0 (TheRock RC line): stock rocprof-compute 3.7.0 is a Python wrapper whose
+      # pinned deps are not on PYTHONPATH, so analyze/profile/roofline CTests fail at
+      # import/runtime.  The nuitka onefile overlay is the working tool.  AAC7 proof on
+      # MI300A: Analyze + Roofline PASS after overlay rebuild (job 10550, sha256
+      # bb4bc337…); Profile stays ENV-BLOCKED (rocprofiler-sdk defect, separate ticket).
+      # build.sh maps 7.14.0 -> rocm-systems tag `therock-7.14`.
+      7.14.0)            echo "rocprof-compute" ;;
       6.3.*)            echo "rocprof-compute" ;;
       6.4.*)            echo "rocprof-compute" ;;
       7.0.*)            echo "rocprof-compute" ;;
@@ -1534,6 +1541,7 @@ rocprof_compute_detail_block() {
       7.2.2) echo 'Upstream tag `rocm-7.2.2` -- monorepo (rocm-systems @ rocm-7.2.2), `projects/rocprofiler-compute` subtree.  Builds alongside the rocprof-sys 1.3.0 cherry-pick.' ;;
       7.2.3) echo 'Upstream tag `rocm-7.2.3` -- monorepo (rocm-systems @ rocm-7.2.3), `projects/rocprofiler-compute` subtree.  Builds alongside the rocprof-sys 1.3.0 cherry-pick.' ;;
       7.2.4) echo 'Upstream tag `rocm-7.2.4` -- monorepo (rocm-systems @ rocm-7.2.4), `projects/rocprofiler-compute` subtree.  Builds alongside the rocprof-sys 1.3.0 cherry-pick.' ;;
+      7.14.0) echo 'TheRock RC line (no `rocm-7.14.0` upstream tag).  build.sh maps 7.14.0 -> rocm-systems tag `therock-7.14`, upstream VERSION 3.7.0.  Overlay includes built-in-counter default and roofline package freeze (AAC7 MI300A proof, Sep 2026).' ;;
       afar-22.1.0)    echo 'RC tree (no `rocm-afar-22.1.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (afar-22.1.0 ships `167a9576`, upstream VERSION `3.3.0`).' ;;
       afar-22.2.0)    echo 'RC tree (no `rocm-afar-22.2.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (afar-22.2.0 ships `bad92dc4`, upstream VERSION `3.3.0`).' ;;
       afar-23.1.0)    echo 'TheRock-AFAR RC tree (no `rocm-afar-23.1.0` upstream tag).  build.sh switches to RC mode and pins to the commit recorded in `${ROCM_PATH}/libexec/rocprofiler-compute/VERSION.sha` (afar-23.1.0 SDK is ROCm 7.12.0; soft no-op if VERSION.sha cannot be resolved upstream).' ;;
