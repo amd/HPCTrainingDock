@@ -61,6 +61,12 @@ fi
 source /etc/profile.d/lmod.sh 2>/dev/null || true
 module purge 2>/dev/null || true
 module load rocm/"$ROCM_VERSION" 2>/dev/null || true
+# `module purge` above wipes any pre-loaded cray-python, dropping python3 back
+# to the RHEL9 system 3.9, which cannot even parse rocprof-compute 3.7.0's PEP
+# 695 `type X[T] = ...` aliases (therock-7.14). Re-load cray-python so the venv
+# below is built with python 3.12. Best-effort: a no-op on hosts without it
+# (e.g. Ubuntu Dock builders that already ship 3.12). (AAC7, 2 September 2026)
+module load cray-python 2>/dev/null || true
 
 # For RC trees we need ROCM_PATH (set by the module load above, or
 # injectable via env from rocm_patches.sh) to find VERSION.sha.
@@ -106,8 +112,15 @@ python3 -m pip install --upgrade pip 2>&1 | tail -3 | tee -a "$LOG"
 NUITKA_VERSION="2.6"
 _os_id="$(. /etc/os-release && echo "${ID:-}")"
 _os_ver="$(. /etc/os-release && echo "${VERSION_ID:-}")"
-if [ "${_os_id}" = "ubuntu" ] && [ -n "${_os_ver}" ] \
-   && [ "$(printf '%s\n' "24.04" "${_os_ver}" | sort -V | head -n1)" = "24.04" ]; then
+# PEP 695 gate. The 2.6 pin crashes on `type X[T] = ...` aliases (Python 3.12+).
+# Original condition keyed only on Ubuntu 24.04; generalise to any host whose
+# python3 is >= 3.12, so RHEL9 + cray-python (3.12) also gets Nuitka 4.1.3.
+# (AAC7, 2 September 2026 — needed for the 7.14.0 / therock-7.14 overlay.)
+_py_major="$(python3 -c 'import sys;print(sys.version_info[0])' 2>/dev/null || echo 0)"
+_py_minor="$(python3 -c 'import sys;print(sys.version_info[1])' 2>/dev/null || echo 0)"
+if { [ "${_os_id}" = "ubuntu" ] && [ -n "${_os_ver}" ] \
+     && [ "$(printf '%s\n' "24.04" "${_os_ver}" | sort -V | head -n1)" = "24.04" ]; } \
+   || { [ "${_py_major}" = "3" ] && [ "${_py_minor}" -ge 12 ]; }; then
     NUITKA_VERSION="4.1.3"
 fi
 echo "[build] Nuitka version selected: ${NUITKA_VERSION} (distro=${_os_id:-?} ${_os_ver:-?}, python=$(python3 -V 2>&1))" | tee -a "$LOG"
@@ -171,6 +184,7 @@ else
         case "$ROCM_VERSION" in
             7.13.0) RPC_MONO_REF="therock-7.13" ;;
             7.12.0) RPC_MONO_REF="therock-7.12" ;;
+            7.14.0) RPC_MONO_REF="therock-7.14" ;;
             *)      RPC_MONO_REF="rocm-${ROCM_VERSION}" ;;
         esac
         echo "[build] cloning rocm-systems @ ${RPC_MONO_REF} (sparse subtree projects/rocprofiler-compute) ..." | tee -a "$LOG"
@@ -353,6 +367,74 @@ PYEOF
     echo "[build] site patch applied cleanly" | tee -a "$LOG"
 fi
 
+# ------------------------------------------------------------------ #
+# Site patch: force rocprofiler-sdk BUILT-IN counter collection on the
+# 7.14.0 (therock-7.14) overlay by disabling the runtime-compiled
+# "native counter collection tool".
+#
+# rocprof-compute 3.7.0 (rocm >= 7.x) prefers a native tool that it
+# builds at runtime via `cmake -S <install>/lib`.  In a Nuitka onefile
+# there is no such lib/ tree, so it tries to build one -- but the build
+# is impossible on this ROCm: rocprofiler-sdk's own cmake config bakes a
+# non-existent CI path into INTERFACE_INCLUDE_DIRECTORIES:
+#   /__w/rockrel/rockrel/build/third-party/sysdeps/linux/zlib/build/
+#     stage/lib/rocm_sysdeps/include
+# so `find_package(rocprofiler-sdk)` makes cmake abort for every consumer
+# (a base-package defect of the TheRock RC 7.14.0 build, not the overlay).
+#
+# The tool already ships a fallback (CLI `--no-native-tool`) that uses
+# rocprofiler-sdk's built-in collection (ROCPROF_COUNTER_COLLECTION=1).
+# Validated on AAC7 MI300A: that path produces the exact analyze output
+# the HPCTrainingExamples Rocprof-compute_ROCm_Analyze_Check asserts
+# ("7.1 Wavefront Launch Stats").  Since the upstream test invokes
+# `rocprof-compute profile` without the flag, we make it the default by
+# forcing __is_native_tool_requested() to return False.
+#
+# Idempotent python in-place rewrite (line-number-independent). (2 Sep 2026)
+# ------------------------------------------------------------------ #
+if [[ "$ROCM_VERSION" == "7.14.0" ]]; then
+    echo "[build] applying site patch (profiler_base.py: force --no-native-tool / built-in counters) for ${ROCM_VERSION}" | tee -a "$LOG"
+    python3 - <<'PYEOF' 2>&1 | tee -a "$LOG"
+import sys
+src = "src/rocprof_compute_profile/profiler_base.py"
+with open(src) as f:
+    content = f.read()
+
+OLD = (
+'    def __is_native_tool_requested(self, args: argparse.Namespace) -> bool:\n'
+'        return self.__profiler == "rocprofiler-sdk" and not args.no_native_tool\n'
+)
+
+NEW = (
+'    def __is_native_tool_requested(self, args: argparse.Namespace) -> bool:\n'
+'        # AAC7 overlay patch (7.14.0 / therock-7.14): force the rocprofiler-sdk\n'
+'        # BUILT-IN counter collection (ROCPROF_COUNTER_COLLECTION=1) instead of\n'
+'        # the runtime-compiled native tool.  The native tool cannot be built on\n'
+'        # this ROCm: rocprofiler-sdk\'s cmake config bakes a non-existent CI\n'
+'        # path (/__w/rockrel/.../rocm_sysdeps/include) into its\n'
+'        # INTERFACE_INCLUDE_DIRECTORIES, so `cmake -S lib` aborts.  The built-in\n'
+'        # path yields valid "7.1 Wavefront Launch Stats" analyze output.\n'
+'        return False\n'
+'        return self.__profiler == "rocprofiler-sdk" and not args.no_native_tool\n'
+)
+
+if NEW in content:
+    print(f"[patch] {src} already patched -- no-op")
+    sys.exit(0)
+
+n = content.count(OLD)
+if n != 1:
+    print(f"[patch] ERROR: expected exactly 1 match in {src}, found {n}", file=sys.stderr)
+    sys.exit(2)
+
+content = content.replace(OLD, NEW)
+with open(src, 'w') as f:
+    f.write(content)
+print(f"[patch] OK: rewrote {src}")
+PYEOF
+    echo "[build] native-tool patch applied cleanly" | tee -a "$LOG"
+fi
+
 # Pin Python deps for ROCm 7.1.0+ official releases.  Mirror of the
 # locked list that lived in rocm/scripts/rocm_setup.sh up to 2026-05
 # (the original home of the nuitka build, now retired in favour of
@@ -373,7 +455,7 @@ if [ -z "$RC_FLAVOUR" ] \
    && [ "$(printf '%s\n' "7.1.0" "$ROCM_VERSION" | sort -V | head -n1)" = "7.1.0" ]; then
     REPIN_REQS=1
     case "$ROCM_VERSION" in
-        7.12.0|7.13.0) REPIN_REQS=0 ;;
+        7.12.0|7.13.0|7.14.0) REPIN_REQS=0 ;;
     esac
 fi
 if [ "$REPIN_REQS" = "1" ]; then
@@ -579,6 +661,29 @@ if [ -d "vendored" ]; then
     echo "[build] vendored/ present -- including in onefile" | tee -a "$LOG"
 fi
 
+# Optional: the `roofline` package provides the empirical roofline benchmark.
+# roofline/run_benchmark.py:load_bench() selects the device kernel class via a
+# RUNTIME-constructed import:
+#     importlib.import_module(f"roofline.benchmark.{gfx_arch}.benchmark_{gfx_device}")
+# (e.g. roofline.benchmark.gfx9.benchmark_gfx942 on MI300A). Because that module
+# name is built dynamically, Nuitka's static import analysis cannot see it, so
+# WITHOUT an explicit --include-package the onefile omits the whole roofline
+# subpackage and `rocprof-compute profile` (empirical roofline) fails at runtime:
+#     ERROR [roofline] Benchmark execution failed: Failed to load benchmark for
+#       devices 0: No module named 'roofline.benchmark'. Skipping roofline.
+#     ROOFLINE_RESULT: FAIL no non-empty roofline.csv produced
+# which is exactly the HPCTrainingExamples Rocprof-compute_ROCm_Roofline_Check
+# regression first seen in aac7_run_20260904_060839. The benchmark kernels are
+# embedded HIP source strings compiled at runtime (see benchmark_gfx9_base.py),
+# so freezing the Python package is sufficient -- there are no external kernel
+# binaries or data files to bundle. Gated on the dir existing so any release
+# without it stays a clean no-op. (AAC7, 4 September 2026)
+ROOFLINE_FLAGS=()
+if [ -d "roofline" ]; then
+    ROOFLINE_FLAGS=(--include-package=roofline --include-package-data=roofline)
+    echo "[build] roofline/ present -- including in onefile (empirical roofline benchmark)" | tee -a "$LOG"
+fi
+
 echo "[build] running nuitka (~10-30 min) ..." | tee -a "$LOG"
 python3 -m nuitka --mode=onefile --no-deployment-flag=self-execution \
     --include-data-files=${PROJECT_SOURCE_DIR}/VERSION*=./ \
@@ -590,6 +695,7 @@ python3 -m nuitka --mode=onefile --no-deployment-flag=self-execution \
     --noinclude-data-files=plotly/datasets/* \
     "${KALEIDO_FLAGS[@]}" \
     "${VENDORED_FLAGS[@]}" \
+    "${ROOFLINE_FLAGS[@]}" \
     --include-package=rocprof_compute_analyze \
     --include-package-data=rocprof_compute_analyze \
     --include-package=rocprof_compute_profile \
