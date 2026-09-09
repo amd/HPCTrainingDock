@@ -15,6 +15,9 @@ sources/rocm-patches/
     install.sh                     # the bundle ships shell scripts that
     build.sh                       # produce the artefact from upstream
     README.md.in                   # source plus a README template)
+  <component>-<symptom>/           # drop-in bundle (no patches, no build;
+    install.sh                     # takes the fixed artefact from a post-fix
+                                   # ROCm tree and shadows the site install)
 ```
 
 Subdirectory naming is keyed by the **upstream component + the version
@@ -22,9 +25,11 @@ of that component that contains the bug**, not by the ROCm release.
 This is important because a single patch typically applies to every
 ROCm release that ships the same buggy component (for instance,
 `rocprof-sys-1.3.0` is the v1.3.0 source baseline that ships with
-both ROCm 7.2.0 and 7.2.1).
+both ROCm 7.2.0 and 7.2.1).  A drop-in bundle carries no version in its
+name because it is not tied to one source baseline: it is keyed by the
+component plus the symptom it removes.
 
-Two bundle shapes are currently supported:
+Three bundle shapes are currently supported:
 
 * **patch-style** (`<component>-<version>/`): a directory of
   `git format-patch` files cherry-picked from upstream.  The
@@ -38,6 +43,13 @@ Two bundle shapes are currently supported:
   packaging-level rebuild (e.g. the upstream component itself is
   fine, but the ROCm `.deb` ships a broken or missing artefact).
   `rocprof-compute/` is the reference example.
+* **drop-in style** (`<component>-<symptom>/`): no patches and no build.
+  The bundle ships only an `install.sh` that lifts an already-fixed
+  library out of an official post-fix ROCm tree and shadows the site
+  install with it.  Used when the upstream fix is small, confined to a
+  single shared object, and already present in a build we can reach, so
+  compiling anything locally would only add risk.
+  `rocprofiler-sdk-node-wedging-fix/` is the reference example.
 
 The mapping from ROCm release to which subdirectory of patches to
 apply lives in `rocm/scripts/rocm_patches.sh` (see the
@@ -287,6 +299,45 @@ pushed to the public repo.  The "do not guess a commit" policy
 trades coverage breadth for build-provenance fidelity: a guessed
 overlay would not necessarily reproduce the in-distribution binary's
 behaviour.
+
+### `rocprofiler-sdk-node-wedging-fix/` -- concurrent rocprofv3 stability on ROCm 10
+
+In ROCm 10.0 and early 10.1 builds, a race in rocprofiler-sdk's shutdown
+path could, under concurrent per-GPU `rocprofv3` sessions, leave the GPU
+with a dangling pointer into host memory and destabilize the node. It was
+fixed in a later 10.1 nightly by
+[PR #10219](https://github.com/ROCm/rocm-systems/pull/10219).
+
+This bundle builds nothing. The fix lives entirely in
+`librocprofiler-sdk.so`, and it cannot be applied to an installed tree:
+the affected functions have internal linkage and the shipped library
+exports only the public `rocprofiler_*` API, so there is no symbol for
+an `LD_PRELOAD` shim to interpose. Replacing the library is the only
+option, and any post-fix build already contains it. `install.sh` lifts
+`librocprofiler-sdk*` and its companion tool library out of a donor tree
+(`--fixed-rocm`, or autodetected among siblings of the site install) and
+shadows the site copy with them. It reads the fix out of the donor
+binary and refuses a donor that lacks it, falling back to the build date
+only when the binary cannot be inspected.
+
+Because `rocprofv3` loads the SDK by absolute path, an `LD_LIBRARY_PATH`
+overlay cannot shadow it (the same problem `swap_sdk_lib_symlink()`
+solves for `librocprof-sys`). By default the bundle is non-invasive: it
+builds a symlink farm of the site install with only the rocprofiler-sdk
+libraries replaced, and adds one `prepend_path("PATH", ...)` line to the
+`rocm/<version>.lua` modulefile pointing at a `rocprofv3` wrapper that
+runs the distribution launcher against that farm. Nothing in the ROCm
+install is modified and an explicit user `--rocm-root` still wins. The
+staged libraries live inside the farm's `lib/` so their `$ORIGIN`-relative
+`RUNPATH` resolves back into the site tree. On a `rocprofv3` without the
+`--rocm-root` option the bundle instead swaps the distribution library
+for a symlink into the overlay, keeping the original as `.orig`.
+
+The bundle soft no-ops when the tree has no `rocprofv3` or no post-fix
+donor is staged, so the whole `10.*` line can be listed in
+`rocm_version_to_patches()` without pinning individual builds. Since the
+donor is a binary from a different build than the site install, validate
+on a drainable node before declaring the line safe.
 
 ## Adding a new patch
 

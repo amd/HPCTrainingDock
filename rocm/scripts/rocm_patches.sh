@@ -47,6 +47,16 @@
 #                              sdk_tool_configure out of the patched
 #                              code path. AFAR-23.1.0 has neither
 #                              issue and dispatches nothing.
+#   * ROCm 10.x            -- rocprofiler-sdk node-wedging overlay:
+#                            a shutdown-path race could destabilize the
+#                            node under concurrent per-GPU rocprofv3
+#                            sessions. Binary drop-in, NOT a build: the
+#                            fixed librocprofiler-sdk is taken from an
+#                            official post-fix tree and put in front of
+#                            the site copy via a rocprofv3 --rocm-root
+#                            wrapper on the modulefile PATH (or an SDK
+#                            symlink swap where --rocm-root is absent).
+#                            See sources/rocm-patches/rocprofiler-sdk-node-wedging-fix/.
 #   * ROCm 7.13.0          -- symlink libomp.so into the SDK's Dyninst
 #                            lib dir so it resolves for the libs that
 #                            need it transitively (libcommon /
@@ -415,6 +425,13 @@ rocm_version_to_patches() {
       # cluster; the libomp symlink is a few-millisecond no-op; the
       # rocprof-compute nuitka build (~10-30 min) runs last.
       7.13.0)           echo "rocprof-sys-1.6.0 rocprof-sys-instrument-libomp rocprof-compute" ;;
+      # ROCm 10.x: rocprofiler-sdk node-wedging overlay -- a shutdown-path
+      # race could destabilize the node under concurrent per-GPU rocprofv3
+      # sessions. The bundle is a binary drop-in (no build): it takes
+      # librocprofiler-sdk* out of an official post-fix tree and shadows
+      # the site install. It soft no-ops (43) when no such donor tree is
+      # on the cluster, so listing the whole 10.* line here is safe.
+      10.*)             echo "rocprofiler-sdk-node-wedging-fix" ;;
       6.3.*)            echo "rocprof-compute" ;;
       6.4.*)            echo "rocprof-compute" ;;
       7.0.*)            echo "rocprof-compute" ;;
@@ -709,6 +726,25 @@ already_installed_check() {
                patchelf --print-rpath "${lib}" 2>/dev/null \
                   | grep -qE "${INSTALL_PREFIX}/build/" \
                   && return 1
+            fi
+            ;;
+         rocprofiler-sdk-node-wedging-fix)
+            # Overlay libraries must be staged, and whichever mechanism
+            # install.sh picked must still be in place: wrapper mode
+            # leaves bin/rocprofv3 plus the modulefile PATH prepend, swap
+            # mode leaves the distribution .so symlinked into the overlay.
+            # The staged libraries live in the farm (root/lib) so their
+            # $ORIGIN-relative RUNPATH resolves into the site tree.
+            local _ovl="${INSTALL_PREFIX}/rocprofiler-sdk"
+            ls "${_ovl}"/root/lib/librocprofiler-sdk.so.* >/dev/null 2>&1 || return 1
+            if [ -x "${_ovl}/bin/rocprofv3" ]; then
+               grep -Fq 'rocprofiler-sdk node-wedging overlay' "${mf}" || return 1
+            else
+               local _dist
+               _dist="$(ls -1 "${ROCM_PATH}"/lib/librocprofiler-sdk.so.[0-9]*.[0-9]*.[0-9]* 2>/dev/null \
+                         | grep -vE '\.orig$' | head -1)"
+               [ -n "${_dist}" ] && [ -L "${_dist}" ]                      || return 1
+               [[ "$(readlink -f "${_dist}")" == "${_ovl}/root/lib/"* ]]   || return 1
             fi
             ;;
          rocprof-sys-instrument-libomp)
@@ -1619,6 +1655,48 @@ build_rocprof_compute() {
 }
 
 # ─────────────────────────────────────────────────────────────────────
+# apply_rocprofiler_sdk_node_wedging_fix
+# ---------------------------
+# In ROCm 10.0 and early 10.1 builds, a race in rocprofiler-sdk's shutdown
+# path could, under concurrent per-GPU rocprofv3 sessions, leave the GPU
+# with a dangling pointer into host memory and destabilize the node. It
+# was fixed in a later 10.1 nightly by ROCm/rocm-systems PR #10219.
+#
+# Unlike the rocprof-sys bundles this one BUILDS NOTHING: the fix lives
+# entirely in librocprofiler-sdk.so, so the bundle lifts that library
+# (and its companion tool library) out of an official post-fix tree and
+# shadows the site install with it. All the mechanism lives in the
+# vendored install.sh; this wrapper only stages it and forwards the
+# paths this run targets. FIXED_ROCM (env) names the donor tree
+# explicitly; unset, install.sh scans siblings of ROCM_PATH.
+#
+# Returns 0 (applied), 43 (soft no-op: no rocprofv3 here, or no post-fix
+# donor tree on the cluster), or 1 (hard error).
+# ─────────────────────────────────────────────────────────────────────
+apply_rocprofiler_sdk_node_wedging_fix() {
+   local bundle_dir="${PATCH_SOURCE_DIR}/rocprofiler-sdk-node-wedging-fix"
+   local overlay_dir="${INSTALL_PREFIX}/rocprofiler-sdk"
+
+   [ -d "${bundle_dir}" ]            || send-error "patch bundle missing: ${bundle_dir}"
+   [ -f "${bundle_dir}/install.sh" ] || send-error "missing vendored file: ${bundle_dir}/install.sh"
+
+   ${SUDO} mkdir -p "${overlay_dir}"
+   if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+      ${SUDO} chown -R "$(id -u):$(id -g)" "${overlay_dir}" || true
+   fi
+   install -m 0755 "${bundle_dir}/install.sh" "${overlay_dir}/install.sh"
+
+   local rc=0
+   ROCM_VERSION="${ROCM_VERSION}" \
+   ROCM_PATH="${ROCM_PATH}" \
+   MODULEFILE="${MODULE_FILE}" \
+   FIXED_ROCM="${FIXED_ROCM:-}" \
+   SUDO="${SUDO}" \
+   bash "${overlay_dir}/install.sh" || rc=$?
+   return ${rc}
+}
+
+# ─────────────────────────────────────────────────────────────────────
 # fix_rocprof_sys_instrument_libomp
 # ---------------------------------
 # ROCm 7.13.0 (AFAR / TheRock RC line) ships rocprof-sys-instrument with
@@ -2226,6 +2304,7 @@ fi
 built_rocprof_sys=0
 built_rocprof_compute=0
 built_instrument_libomp=0
+built_rocprofiler_sdk_node_wedging_fix=0
 
 for bundle in ${PATCH_BUNDLES}; do
    case "${bundle}" in
@@ -2290,6 +2369,22 @@ for bundle in ${PATCH_BUNDLES}; do
          else
             rc=${bundle_rc}
          fi ;;
+      rocprofiler-sdk-node-wedging-fix)
+         # Binary drop-in, no build: stage the post-fix librocprofiler-sdk
+         # and put it in front of the site copy (rocprofv3 --rocm-root
+         # wrapper on PATH via the modulefile, or an SDK symlink swap on
+         # a rocprofv3 without that option). install.sh does its own
+         # modulefile edit, so there is no follow-on hook here. Exit 43 =
+         # soft skip (no rocprofv3 on this tree, or no post-fix donor).
+         apply_rocprofiler_sdk_node_wedging_fix
+         bundle_rc=$?
+         if [ "${bundle_rc}" -eq 0 ]; then
+            built_rocprofiler_sdk_node_wedging_fix=1
+         elif [ "${bundle_rc}" -eq 43 ]; then
+            : # soft skip; leave built_rocprofiler_sdk_node_wedging_fix=0, rc unchanged
+         else
+            rc=${bundle_rc}
+         fi ;;
       *)
          echo "[rocm_patches] ERROR: no builder registered for bundle '${bundle}'" >&2
          rc=1 ;;
@@ -2332,7 +2427,8 @@ fi
 if [ "${rc}" -eq 0 ] \
      && { [ "${built_rocprof_sys}" -eq 1 ] \
           || [ "${built_rocprof_compute}" -eq 1 ] \
-          || [ "${built_instrument_libomp}" -eq 1 ]; }; then
+          || [ "${built_instrument_libomp}" -eq 1 ] \
+          || [ "${built_rocprofiler_sdk_node_wedging_fix}" -eq 1 ]; }; then
    write_rocm_patches_provenance || rc=$?
 fi
 
@@ -2340,7 +2436,8 @@ if [ "${rc}" -eq 0 ]; then
    echo ""
    if [ "${built_rocprof_sys}" -eq 0 ] \
         && [ "${built_rocprof_compute}" -eq 0 ] \
-        && [ "${built_instrument_libomp}" -eq 0 ]; then
+        && [ "${built_instrument_libomp}" -eq 0 ] \
+        && [ "${built_rocprofiler_sdk_node_wedging_fix}" -eq 0 ]; then
       # All bundles dispatched ran (or were skipped) without error, but
       # nothing landed on disk -- e.g. every dispatched bundle was a
       # soft no-op (RC tree without a public-resolvable VERSION.sha).
@@ -2364,6 +2461,9 @@ if [ "${rc}" -eq 0 ]; then
       fi
       if [ "${built_rocprof_compute}" -eq 1 ]; then
          echo "[rocm_patches]   rocprof-compute:     ${INSTALL_PREFIX}/rocprof-compute/bin/rocprof-compute"
+      fi
+      if [ "${built_rocprofiler_sdk_node_wedging_fix}" -eq 1 ]; then
+         echo "[rocm_patches]   rocprofiler-sdk (node wedging): ${INSTALL_PREFIX}/rocprofiler-sdk/root/lib"
       fi
       if [ "${built_instrument_libomp}" -eq 1 ]; then
          echo "[rocm_patches]   rocprof-sys-instrument: libomp.so symlinked into Dyninst lib dir"
