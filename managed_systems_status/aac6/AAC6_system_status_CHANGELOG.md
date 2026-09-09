@@ -2,6 +2,14 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-09-09
+
+- User-facing modules:
+    + glow
+- Modules:
+    + glow/2.1.1
+
+[Full snapshot](archive/AAC6_system_status_2026-09-09.md)
 ## 2026-09-07
 
 - Down/drained nodes:
