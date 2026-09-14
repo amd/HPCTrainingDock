@@ -1380,6 +1380,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}
 	prepend-path LD_LIBRARY_PATH    \$AMD_LIB
 	prepend-path LD_LIBRARY_PATH    \$AMD_ROCP_LIB
 	prepend-path LD_LIBRARY_PATH    \$AMD_ROCT_LIB
+	prepend-path LD_LIBRARY_PATH    \$AMD_CURPATH/lib/rocprofiler-systems
 
 	append-path PE_PRODUCT_LIST     \$CPE_PRODUCT_NAME
 	prepend-path PKG_CONFIG_PATH    \$CPE_PKGCONFIG_PATH
@@ -1464,6 +1465,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	if isDir(pathJoin(base, "lib/rocm_sysdeps/lib")) then
 	   prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib/rocm_sysdeps/lib"))
 	end
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib/rocprofiler-systems"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPATH", pathJoin(base, "include"))
@@ -1504,6 +1506,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	local mbase = myFileName():gsub("/[^/]*\$",""):gsub("/[^/]*\$",""):gsub("/[^/]*\$","")
 
 	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+	prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib/rocprofiler-systems"))
 	prepend_path("C_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPLUS_INCLUDE_PATH", pathJoin(base, "include"))
 	prepend_path("CPATH", pathJoin(base, "include"))
