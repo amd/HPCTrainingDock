@@ -57,6 +57,8 @@
 #   * 7.13.0        -- family D (per-arch lib subdir gfx942/; CPX
 #                     WGMXCC=4 defect already fixed upstream so the
 #                     CPX rewrite step is a sentinel-only no-op there)
+#   * 7.14.0        -- family D (*.dat.zlib in gfx942/; fp16 forward
+#                     leaf only, solution 243113; no CPX rewrite)
 #
 
 set -euo pipefail
@@ -143,7 +145,7 @@ done
 
 # ── version gate ────────────────────────────────────────────────────
 case "${ROCM_VERSION}" in
-   7.1.0|7.1.1|7.2.0|7.2.2|7.2.3|7.2.4|7.13.0) ;;
+   7.1.0|7.1.1|7.2.0|7.2.2|7.2.3|7.2.4|7.13.0|7.14.0) ;;
    *)
       echo "[hipblaslt_patch] no fix vendored for rocm/${ROCM_VERSION}; exiting NOOP (rc=${NOOP_RC})"
       exit ${NOOP_RC}
@@ -168,7 +170,9 @@ MODULE_FILE="${MODULE_PATH}/rocmplus-${ROCM_VERSION}/hipblaslt/patched.lua"
 # layout the SDK uses so HIPBLASLT_TENSILE_LIBPATH=${DST_LIBDIR}
 # resolves the same way after the overlay is selected.
 ARCH_SUBDIR=""
-if [ -d "${SRC_LIBDIR}/gfx942" ] && compgen -G "${SRC_LIBDIR}/gfx942/*.dat" >/dev/null; then
+if [ -d "${SRC_LIBDIR}/gfx942" ] \
+   && { compgen -G "${SRC_LIBDIR}/gfx942/*.dat" >/dev/null \
+        || compgen -G "${SRC_LIBDIR}/gfx942/*.dat.zlib" >/dev/null; }; then
    ARCH_SUBDIR="gfx942"
 fi
 EFFECTIVE_SRC_LIBDIR="${SRC_LIBDIR}${ARCH_SUBDIR:+/${ARCH_SUBDIR}}"
@@ -235,6 +239,7 @@ import argparse
 import os
 import pathlib
 import sys
+import zlib
 
 import msgpack
 
@@ -342,8 +347,21 @@ SOLUTION_INDEX = {
     "7.13.0":{("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       236740,
               ("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"): 225772,
               ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 222586},
+    # rocm/7.14.0: *.dat.zlib; fp16 forward leaf -> 243113.
+    "7.14.0":{("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       243113},
 }
 CPX_SENTINEL = "__cpx_patch_v1__"
+
+ZLIB_VERSIONS = {"7.14.0"}
+
+NO_CPX_VERSIONS = {"7.14.0"}
+
+
+def _read_lib(path):
+    raw = open(path, "rb").read()
+    if str(path).endswith(".zlib"):
+        raw = zlib.decompress(raw)
+    return msgpack.unpackb(raw, raw=False, strict_map_key=False)
 
 
 def equality_matching(data):
@@ -366,20 +384,24 @@ def _patch_one_row(table, key, idx):
     return "added"
 
 
-def patch_spx(src, dst, shapes_for_file, idx):
-    """Patch one SPX .dat with all `shapes_for_file` rows in one pass.
+def patch_spx(src, dst, shapes_for_file, idx, zlib_mode=False):
+    """Patch one SPX .dat[.zlib] with all `shapes_for_file` rows in one pass.
 
     A single read+write per file is required when multiple rows share a
     filename, otherwise the second write would overwrite the first.
     """
-    data = msgpack.unpack(open(src, "rb"), raw=False, strict_map_key=False)
+    data = _read_lib(src)
     table = equality_matching(data)["table"]
     actions = []
     for M, N, B, K in shapes_for_file:
         actions.append((M, N, B, K, _patch_one_row(table, [M, N, B, K], idx)))
     dst.parent.mkdir(parents=True, exist_ok=True)
-    with open(dst, "wb") as f:
-        msgpack.pack(data, f)
+    if zlib_mode:
+        with open(dst, "wb") as f:
+            f.write(zlib.compress(msgpack.packb(data, use_bin_type=True), 9))
+    else:
+        with open(dst, "wb") as f:
+            msgpack.pack(data, f)
     print(f"  [spx] {dst.name}: {len(actions)} row(s) -> solution {idx}")
     for M, N, B, K, what in actions:
         print(f"           {what:7s}  [{M}, {N}, {B}, {K}]")
@@ -446,6 +468,8 @@ def main():
     sdir = pathlib.Path(args.src_libdir)
     ddir = pathlib.Path(args.dst_libdir)
     idx_map = SOLUTION_INDEX[args.rocm_version]
+    zlib_mode = args.rocm_version in ZLIB_VERSIONS
+    disk = (lambda s: s + ".zlib") if zlib_mode else (lambda s: s)
     # bf16 (BB / BB_HA) is opt-in per version: it runs only when this
     # version carries a BB solution index. Versions without one get the
     # fp16-only (HH) behaviour, unchanged.
@@ -460,13 +484,16 @@ def main():
         if (tag, suffix) not in idx_map:
             continue
         prefix = DAT_PREFIXES[tag]
-        patch_spx(sdir / (prefix + suffix), ddir / (prefix + suffix),
-                  shapes, idx_map[(tag, suffix)])
-    for tag, suffix in CPX_DATS:
-        if tag.startswith("BB") and not bf16_enabled:
-            continue
-        prefix = DAT_PREFIXES[tag]
-        patch_cpx(sdir / (prefix + suffix), ddir / (prefix + suffix))
+        patch_spx(sdir / (prefix + disk(suffix)), ddir / (prefix + disk(suffix)),
+                  shapes, idx_map[(tag, suffix)], zlib_mode=zlib_mode)
+    if args.rocm_version in NO_CPX_VERSIONS:
+        print(f"  [cpx] skipped for rocm/{args.rocm_version}")
+    else:
+        for tag, suffix in CPX_DATS:
+            if tag.startswith("BB") and not bf16_enabled:
+                continue
+            prefix = DAT_PREFIXES[tag]
+            patch_cpx(sdir / (prefix + disk(suffix)), ddir / (prefix + disk(suffix)))
 
 
 if __name__ == "__main__":
@@ -481,7 +508,7 @@ ${SUDO} mkdir -p "${EFFECTIVE_DST_LIBDIR}"
 # section correct as coverage grows: fp16-only versions yield the 6 HH
 # files; bf16-enabled versions (7.2.4) additionally yield the BB SPX
 # leaf + 3 BB_HA CU38 leaves.
-mapfile -t PATCHED_FILES < <(cd "${WORKDIR}" && ls -1 *.dat 2>/dev/null)
+mapfile -t PATCHED_FILES < <(cd "${WORKDIR}" && ls -1 2>/dev/null | grep -E '\.dat(\.zlib)?$')
 [ "${#PATCHED_FILES[@]}" -gt 0 ] \
    || send-error "inline patcher produced no .dat files in ${WORKDIR}"
 for fname in "${PATCHED_FILES[@]}"; do
