@@ -179,6 +179,12 @@ SITE_CLI=0
 # the leaf degrades a blocked/failed download to SKIPPED(missing-prereq)
 # so it can never turn the sweep red (pre-stage a tarball to guarantee it).
 : ${BUILD_UPROF:="1"}
+# roofline-extractor: AMD Roofline Extractor -- ROCm-agnostic base tool
+# (Python payload + pinned deps), installs under TOP_INSTALL_PATH (shared
+# across ROCm versions, existence-skips on later sweep versions like
+# emacs/qcachegrind). The leaf clones the PUBLIC repo, applies its sidecar
+# roofline_extractor.patch, and writes an Lmod/Tcl modulefile.
+: ${BUILD_ROOFLINE_EXTRACTOR:="1"}
 : ${PACKAGES_INPUT:=""}      # comma- or space-separated whitelist; empty = all (subject to other flags)
 # PnetCDF version (build-time dep of netcdf, also a first-class
 # versioned rocmplus module after 2026-05-20). Empty = leaf default
@@ -956,6 +962,7 @@ declare -A PKG_FLAG=(
    [turbovnc]=BUILD_TURBOVNC
    [google-chrome]=BUILD_GOOGLE_CHROME
    [qcachegrind]=BUILD_QCACHEGRIND
+   [roofline-extractor]=BUILD_ROOFLINE_EXTRACTOR
 )
 
 # Subset of PKG_FLAG entries whose leaf script exposes a single
@@ -1022,6 +1029,7 @@ declare -A PKG_VER_FLAG=(
    [turbovnc]="--turbovnc-version"
    [google-chrome]="--google-chrome-version"
    [qcachegrind]="--qcachegrind-version"
+   [roofline-extractor]="--roofline-version"
 )
 
 # Per-package list of versions requested via --packages name=VER. Unset
@@ -2368,6 +2376,17 @@ run_and_log_versioned qcachegrind extras/scripts/qcachegrind_setup.sh --build-qc
 # pre-stage the tarball (uprof_setup.sh --tarball-file) to guarantee it.
 run_and_log_versioned uprof tools/scripts/uprof_setup.sh --build-uprof ${BUILD_UPROF} \
    $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path-parent ${TOP_INSTALL_PATH} --module-path ${TOP_MODULE_PATH}/base/uprof")
+
+# roofline-extractor: AMD Roofline Extractor -- ROCm-agnostic base tool, installs
+# under TOP_INSTALL_PATH (shared across ROCm versions, existence-skips on later
+# sweep versions like emacs/qcachegrind) and is intentionally NOT given
+# ${REPLACE_OPTS} (a shared tool should not be wiped per ROCm version; pass
+# --replace 1 to the leaf, or bump the version, to update it). The leaf does NOT
+# accept --rocm-version/--amdgpu-gfxmodel so COMMON_OPTIONS is not threaded.
+# --install-path is a PARENT dir; the leaf appends rooflineExtractor. Its sidecar
+# roofline_extractor.patch lives next to the leaf in tools/scripts/.
+run_and_log_versioned roofline-extractor tools/scripts/roofline_extractor_setup.sh --build-roofline-extractor ${BUILD_ROOFLINE_EXTRACTOR} \
+   $([ "${USE_CUSTOM_PATHS}" == 1 ] && echo "--install-path ${TOP_INSTALL_PATH} --module-path ${TOP_MODULE_PATH}/base/roofline-extractor")
 
 # hipfort: build-from-source intentionally removed. ROCm 6.3+ ships
 # hipfort natively (see <pkg>.BUNDLED markers / rocm/<v> module). The

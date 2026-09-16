@@ -27,6 +27,7 @@ ARG BUILD_AQLPROFILE
 ARG BUILD_MDB
 ARG BUILD_INTELLIKIT
 ARG BUILD_ROC_OPTIQ=0
+ARG BUILD_ROOFLINE_EXTRACTOR=0
 
 LABEL maintainer="bob.robey@amd.com"
 
@@ -92,6 +93,20 @@ RUN  /tmp/tools/intellikit_setup.sh --rocm-version ${ROCM_VERSION} --build-intel
 COPY tools/scripts/roc-optiq_setup.sh /tmp/tools/roc-optiq_setup.sh
 RUN  /tmp/tools/roc-optiq_setup.sh --rocm-version ${ROCM_VERSION} --build-roc-optiq ${BUILD_ROC_OPTIQ} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} || [ "$?" = "43" ] && \
      rm -f /tmp/tools/roc-optiq_setup.sh
+
+# roofline-extractor: AMD Roofline Extractor -- ROCm-agnostic Python tool.
+# Defaults OFF (ARG BUILD_ROOFLINE_EXTRACTOR=0): the leaf clones a PUBLIC repo and pip-
+# installs a pinned dep stack, and its dependency bootstrap is Ubuntu-only, so
+# it is opt-in per image (build with --build-arg BUILD_ROOFLINE_EXTRACTOR=1). The leaf and
+# its sidecar roofline_extractor.patch MUST land in the same dir -- the leaf
+# resolves the patch relative to itself. Container layout: install under
+# /opt/rocmplus-${ROCM_VERSION}; modulefile under the ROCmPlus Lmod tree (like
+# tau). NOOP_RC=43 (opt-out / already-installed) is treated as success; any
+# other non-zero rc still fails the build.
+COPY tools/scripts/roofline_extractor_setup.sh /tmp/tools/roofline_extractor_setup.sh
+COPY tools/scripts/roofline_extractor.patch    /tmp/tools/roofline_extractor.patch
+RUN  /tmp/tools/roofline_extractor_setup.sh --build-roofline-extractor ${BUILD_ROOFLINE_EXTRACTOR} --install-path /opt/rocmplus-${ROCM_VERSION} --module-path /etc/lmod/modules/ROCmPlus/roofline-extractor || [ "$?" = "43" ] && \
+     rm -f /tmp/tools/roofline_extractor_setup.sh /tmp/tools/roofline_extractor.patch
 
 #
 # Install Grafana

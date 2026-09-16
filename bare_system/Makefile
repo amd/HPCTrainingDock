@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
-all: rocm openmpi rocprof-sys_rocm rocprof-sys_source rocprof-compute_rocm rocprof-compute_source kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk compiler petsc hypre tensorflow ftorch julia smartsim lammps likwid mdb intellikit roc-optiq
-.PHONY: baseospackages rocm openmpi mvapich slurm rocprof-sys_rocm rocprof-sys_source amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk rocprof-compute_rocm rocprof-compute_source compiler petsc hypre tensorflow ftorch julia smartsim lammps likwid mdb intellikit roc-optiq
+all: rocm openmpi rocprof-sys_rocm rocprof-sys_source rocprof-compute_rocm rocprof-compute_source kokkos aomp cupy pytorch hpctoolkit mpi4py tau jax scorep x11vnc miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk compiler petsc hypre tensorflow ftorch julia smartsim lammps likwid mdb intellikit roc-optiq roofline-extractor
+.PHONY: baseospackages rocm openmpi mvapich slurm rocprof-sys_rocm rocprof-sys_source amd_gcc aomp kokkos aomp cupy pytorch apps_setup hpctoolkit mpi4py tau jax scorep miniconda3 miniforge3 hdf5 hipfort netcdf flang-new fftw hipifly rocprofiler-sdk rocprof-compute_rocm rocprof-compute_source compiler petsc hypre tensorflow ftorch julia smartsim lammps likwid mdb intellikit roc-optiq roofline-extractor
 
 baseospackages: baseospackages.timestamp
 rocm: rocm.timestamp
@@ -30,6 +30,7 @@ likwid: likwid.timestamp
 mdb: mdb.timestamp
 intellikit: intellikit.timestamp
 roc-optiq: roc-optiq.timestamp
+roofline-extractor: roofline-extractor.timestamp
 mpi4py: mpi4py.timestamp
 hpctoolkit: hpctoolkit.timestamp
 cupy: cupy.timestamp
@@ -205,6 +206,11 @@ roc-optiq.timestamp: rocm.timestamp
 	   --amdgpu-gfxmodel '${AMDGPU_GFXMODEL}' \
 	   --build-roc-optiq 1
 	touch roc-optiq.timestamp
+
+roofline-extractor.timestamp: rocm.timestamp
+	tools/scripts/roofline_extractor_setup.sh \
+	   --build-roofline-extractor 1
+	touch roofline-extractor.timestamp
 
 # From Training layer
 

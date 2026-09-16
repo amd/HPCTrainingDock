@@ -47,7 +47,7 @@ set -eo pipefail
 # ─────────────────────────────────────────────────────────────────────
 
 # Variables controlling setup process
-BUILD_ROOFLINE=1
+BUILD_ROOFLINE_EXTRACTOR=1
 ROOFLINE_VERSION=dev
 # Public repo -- anonymous HTTPS clone, no deploy key or token required.
 ROOFLINE_REPO="https://github.com/AMD-HPC/rooflineExtractor.git"
@@ -70,7 +70,6 @@ SHARED_MAN_DIR=/shared/apps/ubuntu/man
 REPLACE=0
 KEEP_FAILED_INSTALLS=0
 SUDO="sudo"
-DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 
 # Python deps, PINNED to the validated stack (rebuilt cp312 for 3.12).
 # numexpr/bottleneck are vendored deliberately (see header). Keep in sync
@@ -88,7 +87,6 @@ ROOFLINE_PIP_PINS=(
 
 if [ -f /.singularity.d/Singularity ]; then
    SUDO=""
-   DEB_FRONTEND=""
 fi
 
 # Autodetect defaults
@@ -99,7 +97,7 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path and --module-path, the PARENT directories must already exist (the script probes them for write permission)"
-   echo "  --build-roofline [ 0|1 ]       default $BUILD_ROOFLINE"
+   echo "  --build-roofline-extractor [ 0|1 ]  default $BUILD_ROOFLINE_EXTRACTOR"
    echo "  --roofline-version [ VER ]     modulefile name stem, default $ROOFLINE_VERSION"
    echo "  --repo [ URL ]                 git repo to clone, default $ROOFLINE_REPO"
    echo "  --ref [ BRANCH|TAG|SHA ]       git ref to check out, default $ROOFLINE_REF"
@@ -127,9 +125,9 @@ n=0
 while [[ $# -gt 0 ]]
 do
    case "${1}" in
-      "--build-roofline")
+      "--build-roofline-extractor")
           shift
-          BUILD_ROOFLINE=${1}
+          BUILD_ROOFLINE_EXTRACTOR=${1}
           reset-last
           ;;
       "--roofline-version")
@@ -191,7 +189,7 @@ fi
 echo ""
 echo "==================================="
 echo "Starting Roofline Extractor Install with"
-echo "BUILD_ROOFLINE: $BUILD_ROOFLINE"
+echo "BUILD_ROOFLINE_EXTRACTOR: $BUILD_ROOFLINE_EXTRACTOR"
 echo "ROOFLINE_VERSION: $ROOFLINE_VERSION"
 echo "ROOFLINE_REPO: $ROOFLINE_REPO"
 echo "ROOFLINE_REF: $ROOFLINE_REF"
@@ -202,12 +200,12 @@ echo "KEEP_FAILED_INSTALLS: $KEEP_FAILED_INSTALLS"
 echo "==================================="
 echo ""
 
-# ── BUILD_ROOFLINE=0 short-circuit: operator opt-out ──────────────────
+# ── BUILD_ROOFLINE_EXTRACTOR=0 short-circuit: operator opt-out ──────────────────
 # NOOP_RC=43 so main_setup.sh's run_and_log records this as SKIPPED(no-op)
 # rather than OK-bucketing an install that never happened.
 NOOP_RC=43
-if [ "${BUILD_ROOFLINE}" = "0" ]; then
-   echo "[roofline BUILD_ROOFLINE=0] operator opt-out; skipping (no install)."
+if [ "${BUILD_ROOFLINE_EXTRACTOR}" = "0" ]; then
+   echo "[roofline BUILD_ROOFLINE_EXTRACTOR=0] operator opt-out; skipping (no install)."
    exit ${NOOP_RC}
 fi
 
@@ -256,18 +254,12 @@ _roofline_on_exit() {
 trap _roofline_on_exit EXIT
 
 # ── build/runtime dependencies ────────────────────────────────────────
-# git to clone the repo; python3 + pip to vendor the deps.
-if [ "${DISTRO}" = "ubuntu" ]; then
-   echo "[roofline] ensuring git + python3 + pip are present ..."
-   ${SUDO} ${DEB_FRONTEND} apt-get update -q -y || true
-   ${SUDO} ${DEB_FRONTEND} apt-get install -q -y git python3 python3-pip
-else
-   echo "[roofline] WARNING: automatic dep install is only wired up for Ubuntu."
-   echo "        DISTRO='${DISTRO}' detected -- assuming git, python3, and pip are present."
-fi
-
-command -v git     >/dev/null 2>&1 || send-error "git not found on PATH"
-command -v python3 >/dev/null 2>&1 || send-error "python3 not found on PATH"
+# git (clone the repo) + python3 + pip (vendor the deps) are provided by the
+# base OS layer (rocm/scripts/baseospackages_setup.sh) on every supported
+# distro (ubuntu / rhel-compatible / opensuse), so this leaf does NOT install
+# them -- it just fail-loud verifies their presence, distro-agnostically.
+command -v git     >/dev/null 2>&1 || send-error "git not found on PATH (expected from baseospackages_setup.sh)"
+command -v python3 >/dev/null 2>&1 || send-error "python3 not found on PATH (expected from baseospackages_setup.sh)"
 
 # ── install-path sudo: probe nearest existing ancestor for writability ─
 if [ "${EUID:-$(id -u)}" -eq 0 ]; then
