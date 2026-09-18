@@ -95,6 +95,18 @@ UCX_PATH_INPUT=""
 UCC_PATH_INPUT=""
 OPENMPI_PATH_INPUT=""
 USE_CACHE_BUILD=1
+# ── MI300A UCX CMA-EFAULT mitigations (see the decision block below) ──
+# --ucx-rocm-patch: apply the PR openucx/ucx#11887 source fix (bistro ROCm
+#   memory hooks) to the UCX build. This is the real fix, meant for testing
+#   toward upstream / next-ROCm inclusion. auto (default) = apply on the
+#   affected ROCm range (>=10.1 / AFAR>=24) when UCX is the validated 1.19.1;
+#   1 = force apply; 0 = never.
+# --ucx-cma-workaround: the OLD UCX_TLS=^cma env workaround (removes the CMA
+#   transport -> xpmem). Superseded by the patch, so OFF by default; kept as a
+#   fallback / A-vs-B knob. 0 = off (default); 1 = force on; auto = version +
+#   MI300A-hardware gate.
+UCX_ROCM_PATCH=auto
+UCX_CMA_WORKAROUND=0
 UCX_VERSION=1.19.1
 UCX_MD5CHECKSUM=684414d2fcb96ded0cbaad33d88ea56d
 UCC_VERSION=1.6.0
@@ -185,6 +197,8 @@ usage()
     echo "  --ucx-path default $INSTALL_PATH/ucx-$UCX_VERSION-xpmem-$XPMEM_VERSION"
     echo "  --ucx-version [VERSION] default $UCX_VERSION"
     echo "  --ucx-md5checksum [ CHECKSUM ] default for default version, blank or \"skip\" for no check"
+    echo "  --ucx-rocm-patch [ auto|0|1 ] apply PR openucx/ucx#11887 (ROCm bistro memory-hook fix) to the UCX build; auto=apply on ROCm>=10.1/AFAR>=24 with UCX 1.19.1, default $UCX_ROCM_PATCH"
+    echo "  --ucx-cma-workaround [ 0|1|auto ] old UCX_TLS=^cma env workaround (superseded by --ucx-rocm-patch); auto=ROCm>=10.1/AFAR>=24 on MI300A, default $UCX_CMA_WORKAROUND"
     echo "  --xpmem-path default ${INSTALL_PATH}/xpmem-${XPMEM_VERSION}"
     echo "  --xpmem-version [VERSION] default $XPMEM_VERSION"
     echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL ] default autodetected"
@@ -340,6 +354,16 @@ do
       "--ucx-version")
           shift
           UCX_VERSION=${1}
+          reset-last
+          ;;
+      "--ucx-rocm-patch")
+          shift
+          UCX_ROCM_PATCH=${1}
+          reset-last
+          ;;
+      "--ucx-cma-workaround")
+          shift
+          UCX_CMA_WORKAROUND=${1}
           reset-last
           ;;
       "--ucx-md5checksum")
@@ -770,6 +794,120 @@ MARKER_EOF
 }
 trap _openmpi_on_exit EXIT
 
+# ---------------------------------------------------------------------------
+# MI300A UCX CMA-EFAULT mitigations -- decided ONCE here, consumed later.
+#
+# The bug: on ROCm >= 10.1 / AFAR >= 24, MI300A (gfx942 APU), UCX 1.19.1
+# misclassifies host-range coherent/unified-memory GPU buffers as HOST memory
+# (its default ELF-reloc memory hook misses HSA allocations resolved via
+# dlopen/dlsym), routes them through the CMA (cross-memory-attach) transport,
+# and cma_ep's process_vm_readv() then EFAULTs cross-process on the APU's
+# coherent VMAs -- aborting GPU-aware p2p (MPI_Ghost_Exchange_Ver3/Ver6) and the
+# UCX-native collective path (GPUAwareOpenMPI_UCC_OpenMP_AllReduce). Passes on
+# ROCm <= 7.2.x. Two independent mitigations, each with its own gate:
+#
+#   (A) PR openucx/ucx#11887 SOURCE FIX  [--ucx-rocm-patch, default auto]
+#       Teaches UCX's ROCm memory hooks to install in bistro (binary-
+#       instrumentation) mode, so coherent/USM allocations are correctly
+#       classified as device memory and never routed to CMA. This is the real
+#       fix we want to validate for upstream / next-ROCm inclusion. It is a
+#       build-time, hardware-independent source change, so it is gated on
+#       VERSION ONLY: the affected ROCm range AND the UCX release the patch was
+#       cut+validated against (1.19.1). Applying it on MI300X or a login node is
+#       harmless (just correct memtype classification), and the module is
+#       deployed cluster-wide, so we do NOT hardware-gate the patch.
+#
+#   (B) OLD UCX_TLS=^cma ENV WORKAROUND  [--ucx-cma-workaround, default 0/off]
+#       Removes the CMA transport so intra-node single-copy uses xpmem instead.
+#       Superseded by (A); kept OFF by default as a fallback / A-vs-B knob.
+#       Because it is a runtime behavior change (forces xpmem), its auto mode is
+#       gated on VERSION *and* MI300A hardware so it never needlessly fires on a
+#       discrete MI300X.
+#
+# "Affected version" = SDK numeric major.minor >= 10.1 (regular releases +
+# datestamped nightlies like 10.1.0a20260811; NOT 10.0.x / 7.2.x) OR the AFAR
+# flang-release tag >= 24 (afar-24.x is the first ROCm-10-era AFAR drop; the
+# afar-22.x/23.x lines are ROCm 7.x/7.1x). AFAR is gated on the release tag, not
+# its .info/version numeric, which can read 10.0.x while still needing the fix.
+# MI300A is disambiguated from the gfx942-sharing MI300X via the APU's PCI id
+# 0x74a0 (== the bug report's 1002:74a0, and the same signal
+# bare_system/rocm10-guard-layer2/rocprof_guard.c uses). All probes are guarded
+# for set -eo pipefail. Ref: https://github.com/openucx/ucx/pull/11887 .
+# ---------------------------------------------------------------------------
+# (1) Is the ROCm version in the affected range? (used by BOTH mitigations)
+_ucx_cma_version_hit=0
+# (1a) regular release / nightly: SDK numeric major.minor >= 10.1. The regex
+# ignores any trailing "aYYYYMMDD" nightly suffix (10.1.0a20260811 -> 10 . 1).
+if [[ "${ROCM_VERSION}" =~ ^([0-9]+)\.([0-9]+) ]]; then
+   _ucx_cma_major="${BASH_REMATCH[1]}"
+   _ucx_cma_minor="${BASH_REMATCH[2]}"
+   if [ "${_ucx_cma_major}" -gt 10 ]; then
+      _ucx_cma_version_hit=1
+   elif [ "${_ucx_cma_major}" -eq 10 ] && [ "${_ucx_cma_minor}" -ge 1 ]; then
+      _ucx_cma_version_hit=1
+   fi
+   unset _ucx_cma_major _ucx_cma_minor
+fi
+# (1b) AFAR drop: flang-release tag >= 24 (afar-24.x == the ROCm 10.x AFAR line).
+# The tag lives in the module name (rocm/afar-24.1.0-10.1.0), the ROCM_PATH
+# basename (rocm-afar-24.1.0), and LOADEDMODULES -- check all three.
+if [ "${_ucx_cma_version_hit}" -eq 0 ]; then
+   _ucx_cma_afar_str="${ROCM_MODULE_NAME:-} ${ROCM_PATH:-} ${LOADEDMODULES:-}"
+   if [[ "${_ucx_cma_afar_str}" =~ afar-([0-9]+)\. ]]; then
+      _ucx_cma_afar_rel="${BASH_REMATCH[1]}"
+      if [ "${_ucx_cma_afar_rel}" -ge 24 ]; then
+         _ucx_cma_version_hit=1
+      fi
+      unset _ucx_cma_afar_rel
+   fi
+   unset _ucx_cma_afar_str
+fi
+
+# (2) PR #11887 source-patch decision (version-gated, hardware-independent).
+APPLY_UCX_ROCM_PATCH=0
+case "${UCX_ROCM_PATCH}" in
+   1) APPLY_UCX_ROCM_PATCH=1 ;;
+   0) APPLY_UCX_ROCM_PATCH=0 ;;
+   *) # auto: affected ROCm range AND the UCX release the patch was validated on
+      if [ "${_ucx_cma_version_hit}" -eq 1 ] && [ "${UCX_VERSION}" = "1.19.1" ]; then
+         APPLY_UCX_ROCM_PATCH=1
+      fi
+      ;;
+esac
+
+# (3) Old UCX_TLS=^cma workaround decision. auto mode additionally requires
+# MI300A (APU) hardware -- disambiguate from discrete MI300X via PCI id 0x74a0.
+# rocminfo is only a fallback (needs a runnable ROCm and can die on glibc skew),
+# so read /sys directly first.
+APPLY_UCX_CMA_WORKAROUND=0
+case "${UCX_CMA_WORKAROUND}" in
+   1) APPLY_UCX_CMA_WORKAROUND=1 ;;
+   0) APPLY_UCX_CMA_WORKAROUND=0 ;;
+   *) # auto
+      if [ "${_ucx_cma_version_hit}" -eq 1 ]; then
+         _ucx_cma_is_mi300a=0
+         for _ucx_cma_dev in /sys/bus/pci/devices/*/device; do
+            [ -r "${_ucx_cma_dev}" ] || continue
+            if grep -qi '0x74a0' "${_ucx_cma_dev}" 2>/dev/null; then
+               _ucx_cma_is_mi300a=1
+               break
+            fi
+         done
+         unset _ucx_cma_dev
+         if [ "${_ucx_cma_is_mi300a}" -eq 0 ] && rocminfo 2>/dev/null | grep -qi 'MI300A'; then
+            _ucx_cma_is_mi300a=1
+         fi
+         [ "${_ucx_cma_is_mi300a}" -eq 1 ] && APPLY_UCX_CMA_WORKAROUND=1
+         unset _ucx_cma_is_mi300a
+      fi
+      ;;
+esac
+unset _ucx_cma_version_hit
+echo "openmpi: UCX MI300A CMA mitigations -> patch(openucx#11887)=${APPLY_UCX_ROCM_PATCH}" \
+     "cma-workaround=${APPLY_UCX_CMA_WORKAROUND}" \
+     "(ROCM_VERSION=${ROCM_VERSION}, UCX=${UCX_VERSION}, module=${ROCM_MODULE_NAME:-?}," \
+     "flags: --ucx-rocm-patch=${UCX_ROCM_PATCH} --ucx-cma-workaround=${UCX_CMA_WORKAROUND})"
+
 #
 # Install XPMEM
 #
@@ -865,6 +1003,682 @@ if [ "${BUILD_XPMEM}" == "1" ]; then
    fi
 fi
 
+# ── Inlined PR openucx/ucx#11887 (ROCm bistro memory-hook fix) ──────
+# write_ucx_rocm_patch: emit the vendored unified diff to stdout. Inlined via a
+# single-quoted heredoc (verbatim, no shell expansion) so this script is fully
+# self-contained -- a user who copies only openmpi_setup.sh still gets the fix.
+# The UCX build materializes this to a temp file and git-applies it. To refresh:
+# replace the body between the UCX_PR11887_PATCH_EOF markers with a new `git diff`, or drop a
+# sidecar comm/scripts/ucx_rocm_hook_mode.patch (which takes precedence).
+write_ucx_rocm_patch() {
+   cat <<'UCX_PR11887_PATCH_EOF'
+diff --git a/buildlib/pr/rocm/test_malloc_hook.sh b/buildlib/pr/rocm/test_malloc_hook.sh
+new file mode 100644
+index 00000000000..30863af4dd4
+--- /dev/null
++++ b/buildlib/pr/rocm/test_malloc_hook.sh
+@@ -0,0 +1,68 @@
++#!/bin/bash -eExl
++realdir=$(realpath $(dirname $0))
++source ${realdir}/../../az-helpers.sh
++
++#
++# Prepare build environment
++#
++WORKSPACE=${WORKSPACE:=$PWD}
++ucx_inst=${WORKSPACE}/install
++
++prepare() {
++	echo " ==== Prepare ===="
++	env
++	cd ${WORKSPACE}
++	mkdir -p build-test
++	cd build-test
++}
++
++#
++# Check ROCm (amdgpu/kfd) driver is present
++#
++check_rocm_driver() {
++	if [ ! -e "/dev/kfd" ]; then
++		azure_log_error "ROCm KFD device /dev/kfd not found"
++		exit 1
++	fi
++}
++
++build() {
++	../contrib/configure-devel --enable-gtest --without-valgrind --enable-examples --with-rocm --prefix=$ucx_inst
++
++	make -j$(nproc)
++}
++
++test_malloc_hook_mode() {
++	mode=$1
++
++	export UCX_MEM_ROCM_HOOK_MODE=${mode}
++
++	# Test hooks in gtest for the selected hook mode. Check the exit status
++	# explicitly: a login shell (-l) may reset errexit, so a failing gtest
++	# would otherwise not fail the script.
++	if ! UCX_MEM_LOG_LEVEL=diag ./test/gtest/gtest --gtest_filter='rocm_hooks.*'
++	then
++		azure_log_error "rocm memory hooks test failed in ${mode} mode"
++		exit 1
++	fi
++
++	unset UCX_MEM_ROCM_HOOK_MODE
++}
++
++test_malloc_hook() {
++	echo "==== Running rocm malloc hooks test, using ELF relocation table ===="
++	test_malloc_hook_mode 'reloc'
++
++	echo "==== Running rocm malloc hooks test, using binary instrumentation ===="
++	test_malloc_hook_mode 'bistro'
++
++	echo "==== Running rocm malloc hooks test with far jump, using binary instrumentation ===="
++	export UCX_MEM_BISTRO_FORCE_FAR_JUMP=y
++	test_malloc_hook_mode 'bistro'
++	unset UCX_MEM_BISTRO_FORCE_FAR_JUMP
++}
++
++prepare
++build
++check_rocm_driver
++test_malloc_hook
+diff --git a/src/ucm/api/ucm.h b/src/ucm/api/ucm.h
+index 8d04e4860a6..d2d3812783e 100644
+--- a/src/ucm/api/ucm.h
++++ b/src/ucm/api/ucm.h
+@@ -219,6 +219,7 @@ typedef struct ucm_global_config {
+     int                  enable_malloc_hooks;         /* Enable installing malloc hooks */
+     int                  enable_malloc_reloc;         /* Enable installing malloc relocations */
+     uint64_t             cuda_hook_modes;             /* Bitmap of allowed cuda hooks modes */
++    uint64_t             rocm_hook_modes;             /* Bitmap of allowed rocm hooks modes */
+     int                  enable_dynamic_mmap_thresh;  /* Enable adaptive mmap threshold */
+     size_t               alloc_alignment;             /* Alignment for memory allocations */
+     int                  dlopen_process_rpath;        /* Process RPATH section in dlopen hook */
+diff --git a/src/ucm/bistro/bistro_x86_64.c b/src/ucm/bistro/bistro_x86_64.c
+index 9ea9d61be3a..65f49653534 100644
+--- a/src/ucm/bistro/bistro_x86_64.c
++++ b/src/ucm/bistro/bistro_x86_64.c
+@@ -65,6 +65,18 @@ typedef struct {
+     uint64_t                  addr;
+ } UCS_S_PACKED ucm_bistro_jcc_xlt_t;
+ 
++/* Translation of RIP-relative "mov %reg, disp32(%rip)" (load form) into a
++ * position-independent sequence, since the relocated code is not guaranteed to
++ * be within 32-bit range of the referenced address:
++ *   movabs $addr64, %reg  ; $addr64 = $disp32 + %rip
++ *   mov    (%reg), %reg
++ */
++typedef struct {
++    uint8_t  movabs_reg[2]; /* REX.W ; 0xB8+reg */
++    uint64_t addr;
++    uint8_t  mov_load[3];   /* REX.W ; 0x8B ; ModR/M */
++} UCS_S_PACKED ucm_bistro_mov_rip_xlt_t;
++
+ 
+ /* REX prefix */
+ #define UCM_BISTRO_X86_REX_MASK  0xF0 /* Mask */
+@@ -88,6 +100,15 @@ typedef struct {
+ /* MOV Ev,Gv */
+ #define UCM_BISTRO_X86_MOV_EV_GV 0x89
+ 
++/* MOV Gv,Ev - load form "mov r64, r/m64" */
++#define UCM_BISTRO_X86_MOV_GV_EV 0x8B
++
++/* ENDBR64 (CET landing pad): F3 0F 1E FA */
++#define UCM_BISTRO_X86_ENDBR64_B0 0xF3
++#define UCM_BISTRO_X86_ENDBR64_B1 0x0F
++#define UCM_BISTRO_X86_ENDBR64_B2 0x1E
++#define UCM_BISTRO_X86_ENDBR64_B3 0xFA
++
+ /* MOV immediate word or double into word, double, or quad register
+  * "mov $imm32, %reg"
+  */
+@@ -107,6 +128,7 @@ typedef struct {
+ #define UCM_BISTRO_X86_MODRM_MOD_DISP32 2 /* 0b10 */
+ #define UCM_BISTRO_X86_MODRM_MOD_REG    3 /* 0b11 */
+ #define UCM_BISTRO_X86_MODRM_RM_SIB     4 /* 0b100 */
++#define UCM_BISTRO_X86_MODRM_RM_DISP32  5 /* 0b101 (%rbp / RIP-relative disp32) */
+ 
+ /* ModR/M encoding for SUB RSP
+  * mod=0b11, reg=0b101 (SUB as opcode extension), r/m=0b100
+@@ -123,6 +145,10 @@ typedef struct {
+ #define UCM_BISTRO_X86_JCC_FIRST 0x70
+ #define UCM_BISTRO_X86_JCC_LAST  0x7F
+ 
++/* Grp 5 (0xFF); only the indirect near jump extension (reg=/4) is handled */
++#define UCM_BISTRO_X86_GRP5     0xFF
++#define UCM_BISTRO_X86_GRP5_JMP 4 /* reg field /4: JMP r/m64 */
++
+ 
+ ucs_status_t ucm_bistro_relocate_one(ucm_bistro_relocate_context_t *ctx)
+ {
+@@ -138,7 +164,8 @@ ucs_status_t ucm_bistro_relocate_one(ucm_bistro_relocate_context_t *ctx)
+         .jmp_out = {0xeb, 0x0e},
+         .jmp_rip = {0xff, 0x25, 0}
+     };
+-    uint8_t rex, opcode, modrm, mod;
++    ucm_bistro_mov_rip_xlt_t mov_rip;
++    uint8_t rex, opcode, modrm, mod, reg;
+     size_t dst_length;
+     uint64_t jmpdest;
+     int32_t disp32;
+@@ -154,7 +181,16 @@ ucs_status_t ucm_bistro_relocate_one(ucm_bistro_relocate_context_t *ctx)
+         rex = 0;
+     }
+ 
+-    if (((rex == 0) || rex == UCM_BISTRO_X86_REX_B) &&
++    if ((rex == 0) && (opcode == UCM_BISTRO_X86_ENDBR64_B0) &&
++        (*(const uint8_t*)ctx->src_p                 == UCM_BISTRO_X86_ENDBR64_B1) &&
++        (((const uint8_t*)ctx->src_p)[1]             == UCM_BISTRO_X86_ENDBR64_B2) &&
++        (((const uint8_t*)ctx->src_p)[2]             == UCM_BISTRO_X86_ENDBR64_B3)) {
++        /* endbr64 (CET landing pad) - position independent, copy verbatim */
++        ucs_serialize_next(&ctx->src_p, const uint8_t); /* 0x0F */
++        ucs_serialize_next(&ctx->src_p, const uint8_t); /* 0x1E */
++        ucs_serialize_next(&ctx->src_p, const uint8_t); /* 0xFA */
++        goto out_copy_src;
++    } else if (((rex == 0) || rex == UCM_BISTRO_X86_REX_B) &&
+         ((opcode & UCM_BISTRO_X86_PUSH_R_MASK) == UCM_BISTRO_X86_PUSH_R)) {
+         /* push reg */
+         goto out_copy_src;
+@@ -195,6 +231,37 @@ ucs_status_t ucm_bistro_relocate_one(ucm_bistro_relocate_context_t *ctx)
+                 goto out_copy_src;
+             }
+         }
++    } else if ((rex == UCM_BISTRO_X86_REX_W) &&
++               (opcode == UCM_BISTRO_X86_MOV_GV_EV)) {
++        modrm = *ucs_serialize_next(&ctx->src_p, const uint8_t);
++        /* Handle RIP-relative load "mov disp32(%rip), %reg" (mod=00, r/m=101).
++         * Emitted e.g. by CET-built dispatch thunks that load an API table
++         * pointer. Translate to an absolute-address load, because the relocated
++         * code is not guaranteed to be within 32-bit range of the target. */
++        if ((modrm & 0xC7) == UCM_BISTRO_X86_MODRM_RM_DISP32) {
++            reg = (modrm >> UCM_BISTRO_X86_MODRM_REG_SHIFT) &
++                  UCS_MASK(UCM_BISTRO_X86_MODRM_RM_BITS);
++            /* rm=100 (SIB) and rm=101 (disp8/RIP) can't encode "mov (%reg),
++             * %reg" directly; %rsp/%rbp are never used to hold a loaded
++             * pointer, so leave those unsupported. */
++            if ((reg != UCM_BISTRO_X86_MODRM_RM_SIB) &&
++                (reg != UCM_BISTRO_X86_MODRM_RM_DISP32)) {
++                disp32              = *ucs_serialize_next(&ctx->src_p,
++                                                          const int32_t);
++                mov_rip.movabs_reg[0] = UCM_BISTRO_X86_REX_W;
++                mov_rip.movabs_reg[1] = UCM_BISTRO_X86_MOV_IR | reg;
++                mov_rip.addr          = (uintptr_t)UCS_PTR_BYTE_OFFSET(
++                                                ctx->src_p, disp32);
++                mov_rip.mov_load[0]   = UCM_BISTRO_X86_REX_W;
++                mov_rip.mov_load[1]   = UCM_BISTRO_X86_MOV_GV_EV;
++                /* ModR/M: mod=00, reg=reg, r/m=reg -> "mov (%reg), %reg" */
++                mov_rip.mov_load[2]   = (reg << UCM_BISTRO_X86_MODRM_REG_SHIFT) |
++                                        reg;
++                copy_src              = &mov_rip;
++                dst_length            = sizeof(mov_rip);
++                goto out_copy;
++            }
++        }
+     } else if ((rex == 0) && ((opcode & UCM_BISTRO_X86_MOV_IR_MASK) ==
+                               UCM_BISTRO_X86_MOV_IR)) {
+         /* mov $imm32, %reg */
+@@ -244,6 +311,40 @@ ucs_status_t ucm_bistro_relocate_one(ucm_bistro_relocate_context_t *ctx)
+         /* Prevent patching past jump target */
+         ctx->src_end   = ucs_min(ctx->src_end, (void*)jmpdest);
+         goto out_copy;
++    } else if (((rex == 0) || (rex == UCM_BISTRO_X86_REX_B)) &&
++               (opcode == UCM_BISTRO_X86_GRP5)) {
++        /* Grp 5: handle only "jmp r/m64" (reg=/4), which heads ROCr HSA
++         * dispatch thunks (endbr64; mov tbl(%rip),%rax; jmp *off(%rax)). The
++         * register/memory addressing form is position independent, so it can
++         * be copied verbatim; only the RIP-relative form needs translation and
++         * is left unsupported. */
++        modrm = *ucs_serialize_next(&ctx->src_p, const uint8_t);
++        mod   = modrm >> UCM_BISTRO_X86_MODRM_MOD_SHIFT;
++        reg   = (modrm >> UCM_BISTRO_X86_MODRM_REG_SHIFT) &
++                UCS_MASK(UCM_BISTRO_X86_MODRM_RM_BITS);
++        if (reg == UCM_BISTRO_X86_GRP5_JMP) {
++            if (mod != UCM_BISTRO_X86_MODRM_MOD_REG) {
++                switch (modrm & UCS_MASK(UCM_BISTRO_X86_MODRM_RM_BITS)) {
++                case UCM_BISTRO_X86_MODRM_RM_DISP32:
++                    if (mod == 0) {
++                        /* "jmp *disp32(%rip)": position dependent */
++                        return UCS_ERR_UNSUPPORTED;
++                    }
++                    break;
++                case UCM_BISTRO_X86_MODRM_RM_SIB:
++                    ucs_serialize_next(&ctx->src_p, const uint8_t); /* SIB */
++                    break;
++                }
++                if (mod == UCM_BISTRO_X86_MODRM_MOD_DISP8) {
++                    ucs_serialize_next(&ctx->src_p, const uint8_t);  /* disp8 */
++                } else if (mod == UCM_BISTRO_X86_MODRM_MOD_DISP32) {
++                    ucs_serialize_next(&ctx->src_p, const uint32_t); /* disp32 */
++                }
++            }
++            /* Unconditional transfer - do not relocate past it */
++            ctx->src_end = ucs_min(ctx->src_end, ctx->src_p);
++            goto out_copy_src;
++        }
+     }
+ 
+     /* Could not recognize the instruction */
+diff --git a/src/ucm/rocm/rocmmem.c b/src/ucm/rocm/rocmmem.c
+index 0470e42958c..601239af8b1 100644
+--- a/src/ucm/rocm/rocmmem.c
++++ b/src/ucm/rocm/rocmmem.c
+@@ -10,9 +10,11 @@
+ #include <ucm/rocm/rocmmem.h>
+ 
+ #include <ucm/event/event.h>
++#include <ucm/mmap/mmap.h>
+ #include <ucm/util/log.h>
+ #include <ucm/util/reloc.h>
+ #include <ucm/util/replace.h>
++#include <ucm/bistro/bistro.h>
+ #include <ucs/debug/assert.h>
+ #include <ucm/util/sys.h>
+ #include <ucs/sys/compiler.h>
+@@ -25,11 +27,15 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
+-UCM_DEFINE_REPLACE_DLSYM_FUNC(hsa_amd_memory_pool_allocate, hsa_status_t,
+-                              HSA_STATUS_ERROR, hsa_amd_memory_pool_t,
+-                              size_t, uint32_t, void**)
+-UCM_DEFINE_REPLACE_DLSYM_FUNC(hsa_amd_memory_pool_free, hsa_status_t,
+-                              HSA_STATUS_ERROR, void*)
++/* Use the PTR variant so that ucm_orig_<fn> is a function pointer that bistro
++ * can redirect to the relocated (trampoline) original, allowing us to intercept
++ * callers that resolve the HSA symbol via dlopen/dlsym, which the reloc/GOT 
++ * hook cannot see. */
++UCM_DEFINE_REPLACE_DLSYM_PTR_FUNC(hsa_amd_memory_pool_allocate, hsa_status_t,
++                                  HSA_STATUS_ERROR, hsa_amd_memory_pool_t,
++                                  size_t, uint32_t, void**)
++UCM_DEFINE_REPLACE_DLSYM_PTR_FUNC(hsa_amd_memory_pool_free, hsa_status_t,
++                                  HSA_STATUS_ERROR, void*)
+ 
+ static UCS_F_ALWAYS_INLINE void
+ ucm_dispatch_mem_type_alloc(void *addr, size_t length, ucs_memory_type_t mem_type)
+@@ -129,45 +135,124 @@ hsa_status_t ucm_hsa_amd_memory_pool_allocate(
+     return status;
+ }
+ 
+-static ucm_reloc_patch_t patches[] = {
+-    {UCS_PP_MAKE_STRING(hsa_amd_memory_pool_allocate),
+-     ucm_override_hsa_amd_memory_pool_allocate},
+-    {UCS_PP_MAKE_STRING(hsa_amd_memory_pool_free),
+-     ucm_override_hsa_amd_memory_pool_free},
+-    {NULL, NULL}
++#define UCM_ROCM_FUNC_ENTRY(_func) \
++    { \
++        {UCS_PP_MAKE_STRING(_func), ucm_override_##_func}, \
++        (void**)&ucm_orig_##_func \
++    }
++
++typedef struct {
++    ucm_reloc_patch_t patch;
++    void              **orig_func_ptr;
++} ucm_rocm_func_t;
++
++static ucm_rocm_func_t ucm_rocm_funcs[] = {
++    UCM_ROCM_FUNC_ENTRY(hsa_amd_memory_pool_allocate),
++    UCM_ROCM_FUNC_ENTRY(hsa_amd_memory_pool_free),
++    {{NULL, NULL}, NULL}
+ };
+ 
++static ucs_status_t
++ucm_rocmmem_install_hooks(ucm_mmap_hook_mode_t mode, int *installed_hooks_p)
++{
++    ucm_rocm_func_t *func;
++    ucs_status_t status;
++    void *func_ptr;
++    int count;
++
++    if (*installed_hooks_p & UCS_BIT(mode)) {
++        return UCS_OK;
++    }
++
++    if (!(ucm_global_opts.rocm_hook_modes & UCS_BIT(mode))) {
++        /* Disabled by configuration */
++        ucm_debug("rocm memory hooks mode %s is disabled",
++                  ucm_mmap_hook_modes[mode]);
++        return UCS_OK;
++    }
++
++    count = 0;
++    for (func = ucm_rocm_funcs; func->patch.symbol != NULL; ++func) {
++        func_ptr = ucm_reloc_get_orig(func->patch.symbol, func->patch.value);
++        if (func_ptr == NULL) {
++            /* Symbol not (yet) loaded - e.g. libhsa-runtime64 not mapped */
++            continue;
++        }
++
++        if (mode == UCM_MMAP_HOOK_BISTRO) {
++            status = ucm_bistro_patch(func_ptr, func->patch.value,
++                                      func->patch.symbol, func->orig_func_ptr,
++                                      NULL);
++        } else if (mode == UCM_MMAP_HOOK_RELOC) {
++            status = ucm_reloc_modify(&func->patch);
++        } else {
++            break;
++        }
++
++        if (status != UCS_OK) {
++            ucm_diag("failed to install %s hook for '%s'",
++                     ucm_mmap_hook_modes[mode], func->patch.symbol);
++            return status;
++        }
++
++        ucm_debug("installed %s hook for '%s'", ucm_mmap_hook_modes[mode],
++                  func->patch.symbol);
++        ++count;
++    }
++
++    *installed_hooks_p |= UCS_BIT(mode);
++    ucm_info("rocm memory hooks mode %s: installed %d hooks",
++             ucm_mmap_hook_modes[mode], count);
++    return UCS_OK;
++}
++
+ static ucs_status_t ucm_rocmmem_install(int events)
+ {
+-    static int ucm_rocmmem_installed = 0;
++    static int installed_hooks           = 0;
+     static pthread_mutex_t install_mutex = PTHREAD_MUTEX_INITIALIZER;
+-    ucm_reloc_patch_t *patch;
+-    ucs_status_t status = UCS_OK;
++    ucs_status_t status                  = UCS_OK;
++    ucs_status_t bistro_status, reloc_status;
+ 
+     if (!(events & (UCM_EVENT_MEM_TYPE_ALLOC | UCM_EVENT_MEM_TYPE_FREE))) {
+         goto out;
+     }
+ 
+-    /* TODO: check mem reloc */
++    if (ucm_global_opts.rocm_hook_modes == 0) {
++        ucm_info("rocm memory hooks are disabled by configuration");
++        status = UCS_ERR_UNSUPPORTED;
++        goto out;
++    }
+ 
+     pthread_mutex_lock(&install_mutex);
+ 
+-    if (ucm_rocmmem_installed) {
+-        goto out_unlock;
++    /* Install bistro first: it patches the HSA function body, so it catches
++     * callers regardless of how they resolved the symbol (GOT or dlsym). If
++     * bistro cannot patch (e.g. an unrelocatable prologue or W^X), fall back to
++     * reloc rather than aborting - reloc still provides GOT-based coverage. */
++    bistro_status = ucm_rocmmem_install_hooks(UCM_MMAP_HOOK_BISTRO,
++                                              &installed_hooks);
++    if (bistro_status != UCS_OK) {
++        ucm_debug("failed to install rocm bistro hooks, falling back to reloc");
+     }
+ 
+-    for (patch = patches; patch->symbol != NULL; ++patch) {
+-        status = ucm_reloc_modify(patch);
+-        if (status != UCS_OK) {
+-            ucm_warn("failed to install relocation table entry for '%s'", patch->symbol);
+-            goto out_unlock;
+-        }
++    /* Then install reloc as well: it is harmless (the wrapper calls the bistro
++     * trampoline via ucm_orig_*, which bypasses the patch, so no double
++     * dispatch) and provides coverage where bistro is not installed. */
++    reloc_status = ucm_rocmmem_install_hooks(UCM_MMAP_HOOK_RELOC,
++                                             &installed_hooks);
++    if (reloc_status != UCS_OK) {
++        ucm_debug("failed to install rocm reloc hooks");
+     }
+ 
+-    ucm_info("rocm hooks are ready");
+-    ucm_rocmmem_installed = 1;
++    /* Success as long as at least one hooking mode was installed. */
++    if (installed_hooks & (UCS_BIT(UCM_MMAP_HOOK_BISTRO) |
++                           UCS_BIT(UCM_MMAP_HOOK_RELOC))) {
++        status = UCS_OK;
++        ucm_info("rocm hooks are ready");
++    } else {
++        status = (bistro_status != UCS_OK) ? bistro_status : reloc_status;
++    }
+ 
+-out_unlock:
+     pthread_mutex_unlock(&install_mutex);
+ out:
+     return status;
+diff --git a/src/ucm/rocm/rocmmem.h b/src/ucm/rocm/rocmmem.h
+index 23bb3b54a7a..59bb3988110 100644
+--- a/src/ucm/rocm/rocmmem.h
++++ b/src/ucm/rocm/rocmmem.h
+@@ -13,7 +13,9 @@
+ hsa_status_t ucm_override_hsa_amd_memory_pool_allocate(
+     hsa_amd_memory_pool_t memory_pool, size_t size,
+     uint32_t flags, void** ptr);
+-hsa_status_t ucm_orig_hsa_amd_memory_pool_allocate(
++/* Pointer to the original implementation. Defined via the PTR replace macro so
++ * that bistro can redirect it to the relocated (trampoline) original. */
++extern hsa_status_t (*ucm_orig_hsa_amd_memory_pool_allocate)(
+     hsa_amd_memory_pool_t memory_pool, size_t size,
+     uint32_t flags, void** ptr);
+ hsa_status_t ucm_hsa_amd_memory_pool_allocate(
+@@ -22,7 +24,7 @@ hsa_status_t ucm_hsa_amd_memory_pool_allocate(
+ 
+ /* hsa_amd_memory_pool_free */
+ hsa_status_t ucm_override_hsa_amd_memory_pool_free(void* ptr);
+-hsa_status_t ucm_orig_hsa_amd_memory_pool_free(void* ptr);
++extern hsa_status_t (*ucm_orig_hsa_amd_memory_pool_free)(void* ptr);
+ hsa_status_t ucm_hsa_amd_memory_pool_free(void* ptr);
+ 
+ #endif
+diff --git a/src/ucm/util/sys.c b/src/ucm/util/sys.c
+index ce335eea07c..df47489ae14 100644
+--- a/src/ucm/util/sys.c
++++ b/src/ucm/util/sys.c
+@@ -43,6 +43,11 @@ ucm_global_config_t ucm_global_opts = {
+     .cuda_hook_modes            =
+ #if UCM_BISTRO_HOOKS
+                                   UCS_BIT(UCM_MMAP_HOOK_BISTRO) |
++#endif
++                                  UCS_BIT(UCM_MMAP_HOOK_RELOC),
++    .rocm_hook_modes            =
++#if UCM_BISTRO_HOOKS
++                                  UCS_BIT(UCM_MMAP_HOOK_BISTRO) |
+ #endif
+                                   UCS_BIT(UCM_MMAP_HOOK_RELOC),
+     .enable_dynamic_mmap_thresh = 1,
+diff --git a/src/ucs/config/ucm_opts.c b/src/ucs/config/ucm_opts.c
+index c4a705c0a8f..8f25545c3f8 100644
+--- a/src/ucs/config/ucm_opts.c
++++ b/src/ucs/config/ucm_opts.c
+@@ -85,6 +85,25 @@ static ucs_config_field_t ucm_global_config_table[] = {
+    "The configuration parameter replaced by UCX_MEM_CUDA_HOOK_MODE",
+    UCS_CONFIG_DEPRECATED_FIELD_OFFSET, UCS_CONFIG_TYPE_DEPRECATED},
+ 
++  {"ROCM_HOOK_MODE",
++#if UCM_BISTRO_HOOKS
++   UCM_MMAP_HOOK_BISTRO_STR,
++#else
++   UCM_MMAP_HOOK_RELOC_STR,
++#endif
++   "ROCm memory hook modes. A combination of:\n"
++   " none   - Don't set ROCm hooks.\n"
++   " reloc  - Use ELF relocation table to set hooks. In this mode, if a caller\n"
++   "          resolves the HSA memory APIs via dlopen/dlsym rather than the GOT,\n"
++   "          its allocations may be missed and reported as host memory.\n"
++#if UCM_BISTRO_HOOKS
++   "\n bistro - Use binary instrumentation to set hooks. In this mode, calls\n"
++   "          into the HSA runtime are intercepted regardless of how the symbol\n"
++   "          was resolved, so device allocations are reported properly."
++#endif
++   ,ucs_offsetof(ucm_global_config_t, rocm_hook_modes),
++                 UCS_CONFIG_TYPE_BITMAP(ucm_mmap_hook_modes)},
++
+   {"DYNAMIC_MMAP_THRESH", "yes",
+    "Enable dynamic mmap threshold: for every released block, the\n"
+    "mmap threshold is adjusted upward to the size of the size of\n"
+diff --git a/test/gtest/ucm/malloc_hook.cc b/test/gtest/ucm/malloc_hook.cc
+index 18519ec0844..788870390f2 100644
+--- a/test/gtest/ucm/malloc_hook.cc
++++ b/test/gtest/ucm/malloc_hook.cc
+@@ -1548,3 +1548,155 @@ UCS_MT_TEST_F(malloc_hook_dlopen, dlopen_mt_with_memtype, 2) {
+ 
+     event.unset();
+ }
++
++#if defined(__x86_64__)
++/*
++ * Unit tests for the x86-64 single-instruction relocator used by bistro to
++ * build the trampoline that jumps back to the original (unpatched) function.
++ * These exercise machine-code emission directly, so they need no GPU/HSA and
++ * run in CI regardless of which specific opcodes appear in a given libc/HSA
++ * function prologue.
++ */
++class bistro_relocate : public ucs::test {
++protected:
++    /* Relocate a single instruction from 'src' into 'dst'. On success, reports
++     * how many bytes were consumed from the source and emitted to the
++     * destination. */
++    static ucs_status_t relocate_one(const void *src, size_t src_len, void *dst,
++                                     size_t dst_len, size_t *src_used,
++                                     size_t *dst_used)
++    {
++        ucm_bistro_relocate_context_t ctx;
++        ucs_status_t status;
++
++        ctx.src_p   = src;
++        ctx.src_end = UCS_PTR_BYTE_OFFSET(src, src_len);
++        ctx.dst_p   = dst;
++        ctx.dst_end = UCS_PTR_BYTE_OFFSET(dst, dst_len);
++
++        status = ucm_bistro_relocate_one(&ctx);
++        if (status == UCS_OK) {
++            *src_used = UCS_PTR_BYTE_DIFF(src, ctx.src_p);
++            *dst_used = UCS_PTR_BYTE_DIFF(dst, ctx.dst_p);
++        }
++        return status;
++    }
++};
++
++/* endbr64 (CET landing pad) is position independent and must be copied through
++ * verbatim. */
++UCS_TEST_F(bistro_relocate, endbr64) {
++    const uint8_t src[] = {0xF3, 0x0F, 0x1E, 0xFA};
++    uint8_t dst[64];
++    size_t src_used, dst_used;
++
++    ASSERT_UCS_OK(relocate_one(src, sizeof(src), dst, sizeof(dst), &src_used,
++                               &dst_used));
++    EXPECT_EQ(sizeof(src), src_used);
++    EXPECT_EQ(sizeof(src), dst_used);
++    EXPECT_EQ(0, memcmp(dst, src, sizeof(src)));
++}
++
++/* "mov disp32(%rip), %rax" must be translated to an absolute-address load,
++ * since the relocated code may be out of 32-bit range of the target:
++ *   movabs $addr64, %rax   ; addr64 = next_ip + disp32
++ *   mov    (%rax), %rax
++ */
++UCS_TEST_F(bistro_relocate, mov_rip_relative) {
++    const int32_t disp32 = 0x11223344;
++    uint8_t src[7]       = {0x48, 0x8B, 0x05}; /* REX.W MOV Gv,Ev ; modrm=05 */
++    uint8_t dst[64];
++    size_t src_used, dst_used;
++    uint64_t addr;
++
++    memcpy(&src[3], &disp32, sizeof(disp32));
++
++    ASSERT_UCS_OK(relocate_one(src, sizeof(src), dst, sizeof(dst), &src_used,
++                               &dst_used));
++    EXPECT_EQ(sizeof(src), src_used);
++    EXPECT_EQ(13u, dst_used);
++
++    /* movabs $addr, %rax */
++    EXPECT_EQ(0x48, dst[0]);
++    EXPECT_EQ(0xB8, dst[1]); /* 0xB8 | %rax(0) */
++    memcpy(&addr, &dst[2], sizeof(addr));
++    EXPECT_EQ((uintptr_t)UCS_PTR_BYTE_OFFSET(src, sizeof(src)) + disp32, addr);
++
++    /* mov (%rax), %rax */
++    EXPECT_EQ(0x48, dst[10]);
++    EXPECT_EQ(0x8B, dst[11]);
++    EXPECT_EQ(0x00, dst[12]); /* mod=00, reg=%rax, r/m=%rax */
++}
++
++/* Same translation, but into a non-zero destination register (%rcx), to verify
++ * the register index is propagated into both the movabs and the load. */
++UCS_TEST_F(bistro_relocate, mov_rip_relative_reg) {
++    const int32_t disp32 = 0x100;
++    uint8_t src[7]       = {0x48, 0x8B, 0x0D}; /* modrm=0D -> %rcx */
++    uint8_t dst[64];
++    size_t src_used, dst_used;
++
++    memcpy(&src[3], &disp32, sizeof(disp32));
++
++    ASSERT_UCS_OK(relocate_one(src, sizeof(src), dst, sizeof(dst), &src_used,
++                               &dst_used));
++    EXPECT_EQ(13u, dst_used);
++    EXPECT_EQ(0xB9, dst[1]);  /* 0xB8 | %rcx(1) */
++    EXPECT_EQ(0x09, dst[12]); /* mod=00, reg=%rcx, r/m=%rcx */
++}
++
++/* %rsp (reg=100) and %rbp (reg=101) can't encode "mov (%reg), %reg" directly
++ * and are never used to hold a loaded pointer, so the relocator rejects them. */
++UCS_TEST_F(bistro_relocate, mov_rip_relative_unsupported_reg) {
++    const uint8_t rsp[7] = {0x48, 0x8B, 0x25, 0, 0, 0, 0}; /* dest %rsp */
++    const uint8_t rbp[7] = {0x48, 0x8B, 0x2D, 0, 0, 0, 0}; /* dest %rbp */
++    uint8_t dst[64];
++    size_t src_used, dst_used;
++
++    EXPECT_EQ(UCS_ERR_UNSUPPORTED,
++              relocate_one(rsp, sizeof(rsp), dst, sizeof(dst), &src_used,
++                           &dst_used));
++    EXPECT_EQ(UCS_ERR_UNSUPPORTED,
++              relocate_one(rbp, sizeof(rbp), dst, sizeof(dst), &src_used,
++                           &dst_used));
++}
++
++/* Indirect near jump "jmp *disp8(%reg)" heads ROCr HSA dispatch thunks. It is
++ * position independent, so it must be copied through verbatim. */
++UCS_TEST_F(bistro_relocate, jmp_indirect_mem) {
++    const uint8_t src[] = {0xFF, 0x60, 0x78}; /* jmp *0x78(%rax) */
++    uint8_t dst[64];
++    size_t src_used, dst_used;
++
++    ASSERT_UCS_OK(relocate_one(src, sizeof(src), dst, sizeof(dst), &src_used,
++                               &dst_used));
++    EXPECT_EQ(sizeof(src), src_used);
++    EXPECT_EQ(sizeof(src), dst_used);
++    EXPECT_EQ(0, memcmp(dst, src, sizeof(src)));
++}
++
++/* Register-direct "jmp *%reg" is likewise position independent. */
++UCS_TEST_F(bistro_relocate, jmp_indirect_reg) {
++    const uint8_t src[] = {0xFF, 0xE0}; /* jmp *%rax */
++    uint8_t dst[64];
++    size_t src_used, dst_used;
++
++    ASSERT_UCS_OK(relocate_one(src, sizeof(src), dst, sizeof(dst), &src_used,
++                               &dst_used));
++    EXPECT_EQ(sizeof(src), src_used);
++    EXPECT_EQ(sizeof(src), dst_used);
++    EXPECT_EQ(0, memcmp(dst, src, sizeof(src)));
++}
++
++/* The RIP-relative form "jmp *disp32(%rip)" is position dependent and must be
++ * rejected rather than copied to a different address. */
++UCS_TEST_F(bistro_relocate, jmp_indirect_rip) {
++    const uint8_t src[6] = {0xFF, 0x25, 0, 0, 0, 0}; /* jmp *0x0(%rip) */
++    uint8_t dst[64];
++    size_t src_used, dst_used;
++
++    EXPECT_EQ(UCS_ERR_UNSUPPORTED,
++              relocate_one(src, sizeof(src), dst, sizeof(dst), &src_used,
++                           &dst_used));
++}
++#endif /* __x86_64__ */
+UCX_PR11887_PATCH_EOF
+}
+
 #
 # Install UCX
 #
@@ -929,6 +1743,58 @@ else
       fi
       tar xzf ucx-${UCX_VERSION}.tar.gz
       cd ucx-${UCX_VERSION}
+
+      # ── PR openucx/ucx#11887: ROCm bistro memory-hook fix ──────────────
+      # Applied to the freshly-extracted UCX source tree BEFORE configure.
+      # Decision (APPLY_UCX_ROCM_PATCH) is made once in the mitigation block
+      # near the EXIT trap. Idempotent + fail-loud, mirroring the sidecar-patch
+      # pattern in tools/scripts/roofline_extractor_setup.sh: apply if it
+      # applies; skip if it is already present (reverse-applies); ABORT if it
+      # neither applies nor is present (UCX source drifted -> regenerate the
+      # patch or pass --ucx-rocm-patch 0). git apply works on the plain tarball
+      # tree (no git repo needed).
+      #
+      # The patch is INLINED in this script (write_ucx_rocm_patch, defined just
+      # above the UCX install section) so a single self-contained openmpi_setup.sh
+      # carries the fix -- users who copy only this one file still get it. A
+      # sidecar comm/scripts/ucx_rocm_hook_mode.patch, if present next to the
+      # script, takes precedence (lets you test a newer diff without editing the
+      # inlined copy).
+      if [[ "${APPLY_UCX_ROCM_PATCH}" == "1" ]]; then
+         if ! command -v git >/dev/null 2>&1; then
+            echo "ERROR: --ucx-rocm-patch enabled but 'git' is unavailable to apply PR openucx/ucx#11887" >&2
+            exit 1
+         fi
+         _ucx_patch_is_temp=0
+         UCX_ROCM_PATCH_FILE="$(dirname "${LEAF_SCRIPT_PATH}")/ucx_rocm_hook_mode.patch"
+         if [ -f "${UCX_ROCM_PATCH_FILE}" ]; then
+            echo "openmpi/ucx: using sidecar patch ${UCX_ROCM_PATCH_FILE}"
+         else
+            UCX_ROCM_PATCH_FILE="$(mktemp -t ucx_rocm_hook_mode.XXXXXX.patch)"
+            _ucx_patch_is_temp=1
+            write_ucx_rocm_patch > "${UCX_ROCM_PATCH_FILE}"
+            echo "openmpi/ucx: using inlined PR openucx/ucx#11887 (materialized to ${UCX_ROCM_PATCH_FILE})"
+         fi
+         echo "openmpi/ucx: applying PR openucx/ucx#11887 to ucx-${UCX_VERSION}"
+         if git apply --check -p1 "${UCX_ROCM_PATCH_FILE}" 2>/dev/null; then
+            # --whitespace=nowarn: the upstream diff carries one trailing-space
+            # line; apply it verbatim without the cosmetic warning in the log.
+            git apply --whitespace=nowarn -p1 "${UCX_ROCM_PATCH_FILE}"
+            echo "openmpi/ucx:   PR #11887 applied (ROCm hooks default to bistro; no runtime env needed)."
+         elif git apply --reverse --check -p1 "${UCX_ROCM_PATCH_FILE}" 2>/dev/null; then
+            echo "openmpi/ucx:   PR #11887 already present in ucx-${UCX_VERSION}; skipping."
+         else
+            echo "ERROR: PR openucx/ucx#11887 does not apply to ucx-${UCX_VERSION}." >&2
+            echo "       The UCX source drifted at the patched hunks. Regenerate the inlined patch" >&2
+            echo "       (or drop an updated ucx_rocm_hook_mode.patch next to this script), or pass" >&2
+            echo "       --ucx-rocm-patch 0 to build without it." >&2
+            [ "${_ucx_patch_is_temp}" = "1" ] && rm -f "${UCX_ROCM_PATCH_FILE}"
+            exit 1
+         fi
+         [ "${_ucx_patch_is_temp}" = "1" ] && rm -f "${UCX_ROCM_PATCH_FILE}"
+         unset UCX_ROCM_PATCH_FILE _ucx_patch_is_temp
+      fi
+
       mkdir build && cd build
 
 if [ "${BUILD_XPMEM}" == "1" ]; then
@@ -1195,33 +2061,11 @@ fi
 #
 # Install OpenMPI
 #
-
-# ---------------------------------------------------------------------------
-# ROCm >= 10 on MI300A (APU): UCX 1.19.1 misroutes host-range coherent/managed
-# GPU buffers to the CMA transport, whose process_vm_readv() EFAULTs
-# cross-process on the APU's coherent VMAs -- aborting GPU-aware p2p (Ghost
-# Exchange) and the UCX-native collective path. Workaround: export UCX_TLS=^cma
-# so intra-node transfers use xpmem. Decided once here, then consumed twice
-# below: the openmpi-mca-params.conf line (via mca_base_env_list, alongside
-# pml/osc/coll) and a `module show` note. Gated to ROCm major >= 10 on an
-# MI300A APU (MI300A/MI300X share the gfx942 target, so disambiguate on the
-# rocminfo marketing name); not applied on discrete MI300X or ROCm < 10.
-# UCX-scoped -> RCCL/PyTorch/JAX (RCCL-direct) unaffected. rocminfo/grep are
-# guarded for set -eo pipefail. Validated on gfx942 (restores 7.2.4 parity).
-# ---------------------------------------------------------------------------
-APPLY_UCX_CMA_WORKAROUND=0
-_ucx_cma_major=""
-if [[ "${ROCM_VERSION}" =~ ^([0-9]+)\. ]]; then
-   _ucx_cma_major="${BASH_REMATCH[1]}"
-fi
-if [[ -n "${_ucx_cma_major}" && "${_ucx_cma_major}" -ge 10 ]]; then
-   _ucx_cma_rocminfo="$(rocminfo 2>/dev/null || true)"
-   if echo "${_ucx_cma_rocminfo}" | grep -qi "MI300A"; then
-      APPLY_UCX_CMA_WORKAROUND=1
-   fi
-   unset _ucx_cma_rocminfo
-fi
-unset _ucx_cma_major
+# NOTE: the UCX_TLS=^cma workaround decision (APPLY_UCX_CMA_WORKAROUND) and the
+# PR #11887 patch decision (APPLY_UCX_ROCM_PATCH) are both made once in the
+# mitigation block up near the EXIT trap. Here we only CONSUME
+# APPLY_UCX_CMA_WORKAROUND: the openmpi-mca-params.conf line below (via
+# mca_base_env_list) and the `module show` note further down.
 
 if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE_OPENMPI}" == "0" ]] ; then
    echo "There is a previous installation and the replace flag is false"
@@ -1394,8 +2238,8 @@ else
       echo "coll_ucc_enable = 1" | ${SUDO_OPENMPI} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
       echo "coll_ucc_priority = 100" | ${SUDO_OPENMPI} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
       if [[ "${APPLY_UCX_CMA_WORKAROUND}" == "1" ]]; then
-         # ROCm >= 10 on MI300A: keep GPU-aware MPI off UCX's CMA transport
-         # (process_vm_readv EFAULT on APU coherent buffers) by exporting
+         # ROCm >= 10.1 / AFAR >= 24 on MI300A: keep GPU-aware MPI off UCX's CMA
+         # transport (process_vm_readv EFAULT on APU coherent buffers) by exporting
          # UCX_TLS=^cma to every rank; intra-node transfers use xpmem instead.
          echo "openmpi: ROCm ${ROCM_VERSION} on MI300A -- baking mca_base_env_list = UCX_TLS=^cma into openmpi-mca-params.conf"
          echo "mca_base_env_list = UCX_TLS=^cma" | ${SUDO_OPENMPI} tee -a "${OPENMPI_PATH}"/etc/openmpi-mca-params.conf
@@ -1546,10 +2390,10 @@ if [[ "${DRY_RUN}" == "0" ]]; then
    # Note surfaced by `module show openmpi` (a whatis line) so users can see --
    # and know how to override -- the UCX_TLS=^cma setting baked into
    # openmpi-mca-params.conf above. Empty (blank line) when the workaround is
-   # not applied, i.e. on ROCm < 10 or non-MI300A hardware.
+   # not applied, i.e. on ROCm < 10.1 / AFAR < 24 or non-MI300A hardware.
    UCX_CMA_NOTE_LINE=""
    if [[ "${APPLY_UCX_CMA_WORKAROUND}" == "1" ]]; then
-      UCX_CMA_NOTE_LINE='whatis("Note: this build sets UCX_TLS=^cma via mca_base_env_list in etc/openmpi-mca-params.conf (ROCm>=10 on MI300A) to keep intra-node GPU-aware MPI off the UCX CMA transport, which EFAULTs on MI300A coherent buffers. Override by setting UCX_TLS in your environment.")'
+      UCX_CMA_NOTE_LINE='whatis("Note: this build sets UCX_TLS=^cma via mca_base_env_list in etc/openmpi-mca-params.conf (ROCm>=10.1 or AFAR>=24 on MI300A) to keep intra-node GPU-aware MPI off the UCX CMA transport, which EFAULTs on MI300A coherent buffers. Override by setting UCX_TLS in your environment.")'
    fi
 
    # ── MPI_{C,CXX,F}FLAGS / MPI_{LD,FLD}FLAGS for compiler-agnostic builds ─
