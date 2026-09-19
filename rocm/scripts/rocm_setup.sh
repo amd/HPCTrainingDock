@@ -1318,6 +1318,36 @@ if [ "$(printf '%s\n' "7.13.0" "${ROCM_VERSION}" | sort -V | head -n1)" = "7.13.
    HSA_SCRATCH_TCL='setenv HSA_NO_SCRATCH_RECLAIM 1'
 fi
 
+# rocprofiler-sdk LIBRARY_PATH fix, gated to the ROCm 10.x nightly snapshots
+# that need it. From snapshot date 20260909 onward the SDK ships a broken
+# rocprofiler-sdk CMake config: lib/cmake/rocprofiler-sdk/Modules/
+# rocprofiler-sdk-utilities.cmake calls rocprofiler_sdk_load_spm_min_amdgpu_
+# driver_version() at find_package() time, which message(FATAL_ERROR)s because
+# spm_runner_preflight.py is not installed anywhere in the tree. That makes
+# meson's dependency('rocprofiler-sdk', method:'cmake') return not-found, so
+# HPCToolkit falls back to cc.find_library('rocprofiler-sdk'), which searches
+# LIBRARY_PATH (link-time) -- NOT CPATH/LD_LIBRARY_PATH -- and cannot locate
+# librocprofiler-sdk.so, dying at meson.build:667. Adding $ROCM_PATH/lib to
+# LIBRARY_PATH lets that fallback resolve the lib. The defect is date-based and
+# spans the nightly version bump: verified broken on 10.1.0a20260909/a20260910
+# AND on the 10.2.0 line that superseded 10.1 from a20260911 (10.2.0a20260916
+# still ships the FATAL call and no spm_runner_preflight.py). Deliberately NOT
+# added for a20260908 and earlier (they detect via the CMake config) and we do
+# not otherwise widen the link-time search for the ~40 packages built under this
+# module. Remove this gate once the SDK ships spm_runner_preflight.py again.
+# Verify: `find_package(rocprofiler-sdk CONFIG)` against the SDK FATAL_ERRORs on
+# 10.1.0a20260909+ and 10.2.0a*, but returns 1.4.1 on 10.1.0a20260908.
+ROCPROFILER_SDK_LIBPATH_LUA=""
+case "${ROCM_VERSION}" in
+   10.[0-9]*.0a[0-9]*)
+      _rps_snap="${ROCM_VERSION##*a}"
+      if [[ "${_rps_snap}" =~ ^[0-9]{8}$ ]] && [ "${_rps_snap}" -ge 20260909 ]; then
+         ROCPROFILER_SDK_LIBPATH_LUA='prepend_path("LIBRARY_PATH", pathJoin(base, "lib"))'
+      fi
+      unset _rps_snap
+      ;;
+esac
+
 if [[ "${CRAY_SYSTEM}" == 1 ]]; then
 # ---- Cray base 'rocm' module (Tcl), modeled on /opt/modulefiles/rocm/<v> ----
 # AMD_CURPATH uses the container-form /opt/rocm-<v> placeholder; run_rocm_build.sh
@@ -1471,6 +1501,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	prepend_path("CPATH", pathJoin(base, "include"))
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("INCLUDE", pathJoin(base, "include"))
+	${ROCPROFILER_SDK_LIBPATH_LUA}
 	setenv("HSA_NO_SCRATCH_RECLAIM","1")
 	setenv("HIPCC_COMPILE_FLAGS_APPEND","--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_BASE_VERSION}")
 	setenv("HIPCC_LINK_FLAGS_APPEND","--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/${GCC_BASE_VERSION}")
@@ -1512,6 +1543,7 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	prepend_path("CPATH", pathJoin(base, "include"))
 	prepend_path("PATH", pathJoin(base, "bin"))
 	prepend_path("INCLUDE", pathJoin(base, "include"))
+	${ROCPROFILER_SDK_LIBPATH_LUA}
 	${HSA_SCRATCH_LUA}
 	prepend_path("MODULEPATH", pathJoin(mbase, "rocm-${ROCM_VERSION}"))
 	prepend_path("MODULEPATH", pathJoin(mbase, "rocmplus-${ROCM_VERSION}"))

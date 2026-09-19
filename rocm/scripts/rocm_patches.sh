@@ -57,6 +57,21 @@
 #                            wrapper on the modulefile PATH (or an SDK
 #                            symlink swap where --rocm-root is absent).
 #                            See sources/rocm-patches/rocprofiler-sdk-node-wedging-fix/.
+#   * ROCm 10.1 nightlies  -- rocm-smi-restore: some 10.1 nightlies
+#     (rocm-smi dropped)      (a20260905..a20260910 verified) shipped the
+#                            SDK WITHOUT rocm-smi-dev, so
+#                            include/rocm_smi/rocm_smi.h and
+#                            lib/librocm_smi64.so* are missing and every
+#                            consumer of <rocm_smi/rocm_smi.h> +
+#                            -lrocm_smi64 (PyTorch intra_node_comm.cpp,
+#                            likwid rocmon.c) fails to build. Restores the
+#                            header set + library in place from a donor
+#                            sibling tree that still ships them. No build,
+#                            no vendored .patch, no modulefile edit -- the
+#                            consumers already look under
+#                            ${ROCM_PATH}/include and .../lib. Soft no-op
+#                            when the tree already has rocm_smi or no donor
+#                            is on the cluster.
 #   * ROCm 7.13.0          -- symlink libomp.so into the SDK's Dyninst
 #                            lib dir so it resolves for the libs that
 #                            need it transitively (libcommon /
@@ -431,7 +446,18 @@ rocm_version_to_patches() {
       # librocprofiler-sdk* out of an official post-fix tree and shadows
       # the site install. It soft no-ops (43) when no such donor tree is
       # on the cluster, so listing the whole 10.* line here is safe.
-      10.*)             echo "rocprofiler-sdk-node-wedging-fix" ;;
+      #
+      # `rocm-smi-restore`: some 10.1 nightlies (verified a20260905 ..
+      # a20260910 on this cluster) dropped the rocm-smi-dev payload -- the
+      # tree ships only include/rocm_smi/rocm_smi_logger.h with NO
+      # rocm_smi.h and NO lib/librocm_smi64.so*, which breaks every
+      # consumer that compiles against <rocm_smi/rocm_smi.h> and links
+      # -lrocm_smi64 (PyTorch intra_node_comm.cpp, likwid rocmon.c). The
+      # bundle restores the header set + library in place from a donor
+      # sibling tree that still ships them (restore_rocm_smi()); it soft
+      # no-ops (43) when the tree already has rocm_smi or no donor is on
+      # the cluster, so listing it for the whole 10.* line is safe.
+      10.*)             echo "rocprofiler-sdk-node-wedging-fix rocm-smi-restore" ;;
       6.3.*)            echo "rocprof-compute" ;;
       6.4.*)            echo "rocprof-compute" ;;
       7.0.*)            echo "rocprof-compute" ;;
@@ -757,6 +783,16 @@ already_installed_check() {
             local _omp="${ROCM_PATH}/lib/llvm/lib/libomp.so"
             [ -L "${_link}" ] || return 1
             [ "$(readlink -f "${_link}")" = "$(readlink -f "${_omp}")" ] || return 1
+            ;;
+         rocm-smi-restore)
+            # No INSTALL_PREFIX artifact; the fix restores the missing
+            # rocm_smi header + library directly into the SDK tree.
+            # "Already installed" == the tree now ships both the header
+            # the consumers include and the linker's librocm_smi64.so
+            # (true either because the SDK shipped them or because a
+            # prior run restored them).
+            [ -f "${ROCM_PATH}/include/rocm_smi/rocm_smi.h" ]        || return 1
+            ls "${ROCM_PATH}"/lib/librocm_smi64.so >/dev/null 2>&1   || return 1
             ;;
          *)
             return 1
@@ -1349,11 +1385,37 @@ PY
    #    threads unbounded and blows past that cap. Bumping the cap to 4096
    #    (a power of 2, as CMake enforces) extends the static thread-data array
    #    so the profiled run no longer hangs. Overridable via $ROCPROFSYS_MAX_THREADS.
+   # ── ElfUtils: build it INSIDE the package (encapsulated, node-independent) ─
+   # Dyninst hard-requires ElfUtils (LibElf/LibDW). Depending on the compute
+   # node having libelf-dev/libdw-dev is fragile: the headers are present on
+   # some warewulf images and absent on others, and the apt install above is a
+   # single atomic transaction that an unrelated superseded package (e.g. a
+   # stale libsqlite3-dev pin 404ing on archive.ubuntu.com) can sink entirely,
+   # leaving libelf-dev/libdw-dev uninstalled and the configure hard-failing
+   # with "Could NOT find LibElf". Rather than add ElfUtils to the node images
+   # (which risks perturbing other builds), we tell rocprofiler-systems to build
+   # elfutils from source as part of THIS package build -- the same
+   # self-contained approach already used for Dyninst and libunwind
+   # (ROCPROFSYS_BUILD_{DYNINST,LIBUNWIND}=ON) -- so the overlay is identical on
+   # every node regardless of image state. The switch is the rocprof-sys
+   # user-facing option ROCPROFSYS_BUILD_ELFUTILS: upstream
+   # cmake/DyninstExternals.cmake maps it to Dyninst's BUILD_ELFUTILS, whose
+   # DyninstElfUtils.cmake then downloads + builds elfutils. Opt out with
+   # ROCPROFSYS_SYSTEM_ELFUTILS=1 to use the node's system headers instead.
+   ELFUTILS_ARGS=()
+   if [ "${ROCPROFSYS_SYSTEM_ELFUTILS:-0}" = "1" ]; then
+      echo "[rocm_patches] ROCPROFSYS_SYSTEM_ELFUTILS=1 -> using system ElfUtils (libelf-dev/libdw-dev)"
+   else
+      echo "[rocm_patches] encapsulating ElfUtils in the package build (-DROCPROFSYS_BUILD_ELFUTILS=ON; node-independent)"
+      ELFUTILS_ARGS+=( -DROCPROFSYS_BUILD_ELFUTILS=ON )
+   fi
+
    echo "[rocm_patches] running cmake ..."
    cmake \
       -S "${src_root}/projects/rocprofiler-systems" \
       -B "${build_dir}" \
       "${CCACHE_ARGS[@]}" \
+      "${ELFUTILS_ARGS[@]}" \
       -DCMAKE_BUILD_TYPE=RelWithDebInfo \
       -DBUILD_SHARED_LIBS=ON \
       -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}/install-staging" \
@@ -1788,6 +1850,131 @@ fix_rocprof_sys_instrument_libomp() {
          echo "[rocm_patches] libomp.so now resolves for rocprof-sys-instrument"
       fi
    fi
+   return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# restore_rocm_smi
+# ----------------
+# Some ROCm 10.1 nightlies (verified a20260905 .. a20260910 on this
+# cluster) dropped the rocm-smi-dev payload from the SDK: the tree ships
+# only include/rocm_smi/rocm_smi_logger.h and has NO
+# include/rocm_smi/rocm_smi.h and NO lib/librocm_smi64.so*. That breaks
+# every consumer that compiles against <rocm_smi/rocm_smi.h> and links
+# -lrocm_smi64 -- notably PyTorch's intra_node_comm.cpp and likwid's
+# rocmon.c ("fatal error: rocm_smi/rocm_smi.h: No such file").
+#
+# The header/library are stable and self-contained: `readelf -d` on the
+# donor librocm_smi64.so.1.0 shows its only NEEDED entries are system
+# libs (libc/libstdc++/libpthread/librt/libdl/libm/libgcc_s), no
+# ROCm-internal deps and no $ORIGIN-relative ROCm payload, so the .so
+# loads unchanged in any sibling tree. rocm_smi.h pulls in only the
+# sibling kfd_ioctl.h (not the logger header), so restoring the three
+# missing headers is a coherent set. We RESTORE them in place; both
+# consumers already look under ${ROCM_PATH}/include and ${ROCM_PATH}/lib,
+# so this needs NO modulefile edit and NO overlay -- same philosophy as
+# fix_rocprof_sys_instrument_libomp above.
+#
+# Donor selection:
+#   * ROCM_SMI_DONOR (env) names a donor ROCm tree explicitly.
+#   * otherwise scan siblings of ROCM_PATH (version-sorted, newest first
+#     so we prefer the closest / a future re-fixed drop) for the newest
+#     rocm-* tree that ships BOTH include/rocm_smi/rocm_smi.h and
+#     lib/librocm_smi64.so, and copy from it.
+# Headers/library are COPIED (not symlinked) so the restore survives
+# donor removal; an existing SDK file (e.g. its own rocm_smi_logger.h) is
+# never clobbered.
+#
+# Idempotent. Returns:
+#   0  -- restored (header set and/or library copied in)
+#   43 -- soft no-op (tree already ships rocm_smi, or no donor on cluster)
+#   1  -- hard error (copy failed / restore incomplete)
+# ─────────────────────────────────────────────────────────────────────
+restore_rocm_smi() {
+   local inc_dir="${ROCM_PATH}/include/rocm_smi"
+   local lib_dir="${ROCM_PATH}/lib"
+   local hdr="${inc_dir}/rocm_smi.h"
+   local have_hdr=0 have_lib=0
+   [ -f "${hdr}" ] && have_hdr=1
+   ls "${lib_dir}"/librocm_smi64.so* >/dev/null 2>&1 && have_lib=1
+
+   if [ "${have_hdr}" -eq 1 ] && [ "${have_lib}" -eq 1 ]; then
+      echo "[rocm_patches] rocm_smi already present under ${ROCM_PATH} (idempotent no-op)"
+      return 43
+   fi
+
+   # ── locate a donor tree that still ships rocm_smi ─────────────────
+   local donor="${ROCM_SMI_DONOR:-}"
+   if [ -n "${donor}" ]; then
+      if [ ! -f "${donor}/include/rocm_smi/rocm_smi.h" ] \
+         || ! ls "${donor}"/lib/librocm_smi64.so* >/dev/null 2>&1; then
+         echo "[rocm_patches] ROCM_SMI_DONOR=${donor} does not ship rocm_smi; ignoring" >&2
+         donor=""
+      fi
+   fi
+   if [ -z "${donor}" ]; then
+      local parent cand
+      parent="$(dirname "${ROCM_PATH}")"
+      for cand in $(ls -1d "${parent}"/rocm-* 2>/dev/null | sort -Vr); do
+         [ "${cand}" = "${ROCM_PATH}" ] && continue
+         if [ -f "${cand}/include/rocm_smi/rocm_smi.h" ] \
+            && ls "${cand}"/lib/librocm_smi64.so* >/dev/null 2>&1; then
+            donor="${cand}"
+            break
+         fi
+      done
+   fi
+   if [ -z "${donor}" ]; then
+      echo "[rocm_patches] no donor ROCm tree with rocm_smi found next to ${ROCM_PATH} (soft no-op)"
+      echo "[rocm_patches]   (set ROCM_SMI_DONOR=/path/to/rocm-X to point at one explicitly)"
+      return 43
+   fi
+   echo "[rocm_patches] restoring rocm_smi from donor: ${donor}"
+
+   ${SUDO} mkdir -p "${inc_dir}" "${lib_dir}" || return 1
+
+   # ── headers: copy any donor rocm_smi header the target is missing;
+   #    never clobber a file the SDK still ships (its rocm_smi_logger.h
+   #    may be a different version and is not pulled in by rocm_smi.h) ──
+   local f base
+   for f in "${donor}"/include/rocm_smi/*; do
+      [ -f "${f}" ] || continue
+      base="$(basename "${f}")"
+      if [ -e "${inc_dir}/${base}" ]; then
+         echo "[rocm_patches]   keep existing header rocm_smi/${base}"
+         continue
+      fi
+      echo "[rocm_patches]   + include/rocm_smi/${base}"
+      ${SUDO} install -m 0644 "${f}" "${inc_dir}/${base}" || return 1
+   done
+
+   # ── library: replicate the donor's librocm_smi64.so* chain (the two
+   #    dev/SONAME symlinks + the real .so.1.0). Copy the regular file,
+   #    recreate the symlinks with the same (basename) targets. ────────
+   if [ "${have_lib}" -eq 0 ]; then
+      for f in "${donor}"/lib/librocm_smi64.so*; do
+         [ -e "${f}" ] || continue
+         base="$(basename "${f}")"
+         if [ -L "${f}" ]; then
+            local tgt
+            tgt="$(readlink "${f}")"
+            echo "[rocm_patches]   + lib/${base} -> ${tgt}"
+            ${SUDO} ln -sfn "${tgt}" "${lib_dir}/${base}" || return 1
+         else
+            echo "[rocm_patches]   + lib/${base}"
+            ${SUDO} install -m 0755 "${f}" "${lib_dir}/${base}" || return 1
+         fi
+      done
+   fi
+
+   # ── verify the two things the consumers actually need ─────────────
+   if [ ! -f "${hdr}" ] || ! ls "${lib_dir}"/librocm_smi64.so >/dev/null 2>&1; then
+      echo "[rocm_patches] ERROR: rocm_smi restore incomplete under ${ROCM_PATH}" >&2
+      return 1
+   fi
+   echo "[rocm_patches] rocm_smi restored:"
+   echo "[rocm_patches]   header : ${hdr}"
+   echo "[rocm_patches]   library: ${lib_dir}/librocm_smi64.so"
    return 0
 }
 
@@ -2305,6 +2492,7 @@ built_rocprof_sys=0
 built_rocprof_compute=0
 built_instrument_libomp=0
 built_rocprofiler_sdk_node_wedging_fix=0
+built_rocm_smi_restore=0
 
 for bundle in ${PATCH_BUNDLES}; do
    case "${bundle}" in
@@ -2385,6 +2573,20 @@ for bundle in ${PATCH_BUNDLES}; do
          else
             rc=${bundle_rc}
          fi ;;
+      rocm-smi-restore)
+         # In-place restore of the dropped rocm-smi-dev header + library
+         # into the SDK tree from a donor sibling. No build, no modulefile
+         # edit, no ELF modification. Exit 43 = soft skip (tree already
+         # ships rocm_smi, or no donor tree on this cluster).
+         restore_rocm_smi
+         bundle_rc=$?
+         if [ "${bundle_rc}" -eq 0 ]; then
+            built_rocm_smi_restore=1
+         elif [ "${bundle_rc}" -eq 43 ]; then
+            : # soft skip; leave built_rocm_smi_restore=0, rc unchanged
+         else
+            rc=${bundle_rc}
+         fi ;;
       *)
          echo "[rocm_patches] ERROR: no builder registered for bundle '${bundle}'" >&2
          rc=1 ;;
@@ -2428,7 +2630,8 @@ if [ "${rc}" -eq 0 ] \
      && { [ "${built_rocprof_sys}" -eq 1 ] \
           || [ "${built_rocprof_compute}" -eq 1 ] \
           || [ "${built_instrument_libomp}" -eq 1 ] \
-          || [ "${built_rocprofiler_sdk_node_wedging_fix}" -eq 1 ]; }; then
+          || [ "${built_rocprofiler_sdk_node_wedging_fix}" -eq 1 ] \
+          || [ "${built_rocm_smi_restore}" -eq 1 ]; }; then
    write_rocm_patches_provenance || rc=$?
 fi
 
@@ -2437,7 +2640,8 @@ if [ "${rc}" -eq 0 ]; then
    if [ "${built_rocprof_sys}" -eq 0 ] \
         && [ "${built_rocprof_compute}" -eq 0 ] \
         && [ "${built_instrument_libomp}" -eq 0 ] \
-        && [ "${built_rocprofiler_sdk_node_wedging_fix}" -eq 0 ]; then
+        && [ "${built_rocprofiler_sdk_node_wedging_fix}" -eq 0 ] \
+        && [ "${built_rocm_smi_restore}" -eq 0 ]; then
       # All bundles dispatched ran (or were skipped) without error, but
       # nothing landed on disk -- e.g. every dispatched bundle was a
       # soft no-op (RC tree without a public-resolvable VERSION.sha).
@@ -2469,6 +2673,10 @@ if [ "${rc}" -eq 0 ]; then
          echo "[rocm_patches]   rocprof-sys-instrument: libomp.so symlinked into Dyninst lib dir"
          echo "[rocm_patches]                          (${ROCM_PATH}/lib/rocprofiler-systems/libomp.so"
          echo "[rocm_patches]                           -> ../llvm/lib/libomp.so)"
+      fi
+      if [ "${built_rocm_smi_restore}" -eq 1 ]; then
+         echo "[rocm_patches]   rocm_smi (restored):  ${ROCM_PATH}/include/rocm_smi/rocm_smi.h"
+         echo "[rocm_patches]                         ${ROCM_PATH}/lib/librocm_smi64.so"
       fi
       echo "[rocm_patches]   module file:         ${MODULE_FILE}"
    fi

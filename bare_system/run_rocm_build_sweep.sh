@@ -11,14 +11,19 @@
 set -uo pipefail
 
 : ${PARTITION:="sh5_cpx_admin_long"}
-: ${MIN_PER_VERSION:="95"}        # estimated minutes per ROCm build (cold docker
+: ${MIN_PER_VERSION:="110"}       # estimated minutes per ROCm build (cold docker
                                   # cache; ~35 min with warm cache). Includes
                                   # the slow chown -R sysadmin pass (~11 min)
                                   # plus make rocm + rocm_package + module pkg
                                   # (~60 min total) plus Phase 3.6
-                                  # rocm_patches.sh (~30 min: rocprof-compute
-                                  # nuitka on 6.3.x-7.1.x, rocprof-sys-1.3.0
-                                  # cmake on 7.2.x). Versions with no
+                                  # rocm_patches.sh (rocprof-compute
+                                  # nuitka on 6.3.x-7.1.x, rocprof-sys cmake on
+                                  # 7.2.x/7.12/7.13). The rocprof-sys builds now
+                                  # also build ElfUtils from source in-tree
+                                  # (encapsulated, node-independent -- no reliance
+                                  # on libelf-dev being present on the node),
+                                  # which adds ~15 min: patches wall ~45 min ->
+                                  # 110-min default (was 95). Versions with no
                                   # vendored fix (NOOP_RC=43) skip the
                                   # patches wall in under a second; set
                                   # --skip-patches 1 to opt out entirely.
@@ -36,7 +41,7 @@ set -uo pipefail
                                   # leaves ~30% headroom for a slower NFS
                                   # day; bump via --afar-min-per-version
                                   # if your cluster is consistently slower.
-: ${THEROCK_MIN_PER_VERSION:="15"} # TheRock tokens (therock-X.Y[.Z]) follow
+: ${THEROCK_MIN_PER_VERSION:="30"} # TheRock tokens (therock-X.Y[.Z]) follow
                                   # the same wget+tar shape as AFAR --
                                   # run_rocm_therock_install.sh curls a
                                   # pre-built distro-agnostic tarball from
@@ -45,11 +50,21 @@ set -uo pipefail
                                   # dir. Tarballs are gfx-family-specific
                                   # (gfx94X-dcgpu for MI300A/X / MI250 /
                                   # MI210). Compressed size is comparable
-                                  # to AFAR (~4-5GB), and extract is over
-                                  # NFS, so the AFAR walltime baseline
-                                  # applies: ~11 min on sh5. 15-min default
-                                  # leaves the same ~30% headroom; bump via
+                                  # to AFAR (~4-5GB), extract over NFS is
+                                  # ~11 min, BUT the Phase 6 rocm_patches.sh
+                                  # still runs: the 7.12/7.13 tokens build
+                                  # rocprof-sys (now + encapsulated ElfUtils
+                                  # from source, adding ~15 min). 30-min
+                                  # default (was 15) covers that build plus
+                                  # the extract; bump via
                                   # --therock-min-per-version if needed.
+# Numeric tokens installed via --build-method runfile go through the ROCm
+# Runfile Installer (download the self-extracting .run + untar the SDK tree).
+# Acquire is download + NFS extract, but the Phase 6 rocm_patches.sh still runs:
+# the legacy 7.2.x numerics build rocprof-sys (now + encapsulated ElfUtils from
+# source, adding ~15 min). 35-min default (was 20) covers that build plus the
+# extract; bump via --runfile-min-per-version on a slow-NFS day.
+: ${RUNFILE_MIN_PER_VERSION:="35"}
 : ${MARGIN_MIN:="60"}             # global margin (minutes)
 : ${MAX_TIME_MIN:="2880"}         # MaxTime of sh5_cpx_admin_long = 48h
 # --replace-existing is the rocm-sweep analog of run_rocmplus_install_sweep.sh's
@@ -63,6 +78,24 @@ fi
 : ${REPLACE_EXISTING:="0"}
 : ${SKIP_PATCHES:="0"}
 : ${KEEP_TARBALLS:="3"}
+# BUILD_METHOD selects HOW a bare-numeric ROCm token is installed (the docker
+# build path the sweep has always used, or a no-docker alternative). Explicit
+# therock-*/afar-* tokens ignore this -- their token shape already IS the
+# method. Values:
+#   auto    (default) route each bare numeric by MAJOR version:
+#             6.x       -> docker build (run_rocm_build.sh)
+#             7.x       -> runfile (ROCm Runfile Installer, no docker), except
+#                          7.10/7.11 which AMD ships only as a TheRock tarball
+#                          (no runfile published) -> tarball
+#             10.x, ... -> docker build
+#           therock-*/afar-* tokens -> their own installer regardless.
+#   docker  force the container build + repackage path (run_rocm_build.sh);
+#           needs docker/podman on the compute node.
+#   tarball force the TheRock pre-built tarball download+extract (no docker);
+#           only works for versions AMD publishes as TheRock tarballs.
+#   runfile force the ROCm Runfile Installer download+extract (no docker);
+#           covers legacy numerics (e.g. 7.2.4) that have no TheRock tarball.
+: ${BUILD_METHOD:="auto"}
 # DISTRO / DISTRO_VERSION default to the OS this submitter runs on (AAC7 login
 # == the numeric build/stage target), detected from /etc/os-release the same way
 # the *_setup.sh helpers do: NAME lowercased (e.g. "ubuntu", "red hat enterprise
@@ -264,6 +297,15 @@ Usage: $0 [opts]
                                  nightly, and e.g. --site /nfsapps/ubuntu-24.04-nightlies
                                  to deploy into a dedicated test tree.
    --margin-min N                margin minutes added to total (default $MARGIN_MIN)
+   --build-method METHOD         how to install a bare-numeric ROCm token (default $BUILD_METHOD):
+                                   auto    by major version: 6.x -> docker,
+                                           7.x -> runfile (7.10/7.11 -> tarball),
+                                           10.x -> docker
+                                   docker  force docker/podman build (run_rocm_build.sh)
+                                   tarball force TheRock prebuilt tarball, no docker
+                                   runfile force ROCm Runfile Installer, no docker
+                                 Explicit therock-*/afar-* tokens ignore this.
+   --runfile-min-per-version N   estimated minutes per runfile-method numeric token (default $RUNFILE_MIN_PER_VERSION)
    --replace-existing 0|1        overwrite existing \${TOP_INSTALL_PATH}/rocm-<v> (default $REPLACE_EXISTING)
                                  (alias: --force-extract -- deprecated, kept for backward compat)
    --skip-patches 0|1            skip Phase 3.6 (rocm_patches.sh) (default $SKIP_PATCHES)
@@ -302,6 +344,8 @@ while [[ $# -gt 0 ]]; do
       --min-per-version)  shift; MIN_PER_VERSION=${1} ;;
       --afar-min-per-version) shift; AFAR_MIN_PER_VERSION=${1} ;;
       --therock-min-per-version) shift; THEROCK_MIN_PER_VERSION=${1} ;;
+      --runfile-min-per-version) shift; RUNFILE_MIN_PER_VERSION=${1} ;;
+      --build-method)     shift; BUILD_METHOD=${1} ;;
       --therock-amdgpu-family)   shift; THEROCK_AMDGPU_FAMILY=${1} ;;
       --therock-url-base) shift; THEROCK_URL_BASE=${1} ;;
       --margin-min)       shift; MARGIN_MIN=${1} ;;
@@ -322,6 +366,12 @@ while [[ $# -gt 0 ]]; do
    esac
    shift
 done
+
+# ── --build-method validation ─────────────────────────────────────────
+case "${BUILD_METHOD}" in
+   auto|docker|tarball|runfile) : ;;
+   *) echo "ERROR: --build-method must be one of: auto docker tarball runfile (got '${BUILD_METHOD}')" >&2; exit 1 ;;
+esac
 
 # ── --site preset application ─────────────────────────────────────────
 # Mirror the priority chain in run_rocmplus_install_sweep.sh: explicit
@@ -559,11 +609,28 @@ if [[ -f "${DELTA_CONF}" ]]; then
    unset _v _base
 fi
 
-# Each delta version adds an extra MIN_PER_VERSION/2 minutes to the budget
-# (the base install is roughly half the wall of a full SDK install).
-DELTA_EXTRA_MIN=$(( ${#DELTA_VERSIONS[@]} * MIN_PER_VERSION / 2 ))
+# Per-numeric-token wall estimate depends on --build-method: docker/auto builds
+# in a container (~MIN_PER_VERSION), tarball downloads a TheRock tarball
+# (~THEROCK_MIN_PER_VERSION), runfile downloads+extracts the Runfile Installer
+# (~RUNFILE_MIN_PER_VERSION).
+case "${BUILD_METHOD}" in
+   tarball) NUMERIC_MIN_PER_VERSION="${THEROCK_MIN_PER_VERSION}" ;;
+   runfile) NUMERIC_MIN_PER_VERSION="${RUNFILE_MIN_PER_VERSION}" ;;
+   *)       NUMERIC_MIN_PER_VERSION="${MIN_PER_VERSION}" ;;
+esac
 
-TOTAL_MIN=$(( N_NUMERIC * MIN_PER_VERSION + N_AFAR * AFAR_MIN_PER_VERSION + N_THEROCK * THEROCK_MIN_PER_VERSION + DELTA_EXTRA_MIN + MARGIN_MIN ))
+# Each delta version adds an extra MIN_PER_VERSION/2 minutes to the budget
+# (the base install is roughly half the wall of a full SDK install). Delta-
+# release merges only happen on the docker path, so their extra budget is
+# zeroed for the no-docker methods (tarball/runfile), where numeric tokens are
+# routed to a download+extract installer instead of a container build.
+if [[ "${BUILD_METHOD}" == "docker" || "${BUILD_METHOD}" == "auto" ]]; then
+   DELTA_EXTRA_MIN=$(( ${#DELTA_VERSIONS[@]} * MIN_PER_VERSION / 2 ))
+else
+   DELTA_EXTRA_MIN=0
+fi
+
+TOTAL_MIN=$(( N_NUMERIC * NUMERIC_MIN_PER_VERSION + N_AFAR * AFAR_MIN_PER_VERSION + N_THEROCK * THEROCK_MIN_PER_VERSION + DELTA_EXTRA_MIN + MARGIN_MIN ))
 if (( TOTAL_MIN > MAX_TIME_MIN )); then
    echo "WARNING: requested ${TOTAL_MIN}min exceeds partition MaxTime ${MAX_TIME_MIN}min; capping."
    TOTAL_MIN=${MAX_TIME_MIN}
@@ -613,12 +680,13 @@ cat <<EOF
 ==================================================================
  Partition:        ${PARTITION}
  Node pin:         ${NODELIST:-<scheduler chooses>}
+ Build method:     ${BUILD_METHOD}  (numeric-token routing; therock-*/afar-* ignore it)
  Versions (${N}):  ${VERSIONS_ARR[*]}
    numeric (${N_NUMERIC}):  ${NUMERIC_VERSIONS[*]:-<none>}
    AFAR    (${N_AFAR}):     ${AFAR_VERSIONS[*]:-<none>}
    TheRock (${N_THEROCK}):  ${THEROCK_VERSIONS[*]:-<none>}
  Delta versions:   ${DELTA_VERSIONS[*]:-<none>}
- Per-version est:  numeric=${MIN_PER_VERSION} min, AFAR=${AFAR_MIN_PER_VERSION} min, TheRock=${THEROCK_MIN_PER_VERSION} min (+${DELTA_EXTRA_MIN} min for ${#DELTA_VERSIONS[@]} delta(s))
+ Per-version est:  numeric=${NUMERIC_MIN_PER_VERSION} min (method=${BUILD_METHOD}), AFAR=${AFAR_MIN_PER_VERSION} min, TheRock=${THEROCK_MIN_PER_VERSION} min (+${DELTA_EXTRA_MIN} min for ${#DELTA_VERSIONS[@]} delta(s))
  Margin:           ${MARGIN_MIN} min
  Total --time:     ${TIME_STR}
  Replace existing: ${REPLACE_EXISTING}
@@ -641,7 +709,7 @@ cat <<EOF
 ==================================================================
 EOF
 
-EXPORT_VARS="ALL,ROCM_VERSIONS=${ROCM_VERSIONS_NORM},REPLACE_EXISTING=${REPLACE_EXISTING},SKIP_PATCHES=${SKIP_PATCHES},KEEP_TARBALLS=${KEEP_TARBALLS},DISTRO=${DISTRO},DISTRO_VERSION=${DISTRO_VERSION},AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL},TOP_INSTALL_PATH=${TOP_INSTALL_PATH},TOP_MODULE_PATH=${TOP_MODULE_PATH},THEROCK_AMDGPU_FAMILY=${THEROCK_AMDGPU_FAMILY}"
+EXPORT_VARS="ALL,ROCM_VERSIONS=${ROCM_VERSIONS_NORM},REPLACE_EXISTING=${REPLACE_EXISTING},SKIP_PATCHES=${SKIP_PATCHES},KEEP_TARBALLS=${KEEP_TARBALLS},DISTRO=${DISTRO},DISTRO_VERSION=${DISTRO_VERSION},AMDGPU_GFXMODEL=${AMDGPU_GFXMODEL},TOP_INSTALL_PATH=${TOP_INSTALL_PATH},TOP_MODULE_PATH=${TOP_MODULE_PATH},THEROCK_AMDGPU_FAMILY=${THEROCK_AMDGPU_FAMILY},BUILD_METHOD=${BUILD_METHOD}"
 # Pass --site through so the sbatch banner can echo it for traceability
 # (the sbatch itself uses the already-resolved TOP_INSTALL_PATH /
 # TOP_MODULE_PATH; SITE is informational on the compute-node side).

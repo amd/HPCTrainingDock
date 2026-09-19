@@ -568,6 +568,32 @@ Click on *Save and Connect*, then type the `<password>` noted from Step 8. This 
 
 13. In the bottom left of the VNC window, click on the terminal icon to access the terminal from the container.
 
+### 2.2.7 Installing Without Docker: Selecting the ROCm Build Method
+
+The multi-version sweep driver [`bare_system/run_rocm_build_sweep.sh`](bare_system/run_rocm_build_sweep.sh) (invoked for each release list in [`do_rocm_reinstall.sh`](do_rocm_reinstall.sh)) installs each requested ROCm release into a relocatable tree under `--top-install-path`, with matching Lmod modulefiles under `--top-module-path`, so several ROCm versions can coexist outside `/opt/rocm`. By default a numeric release is built inside a container, which requires Docker or Podman. On a host that has neither, we can select a no-docker path with `--build-method`:
+
+- `auto` (default): the historical dispatch by token shape. Numeric releases build in a container; a numeric that AMD publishes only as a prebuilt TheRock tarball is downloaded instead; `afar-*` and `therock-*` tokens use their own download-and-extract path.
+- `docker`: force the container build (`run_rocm_build.sh`). Requires Docker or Podman on the compute node.
+- `tarball`: download AMD's prebuilt, distro-agnostic TheRock SDK tarball and extract it (`run_rocm_therock_install.sh`). No Docker. This only works for versions AMD publishes as tarballs (the recent releases and previews).
+- `runfile`: download AMD's ROCm Runfile Installer and extract its SDK tree in place (`run_rocm_runfile_install.sh`). No Docker. This covers the legacy numeric releases (for example `7.2.4`) that have no TheRock tarball.
+
+Explicit `therock-*` and `afar-*` tokens always follow their own no-docker path, so `--build-method` only changes how a bare numeric token is installed. To steer the whole reinstall from the top without editing the driver, set the `BUILD_METHOD` environment variable:
+
+```bash
+BUILD_METHOD=runfile ./do_rocm_reinstall.sh
+```
+
+or call the sweep directly for a single version:
+
+```bash
+bare_system/run_rocm_build_sweep.sh --build-method runfile \
+   --rocm-versions "7.2.4" \
+   --top-install-path /nfsapps/ubuntu-24.04/opt \
+   --top-module-path  /nfsapps/ubuntu-24.04/modules
+```
+
+The `tarball` and `runfile` paths need no container runtime and no package-manager install into `/opt`, but the target tree must still be writable: `sudo` is used automatically for a root-owned shared location, and a home-directory install runs without it.
+
 # 3. Inspecting the Model Installation Environment
 
 The training environment comes with a variety of modules installed, with their necessary dependencies. To inspect the modules available, run `module avail`, which will show you this output (assuming the installation has been performed with ROCm 7.2.0):

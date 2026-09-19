@@ -12,7 +12,11 @@
 set -uo pipefail
 
 : ${PARTITION:="sh5_cpx_admin_long"}
-: ${MIN_PER_NUMERIC:="95"}
+# Numeric tokens are FULL almalinux-9.6 docker builds that also run Phase 3.6
+# rocm_patches.sh (no --skip-extract in the stage sbatch's numeric branch). The
+# rocprof-sys patches now build ElfUtils from source in-tree (encapsulated,
+# node-independent), adding ~15 min: 110-min default (was 95).
+: ${MIN_PER_NUMERIC:="110"}
 : ${MIN_PER_DOWNLOAD:="6"}
 : ${MARGIN_MIN:="60"}
 : ${MAX_TIME_MIN:="2880"}

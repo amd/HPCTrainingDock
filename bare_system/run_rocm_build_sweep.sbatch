@@ -52,6 +52,17 @@ THEROCK_AMDGPU_FAMILY="${THEROCK_AMDGPU_FAMILY:-gfx94X-dcgpu}"
 # submitter's --therock-url-base for nightlies/prereleases.
 THEROCK_URL_BASE="${THEROCK_URL_BASE:-}"
 SITE="${SITE:-}"
+# BUILD_METHOD (from the submitter) selects how a bare-numeric ROCm token is
+# installed: docker (container build via run_rocm_build.sh), tarball (TheRock
+# prebuilt tarball via run_rocm_therock_install.sh, no docker), runfile (ROCm
+# Runfile Installer via run_rocm_runfile_install.sh, no docker), or auto. In auto
+# (the default) a bare numeric is routed by major version via
+# auto_numeric_method(): 6.x -> docker, 7.x -> runfile (7.10/7.11 -> tarball,
+# since AMD ships no runfile for that TheRock-only line), 10.x -> docker.
+# Explicit therock-*/afar-* tokens keep their inherent path regardless (their
+# shape already IS the method). The --program-environments flow has its own
+# builder/cache dispatch and ignores BUILD_METHOD.
+BUILD_METHOD="${BUILD_METHOD:-auto}"
 # AAC7 high-level interface (see run_rocm_build_sweep.sh --program-environments).
 # When PROGRAM_ENVIRONMENTS is non-empty the sweep runs the Cray PrgEnv flow
 # (build-or-cache + per-flavor module emission) instead of the legacy
@@ -229,6 +240,7 @@ SUMMARY="sweep_summary_$(date +%Y%m%d_%H%M%S)_job${SLURM_JOB_ID}.out"
    echo " REPLACE_EXISTING: ${REPLACE_EXISTING}"
    echo " SKIP_PATCHES:     ${SKIP_PATCHES}"
    echo " KEEP_TARBALLS:    ${KEEP_TARBALLS}"
+   echo " BUILD_METHOD:     ${BUILD_METHOD}  (bare-numeric token routing)"
    echo " SITE:             ${SITE:-<none>}"
    echo " TOP_INSTALL_PATH: ${TOP_INSTALL_PATH}"
    echo " TOP_MODULE_PATH:  ${TOP_MODULE_PATH}"
@@ -274,6 +286,28 @@ _is_therock_numeric() {
    # exclude >= 7.12: those install via the docker/apt preview path, not tarball.
    [ "$(printf '%s\n' "7.12" "${_t}" | sort -V | head -n1)" = "7.12" ] && return 1
    return 0
+}
+
+# auto_numeric_method TOKEN -- for BUILD_METHOD=auto, the concrete install method
+# used for a BARE NUMERIC token, chosen by major version (default policy):
+#   6.x            -> docker  (docker build; preserves the historical 6.x path,
+#                              including the ROCm-6 flang-new build)
+#   7.10 / 7.11    -> tarball (AMD publishes NO ROCm Runfile Installer for the
+#                              7.10/7.11 TheRock-only line; use the tarball)
+#   7.x (other)    -> runfile (ROCm Runfile Installer; no docker/GPU needed)
+#   else (10.x...) -> docker  (unchanged; user policy scoped to the 6.x/7.x lines)
+# Only meaningful for bare numerics; explicit therock-*/afar-* tokens keep their
+# own path. An explicit --build-method (docker|tarball|runfile) always wins over
+# this and is applied directly without consulting the policy.
+auto_numeric_method() {
+   local _t="$1" _major _minor
+   _major="${_t%%.*}"
+   _minor="${_t#*.}"; _minor="${_minor%%.*}"
+   case "${_major}" in
+      6) echo docker ;;
+      7) if [ "${_minor}" = "10" ] || [ "${_minor}" = "11" ]; then echo tarball; else echo runfile; fi ;;
+      *) echo docker ;;
+   esac
 }
 
 if [[ -n "${PROGRAM_ENVIRONMENTS}" ]]; then
@@ -423,6 +457,7 @@ EOF
       echo ""
       echo "=================================================================="
       echo " AAC7 program-environments flow"
+      [[ "${BUILD_METHOD}" != "auto" ]] && echo " NOTE: --build-method ${BUILD_METHOD} is ignored in this flow (it has its own builder/cache dispatch)"
       echo " Canonical tokens: ${PE_CANON[*]}"
       echo " Package cache:    ${PACKAGE_CACHE}  (TheRock/AFAR: optional; downloaded from repo.amd.com if absent)"
       if detect_builder; then
@@ -886,8 +921,12 @@ for v in "${VERSIONS[@]}"; do
    # a GPUSDK-shaped modulefile under base/rocm/therock-<token>.lua.
    # Explicit therock-<rel> token OR a bare numeric >= 7.10.0 (which is only
    # available as a TheRock tarball). Both install with numeric naming;
-   # ${v#therock-} yields the numeric either way.
-   if [[ "${v}" == therock-* ]] || _is_therock_numeric "${v}"; then
+   # ${v#therock-} yields the numeric either way. The bare-numeric auto-route
+   # is gated on BUILD_METHOD=auto: with an explicit --build-method the operator
+   # is choosing the numeric-token installer, so a bare numeric (even in
+   # [7.10,7.12)) falls through to the method-dispatched numeric branch below.
+   # An explicit therock-* token always uses the TheRock installer regardless.
+   if [[ "${v}" == therock-* ]] || { [[ "${BUILD_METHOD}" == "auto" ]] && _is_therock_numeric "${v}"; }; then
       THEROCK_REL="${v#therock-}"
       # Forward the optional nightly/prerelease tarball url-base to the leaf's
       # --url-base only when set; unset preserves the leaf's stable default.
@@ -953,33 +992,80 @@ for v in "${VERSIONS[@]}"; do
       continue
    fi
 
-   # ── Numeric ROCm branch: full docker + make + extract + patches ──
+   # ── Numeric ROCm branch: install method chosen by BUILD_METHOD ──
+   #   docker  -> full container build + make + extract + patches
+   #              (run_rocm_build.sh). Needs docker/podman on the node;
+   #              the leaf hard-errors if neither is present.
+   #   tarball -> TheRock prebuilt tarball download+extract, no docker
+   #              (run_rocm_therock_install.sh). Errors clearly if AMD
+   #              publishes no tarball for this numeric (e.g. legacy 7.2.4).
+   #   runfile -> ROCm Runfile Installer download+extract, no docker
+   #              (run_rocm_runfile_install.sh). Covers legacy numerics.
+   #   auto    -> resolved per major version by auto_numeric_method:
+   #              6.x -> docker, 7.x -> runfile (7.10/7.11 -> tarball), else docker.
+   # All install to ${TOP_INSTALL_PATH}/rocm-${v} (numeric naming), so the
+   # skip-if-installed pre-check above matches regardless of method.
    BASE_TAG=""
    if BASE_FOR_V=$(delta_base_for "${v}"); then
       BASE_TAG="  [DELTA: base=${BASE_FOR_V}]"
    fi
+   # Resolve the effective method (EM). An explicit --build-method wins; auto is
+   # mapped to a concrete method by major version. Delta-release merges only make
+   # sense on the docker path (base+delta installed in-container then merged); the
+   # tarball/runfile paths install the requested version's artifact directly, so
+   # the [DELTA] tag is informational only when EM != docker.
+   EM="${BUILD_METHOD}"
+   [ "${EM}" = "auto" ] && EM="$(auto_numeric_method "${v}")"
    {
       echo ""
       echo "=================================================================="
-      echo " [$(date)] BEGIN rocm-${v}${BASE_TAG}"
+      echo " [$(date)] BEGIN rocm-${v}${BASE_TAG}  [method=${BUILD_METHOD} -> ${EM}]"
       echo "=================================================================="
    } | tee -a "${SUMMARY}"
 
-   if bare_system/run_rocm_build.sh \
-         --rocm-version "${v}" \
-         --distro "${DISTRO}" --distro-version "${DISTRO_VERSION}" \
-         --amdgpu-gfxmodel "${AMDGPU_GFXMODEL}" \
-         --use-makefile 1 \
-         --replace-existing "${REPLACE_EXISTING}" \
-         --skip-patches "${SKIP_PATCHES}" \
-         --keep-tarballs "${KEEP_TARBALLS}" \
-         --top-install-path "${TOP_INSTALL_PATH}" \
-         --top-module-path  "${TOP_MODULE_PATH}"
-   then
+   rc=0
+   case "${EM}" in
+      tarball)
+         _therock_url_args=()
+         [[ -n "${THEROCK_URL_BASE}" ]] && _therock_url_args=( --url-base "${THEROCK_URL_BASE}" )
+         bare_system/run_rocm_therock_install.sh \
+               --therock-release "${v}" \
+               --amdgpu-family   "${THEROCK_AMDGPU_FAMILY}" \
+               "${_therock_url_args[@]}" \
+               --distro "${DISTRO}" --distro-version "${DISTRO_VERSION}" \
+               --top-install-path "${TOP_INSTALL_PATH}" \
+               --top-module-path  "${TOP_MODULE_PATH}" \
+               --replace-existing "${REPLACE_EXISTING}" \
+               --skip-patches     "${SKIP_PATCHES}" || rc=$?
+         unset _therock_url_args
+         ;;
+      runfile)
+         bare_system/run_rocm_runfile_install.sh \
+               --rocm-version    "${v}" \
+               --amdgpu-gfxmodel "${AMDGPU_GFXMODEL}" \
+               --distro "${DISTRO}" --distro-version "${DISTRO_VERSION}" \
+               --top-install-path "${TOP_INSTALL_PATH}" \
+               --top-module-path  "${TOP_MODULE_PATH}" \
+               --replace-existing "${REPLACE_EXISTING}" \
+               --skip-patches     "${SKIP_PATCHES}" || rc=$?
+         ;;
+      *)
+         bare_system/run_rocm_build.sh \
+               --rocm-version "${v}" \
+               --distro "${DISTRO}" --distro-version "${DISTRO_VERSION}" \
+               --amdgpu-gfxmodel "${AMDGPU_GFXMODEL}" \
+               --use-makefile 1 \
+               --replace-existing "${REPLACE_EXISTING}" \
+               --skip-patches "${SKIP_PATCHES}" \
+               --keep-tarballs "${KEEP_TARBALLS}" \
+               --top-install-path "${TOP_INSTALL_PATH}" \
+               --top-module-path  "${TOP_MODULE_PATH}" || rc=$?
+         ;;
+   esac
+   if [[ ${rc} -eq 0 ]]; then
       echo "[$(date)] OK   rocm-${v}" | tee -a "${SUMMARY}"
       OK+=("${v}")
    else
-      rc=$?
       echo "[$(date)] FAIL rocm-${v} (rc=${rc})" | tee -a "${SUMMARY}"
       FAIL+=("${v}")
    fi

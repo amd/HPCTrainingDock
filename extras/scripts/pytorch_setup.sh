@@ -3007,6 +3007,83 @@ else
       export PYTORCH_ROCM_ARCH=${AMDGPU_GFXMODEL}
       export PYTORCH_INSTALL_DIR=${PYTORCH_PATH}
       export AOTRITON_INSTALLED_PREFIX=${AOTRITON_PATH}
+
+      # ── ROCm 10.1-nightly RAGreedy (Greedy Register Allocator) crash ──
+      # Some ROCm 10.1 nightlies ship an AMD clang 24.0.0git whose AMDGPU
+      # Greedy Register Allocator SIGSEGVs during HIP device codegen at
+      # -O3 (in ld.lld's LTO codegen, --lto-CGO3) on PyTorch's own kernels.
+      # Two distinct crash paths were observed on rocm-10.1.0a20260910
+      # (gfx942); both are compiler-internal, not source bugs:
+      #   * SplitEditor::extendPHIKillRanges (region-split under subreg
+      #     liveness) -- e.g. at::native::reduce_kernel<...AbsMaxOps<Half
+      #     ...>> in ReduceNormKernel.hip (slurm-20312).
+      #   * VirtRegAuxInfo::isRematerializable (spill-weight calc) -- 38
+      #     more TUs (Activation*, AdaptiveMaxPool, cub radix-sort, ...).
+      # Routing all three AMDGPU register classes through the BASIC
+      # (non-greedy) allocator sidesteps BOTH paths: basic has no
+      # region-split (no extendPHIKillRanges) and no spill-weight
+      # heuristic (no isRematerializable). Verified end-to-end: with these
+      # flags torch built all 7580 HIP objects with 0 RAGreedy crashes and
+      # `import torch` passed (scoped build job 20446). hipcc appends
+      # HIPCC_COMPILE_FLAGS_APPEND to its clang++ invocation, so the flags
+      # reach every HIP device compile with no compiler wrapper; a
+      # differential probe confirmed they reach ld.lld codegen (a bogus
+      # -vgpr-regalloc value errors as "ld.lld: for the --vgpr-regalloc
+      # option: Cannot find option named ..."), and they are harmless
+      # no-ops on the host-only hipcc compiles that share this env.
+      #
+      # Gating. The basic allocator is correctness-safe (it allocates
+      # registers differently, with at most a minor codegen-quality cost),
+      # so we scope by TOOLCHAIN CLASS rather than a synthetic canary: the
+      # crash only triggers deep inside ATen's reduce_kernel template
+      # instantiation and no small vendored kernel reproduces it reliably,
+      # so a canary would risk a false negative (bug present, canary
+      # passes, real build then crashes). The affected class is a ROCm
+      # 10.x NIGHTLY (datestamped token, e.g. 10.1.0a2026MMDD) whose HIP
+      # clang major version is 24 (the LLVM generation carrying the bug);
+      # if clang can't be probed we still apply on a 10.x nightly (safe
+      # default), and a future clang>=25 10.x nightly is left untouched.
+      # Override with PYTORCH_HIP_REGALLOC_BASIC:
+      #   auto (default) -- enable iff the toolchain matches the class
+      #   1              -- force the workaround ON
+      #   0              -- force it OFF
+      : "${PYTORCH_HIP_REGALLOC_BASIC:=auto}"
+      _RA_WA_FLAGS="-Xoffload-linker -mllvm=-sgpr-regalloc=basic -Xoffload-linker -mllvm=-wwm-regalloc=basic -Xoffload-linker -mllvm=-vgpr-regalloc=basic"
+      _ra_wa_enable=0
+      _ra_clang_major=""
+      _ra_rocm_token=""
+      case "${PYTORCH_HIP_REGALLOC_BASIC}" in
+         1) _ra_wa_enable=1 ;;
+         0) _ra_wa_enable=0 ;;
+         *)
+            _ra_clang_major="$("${ROCM_PATH}/llvm/bin/clang" --version 2>/dev/null \
+                                | sed -nE 's/.*clang version ([0-9]+)\..*/\1/p' | head -1)"
+            # The datestamped nightly suffix (aYYYYMMDD) that identifies the
+            # affected class is stripped from ROCM_VERSION upstream:
+            # main_setup.sh keys ROCM_VERSION on the bare .info/version
+            # numeric (e.g. 10.1.0) and keeps the datestamp ONLY in the
+            # ROCM_PATH basename (e.g. rocm-10.1.0a20260910). Classify on
+            # that basename numeric tail so the gate can actually see the
+            # datestamp; fall back to ROCM_VERSION when ROCM_PATH is unusable.
+            _ra_rocm_token="${ROCM_PATH##*/}"        # rocm-10.1.0a20260910 | rocm-therock-10.1.0a...
+            _ra_rocm_token="${_ra_rocm_token#rocm-}" # strip leading rocm-
+            _ra_rocm_token="${_ra_rocm_token##*-}"   # drop any family prefix (therock-/afar-/...)
+            [ -n "${_ra_rocm_token}" ] || _ra_rocm_token="${ROCM_VERSION}"
+            if [[ "${_ra_rocm_token}" =~ ^10\..*a[0-9]{6} ]] \
+               && { [ -z "${_ra_clang_major}" ] || [ "${_ra_clang_major}" = "24" ]; }; then
+               _ra_wa_enable=1
+            fi ;;
+      esac
+      if [ "${_ra_wa_enable}" -eq 1 ]; then
+         export HIPCC_COMPILE_FLAGS_APPEND="${HIPCC_COMPILE_FLAGS_APPEND:+${HIPCC_COMPILE_FLAGS_APPEND} }${_RA_WA_FLAGS}"
+         echo "pytorch: ROCm Greedy-RegAlloc crash workaround ENABLED (PYTORCH_HIP_REGALLOC_BASIC=${PYTORCH_HIP_REGALLOC_BASIC}, ROCM_VERSION=${ROCM_VERSION}, rocm token=${_ra_rocm_token:-unknown}, clang major=${_ra_clang_major:-unknown})"
+         echo "pytorch:   HIP device compiles routed through the basic register allocator via hipcc"
+         echo "pytorch:   HIPCC_COMPILE_FLAGS_APPEND=${HIPCC_COMPILE_FLAGS_APPEND}"
+      else
+         echo "pytorch: ROCm Greedy-RegAlloc crash workaround NOT applied (PYTORCH_HIP_REGALLOC_BASIC=${PYTORCH_HIP_REGALLOC_BASIC}, ROCM_VERSION=${ROCM_VERSION}, rocm token=${_ra_rocm_token:-unknown}, clang major=${_ra_clang_major:-unknown})"
+      fi
+      unset _RA_WA_FLAGS _ra_wa_enable _ra_clang_major _ra_rocm_token
+
       # ── PT 2.9+ fbgemm_genai kill-switch ───────────────────────────
       # fbgemm_genai is an experimental feature introduced in PT 2.9
       # and carried forward to PT 2.10/2.11/2.12. It pulls in
