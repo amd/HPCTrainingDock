@@ -793,6 +793,37 @@ ROCM_FB_PATCH_EOF
       fi
       unset _GKH_NEEDS_HIP713_PATCH
 
+      # ── ROCm 10.2+ roctracer HIP API-ID rename fix ───────────────────
+      # ROCm 10.2 dropped the unversioned enum HIP_API_ID_hipGetDeviceProperties
+      # from <rocm>/include/hip/amd_detail/hip_prof_str.h. Since ROCm 6.0 the
+      # runtime hipGetDeviceProperties symbol is hipGetDevicePropertiesR0600
+      # (ABI break); roctracer kept an unversioned alias through 10.1 and
+      # removed it in 10.2 (verified: present in every rocm-10.0/10.1 nightly
+      # header, absent in rocm-10.2.0a20260921). XLA's profiler still uses the
+      # unversioned id at xla/backends/profiler/gpu/rocm_tracer.cc, so the wheel
+      # build fails: "use of undeclared identifier 'HIP_API_ID_hipGetDeviceProperties'".
+      # Map it to the R0600 ABI id. Gate on the symbol actually being gone from
+      # the installed ROCm headers, so this is a no-op on <=10.1 and self-heals
+      # once upstream XLA fixes it. Patched by HPCTrainingDock tensorflow_setup.sh.
+      _RT_SRC=third_party/xla/xla/backends/profiler/gpu/rocm_tracer.cc
+      _HIP_PROF_HDR="${ROCM_PATH:-/opt/rocm}/include/hip/amd_detail/hip_prof_str.h"
+      if [[ -f "${_HIP_PROF_HDR}" ]] \
+         && ! grep -q 'HIP_API_ID_hipGetDeviceProperties\b' "${_HIP_PROF_HDR}"; then
+         if [[ ! -f "${_RT_SRC}" ]]; then
+            echo "WARNING: ${_RT_SRC} not found; XLA layout may have changed."
+            echo "         If the wheel build fails on 'HIP_API_ID_hipGetDeviceProperties',"
+            echo "         locate rocm_tracer.cc and map that id to *R0600."
+         elif grep -q 'HIP_API_ID_hipGetDeviceProperties\b' "${_RT_SRC}"; then
+            echo ""
+            echo "tensorflow: ROCm 10.2+ dropped unversioned HIP_API_ID_hipGetDeviceProperties;"
+            echo "            mapping XLA profiler to the R0600 ABI id in ${_RT_SRC}"
+            sed -i 's/HIP_API_ID_hipGetDeviceProperties\b/HIP_API_ID_hipGetDevicePropertiesR0600/g' "${_RT_SRC}"
+            echo "tensorflow: ROCm 10.2 roctracer HIP API-ID rename fix applied."
+            echo ""
+         fi
+      fi
+      unset _RT_SRC _HIP_PROF_HDR
+
       # AMDGPU_GFXMODEL is auto-detected from `rocminfo` (line 7) and on
       # multi-GPU nodes can be a `;`-separated list, e.g. "gfx942;gfx90a".
       # TensorFlow's MLIR `hlo_to_kernel` (the kernel-gen tool fed

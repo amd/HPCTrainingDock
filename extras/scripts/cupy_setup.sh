@@ -1017,6 +1017,9 @@ __CUPY_9742_CHECK_PYEOF__
 	prepend_path("PYTHONPATH","$CUPY_PATH")
 	prepend_path("CPATH","${GCC_CPATH}")
 	setenv("ROCM_HOME","$SAVED_ROCM_HOME")
+	-- hermetic: block ~/.local site so a stray 'coverage' can't shadow this env
+	-- and break numba's optional coverage hook (subclasses coverage.types.Tracer)
+	setenv("PYTHONNOUSERSITE","1")
 EOF
    else
       cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
@@ -1028,6 +1031,9 @@ EOF
 	prepend-path PYTHONPATH $CUPY_PATH
 	prepend-path CPATH ${GCC_CPATH}
 	setenv ROCM_HOME $SAVED_ROCM_HOME
+	# hermetic: block ~/.local site so a stray 'coverage' can't shadow this env
+	# and break numba's optional coverage hook (subclasses coverage.types.Tracer)
+	setenv PYTHONNOUSERSITE 1
 EOF
    fi
    unset _MODFILE _MODFLAVOR ROCM_PREREQ_TCL ROCM_PREREQ_LUA

@@ -1083,8 +1083,12 @@ else
       # the plugin dlopens are on LD_LIBRARY_PATH (no-op if still loaded).
       module load ${ROCM_MODULE_NAME} 2>/dev/null || true
       local _env=( "PYTHONPATH=${JAXLIB_PATH}:${JAX_PATH}${PYTHONPATH:+:${PYTHONPATH}}" "JAX_PLATFORMS=rocm,cpu" )
-      if [ -f "${ROCM_PATH_FOR_MODULE}/lib/llvm/lib/libunwind.so.1" ]; then
-         _env+=( "LD_PRELOAD=${ROCM_PATH_FOR_MODULE}/lib/llvm/lib/libunwind.so.1${LD_PRELOAD:+:${LD_PRELOAD}}" )
+      # ROCm 10.2+ moved libunwind from lib/llvm/lib/ into the per-triple subdir
+      # lib/llvm/lib/x86_64-unknown-linux-gnu/. Prefer that, fall back to flat.
+      local _libunwind="${ROCM_PATH_FOR_MODULE}/lib/llvm/lib/x86_64-unknown-linux-gnu/libunwind.so.1"
+      [ -f "${_libunwind}" ] || _libunwind="${ROCM_PATH_FOR_MODULE}/lib/llvm/lib/libunwind.so.1"
+      if [ -f "${_libunwind}" ]; then
+         _env+=( "LD_PRELOAD=${_libunwind}${LD_PRELOAD:+:${LD_PRELOAD}}" )
       fi
 
       # (1) import must not crash. This exercises the plugin dlopen path
@@ -1216,6 +1220,20 @@ else
       _JAX_PY_TCL=""
    fi
 
+   # LD_PRELOAD for libunwind: ROCm 10.2+ relocated it from lib/llvm/lib/ into the
+   # per-triple subdir lib/llvm/lib/x86_64-unknown-linux-gnu/. Resolve at build
+   # time (prefer triple, fall back to flat) so the module self-adapts per ROCm;
+   # emit nothing if neither exists.
+   _jax_uw="${ROCM_PATH_FOR_MODULE}/lib/llvm/lib/x86_64-unknown-linux-gnu/libunwind.so.1"
+   [ -f "${_jax_uw}" ] || _jax_uw="${ROCM_PATH_FOR_MODULE}/lib/llvm/lib/libunwind.so.1"
+   if [ -f "${_jax_uw}" ]; then
+      _JAX_UW_LUA="prepend_path(\"LD_PRELOAD\",\"${_jax_uw}\")"
+      _JAX_UW_TCL="prepend-path LD_PRELOAD \"${_jax_uw}\""
+   else
+      _JAX_UW_LUA=""
+      _JAX_UW_TCL=""
+   fi
+
    # The - option suppresses tabs
    if [ "${_MODFLAVOR}" = "lua" ]; then
    cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
@@ -1226,7 +1244,7 @@ else
 	${_JAX_PY_LUA}
 	setenv("XLA_FLAGS","${JAX_XLA_FLAGS}")
 	setenv("JAX_PLATFORMS","rocm,cpu")
-	prepend_path("LD_PRELOAD","${ROCM_PATH_FOR_MODULE}/lib/llvm/lib/libunwind.so.1")
+	${_JAX_UW_LUA}
 	prepend_path("PYTHONPATH","${JAX_PATH}")
 	prepend_path("PYTHONPATH","${JAXLIB_PATH}")
 EOF
@@ -1240,11 +1258,11 @@ prereq ${ROCM_MODULE_NAME}
 ${_JAX_PY_TCL}
 setenv XLA_FLAGS "${JAX_XLA_FLAGS}"
 setenv JAX_PLATFORMS "rocm,cpu"
-prepend-path LD_PRELOAD "${ROCM_PATH_FOR_MODULE}/lib/llvm/lib/libunwind.so.1"
+${_JAX_UW_TCL}
 prepend-path PYTHONPATH "${JAX_PATH}"
 prepend-path PYTHONPATH "${JAXLIB_PATH}"
 EOF
    fi
-   unset _MODFILE _MODFLAVOR _JAX_PY_LUA _JAX_PY_TCL
+   unset _MODFILE _MODFLAVOR _JAX_PY_LUA _JAX_PY_TCL _JAX_UW_LUA _JAX_UW_TCL _jax_uw
 
 fi
