@@ -520,6 +520,53 @@ else
    fi
    unset _leaf_dir
 
+   # Portability: make `module load mpi4py` reload the SAME python mpi4py
+   # was built against. The module previously only prepended PYTHONPATH (and
+   # loaded MPI), so on a host where the default python3 is not the build
+   # python (a loaded python/cray-python module, a venv, or conda) the cp3XX
+   # `from mpi4py import MPI` extension failed to import. Detect the module
+   # that OWNS the build python3 by matching its bin dir against each loaded
+   # module's PATH prepends -- name-agnostic (cray-python, python, Python,
+   # spack) -- and re-emit a load of it. Emits nothing for the unmanaged
+   # system python3, where the runtime default already matches the build.
+   _detect_python_provider_module() {
+      local py pybin loaded m cand
+      py="${1:-}"
+      if [ -z "${py}" ]; then py="$(command -v python3 2>/dev/null || true)"; fi
+      [ -n "${py}" ] || return 0
+      pybin="$(cd "$(dirname "${py}")" 2>/dev/null && pwd -P || true)"
+      [ -n "${pybin}" ] || return 0
+      case "${pybin}" in
+         /usr/bin|/bin|/usr/local/bin|/usr/sbin|/sbin) return 0 ;;
+      esac
+      type module >/dev/null 2>&1 || return 0
+      loaded="${LOADEDMODULES:-}"; loaded="${loaded//:/ }"
+      for m in ${loaded}; do
+         while IFS= read -r cand; do
+            [ -n "${cand}" ] || continue
+            cand="$(cd "${cand}" 2>/dev/null && pwd -P || true)"
+            if [ -n "${cand}" ] && [ "${cand}" = "${pybin}" ]; then
+               printf '%s\n' "${m}"; return 0
+            fi
+         done < <(module show "${m}" 2>&1 | awk '
+            /(prepend|append)_path\(.*"PATH".*\)/ {
+               if (match($0, /"PATH"[ ]*,[ ]*"[^"]*"/)) {
+                  s=substr($0,RSTART,RLENGTH); sub(/^"PATH"[ ]*,[ ]*"/,"",s); sub(/"$/,"",s); print s }
+            }
+            /(prepend|append)-path/ { for(i=1;i<=NF;i++) if($i=="PATH") print $(i+1) }')
+      done
+      return 0
+   }
+   _MPI4PY_PY_PROVIDER="$(_detect_python_provider_module)"
+   if [ -n "${_MPI4PY_PY_PROVIDER}" ]; then
+      _MPI4PY_PY_LOAD_LUA="load(\"${_MPI4PY_PY_PROVIDER}\")"
+      _MPI4PY_PY_LOAD_TCL="if { ![ is-loaded ${_MPI4PY_PY_PROVIDER} ] } { module load ${_MPI4PY_PY_PROVIDER} }"
+      echo "mpi4py: modulefile will load python provider module '${_MPI4PY_PY_PROVIDER}'"
+   else
+      _MPI4PY_PY_LOAD_LUA=""
+      _MPI4PY_PY_LOAD_TCL=""
+   fi
+
    # Emit the modulefile in the flavor the site's module tool understands.
    # Lmod reads Lua (.lua); classic Tcl "Environment Modules" (the Cray PE
    # default here, e.g. 3.2.11) reads Tcl and does NOT parse .lua at all
@@ -536,6 +583,7 @@ else
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	
 	prepend_path("PYTHONPATH", "${MPI4PY_PATH}")
+	${_MPI4PY_PY_LOAD_LUA}
 	load("${MPI_MODULE}")
 EOF
    else
@@ -546,6 +594,7 @@ EOF
 	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
 	
 	prepend-path PYTHONPATH ${MPI4PY_PATH}
+	${_MPI4PY_PY_LOAD_TCL}
 	if { ![is-loaded ${MPI_MODULE}] } { module load ${MPI_MODULE} }
 EOF
    fi

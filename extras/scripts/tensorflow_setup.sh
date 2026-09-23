@@ -860,19 +860,26 @@ ROCM_FB_PATCH_EOF
 
       export TF_ROCM_AMDGPU_TARGETS=${AMDGPU_GFXMODEL_SINGLE}
 
-      # Pin HERMETIC_PYTHON_VERSION to the system python3's MAJOR.MINOR.
-      # Without this, TF's configure / bazel startup logs the warning
+      # Pin HERMETIC_PYTHON_VERSION to the MAJOR.MINOR of the SAME python3
+      # that PYTHON_BIN_PATH points at below. Without this, TF's configure
+      # / bazel startup logs the warning
       #   HERMETIC_PYTHON_VERSION variable was not set correctly,
       #   using default version.
       # which lets TF pick its hardcoded default (currently 3.11) and
       # then bazel's hermetic_python rule downloads + builds an
-      # interpreter that doesn't match PYTHON_BIN_PATH=/usr/bin/python3
-      # used in ./configure -- silent ABI / extension-module mismatches
-      # can sneak in. Audited from job 7974 log_tensorflow_05_01_2026.txt.
-      # The system python3 on the Warewulf ubuntu-22.04 image is 3.10.
-      HERMETIC_PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+      # interpreter that doesn't match the PYTHON_BIN_PATH used in
+      # ./configure -- silent ABI / extension-module mismatches can sneak
+      # in. Audited from job 7974 log_tensorflow_05_01_2026.txt.
+      #
+      # Derive BOTH values from one `command -v python3`, so a non-default
+      # python3 (a loaded python module, venv, or conda ahead of
+      # /usr/bin/python3 on PATH) can't make configure run one interpreter
+      # while HERMETIC pins another. No-op where python3 already IS
+      # /usr/bin/python3 (e.g. the Warewulf ubuntu-22.04 image, 3.10).
+      TF_PYTHON_BIN_PATH="$(command -v python3)"
+      HERMETIC_PYTHON_VERSION=$("${TF_PYTHON_BIN_PATH}" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
       export HERMETIC_PYTHON_VERSION
-      echo "tensorflow: HERMETIC_PYTHON_VERSION=${HERMETIC_PYTHON_VERSION}"
+      echo "tensorflow: PYTHON_BIN_PATH=${TF_PYTHON_BIN_PATH} HERMETIC_PYTHON_VERSION=${HERMETIC_PYTHON_VERSION}"
 
       # configure tensorflow
       #
@@ -902,7 +909,7 @@ ROCM_FB_PATCH_EOF
       # CLANG_COMPILER_PATH is set in the environment, it bypasses the
       # default chain AND the prompt entirely. Setting it here is
       # idempotent across all ROCm versions.
-      yes "" | TF_NEED_CLANG=1 ROCM_PATH=$ROCM_PATH TF_NEED_ROCM=1 PYTHON_BIN_PATH=/usr/bin/python3 TF_ROCM_AMDGPU_TARGETS=${AMDGPU_GFXMODEL_SINGLE} HERMETIC_PYTHON_VERSION=${HERMETIC_PYTHON_VERSION} CLANG_COMPILER_PATH=${CLANG_COMPILER} ./configure
+      yes "" | TF_NEED_CLANG=1 ROCM_PATH=$ROCM_PATH TF_NEED_ROCM=1 PYTHON_BIN_PATH="${TF_PYTHON_BIN_PATH}" TF_ROCM_AMDGPU_TARGETS=${AMDGPU_GFXMODEL_SINGLE} HERMETIC_PYTHON_VERSION=${HERMETIC_PYTHON_VERSION} CLANG_COMPILER_PATH=${CLANG_COMPILER} ./configure
 
       # build and install tensorflow
       #
@@ -1061,6 +1068,53 @@ ROCM_FB_PATCH_EOF
    fi
    echo "tensorflow: modulefile flavor = ${_MODFLAVOR} (${_MODFILE})"
 
+   # Portability: make `module load tensorflow` reload the SAME python the
+   # wheel was built against. The module previously only prepended
+   # PYTHONPATH, so on a host where the default python3 is not the build
+   # python (a loaded python/cray-python module, a venv, or conda) the
+   # cp3XX extension modules failed to import. Detect the module that OWNS
+   # the build python3 by matching its bin dir against each loaded module's
+   # PATH prepends -- name-agnostic (cray-python, python, Python, spack) --
+   # and re-emit a load of it. Emits nothing for the unmanaged system
+   # python3, where the runtime default already matches the build.
+   _detect_python_provider_module() {
+      local py pybin loaded m cand
+      py="${1:-}"
+      if [ -z "${py}" ]; then py="$(command -v python3 2>/dev/null || true)"; fi
+      [ -n "${py}" ] || return 0
+      pybin="$(cd "$(dirname "${py}")" 2>/dev/null && pwd -P || true)"
+      [ -n "${pybin}" ] || return 0
+      case "${pybin}" in
+         /usr/bin|/bin|/usr/local/bin|/usr/sbin|/sbin) return 0 ;;
+      esac
+      type module >/dev/null 2>&1 || return 0
+      loaded="${LOADEDMODULES:-}"; loaded="${loaded//:/ }"
+      for m in ${loaded}; do
+         while IFS= read -r cand; do
+            [ -n "${cand}" ] || continue
+            cand="$(cd "${cand}" 2>/dev/null && pwd -P || true)"
+            if [ -n "${cand}" ] && [ "${cand}" = "${pybin}" ]; then
+               printf '%s\n' "${m}"; return 0
+            fi
+         done < <(module show "${m}" 2>&1 | awk '
+            /(prepend|append)_path\(.*"PATH".*\)/ {
+               if (match($0, /"PATH"[ ]*,[ ]*"[^"]*"/)) {
+                  s=substr($0,RSTART,RLENGTH); sub(/^"PATH"[ ]*,[ ]*"/,"",s); sub(/"$/,"",s); print s }
+            }
+            /(prepend|append)-path/ { for(i=1;i<=NF;i++) if($i=="PATH") print $(i+1) }')
+      done
+      return 0
+   }
+   _TF_PY_PROVIDER="$(_detect_python_provider_module "${TF_PYTHON_BIN_PATH:-}")"
+   if [ -n "${_TF_PY_PROVIDER}" ]; then
+      _TF_PY_LOAD_LUA="load(\"${_TF_PY_PROVIDER}\")"
+      _TF_PY_LOAD_TCL="if { ![ is-loaded ${_TF_PY_PROVIDER} ] } { module load ${_TF_PY_PROVIDER} }"
+      echo "tensorflow: modulefile will load python provider module '${_TF_PY_PROVIDER}'"
+   else
+      _TF_PY_LOAD_LUA=""
+      _TF_PY_LOAD_TCL=""
+   fi
+
    # The - option suppresses tabs
    if [ "${_MODFLAVOR}" = "lua" ]; then
    cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
@@ -1069,6 +1123,7 @@ ROCM_FB_PATCH_EOF
 	whatis("Upstream branch: ${GIT_BRANCH}")
 
 	prereq("${ROCM_MODULE_NAME}")
+	${_TF_PY_LOAD_LUA}
 	prepend_path("PYTHONPATH","$TF_PATH")
 	prepend_path("PATH","${TF_PATH}/bin")
 	setenv("TF_CPP_MIN_LOG_LEVEL","2")
@@ -1081,6 +1136,7 @@ module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_
 module-whatis "Upstream branch: ${GIT_BRANCH}"
 
 prereq ${ROCM_MODULE_NAME}
+${_TF_PY_LOAD_TCL}
 prepend-path PYTHONPATH "${TF_PATH}"
 prepend-path PATH "${TF_PATH}/bin"
 setenv TF_CPP_MIN_LOG_LEVEL "2"

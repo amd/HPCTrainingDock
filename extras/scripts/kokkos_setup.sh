@@ -59,6 +59,8 @@ ROCM_VERSION=6.2.0
 # the variable was never plumbed into the cmake call anyway).
 KOKKOS_ARCH_AMD_GFX90A="OFF"
 KOKKOS_ARCH_AMD_GFX942_APU="OFF"
+# gfx950 (MI350) is a discrete GPU, so it uses the plain GFX950 flag (no _APU).
+KOKKOS_ARCH_AMD_GFX950="OFF"
 KOKKOS_VERSION="4.7.04"
 KOKKOS_PATH=/opt/rocmplus-${ROCM_VERSION}/kokkos-v${KOKKOS_VERSION}
 KOKKOS_PATH_INPUT=""
@@ -467,6 +469,9 @@ else
       case ";${AMDGPU_GFXMODEL};" in
          *";gfx942;"*) KOKKOS_ARCH_AMD_GFX942_APU="ON" ;;
       esac
+      case ";${AMDGPU_GFXMODEL};" in
+         *";gfx950;"*) KOKKOS_ARCH_AMD_GFX950="ON" ;;
+      esac
 
       REQUIRED_MODULES=( "${ROCM_MODULE_NAME}" )
       preflight_modules "${REQUIRED_MODULES[@]}" || exit $?
@@ -553,6 +558,7 @@ else
                        -DKokkos_ENABLE_OPENMP=ON \
                        -DKokkos_ARCH_AMD_GFX90A=${KOKKOS_ARCH_AMD_GFX90A} \
                        -DKokkos_ARCH_AMD_GFX942_APU=${KOKKOS_ARCH_AMD_GFX942_APU} \
+                       -DKokkos_ARCH_AMD_GFX950=${KOKKOS_ARCH_AMD_GFX950} \
                        -DKokkos_ARCH_ZEN4=ON \
                        -DGPU_TARGETS="${gpu_targets}" \
                        -DCMAKE_CXX_COMPILER=${ROCM_PATH}/llvm/bin/amdclang++ ..
@@ -593,9 +599,11 @@ else
          echo ""
          KOKKOS_ARCH_AMD_GFX90A="OFF"
          KOKKOS_ARCH_AMD_GFX942_APU="OFF"
+         KOKKOS_ARCH_AMD_GFX950="OFF"
          case "${FIRST_ARCH}" in
             gfx90a) KOKKOS_ARCH_AMD_GFX90A="ON" ;;
             gfx942) KOKKOS_ARCH_AMD_GFX942_APU="ON" ;;
+            gfx950) KOKKOS_ARCH_AMD_GFX950="ON" ;;
             *)
                echo "ERROR: Unrecognized first arch '${FIRST_ARCH}' in" >&2
                echo "       AMDGPU_GFXMODEL='${AMDGPU_GFXMODEL}'." >&2

@@ -1007,6 +1007,53 @@ __CUPY_9742_CHECK_PYEOF__
    esac
    unset _RPV
 
+   # Portability: make `module load cupy` reload the SAME python cupy was
+   # built against. The module previously only prepended PYTHONPATH, so on
+   # a host where the default python3 is not the build python (a loaded
+   # python/cray-python module, a venv, or conda) the cp3XX extension
+   # modules failed to import. Detect the module that OWNS the build
+   # python3 by matching its bin dir against each loaded module's PATH
+   # prepends -- name-agnostic (cray-python, python, Python, spack) -- and
+   # re-emit a load of it. Emits nothing for the unmanaged system python3,
+   # where the runtime default already matches the build.
+   _detect_python_provider_module() {
+      local py pybin loaded m cand
+      py="${1:-}"
+      if [ -z "${py}" ]; then py="$(command -v python3 2>/dev/null || true)"; fi
+      [ -n "${py}" ] || return 0
+      pybin="$(cd "$(dirname "${py}")" 2>/dev/null && pwd -P || true)"
+      [ -n "${pybin}" ] || return 0
+      case "${pybin}" in
+         /usr/bin|/bin|/usr/local/bin|/usr/sbin|/sbin) return 0 ;;
+      esac
+      type module >/dev/null 2>&1 || return 0
+      loaded="${LOADEDMODULES:-}"; loaded="${loaded//:/ }"
+      for m in ${loaded}; do
+         while IFS= read -r cand; do
+            [ -n "${cand}" ] || continue
+            cand="$(cd "${cand}" 2>/dev/null && pwd -P || true)"
+            if [ -n "${cand}" ] && [ "${cand}" = "${pybin}" ]; then
+               printf '%s\n' "${m}"; return 0
+            fi
+         done < <(module show "${m}" 2>&1 | awk '
+            /(prepend|append)_path\(.*"PATH".*\)/ {
+               if (match($0, /"PATH"[ ]*,[ ]*"[^"]*"/)) {
+                  s=substr($0,RSTART,RLENGTH); sub(/^"PATH"[ ]*,[ ]*"/,"",s); sub(/"$/,"",s); print s }
+            }
+            /(prepend|append)-path/ { for(i=1;i<=NF;i++) if($i=="PATH") print $(i+1) }')
+      done
+      return 0
+   }
+   _CUPY_PY_PROVIDER="$(_detect_python_provider_module)"
+   if [ -n "${_CUPY_PY_PROVIDER}" ]; then
+      _CUPY_PY_LOAD_LUA="load(\"${_CUPY_PY_PROVIDER}\")"
+      _CUPY_PY_LOAD_TCL="if { ![ is-loaded ${_CUPY_PY_PROVIDER} ] } { module load ${_CUPY_PY_PROVIDER} }"
+      echo "cupy: modulefile will load python provider module '${_CUPY_PY_PROVIDER}'"
+   else
+      _CUPY_PY_LOAD_LUA=""
+      _CUPY_PY_LOAD_TCL=""
+   fi
+
    # The - option suppresses leading tabs in the heredoc body.
    if [ "${_MODFLAVOR}" = "lua" ]; then
       cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
@@ -1014,6 +1061,7 @@ __CUPY_9742_CHECK_PYEOF__
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
 	${ROCM_PREREQ_LUA}
+	${_CUPY_PY_LOAD_LUA}
 	prepend_path("PYTHONPATH","$CUPY_PATH")
 	prepend_path("CPATH","${GCC_CPATH}")
 	setenv("ROCM_HOME","$SAVED_ROCM_HOME")
@@ -1028,6 +1076,7 @@ EOF
 	module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
 
 	prereq ${ROCM_PREREQ_TCL}
+	${_CUPY_PY_LOAD_TCL}
 	prepend-path PYTHONPATH $CUPY_PATH
 	prepend-path CPATH ${GCC_CPATH}
 	setenv ROCM_HOME $SAVED_ROCM_HOME
