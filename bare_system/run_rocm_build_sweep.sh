@@ -59,7 +59,7 @@ set -uo pipefail
                                   # the extract; bump via
                                   # --therock-min-per-version if needed.
 # Numeric tokens installed via --build-method runfile go through the ROCm
-# Runfile Installer (download the self-extracting .run + untar the SDK tree).
+# Runfile Installer (download the self-extracting .run + extract the SDK tree).
 # Acquire is download + NFS extract, but the Phase 6 rocm_patches.sh still runs:
 # the legacy 7.2.x numerics build rocprof-sys (now + encapsulated ElfUtils from
 # source, adding ~15 min). 35-min default (was 20) covers that build plus the
