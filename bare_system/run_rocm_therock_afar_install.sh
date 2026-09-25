@@ -535,13 +535,22 @@ if [[ -n "${LOCAL_TARBALL_INPUT}" ]]; then
    TARBALL_URL="file://${_abs}"
    LOCAL_TARBALL="${_abs}"            # extract in place; no wget, no /tmp copy
    KEEP_LOCAL_TARBALL=1              # operator's staged file -- never reap it
-   # Parse NUMERIC + SHA from the staged filename (same upstream name).
-   # Tolerate a non-conforming name by leaving these blank (Phase 3 reads
-   # the authoritative .info/version regardless).
-   EXPECTED_NUMERIC="$(echo "${_matched}" \
-      | sed -nE "s|^${_matched_shape}-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-([0-9]+\.[0-9]+(\.[0-9]+)?)-[a-f0-9]+\.tar\.bz2$|\1|p")"
-   THEROCK_SHA="$(echo "${_matched}" \
-      | sed -nE "s|^${_matched_shape}-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-[0-9]+\.[0-9]+(\.[0-9]+)?-([a-f0-9]+)\.tar\.bz2$|\2|p")"
+   # Parse FAMILY + NUMERIC + SHA straight from the staged filename (same
+   # upstream name) instead of assuming the derived AMDGPU_FAMILY: a staged
+   # 24.3.0+ drop carries the `multiarch` segment, not a per-gfx one. Record
+   # the parsed family so the modulefile labels below are accurate. Tolerate a
+   # non-conforming name by leaving these blank (Phase 3 reads the
+   # authoritative .info/version regardless).
+   _fname_re="^${_matched_shape}-${THEROCK_AFAR_RELEASE}-([A-Za-z0-9]+)-([0-9]+\.[0-9]+(\.[0-9]+)?)-([a-f0-9]+)\.tar\.bz2$"
+   if [[ "${_matched}" =~ ${_fname_re} ]]; then
+      AMDGPU_FAMILY="${BASH_REMATCH[1]}"
+      EXPECTED_NUMERIC="${BASH_REMATCH[2]}"
+      THEROCK_SHA="${BASH_REMATCH[4]}"
+   else
+      EXPECTED_NUMERIC=""
+      THEROCK_SHA=""
+   fi
+   unset _fname_re
    echo "Using local tarball: ${_abs}"
    echo "  shape=${_matched_shape}  numeric=${EXPECTED_NUMERIC:-<from .info/version>}  sha=${THEROCK_SHA:-<unknown>}"
    unset _abs
@@ -550,28 +559,37 @@ else
 # upstream flang/ listing carries TWO equivalent shapes for the same REL:
 #   therock-afar-<REL>-<FAMILY>-<X.Y.Z>-<SHA>.tar.bz2   (23.2.x line)
 #   therock-<REL>-<FAMILY>-<X.Y.Z>-<SHA>.tar.bz2        (23.1.x line; no "afar" infix)
-# We don't pin <X.Y.Z> in the regex (only the operator-supplied REL +
-# FAMILY) so AMD reposts (different SHA + same .info/version) auto-pick
-# the latest. Preference order when BOTH shapes exist for the same REL:
-# the explicit `therock-afar-` form wins (operator named the token with
-# the afar infix); fall back to the bare `therock-` form otherwise. This
-# lets `therock-afar-23.1.0` reach the existing `therock-23.1.0-*` files
-# on the flang site without needing a separate token shape.
-_pattern_afar="therock-afar-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-[0-9]+\.[0-9]+(\.[0-9]+)?-[a-f0-9]{4,}\.tar\.bz2"
-_pattern_bare="therock-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-[0-9]+\.[0-9]+(\.[0-9]+)?-[a-f0-9]{4,}\.tar\.bz2"
+# where <FAMILY> was historically a per-gfx-target segment (gfx94X, gfx90a, ...).
+# We don't pin <X.Y.Z> in the regex (only the REL + FAMILY) so AMD reposts
+# (different SHA + same .info/version) auto-pick the latest. Preference order
+# when BOTH shapes exist for the same REL: the explicit `therock-afar-` form
+# wins (operator named the token with the afar infix); fall back to the bare
+# `therock-` form otherwise. This lets `therock-afar-23.1.0` reach the existing
+# `therock-23.1.0-*` files on the flang site without needing a separate token.
+#
+# Multi-arch layout (24.3.0+, 2026-09): AMD stopped shipping per-gfx tarballs
+# and now publishes ONE multi-arch tarball covering all gfx targets, e.g.
+#   therock-afar-24.3.0-multiarch-10.1.0-592954c.tar.bz2
+# The family segment is thus no longer 1:1 with the gfx model. We try the
+# derived/explicit family FIRST (a precise, smaller per-gfx download when it
+# exists) and fall back to the literal `multiarch` segment so gfx942/gfx90a/etc.
+# all resolve to that single file. The family that actually matched is recorded
+# in AMDGPU_FAMILY for the numeric/SHA parse + modulefile labels below.
+_families=( "${AMDGPU_FAMILY}" )
+[[ "${AMDGPU_FAMILY}" != "multiarch" ]] && _families+=( "multiarch" )
 
-# Search directories, in priority order. Pre-release / release-candidate
-# drops (e.g. therock-afar-23.3.0, RC'd 2026-06) land in the HIDDEN .pre/
-# subdir FIRST -- it isn't linked from the public flang/ index, so it
-# stays invisible to anyone browsing https://repo.radeon.com/rocm/misc/flang/
-# until AMD promotes it to the top-level listing. We therefore check the
-# public dir first (so promoted/GA drops win) and fall back to .pre/ for
-# RCs. The directory where the match is found drives the download URL
-# below (a .pre/ match must wget from .pre/, not the public root).
-# NOTE: trailing slash is required on each entry -- Apache directory
-# listings 301-redirect a dir request without it, and curl -fsSL would
+# Search directories, in priority order. Pre-release / release-candidate drops
+# land in a HIDDEN subdir FIRST -- not linked from the public flang/ index, so
+# they stay invisible to anyone browsing https://repo.radeon.com/rocm/misc/flang/
+# until AMD promotes them to the top-level listing. Historically that subdir was
+# `.pre/`; the 24.3.0 drop's companion .txt instead points at a per-release
+# `.pre-<REL>/` subdir. We check the public dir FIRST (so promoted/GA drops win)
+# and fall back to both hidden variants for RCs. The directory where the match
+# is found drives the download URL below (a .pre/ match must wget from .pre/,
+# not the public root). NOTE: trailing slash is required on each entry -- Apache
+# directory listings 301-redirect a dir request without it, and curl -fsSL would
 # need --location; keeping the slash avoids the round-trip.
-_search_dirs=( "${URL_BASE}/" "${URL_BASE}/.pre/" )
+_search_dirs=( "${URL_BASE}/" "${URL_BASE}/.pre/" "${URL_BASE}/.pre-${THEROCK_AFAR_RELEASE}/" )
 
 # `|| true` is REQUIRED on each discovery pipeline: this script runs under
 # `set -eo pipefail` (see top of file), so a grep that finds nothing returns
@@ -581,8 +599,14 @@ _search_dirs=( "${URL_BASE}/" "${URL_BASE}/.pre/" )
 # ONLY the bare `therock-<REL>-...` shape (no afar infix), so the afar
 # pipeline MUST be allowed to return empty so the bare pipeline gets a
 # chance. Discovered 2026-05-26 via job 10698 (therock-afar-23.1.0 FAIL).
+#
+# Loop nesting: DIR is the OUTER loop (public before hidden) so a promoted GA
+# drop always wins over a lingering pre-release copy, regardless of family;
+# FAMILY is the INNER loop (specific gfx before multiarch) so a precise per-gfx
+# tarball wins over the multiarch one within the same dir.
 _matched=""
 _matched_shape=""
+_matched_family=""
 EFFECTIVE_URL_DIR=""
 for _dir in "${_search_dirs[@]}"; do
    echo "  scanning ${_dir}"
@@ -591,40 +615,49 @@ for _dir in "${_search_dirs[@]}"; do
       echo "  (no directory listing at ${_dir}; skipping)"
       continue
    fi
-   # afar-infix shape first ...
-   _cand=$(echo "${_listing}" | grep -oE "${_pattern_afar}" | sort -V -u | tail -n1 || true)
-   if [[ -n "${_cand}" ]]; then
-      _matched="${_cand}"; _matched_shape="therock-afar"; EFFECTIVE_URL_DIR="${_dir}"
-      break
-   fi
-   # ... then the bare `therock-<REL>-...` fallback. grep -v excludes
-   # anything matching the afar-infix shape so we don't double-count
-   # (greedy regex protection). Brace group + `|| true` on the whole
-   # pipeline (not just `tail`) so pipefail from the inner greps doesn't
-   # trip errexit on no-match.
-   _cand=$( { echo "${_listing}" \
-      | grep -oE "${_pattern_bare}" \
-      | grep -v -E "^therock-afar-" \
-      | sort -V -u | tail -n1; } || true)
-   if [[ -n "${_cand}" ]]; then
-      _matched="${_cand}"; _matched_shape="therock"; EFFECTIVE_URL_DIR="${_dir}"
-      break
-   fi
+   for _fam in "${_families[@]}"; do
+      _pattern_afar="therock-afar-${THEROCK_AFAR_RELEASE}-${_fam}-[0-9]+\.[0-9]+(\.[0-9]+)?-[a-f0-9]{4,}\.tar\.bz2"
+      _pattern_bare="therock-${THEROCK_AFAR_RELEASE}-${_fam}-[0-9]+\.[0-9]+(\.[0-9]+)?-[a-f0-9]{4,}\.tar\.bz2"
+      # afar-infix shape first ...
+      _cand=$(echo "${_listing}" | grep -oE "${_pattern_afar}" | sort -V -u | tail -n1 || true)
+      if [[ -n "${_cand}" ]]; then
+         _matched="${_cand}"; _matched_shape="therock-afar"; _matched_family="${_fam}"; EFFECTIVE_URL_DIR="${_dir}"
+         break 2
+      fi
+      # ... then the bare `therock-<REL>-...` fallback. grep -v excludes
+      # anything matching the afar-infix shape so we don't double-count
+      # (greedy regex protection). Brace group + `|| true` on the whole
+      # pipeline (not just `tail`) so pipefail from the inner greps doesn't
+      # trip errexit on no-match.
+      _cand=$( { echo "${_listing}" \
+         | grep -oE "${_pattern_bare}" \
+         | grep -v -E "^therock-afar-" \
+         | sort -V -u | tail -n1; } || true)
+      if [[ -n "${_cand}" ]]; then
+         _matched="${_cand}"; _matched_shape="therock"; _matched_family="${_fam}"; EFFECTIVE_URL_DIR="${_dir}"
+         break 2
+      fi
+   done
 done
-unset _cand _dir
+unset _cand _dir _fam
 if [[ -z "${_matched}" ]]; then
-   echo "ERROR: no tarball matching 'therock-afar-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-*.tar.bz2'" >&2
-   echo "       or 'therock-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-*.tar.bz2' in any of:" >&2
+   echo "ERROR: no tarball matching 'therock[-afar]-${THEROCK_AFAR_RELEASE}-{${AMDGPU_FAMILY},multiarch}-*.tar.bz2' in any of:" >&2
    for _dir in "${_search_dirs[@]}"; do echo "         ${_dir}" >&2; done
    echo "       Verify the release tag + gfx-family combination exists upstream." >&2
-   echo "       Available therock[-afar]-${THEROCK_AFAR_RELEASE} families on the listings:" >&2
+   echo "       Available therock[-afar]-${THEROCK_AFAR_RELEASE} tarballs on the listings:" >&2
    for _dir in "${_search_dirs[@]}"; do
       curl -fsSL --max-time 60 "${_dir}" 2>/dev/null \
-         | grep -oE "therock(-afar)?-${THEROCK_AFAR_RELEASE}-gfx[A-Za-z0-9]+-[0-9.]+-[a-f0-9]+\.tar\.bz2" \
+         | grep -oE "therock(-afar)?-${THEROCK_AFAR_RELEASE}-[A-Za-z0-9]+-[0-9.]+-[a-f0-9]+\.tar\.bz2" \
          | sed "s|^|         ${_dir} |" >&2 || true
    done
    unset _dir
    exit 1
+fi
+# Record the family that actually matched (may be `multiarch` from the
+# fallback) so the numeric/SHA parse + modulefile labels below are accurate.
+if [[ "${_matched_family}" != "${AMDGPU_FAMILY}" ]]; then
+   echo "NOTE: no '${AMDGPU_FAMILY}' tarball for ${THEROCK_AFAR_RELEASE}; matched '${_matched_family}' family instead"
+   AMDGPU_FAMILY="${_matched_family}"
 fi
 echo "Matched upstream filename shape: ${_matched_shape}-${THEROCK_AFAR_RELEASE}-${AMDGPU_FAMILY}-...tar.bz2"
 echo "Found in directory: ${EFFECTIVE_URL_DIR}"
@@ -746,7 +779,7 @@ trap _therock_afar_on_exit EXIT
 
 # ---------------- Phase 2: download + extract -------------------------
 echo "============================================================"
-echo "  Phase 2: ${LOCAL_TARBALL_INPUT:+extract staged tarball}${LOCAL_TARBALL_INPUT:-wget} + tar -xjpf -> ${STAGING_DIR}"
+echo "  Phase 2: ${LOCAL_TARBALL_INPUT:+extract staged tarball}${LOCAL_TARBALL_INPUT:-wget} + parallel-tar extract -> ${STAGING_DIR}"
 echo "============================================================"
 if [[ -z "${LOCAL_TARBALL_INPUT}" ]]; then
    rm -f "${LOCAL_TARBALL}"
@@ -766,7 +799,26 @@ fi
 # rename-only (same filesystem == atomic, no NFS cross-mount copy).
 ${SUDO} rm -rf "${STAGING_DIR}"
 make_dir_root "${STAGING_DIR}"
-${SUDO} tar -xjpf "${LOCAL_TARBALL}" -C "${STAGING_DIR}"
+# Prefer a PARALLEL bzip2 decompressor. The multiarch flang drops are large
+# (24.3.0 is ~9.7 GB compressed / ~23 GB extracted) and stock `tar -j`
+# (single-threaded libbz2) is the dominant cost of the whole install. lbzip2 is
+# preferred over pbzip2 because it parallelizes decompression of ANY .bz2 file,
+# including the single-stream files produced by ordinary bzip2; pbzip2 only
+# parallelizes files it compressed itself. Fall back to serial bzip2 (`-j`) when
+# neither is installed. lbzip2 is baked into the Warewulf compute image via
+# infrastructure/warewulf-image-mods/lbzip2/apply-lbzip2-to-image.sh.
+_bz_par=""
+for _p in lbzip2 pbzip2; do
+   command -v "${_p}" >/dev/null 2>&1 && { _bz_par="${_p}"; break; }
+done
+if [[ -n "${_bz_par}" ]]; then
+   echo "Extracting with parallel decompressor ${_bz_par} ($(nproc 2>/dev/null || echo '?') cores) -> ${STAGING_DIR}"
+   ${SUDO} tar --use-compress-program="${_bz_par}" -xpf "${LOCAL_TARBALL}" -C "${STAGING_DIR}"
+else
+   echo "Extracting with serial bzip2 (install lbzip2/pbzip2 for a parallel extract) -> ${STAGING_DIR}"
+   ${SUDO} tar -xjpf "${LOCAL_TARBALL}" -C "${STAGING_DIR}"
+fi
+unset _bz_par _p
 echo "Extracted into staging: ${STAGING_DIR}"
 
 # ---------------- Phase 3: locate .info/version + derive ROCM_NUMERIC -
