@@ -2,6 +2,19 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-09-28
+
+- Slurm partitions:
+    + MI250_SPX:4
+    + sh5_cpx_admin_long:4
+    - MI250_SPX:2
+    - sh5_cpx_admin_long:3
+- Down/drained nodes:
+    + gct-ccs1-d21-05:down
+    + ppac-pl1-s24-26:down
+    + ppac-pl1-s24-30:down
+
+[Full snapshot](archive/AAC6_system_status_2026-09-28.md)
 ## 2026-09-27
 
 - Slurm partitions:
