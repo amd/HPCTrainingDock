@@ -85,11 +85,30 @@ usage()
    echo "--help: print this usage information"
 }
 
+# true when dotted version $1 >= $2 (sort -V: a non-numeric prefix such as
+# therock- sorts after digits, so therock-7.13.0 counts as >= 7.0)
+_jax_ver_ge() { [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" = "$2" ]; }
+
+# JAX lines whose ROCm GPU support ships as separate jax_rocm*_plugin wheels
+_jax_uses_plugin_wheels() {
+   [[ ${JAX_VERSION} == 5.0 || ${JAX_VERSION} == 6.0 ]] || _jax_ver_ge "0.${JAX_VERSION}" 0.7.1
+}
+
+# prints "sudo" unless the caller can already write $1 (or its nearest
+# existing ancestor), so user-writable prefixes build without sudo
+_jax_sudo_for() {
+   local _d=$1
+   while [ ! -e "${_d}" ] && [ "${_d}" != "/" ]; do _d=$(dirname "${_d}"); done
+   if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "${_d}" ]; then echo ""; else echo "sudo"; fi
+}
+
 compat_info()
 {
-   echo " List of compatible versions according to https://github.com/ROCm/jax/releases: "
-   echo " JAX version 8.0 --> ROCm version 7.0.0 or higher and Python higher than 3.10 "
-   echo " JAX version 7.1 --> ROCm version 7.0.0 or higher and Python higher than 3.10 "
+   echo " List of compatible versions according to https://github.com/ROCm/jax/releases and https://github.com/ROCm/rocm-jax: "
+   echo " JAX version 11.x --> ROCm version 7.0.0 or higher and Python 3.12 or higher "
+   echo " JAX version 10.x --> ROCm version 7.0.0 or higher and Python 3.11 or higher "
+   echo " JAX version 7.1 to 9.x --> ROCm version 7.0.0 or higher and Python higher than 3.10 "
+   echo "   (requires rocm-jaxlib-v0.X.Y branches in ROCm/xla, ROCm/jax and ROCm/rocm-jax; e.g. 8.1 has no ROCm/xla branch) "
    echo " JAX version 6.0 --> ROCm version 7.0.0 or higher and Python 3.10 supported (transition release) "
    echo " JAX version 5.0 --> ROCm versions 6.0.3, 6.2.4 and 6.3.1 "
    echo " JAX version 4.35 --> ROCm versions 6.0.3, 6.1.3 and 6.2.4 "
@@ -341,6 +360,10 @@ else
    JAXLIB_PATH=/opt/rocmplus-${ROCM_VERSION}/jaxlib-v0.${JAX_VERSION}
 fi
 
+if [ -n "${SUDO}" ] && [ -z "$(_jax_sudo_for "${JAX_PATH}")" ] && [ -z "$(_jax_sudo_for "${JAXLIB_PATH}")" ]; then
+   SUDO=""
+fi
+
 # Sibling markers for bare_system/inventory_packages.py ('N' = not buildable on
 # this stack), mirroring pytorch.SKIPPED / ftorch.SKIPPED.
 _jax_write_policy_skip_markers() {
@@ -351,7 +374,7 @@ _jax_write_policy_skip_markers() {
       echo "jax: could not create skip-marker dir ${_root}" >&2
       return 0
    fi
-   _line="ROCm ${ROCM_VERSION} on Ubuntu ${DISTRO_VERSION}: JAX lines for ROCm 7+ need Python 3.11+; this stack uses Python 3.10. Not buildable without upgrading Python or using ROCm 6.x with JAX 5.0."
+   _line="ROCm ${ROCM_VERSION} on ${DISTRO} ${DISTRO_VERSION}: JAX lines for ROCm 7+ need Python 3.10+ (3.11+ from JAX 7.1); this stack uses Python ${PYMAJOR}.${PYMINOR}. Not buildable without upgrading Python or using ROCm 6.x with JAX 5.0."
    for _pkg in jax jaxlib; do
       ${SUDO} tee "${_root}/${_pkg}.SKIPPED" >/dev/null 2>/dev/null <<MARKER_EOF || true
 SKIPPED package: ${_pkg} (jax driver also governs jaxlib)
@@ -424,7 +447,7 @@ fi
 # modulefile. Replaces inline `trap '... rm JAX_BUILD_ROOT ...' EXIT`.
 _jax_on_exit() {
    local rc=$?
-   [ -n "${JAX_BUILD_ROOT:-}" ] && ${SUDO:-sudo} rm -rf "${JAX_BUILD_ROOT}"
+   [ -n "${JAX_BUILD_ROOT:-}" ] && ${SUDO} rm -rf "${JAX_BUILD_ROOT}"
    # attempted-but-failed markers (inventory 'F' glyph): persistent siblings
    # of the install dirs that survive the rm -rf below; cleared on success.
    # Inventory tracks 'jax' and 'jaxlib' as separate rows, so drop one
@@ -432,8 +455,8 @@ _jax_on_exit() {
    _jax_fail_marker="$(dirname "${JAX_PATH}")/jax.FAILED"
    _jaxlib_fail_marker="$(dirname "${JAXLIB_PATH}")/jaxlib.FAILED"
    if [ ${rc} -ne 0 ]; then
-      ${SUDO:-sudo} mkdir -p "$(dirname "${JAX_PATH}")" 2>/dev/null || true
-      ${SUDO:-sudo} tee "${_jax_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+      ${SUDO} mkdir -p "$(dirname "${JAX_PATH}")" 2>/dev/null || true
+      ${SUDO} tee "${_jax_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
 FAILED package: jax
 ROCm SDK:        ${ROCM_PATH:-unknown}
 ROCm token:      ${ROCM_VERSION:-unknown}
@@ -441,8 +464,8 @@ Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
 Setup script:    jax_setup.sh (EXIT-trap fail marker)
 Reason:          build exited rc=${rc}; partial install wiped (see log_jax_*.txt).
 MARKER_EOF
-      ${SUDO:-sudo} mkdir -p "$(dirname "${JAXLIB_PATH}")" 2>/dev/null || true
-      ${SUDO:-sudo} tee "${_jaxlib_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
+      ${SUDO} mkdir -p "$(dirname "${JAXLIB_PATH}")" 2>/dev/null || true
+      ${SUDO} tee "${_jaxlib_fail_marker}" >/dev/null 2>/dev/null <<MARKER_EOF || true
 FAILED package: jaxlib
 ROCm SDK:        ${ROCM_PATH:-unknown}
 ROCm token:      ${ROCM_VERSION:-unknown}
@@ -451,12 +474,12 @@ Setup script:    jax_setup.sh (EXIT-trap fail marker)
 Reason:          build exited rc=${rc}; partial install wiped (see log_jax_*.txt).
 MARKER_EOF
    else
-      ${SUDO:-sudo} rm -f "${_jax_fail_marker}" "${_jaxlib_fail_marker}"
+      ${SUDO} rm -f "${_jax_fail_marker}" "${_jaxlib_fail_marker}"
    fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
       echo "[jax fail-cleanup] rc=${rc}: removing partial jax + jaxlib installs + modulefile"
-      ${SUDO:-sudo} rm -rf "${JAX_PATH}" "${JAXLIB_PATH}"
-      ${SUDO:-sudo} rm -f  "${MODULE_PATH}/0.${JAX_VERSION}.lua" \
+      ${SUDO} rm -rf "${JAX_PATH}" "${JAXLIB_PATH}"
+      ${SUDO} rm -f  "${MODULE_PATH}/0.${JAX_VERSION}.lua" \
                            "${MODULE_PATH}/0.${JAX_VERSION}"
    elif [ ${rc} -ne 0 ]; then
       echo "[jax fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
@@ -551,7 +574,8 @@ else
       # jax-v0.${JAX_VERSION}/ and jaxlib-v0.${JAX_VERSION}/ -- match the
       # versioned JAX_PATH / JAXLIB_PATH layout the from-source branch
       # writes to, so multiple jax releases coexist on disk.
-      cd /opt/rocmplus-${ROCM_VERSION}
+      ${SUDO} mkdir -p "$(dirname "${JAX_PATH}")"
+      cd "$(dirname "${JAX_PATH}")"
 
       ${SUDO} tar -xzpf ${CACHE_FILES}/jax-v0.${JAX_VERSION}.tgz
       ${SUDO} chown -R root:root ${JAX_PATH}
@@ -569,22 +593,65 @@ else
       echo "======================================="
       echo ""
 
-      # don't use sudo if user has write access to both install paths
-      if [ -d "$JAX_PATH" ]; then
-         if [ -d "$JAXLIB_PATH" ]; then
-            # don't use sudo if user has write access to both install paths
-            if [ -w ${JAX_PATH} ]; then
-               if [ -w ${JAXLIB_PATH} ]; then
-               SUDO=""
-               else
-                  echo "WARNING: using install paths that require sudo"
-               fi
-            fi
-         fi
-      else
-         # if install paths do not both exist yet
+      if [ -n "${SUDO}" ]; then
          echo "WARNING: using sudo, make sure you have sudo privileges"
       fi
+
+      # ── Build recipe selection ───────────────────────────────────────
+      #   fork         (>= 0.10) jax + jaxlib from PyPI; plugin + pjrt from the
+      #                ROCm/jax rocm-jaxlib-v0.X branch (rocm-jax README).
+      #   split        (0.7.1 - 0.9.x) jaxlib from ROCm/jax, plugin + pjrt from
+      #                the ROCm/rocm-jax release branch, both on ROCm/xla.
+      #   monorepo     (5.0, 6.0) all three wheels from ROCm/jax.
+      #   clang_legacy (4.35 on ROCm >= 6.4) / gcc_legacy (ROCm < 6.4): jaxlib
+      #                with the built-in GPU plugin from ROCm/jax.
+      JAX_V="0.${JAX_VERSION}"
+      JAX_MIN_ROCM=""; JAX_MIN_PY=""
+      if _jax_ver_ge "${JAX_V}" 0.10; then
+         JAX_RECIPE=fork; JAX_MIN_ROCM=7.0; JAX_MIN_PY=3.11
+         _jax_ver_ge "${JAX_V}" 0.11 && JAX_MIN_PY=3.12
+      elif _jax_ver_ge "${JAX_V}" 0.7.1; then
+         JAX_RECIPE=split; JAX_MIN_ROCM=7.0; JAX_MIN_PY=3.11
+      elif [[ ${JAX_VERSION} == 5.0 || ${JAX_VERSION} == 6.0 ]]; then
+         JAX_RECIPE=monorepo
+      elif ! _jax_ver_ge "${ROCM_VERSION}" 6.4; then
+         JAX_RECIPE=gcc_legacy
+      elif [[ ${JAX_VERSION} == 4.35 ]]; then
+         JAX_RECIPE=clang_legacy
+      else
+         echo " JAX version $JAX_VERSION not compatible with ROCm 6.4.0 "
+         compat_info
+      fi
+      if [ -n "${JAX_MIN_ROCM}" ] && ! _jax_ver_ge "${ROCM_VERSION}" "${JAX_MIN_ROCM}"; then
+         echo "JAX ${JAX_V} needs ROCm >= ${JAX_MIN_ROCM} (got ${ROCM_VERSION})"
+         compat_info
+      fi
+      if [ -n "${JAX_MIN_PY}" ] && ! _jax_ver_ge "${PYMAJOR}.${PYMINOR}" "${JAX_MIN_PY}"; then
+         echo "JAX ${JAX_V} needs Python >= ${JAX_MIN_PY} (got ${PYMAJOR}.${PYMINOR}): https://docs.jax.dev/en/latest/deprecation.html"
+         compat_info
+      fi
+
+      # first of the given refs (branch or tag) that exists in the remote
+      _jax_first_ref() {
+         local _url=$1 _ref; shift
+         for _ref in "$@"; do
+            if git ls-remote --exit-code "${_url}" "refs/heads/${_ref}" "refs/tags/${_ref}" >/dev/null 2>&1; then
+               echo "${_ref}"; return 0
+            fi
+         done
+         echo "jax: none of [$*] found in ${_url} (or remote unreachable)" >&2
+         return 1
+      }
+      JAX_REF=$(_jax_first_ref https://github.com/ROCm/jax.git "rocm-jaxlib-v${JAX_V}") || compat_info
+      if [ "${JAX_RECIPE}" != fork ]; then
+         XLA_REF=$(_jax_first_ref https://github.com/ROCm/xla.git "rocm-jaxlib-v${JAX_V}") || compat_info
+      fi
+      if [ "${JAX_RECIPE}" = split ]; then
+         # the README builds from the release branch; the rocm-jax-v* tag is an
+         # older snapshot of it and does not exist for every release
+         PLUGIN_REF=$(_jax_first_ref https://github.com/ROCm/rocm-jax.git "rocm-jaxlib-v${JAX_V}" "rocm-jax-v${JAX_V}") || compat_info
+      fi
+      echo "jax: recipe=${JAX_RECIPE} jax_ref=${JAX_REF} xla_ref=${XLA_REF:-pinned} plugin_ref=${PLUGIN_REF:-n/a}"
 
       ROCM_VERSION_BAZEL=`echo "$ROCM_VERSION" | sed 's/therock-//' | awk -F. '{print $1}'`
       if [[ "${ROCM_VERSION_BAZEL}" == "6" ]]; then
@@ -753,14 +820,83 @@ else
 
       AMDGPU_GFXMODEL=`echo ${AMDGPU_GFXMODEL} | sed -e 's/;/,/g'`
 
-      git clone --depth 1 --branch rocm-jaxlib-v0.${JAX_VERSION} https://github.com/ROCm/xla.git
-      cd xla
-      export XLA_PATH=$PWD
-      cd ..
-      git clone --depth 1 --branch rocm-jaxlib-v0.${JAX_VERSION} https://github.com/ROCm/jax.git
+      # each branch's bazelrc carries its own default target list; replace it whatever it is
+      _jax_set_gfx_targets() {
+         sed -i -E "s|(TF_ROCM_AMDGPU_TARGETS[= ]+\")[^\"]*\"|\1${AMDGPU_GFXMODEL}\"|g" "$@"
+      }
+
+      # point the bazelrc's hardcoded /usr/lib/llvm-18 clang at the ROCm clang
+      _jax_use_amdclang() {
+         if [ -z "${_JAX_AMDCLANG_LOADED:-}" ]; then
+            module load amdclang
+            export CLANG_COMPILER=`which clang`
+            _JAX_AMDCLANG_LOADED=1
+         fi
+         sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|g" "$@"
+      }
+
+      _jax_build_patchelf() {
+         PATCHELF_PATH=${JAX_PATH}/patchelf
+         ${SUDO} mkdir -p ${PATCHELF_PATH}
+         git clone -b ${PATCHELF_VERSION} https://github.com/NixOS/patchelf.git
+         cd patchelf
+         ./bootstrap.sh
+         ./configure --prefix=$PATCHELF_PATH
+         make -j
+         ${SUDO} make install
+         export PATH=$PATH:$PATCHELF_PATH/bin
+         cd ../
+         rm -rf patchelf
+      }
+
+      JAX_BAZEL_PERF_OPTS=(
+         --bazel_options=--jobs=128
+         --bazel_options=--noexperimental_check_external_repository_files
+         --bazel_startup_options=--output_base="${BAZEL_OUTPUT_BASE}"
+         # per-job install bases (one per bazel release, as the split recipe
+         # runs two): concurrent builds unpacking the same release into the
+         # shared ~/.cache/bazel corrupt it
+         --bazel_startup_options=--output_user_root="${JAX_BUILD_ROOT}/bazel-root"
+         --bazel_startup_options=--host_jvm_args=-Xmx16g
+         --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC
+         --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
+      )
+      _jax_build_py() {
+         _jax_strip_rocm_cpath
+         python3 build/build.py "$@" "${JAX_BAZEL_PERF_OPTS[@]}" || exit 1
+      }
+
+      # $ROCM_PATH/llvm is a symlink on TheRock-style installs; XLA's ROCm
+      # crosstool lists clang's builtin headers via the symlinked path, so
+      # clang must not canonicalize it or Bazel rejects the includes as
+      # "absolute path inclusion(s)" (e.g. cet.h from zstd's .S files).
+      JAX_CLANG_OPTS=(
+         --clang_path=$ROCM_PATH/llvm/bin/clang
+         --rocm_version=$ROCM_VERSION_BAZEL
+         --use_clang=true
+         "${JAX_CLANG_RUNTIME_BAZELOPTS[@]}"
+         --bazel_options=--copt=-no-canonical-prefixes
+         --bazel_options=--host_copt=-no-canonical-prefixes
+      )
+
+      # from a ROCm/jax checkout: the built jaxlib wheel(s), then jax itself
+      _jax_install_jaxlib_and_jax() {
+         pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall || exit 1
+         pip3 install --no-deps --target=${JAX_PATH} . || exit 1
+         pip3 install --no-deps --target=${JAX_PATH} opt-einsum || exit 1
+      }
+
+      XLA_OVERRIDE=()
+      if [ "${JAX_RECIPE}" != fork ]; then
+         git clone --depth 1 --branch ${XLA_REF} https://github.com/ROCm/xla.git
+         cd xla
+         export XLA_PATH=$PWD
+         cd ..
+         XLA_OVERRIDE=( --bazel_options=--override_repository=xla=$XLA_PATH )
+      fi
+      git clone --depth 1 --branch ${JAX_REF} https://github.com/ROCm/jax.git
       cd jax
-      sed -i "s|gfx900,gfx906,gfx908,gfx90a,gfx940,gfx941,gfx942,gfx1030,gfx1100,gfx1200,gfx1201|$AMDGPU_GFXMODEL|g" .bazelrc
-      sed -i "s|gfx906,gfx908,gfx90a,gfx942,gfx1030,gfx1100,gfx1101,gfx1200,gfx1201|$AMDGPU_GFXMODEL|g" .bazelrc
+      _jax_set_gfx_targets .bazelrc
 
       # install necessary packages in installation directory
       ${SUDO} mkdir -p ${JAXLIB_PATH}
@@ -770,219 +906,61 @@ else
          ${SUDO} chmod a+w ${JAXLIB_PATH}
       fi
 
-      # this here is to take into account that the ROCm/jax repo has been deprecated
-      # after the release of ROCm 7.1.0 and now it is all located at ROCm/rocm-jax
-      if [[ $JAX_VERSION == "7.1" || $JAX_VERSION == "8.0" ]]; then
-         result=$( [ "$(printf '%s\n%s\n' "$ROCM_VERSION" "7.0" | sort -V | tail -n1)" != "7.0" ] && printf '%s' "$ROCM_VERSION" || : ) && echo $result
-         # check if ROCm version is greater than or equal to 7.0
-         if [[ "${result}" ]]; then
-
-            PYTHON_VERSION=$(python3 -V 2>&1 | awk '{print $2}')
-            if [[ "$PYTHON_VERSION" == 3.10.* ]]; then
-               echo "Python 3.10 is not supported from JAX 7.1 : https://docs.jax.dev/en/latest/deprecation.html"
-               compat_info
-            fi
-
-            # we are building jaxlib with the ROCm/jax repo
-            PATCHELF_PATH=${JAX_PATH}/patchelf
-            ${SUDO} mkdir -p ${PATCHELF_PATH}
-            git clone -b ${PATCHELF_VERSION} https://github.com/NixOS/patchelf.git
-            cd patchelf
-            ./bootstrap.sh
-            ./configure --prefix=$PATCHELF_PATH
-            make -j
-            ${SUDO} make install
-            export PATH=$PATH:$PATCHELF_PATH/bin
-            cd ../
-            rm -rf patchelf
-            module load amdclang
-            export CLANG_COMPILER=`which clang`
-            sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|g" .bazelrc
-            _jax_strip_rocm_cpath
-            python3 build/build.py build --rocm_path=$ROCM_PATH \
-                                         --bazel_options=--override_repository=xla=$XLA_PATH \
-                                         --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
-                                         --clang_path=$ROCM_PATH/llvm/bin/clang \
-                                         --rocm_version=$ROCM_VERSION_BAZEL \
-                                         --use_clang=true \
-                                         "${JAX_CLANG_RUNTIME_BAZELOPTS[@]}" \
-                                         --wheels=jaxlib \
-                                         --bazel_options=--jobs=128 \
-                                         --bazel_options=--noexperimental_check_external_repository_files \
-                                         --bazel_startup_options=--output_base="${BAZEL_OUTPUT_BASE}" \
-                                         --bazel_startup_options=--host_jvm_args=-Xmx16g \
-                                         --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC \
-                                         --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
-
-	    # install the wheel for jaxlib
-            pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
-            # next we need to install the jax python module
-            pip3 install --no-deps --target=${JAX_PATH} .
-            pip3 install --no-deps --target=${JAX_PATH} opt-einsum
-
+      case "${JAX_RECIPE}" in
+         gcc_legacy)
+            _jax_build_py --enable_rocm --rocm_path=$ROCM_PATH "${XLA_OVERRIDE[@]}" \
+                          --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
+                          --bazel_options=--action_env=CC=/usr/bin/gcc --nouse_clang \
+                          --build_gpu_plugin --gpu_plugin_rocm_version=$ROCM_VERSION_BAZEL --build_gpu_kernel_plugin=rocm
+            _jax_install_jaxlib_and_jax
+            ;;
+         clang_legacy)
+            sed -i '$a build:rocm --copt=-Wno-error=c23-extensions' .bazelrc
+            _jax_use_amdclang .bazelrc
+            _jax_build_py --enable_rocm --rocm_path=$ROCM_PATH "${XLA_OVERRIDE[@]}" \
+                          --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
+                          --build_gpu_plugin --gpu_plugin_rocm_version=$ROCM_VERSION_BAZEL --build_gpu_kernel_plugin=rocm
+            _jax_install_jaxlib_and_jax
+            ;;
+         monorepo)
+            _jax_build_patchelf
+            _jax_use_amdclang .bazelrc
+            _jax_build_py build --rocm_path=$ROCM_PATH "${XLA_OVERRIDE[@]}" \
+                          --rocm_amdgpu_targets=$AMDGPU_GFXMODEL "${JAX_CLANG_OPTS[@]}" \
+                          --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt
+            _jax_install_jaxlib_and_jax
+            ;;
+         split)
+            _jax_build_patchelf
+            _jax_use_amdclang .bazelrc
+            _jax_build_py build --rocm_path=$ROCM_PATH "${XLA_OVERRIDE[@]}" \
+                          --rocm_amdgpu_targets=$AMDGPU_GFXMODEL "${JAX_CLANG_OPTS[@]}" \
+                          --wheels=jaxlib
+            _jax_install_jaxlib_and_jax
             cd ..
-	    # then we are using the ROCm/rocm-jax repo to build the other wheels
-   	    git clone  --depth 1 --branch rocm-jax-v0.${JAX_VERSION} https://github.com/ROCm/rocm-jax.git
-	    cd rocm-jax/jax_rocm_plugin
-            sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|g" .bazelrc
-            sed -i "s|gfx906,gfx908,gfx90a,gfx942,gfx1030,gfx1100,gfx1101,gfx1200,gfx1201|$AMDGPU_GFXMODEL|g" .bazelrc
-	    _jax_strip_rocm_cpath
-	    python3 build/build.py build --rocm_path=$ROCM_PATH \
-                                         --bazel_options=--override_repository=xla=$XLA_PATH \
-                                         --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
-                                         --clang_path=$ROCM_PATH/llvm/bin/clang \
-                                         --rocm_version=$ROCM_VERSION_BAZEL \
-                                         --use_clang=true \
-                                         "${JAX_CLANG_RUNTIME_BAZELOPTS[@]}" \
-                                         --wheels=jax-rocm-plugin,jax-rocm-pjrt \
-                                         --bazel_options=--jobs=128 \
-                                         --bazel_options=--noexperimental_check_external_repository_files \
-                                         --bazel_startup_options=--output_base="${BAZEL_OUTPUT_BASE}" \
-                                         --bazel_startup_options=--host_jvm_args=-Xmx16g \
-                                         --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC \
-                                         --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
-            # next we need to install the wheels that we built
-            pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
-
-         else
-	    echo "For JAX version 7.1 you need at least ROCm 7.0.0"
-            compat_info	    
-         fi		 
-      else 	      
-         result=$( [ "$(printf '%s\n%s\n' "$ROCM_VERSION" "6.3.9" | sort -V | tail -n1)" != "6.3.9" ] && printf '%s' "$ROCM_VERSION" || : ) && echo $result
-         # check if ROCm version is greater than or equal to 6.4.0
-         if [[ "${result}" ]]; then
-            if [[ $JAX_VERSION == "4.35" ]]; then
-               sed -i '$a build:rocm --copt=-Wno-error=c23-extensions' .bazelrc
-               module load amdclang
-               export CLANG_COMPILER=`which clang`
-               sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|g" .bazelrc
-               # build the wheel for jaxlib using clang (which is the default)
-               _jax_strip_rocm_cpath
-               python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
-                                      --bazel_options=--override_repository=xla=$XLA_PATH \
-                                      --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
-                                      --build_gpu_plugin --gpu_plugin_rocm_version=$ROCM_VERSION_BAZEL --build_gpu_kernel_plugin=rocm \
-                                      --bazel_options=--jobs=128 \
-                                      --bazel_options=--noexperimental_check_external_repository_files \
-                                      --bazel_startup_options=--output_base="${BAZEL_OUTPUT_BASE}" \
-                                      --bazel_startup_options=--host_jvm_args=-Xmx16g \
-                                      --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC \
-                                      --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
-
-               # install the wheel for jaxlib
-               pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
-
-               # next we need to install the jax python module
-               pip3 install --no-deps --target=${JAX_PATH} .
-               pip3 install --no-deps --target=${JAX_PATH} opt-einsum
-
-            elif [[ $JAX_VERSION == "5.0" || $JAX_VERSION == "6.0" ]]; then
-               PATCHELF_PATH=${JAX_PATH}/patchelf
-               ${SUDO} mkdir -p ${PATCHELF_PATH}
-               git clone -b ${PATCHELF_VERSION} https://github.com/NixOS/patchelf.git
-               cd patchelf
-               ./bootstrap.sh
-               ./configure --prefix=$PATCHELF_PATH
-               make -j
-               ${SUDO} make install
-               export PATH=$PATH:$PATCHELF_PATH/bin
-               cd ../
-               rm -rf patchelf
-               module load amdclang
-               export CLANG_COMPILER=`which clang`
-               sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|g" .bazelrc
-               _jax_strip_rocm_cpath
-               python3 build/build.py build --rocm_path=$ROCM_PATH \
-                                            --bazel_options=--override_repository=xla=$XLA_PATH \
-                                            --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
-                                            --clang_path=$ROCM_PATH/llvm/bin/clang \
-                                            --rocm_version=$ROCM_VERSION_BAZEL \
-                                            --use_clang=true \
-                                            "${JAX_CLANG_RUNTIME_BAZELOPTS[@]}" \
-                                            --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
-                                            --bazel_options=--jobs=128 \
-                                            --bazel_options=--noexperimental_check_external_repository_files \
-                                            --bazel_startup_options=--output_base="${BAZEL_OUTPUT_BASE}" \
-                                            --bazel_startup_options=--host_jvm_args=-Xmx16g \
-                                            --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC \
-                                            --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
- 
-               # install the wheel for jaxlib
-               pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
-
-               # next we need to install the jax python module
-               pip3 install --no-deps --target=${JAX_PATH} .
-               pip3 install --no-deps --target=${JAX_PATH} opt-einsum
-
-            else
-               echo " JAX version $JAX_VERSION not compatible with ROCm 6.4.0 "
-               compat_info
-            fi
-         else
-            if [[ $JAX_VERSION == "5.0" || $JAX_VERSION == "6.0" ]]; then
-               PATCHELF_PATH=${JAX_PATH}/patchelf
-               ${SUDO} mkdir -p ${PATCHELF_PATH}
-               git clone -b ${PATCHELF_VERSION} https://github.com/NixOS/patchelf.git
-               cd patchelf
-               ./bootstrap.sh
-               ./configure --prefix=$PATCHELF_PATH
-               make -j
-               ${SUDO} make install
-               export PATH=$PATH:$PATCHELF_PATH/bin
-               cd ../
-               rm -rf patchelf
-               module load amdclang
-               export CLANG_COMPILER=`which clang`
-               sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|g" .bazelrc
-               _jax_strip_rocm_cpath
-               python3 build/build.py build --rocm_path=$ROCM_PATH \
-                                            --bazel_options=--override_repository=xla=$XLA_PATH \
-                                            --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
-                                            --clang_path=$ROCM_PATH/llvm/bin/clang \
-                                            --rocm_version=$ROCM_VERSION_BAZEL \
-                                            --use_clang=true \
-                                            "${JAX_CLANG_RUNTIME_BAZELOPTS[@]}" \
-                                            --wheels=jaxlib,jax-rocm-plugin,jax-rocm-pjrt \
-                                            --bazel_options=--jobs=128 \
-                                            --bazel_options=--noexperimental_check_external_repository_files \
-                                            --bazel_startup_options=--output_base="${BAZEL_OUTPUT_BASE}" \
-                                            --bazel_startup_options=--host_jvm_args=-Xmx16g \
-                                            --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC \
-                                            --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
-
-               # install the wheel for jaxlib
-               pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
-
-               # next we need to install the jax python module
-               pip3 install --no-deps --target=${JAX_PATH} .
-               pip3 install --no-deps --target=${JAX_PATH} opt-einsum
-
-            else
-               # build the wheel for jaxlib using gcc
-               _jax_strip_rocm_cpath
-               python3 build/build.py --enable_rocm --rocm_path=$ROCM_PATH \
-                                      --bazel_options=--override_repository=xla=$XLA_PATH \
-                                      --rocm_amdgpu_targets=$AMDGPU_GFXMODEL \
-                                      --bazel_options=--action_env=CC=/usr/bin/gcc --nouse_clang \
-                                      --build_gpu_plugin --gpu_plugin_rocm_version=$ROCM_VERSION_BAZEL --build_gpu_kernel_plugin=rocm \
-                                      --bazel_options=--jobs=128 \
-                                      --bazel_options=--noexperimental_check_external_repository_files \
-                                      --bazel_startup_options=--output_base="${BAZEL_OUTPUT_BASE}" \
-                                      --bazel_startup_options=--host_jvm_args=-Xmx16g \
-                                      --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC \
-                                      --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
-
-               # install the wheel for jaxlib
-               pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall
-
-               # next we need to install the jax python module
-               pip3 install --no-deps --target=${JAX_PATH} .
-               pip3 install --no-deps --target=${JAX_PATH} opt-einsum
-
-            fi
-         fi
-      fi	 
+            git clone --depth 1 --branch ${PLUGIN_REF} https://github.com/ROCm/rocm-jax.git
+            cd rocm-jax/jax_rocm_plugin
+            _jax_use_amdclang .bazelrc
+            _jax_set_gfx_targets .bazelrc
+            _jax_build_py build --rocm_path=$ROCM_PATH "${XLA_OVERRIDE[@]}" \
+                          --rocm_amdgpu_targets=$AMDGPU_GFXMODEL "${JAX_CLANG_OPTS[@]}" \
+                          --wheels=jax-rocm-plugin,jax-rocm-pjrt
+            pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall || exit 1
+            ;;
+         fork)
+            # config:rocm lives only in build/rocm/rocm.bazelrc, whose
+            # common:rocm --repo_env TF_ROCM_AMDGPU_TARGETS outranks build.py's
+            # --action_env; the trailing --repo_env re-asserts our targets.
+            _jax_use_amdclang .bazelrc build/rocm/rocm.bazelrc
+            _jax_build_py build --bazel_startup_options=--bazelrc=build/rocm/rocm.bazelrc \
+                          --rocm_path=$ROCM_PATH \
+                          --rocm_amdgpu_targets=$AMDGPU_GFXMODEL "${JAX_CLANG_OPTS[@]}" \
+                          --wheels=jax-rocm-plugin,jax-rocm-pjrt \
+                          --bazel_options=--repo_env=TF_ROCM_AMDGPU_TARGETS=$AMDGPU_GFXMODEL
+            pip3 install -v --target=${JAXLIB_PATH} "jaxlib==${JAX_V}" dist/jax*.whl --force-reinstall || exit 1
+            pip3 install --no-deps --target=${JAX_PATH} "jax==${JAX_V}" opt-einsum || exit 1
+            ;;
+      esac
 
       # cleanup: trap on JAX_BUILD_ROOT (set in the build entry below)
       # handles removal of jax / rocm-jax / xla source trees. The
@@ -1036,10 +1014,9 @@ else
    # major-agnostic, so it self-corrects for 6/7/10/future majors and is a
    # no-op for the cached lines that already list the right name.
    if ls -d ${JAXLIB_PATH}/jax_rocm*_plugin >/dev/null 2>&1; then
-      # EUID-based sudo (canonical PKG_SUDO pattern, matches modulefile write
-      # below): files are root-owned after both the cached tar-extract and the
-      # from-source chown, so a non-root operator needs sudo to edit them.
-      PKG_SUDO_PLUGIN=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+      # files are root-owned after the cached tar-extract and the from-source
+      # chown, so a non-root operator needs sudo to edit them
+      PKG_SUDO_PLUGIN=$(_jax_sudo_for "${JAXLIB_PATH}/jax_plugins")
       # the plugin dir that actually carries the native extension .so
       _jax_plugin_pkg=""
       for _d in ${JAXLIB_PATH}/jax_rocm*_plugin; do
@@ -1104,17 +1081,13 @@ else
       fi
 
       # (2) the ROCm PJRT plugin must actually be installed for the plugin-based
-      #     JAX lines (5.0/6.0/7.1/8.0). The pre-plugin lines build GPU support
-      #     into jaxlib itself (no separate jax_rocm*_plugin dir), so skip them.
-      case "${JAX_VERSION}" in
-         5.0|6.0|7.1|8.0)
-            if ! ls -d ${JAXLIB_PATH}/jax_rocm*_plugin >/dev/null 2>&1; then
-               echo "[jax smoke test] FATAL: no jax_rocm*_plugin found under ${JAXLIB_PATH};" >&2
-               echo "  the ROCm PJRT plugin did not get installed -- jax would only see CPU." >&2
-               return 1
-            fi
-            ;;
-      esac
+      #     JAX lines. The pre-plugin lines build GPU support into jaxlib
+      #     itself (no separate jax_rocm*_plugin dir), so skip them.
+      if _jax_uses_plugin_wheels && ! ls -d ${JAXLIB_PATH}/jax_rocm*_plugin >/dev/null 2>&1; then
+         echo "[jax smoke test] FATAL: no jax_rocm*_plugin found under ${JAXLIB_PATH};" >&2
+         echo "  the ROCm PJRT plugin did not get installed -- jax would only see CPU." >&2
+         return 1
+      fi
 
       # (3) if a GPU is visible on the build node, try to enumerate a ROCm
       #     device. Two outcomes are distinguished here:
@@ -1157,9 +1130,7 @@ else
 
    # Create a module file for jax
    #
-   # Modulefile-write sudo: canonical PKG_SUDO pattern (job 8063 audit;
-   # see netcdf_setup.sh for the lying-probe failure mode this replaces).
-   PKG_SUDO_MOD=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo "" || echo "sudo")
+   PKG_SUDO_MOD=$(_jax_sudo_for "${MODULE_PATH}")
    ${PKG_SUDO_MOD} mkdir -p ${MODULE_PATH}
 
    # Provenance: capture this leaf script's git state for the modulefile
@@ -1197,6 +1168,21 @@ else
    # it True (validated end-to-end: 10/10 epochs, ~94% test acc) restores
    # the working path. autotune_level=3 is retained unchanged.
    JAX_XLA_FLAGS="--xla_gpu_enable_triton_gemm=True --xla_gpu_autotune_level=3"
+   # XLA 0.9.1-0.9.x autotunes every hipBLASLt algorithm per GEMM through the
+   # hipblaslt_fission backend: ~50 s per GEMM shape on gfx942 (mnist first epoch
+   # ~880 s vs ~3 s without it), for ~35% more large-GEMM bf16 throughput.
+   # The flag's default list is empty (= all backends), so "-hipblaslt_fission"
+   # is a no-op: pass the keep-list. Older XLA aborts on the flag and newer XLA
+   # has a different backend enum (ROCBLAS removed), hence the version window.
+   _JAX_HELP_LUA=""
+   _JAX_HELP_TCL=""
+   if _jax_ver_ge "0.${JAX_VERSION}" 0.9.1 && ! _jax_ver_ge "0.${JAX_VERSION}" 0.10.0; then
+      JAX_XLA_FLAGS+=" --xla_gpu_experimental_autotune_backends=triton,miopen,rocblas,hipblaslt,native_emitter,block_level_emitter"
+      _jax_help="XLA_FLAGS excludes the hipblaslt_fission autotune backend (first compile on MI300A ~50 s per GEMM shape with it). For peak large-GEMM throughput: export XLA_FLAGS=\"--xla_gpu_enable_triton_gemm=True --xla_gpu_autotune_level=3\""
+      _JAX_HELP_LUA="help([[${_jax_help}]])"$'\n'
+      _JAX_HELP_TCL="proc ModulesHelp { } { puts stderr {${_jax_help}} }"$'\n'
+      unset _jax_help
+   fi
 
    # ── Modulefile flavor: Lua (Lmod) vs Tcl (classic Environment Modules) ─
    # Lmod consumes <name>.lua; classic Tcl environment-modules consumes an
@@ -1237,10 +1223,10 @@ else
    # The - option suppresses tabs
    if [ "${_MODFLAVOR}" = "lua" ]; then
    cat <<-EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
-	whatis("JAX version ${JAX_VERSION} with ROCm support")
+	whatis("JAX version 0.${JAX_VERSION} with ROCm support")
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 
-	prereq("${ROCM_MODULE_NAME}")
+	${_JAX_HELP_LUA}prereq("${ROCM_MODULE_NAME}")
 	${_JAX_PY_LUA}
 	setenv("XLA_FLAGS","${JAX_XLA_FLAGS}")
 	setenv("JAX_PLATFORMS","rocm,cpu")
@@ -1251,10 +1237,10 @@ EOF
    else
    cat <<EOF | ${PKG_SUDO_MOD} tee ${_MODFILE}
 #%Module1.0
-module-whatis "JAX version ${JAX_VERSION} with ROCm support"
+module-whatis "JAX version 0.${JAX_VERSION} with ROCm support"
 module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
 
-prereq ${ROCM_MODULE_NAME}
+${_JAX_HELP_TCL}prereq ${ROCM_MODULE_NAME}
 ${_JAX_PY_TCL}
 setenv XLA_FLAGS "${JAX_XLA_FLAGS}"
 setenv JAX_PLATFORMS "rocm,cpu"
@@ -1263,6 +1249,6 @@ prepend-path PYTHONPATH "${JAX_PATH}"
 prepend-path PYTHONPATH "${JAXLIB_PATH}"
 EOF
    fi
-   unset _MODFILE _MODFLAVOR _JAX_PY_LUA _JAX_PY_TCL _JAX_UW_LUA _JAX_UW_TCL _jax_uw
+   unset _MODFILE _MODFLAVOR _JAX_PY_LUA _JAX_PY_TCL _JAX_UW_LUA _JAX_UW_TCL _jax_uw _JAX_HELP_LUA _JAX_HELP_TCL
 
 fi
