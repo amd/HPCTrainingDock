@@ -98,8 +98,11 @@ _jax_uses_plugin_wheels() {
 # existing ancestor), so user-writable prefixes build without sudo
 _jax_sudo_for() {
    local _d=$1
+   local _t
    while [ ! -e "${_d}" ] && [ "${_d}" != "/" ]; do _d=$(dirname "${_d}"); done
-   if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "${_d}" ]; then echo ""; else echo "sudo"; fi
+   # probe with a real write: on the compute nodes' NFS mount `[ -w ]` reports
+   # root-owned 0755 dirs as writable although mkdir there fails with EACCES
+   if [ "${EUID:-$(id -u)}" -eq 0 ] || { _t=$(mktemp -d -p "${_d}" .jax_wtest.XXXXXX 2>/dev/null) && rmdir "${_t}"; }; then echo ""; else echo "sudo"; fi
 }
 
 compat_info()
