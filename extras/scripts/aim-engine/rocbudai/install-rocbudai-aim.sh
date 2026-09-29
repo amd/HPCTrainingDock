@@ -25,7 +25,7 @@ ADDENDUM="${SELF_DIR}/no-gpu-addendum.md"
 # --rocbudai-ref (a clean apply is required, so only move this when the patch
 # is re-cut) or bypass git entirely with --rocbudai-src for an air-gapped host.
 ROCBUDAI_REPO_URL="https://github.com/AMD-HPC/rocBudAI.git"
-ROCBUDAI_REF="e694eb91acb7ea3202fafe78af67554c3d7d0e53"
+ROCBUDAI_REF="24d66249bc58c1c612f49f864550a3d51df4a2c9"
 
 PREFIX="${HOME}/rocbudai-aim"
 GFX_ARCH=""

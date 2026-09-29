@@ -1,5 +1,5 @@
 diff --git a/bin/rocbudai b/bin/rocbudai
-index a1e3842..0f152c5 100755
+index c44e07b..1dedb7b 100755
 --- a/bin/rocbudai
 +++ b/bin/rocbudai
 @@ -32,6 +32,11 @@ case "${1:-}" in
@@ -136,10 +136,10 @@ index 78b4232..248dd73 100755
  # 1. Compute node + ollama allocation
  # ---------------------------------------------------------------------------
 diff --git a/bin/rocbudai-tui b/bin/rocbudai-tui
-index 778167a..523bd68 100755
+index 6a4a6de..6d0f110 100755
 --- a/bin/rocbudai-tui
 +++ b/bin/rocbudai-tui
-@@ -109,6 +109,205 @@ err() { echo "[rocbudai-tui] error: $*" >&2; }
+@@ -111,6 +111,205 @@ err() { echo "[rocbudai-tui] error: $*" >&2; }
  warn() { echo "[rocbudai-tui] warning: $*" >&2; }
  info() { echo "[rocbudai-tui] $*"; }
  
@@ -345,7 +345,7 @@ index 778167a..523bd68 100755
  # 1. Sanity checks ------------------------------------------------------------
  #
  # These are fast preflight checks that bail before launching the TUI if the
-@@ -121,7 +320,7 @@ info() { echo "[rocbudai-tui] $*"; }
+@@ -123,7 +322,7 @@ info() { echo "[rocbudai-tui] $*"; }
  # them in because they have a running allocation here), SLURM_JOB_ID is NOT
  # propagated into the shell. Recover the jobid via squeue: their unique
  # RUNNING job on this node.
@@ -354,7 +354,7 @@ index 778167a..523bd68 100755
      _adopted=$(squeue -h -w "$(hostname -s)" -u "$USER" -t R -o '%i' 2>/dev/null)
      if [[ -n "$_adopted" && $(printf '%s\n' "$_adopted" | wc -l) -eq 1 ]]; then
          export SLURM_JOB_ID="$_adopted"
-@@ -136,7 +335,7 @@ if [[ -n "${ROCBUDAI_CONTAINER:-}" ]]; then
+@@ -138,7 +337,7 @@ if [[ -n "${ROCBUDAI_CONTAINER:-}" ]]; then
      info "container quick-test mode — skipping Slurm/partition gates (testing only)."
  fi
  
@@ -363,7 +363,7 @@ index 778167a..523bd68 100755
      err "no SLURM_JOB_ID — rocbudai-tui must run inside a Slurm allocation."
      err "from a login node, allocate one first (-p selects the GPU"
      err "partition; --comment=ollama starts the ollama daemon for you):"
-@@ -153,7 +352,7 @@ fi
+@@ -155,7 +354,7 @@ fi
  # but `scontrol show job` is the authoritative source for both, so use
  # it as primary and fall back to env vars only if scontrol is missing.
  _scontrol_out=""
@@ -372,7 +372,7 @@ index 778167a..523bd68 100755
      _scontrol_out="$(scontrol show job "${SLURM_JOB_ID:-}" -o 2>/dev/null || true)"
  fi
  _job_comment=""
-@@ -179,7 +378,7 @@ _job_partition="${_job_partition:-${SLURM_JOB_PARTITION:-}}"
+@@ -181,7 +380,7 @@ _job_partition="${_job_partition:-${SLURM_JOB_PARTITION:-}}"
  # lets the launcher start, only for the runner to crash mid-load with
  # "model failed to load, resource limitations or internal error". Catch
  # it here with an actionable message instead.
@@ -381,7 +381,7 @@ index 778167a..523bd68 100755
      err "this allocation's --comment is '${_job_comment:-(none)}', which does not contain 'ollama'."
      err "rocBudAI requires --comment=ollama at salloc time so the Slurm prolog"
      err "starts (and the epilog stops) the ollama daemon for THIS job."
-@@ -210,7 +409,7 @@ for _p in ${_spx_partitions//,/ }; do
+@@ -212,7 +411,7 @@ for _p in ${_spx_partitions//,/ }; do
          break
      fi
  done
@@ -390,7 +390,7 @@ index 778167a..523bd68 100755
      err "this allocation's partition is '${_job_partition:-(none)}', which is not in the rocBudAI allow-list."
      err "the default model needs enough GPUs in full (SPX) mode; partitions that"
      err "expose sliced GPUs (e.g. MI300A CPX/TPX) cause the runner to abort with"
-@@ -263,8 +462,9 @@ if command -v rocm-smi >/dev/null 2>&1; then
+@@ -265,8 +464,9 @@ if command -v rocm-smi >/dev/null 2>&1; then
      fi
  fi
  
@@ -402,7 +402,7 @@ index 778167a..523bd68 100755
      err "ollama daemon not reachable at ${ROCBUDAI_OLLAMA_HOST}."
      err "did you allocate with --comment=ollama?  is the daemon up on this node?"
      err "try:  systemctl is-active ollama ollama-proxy"
-@@ -272,8 +472,8 @@ if ! curl -fsS --max-time 3 "${ROCBUDAI_OLLAMA_HOST}/api/tags" >/dev/null 2>&1;
+@@ -274,8 +474,8 @@ if ! curl -fsS --max-time 3 "${ROCBUDAI_OLLAMA_HOST}/api/tags" >/dev/null 2>&1;
      exit 1
  fi
  
@@ -413,7 +413,7 @@ index 778167a..523bd68 100755
          | grep -q "\"${ROCBUDAI_MODEL}\""; then
      warn "model '${ROCBUDAI_MODEL}' is not in the ollama registry on this node."
      warn "the TUI will start, but the first prompt may fail until an admin"
-@@ -591,6 +791,17 @@ if [[ -f opencode.json \
+@@ -593,6 +793,17 @@ if [[ -f opencode.json \
  fi
  
  if [[ ! -f opencode.json || $ROCBUDAI_FORCE_REWRITE -eq 1 ]]; then
@@ -431,7 +431,7 @@ index 778167a..523bd68 100755
      # Two substitutions into the template:
      #
      # 1. Active model into the "model" field so the JSON matches the --model
-@@ -614,6 +825,7 @@ if [[ ! -f opencode.json || $ROCBUDAI_FORCE_REWRITE -eq 1 ]]; then
+@@ -616,6 +827,7 @@ if [[ ! -f opencode.json || $ROCBUDAI_FORCE_REWRITE -eq 1 ]]; then
          "${ROCBUDAI_OPENCODE_TEMPLATE}" > opencode.json
      chmod 0644 opencode.json
      info "wrote opencode.json (${ROCBUDAI_PERMISSION_MODE} mode, model=${ROCBUDAI_MODEL})"
@@ -439,7 +439,7 @@ index 778167a..523bd68 100755
  fi
  
  # AGENTS.md: seed from the arch-specific persona (resolved here, now that the
-@@ -631,6 +843,8 @@ elif [[ -n "${ROCBUDAI_CONTAINER:-}" && -f "${ROCBUDAI_CONTAINER_DEMO_PERSONA}"
+@@ -633,6 +845,8 @@ elif [[ -n "${ROCBUDAI_CONTAINER:-}" && -f "${ROCBUDAI_CONTAINER_DEMO_PERSONA}"
      # the demo is a tiny saxpy walkthrough and a small model follows a short
      # focused prompt far more reliably than the full ~2100-line persona.
      ROCBUDAI_AGENTS_TEMPLATE="${ROCBUDAI_CONTAINER_DEMO_PERSONA}"
@@ -448,7 +448,7 @@ index 778167a..523bd68 100755
  else
      [[ -n "${ROCBUDAI_AGENTS_TEMPLATE}" ]] && \
          warn "ROCBUDAI_AGENTS_TEMPLATE='${ROCBUDAI_AGENTS_TEMPLATE}' not found; autodetecting persona by GPU arch."
-@@ -1007,7 +1221,7 @@ chmod 0644 .rocbudai-banner.md
+@@ -1009,7 +1223,7 @@ chmod 0644 .rocbudai-banner.md
  # instructions, share=disabled) is still read by opencode regardless of
  # launch path — verified in iter_02.
  
@@ -457,7 +457,7 @@ index 778167a..523bd68 100755
      err "ollama not found on PATH on this node."
      exit 1
  fi
-@@ -1085,7 +1299,7 @@ elif [[ -n "$ROCBUDAI_CONTINUE" ]]; then
+@@ -1087,7 +1301,7 @@ elif [[ -n "$ROCBUDAI_CONTINUE" ]]; then
      info "resuming last session"
      OPENCODE_EXTRA_ARGS=(--continue)
  else
@@ -466,7 +466,7 @@ index 778167a..523bd68 100755
      # Seed prompt = first user turn the model sees. opencode's `--prompt`
      # is rendered as a visible user message in the chat history (there is
      # no hidden / system-message injection in the TUI). We use the visible
-@@ -1140,7 +1354,14 @@ if [[ -n "$ROCBUDAI_OPENCODE_PORT" && "${ROCBUDAI_NUDGE_DISABLE:-0}" != "1" \
+@@ -1142,7 +1356,14 @@ if [[ -n "$ROCBUDAI_OPENCODE_PORT" && "${ROCBUDAI_NUDGE_DISABLE:-0}" != "1" \
      disown "$ROCBUDAI_WATCHER_PID" 2>/dev/null || true
  fi
  
@@ -483,7 +483,7 @@ index 778167a..523bd68 100755
  # Watcher is parent-death-guarded but stop it eagerly on clean exit too,
  # so users don't see a stray python process in ps after /exit.
 diff --git a/libexec/rocbudai-load-hook.sh b/libexec/rocbudai-load-hook.sh
-index db564ca..cec7b4c 100755
+index 279f2f6..cb95c95 100755
 --- a/libexec/rocbudai-load-hook.sh
 +++ b/libexec/rocbudai-load-hook.sh
 @@ -32,7 +32,7 @@ if [[ -z "${SLURM_JOB_ID:-}" ]] && command -v squeue >/dev/null 2>&1; then
@@ -493,5 +493,5 @@ index db564ca..cec7b4c 100755
 -if [[ -z "${SLURM_JOB_ID:-}" ]]; then
 +if [[ "${ROCBUDAI_BACKEND:-ollama}" != "aim" && -z "${SLURM_JOB_ID:-}" ]]; then
      echo "[rocBudAI] this module is for compute nodes; you are on a login node." >&2
-     echo "[rocBudAI] allocate a compute node first (-p selects the SPX MI300A" >&2
+     echo "[rocBudAI] allocate a compute node first (-p selects the SPX" >&2
      echo "[rocBudAI] partition; --comment=ollama starts the ollama daemon):" >&2
