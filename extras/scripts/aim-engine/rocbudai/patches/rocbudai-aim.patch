@@ -136,7 +136,7 @@ index 78b4232..248dd73 100755
  # 1. Compute node + ollama allocation
  # ---------------------------------------------------------------------------
 diff --git a/bin/rocbudai-tui b/bin/rocbudai-tui
-index 6a4a6de..6d0f110 100755
+index dd89a8b..92e5bef 100755
 --- a/bin/rocbudai-tui
 +++ b/bin/rocbudai-tui
 @@ -111,6 +111,205 @@ err() { echo "[rocbudai-tui] error: $*" >&2; }
@@ -466,8 +466,8 @@ index 6a4a6de..6d0f110 100755
      # Seed prompt = first user turn the model sees. opencode's `--prompt`
      # is rendered as a visible user message in the chat history (there is
      # no hidden / system-message injection in the TUI). We use the visible
-@@ -1142,7 +1356,14 @@ if [[ -n "$ROCBUDAI_OPENCODE_PORT" && "${ROCBUDAI_NUDGE_DISABLE:-0}" != "1" \
-     disown "$ROCBUDAI_WATCHER_PID" 2>/dev/null || true
+@@ -1155,7 +1369,14 @@ if [[ -z "${ROCBUDAI_CONTAINER:-}" && "${ROCBUDAI_NO_FENCING:-0}" != "1" ]]; the
+     fi
  fi
  
 -ollama launch opencode --model "${ROCBUDAI_MODEL}" -y -- "${OPENCODE_EXTRA_ARGS[@]}" || true
