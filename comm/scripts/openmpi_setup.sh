@@ -2014,6 +2014,43 @@ else
       fi
       unset _ucc_gcc_dir
 
+      # ── Put an in-tree amdclang on PATH for UCC's ec/rocm kernels ──────
+      # UCC's configure finds its HIP compiler by a plain PATH search for
+      # `amdclang`; finding none it substitutes the literal string "notfound",
+      # which survives configure and only dies in the ec/rocm kernel compile as
+      # "notfound: command not found" / Error 127, taking ucx+xpmem+openmpi down
+      # with it via the EXIT trap. ROCm 7.2.x ships amdclang only under
+      # llvm/bin, which the rocm modulefile does not add to PATH; 7.14.x/10.x
+      # also provide bin/amdclang, which is why only 7.2.x breaks. The amdclang
+      # module supplies that PATH entry -- but it also repoints CC/CXX/FC at
+      # amdclang, and UCC's host code is built with gcc/g++, so restore the
+      # compiler variables and keep only the PATH change. Prepending also stops
+      # a stray node-local /usr/bin/amdclang (a different ROCm's compiler) from
+      # winning, as happened silently for 7.2.0.
+      _ucc_amdclang_loaded=0
+      _ucc_saved_cc=""
+      if ! command -v amdclang >/dev/null 2>&1; then
+         for _v in CC CXX FC F77 F90 OMPI_CC OMPI_CXX OMPI_FC; do
+            if [ -n "${!_v+set}" ]; then
+               _ucc_saved_cc+="export ${_v}=$(printf '%q' "${!_v}"); "
+            else
+               _ucc_saved_cc+="unset ${_v}; "
+            fi
+         done
+         unset _v
+         if module load amdclang 2>/dev/null; then
+            _ucc_amdclang_loaded=1
+            eval "${_ucc_saved_cc}"
+            echo "ucc: loaded amdclang module for PATH -> $(command -v amdclang)"
+         else
+            echo "ucc: WARNING amdclang is not on PATH and 'module load amdclang'"
+            echo "ucc:          failed; configure will substitute \"notfound\" and"
+            echo "ucc:          the ec/rocm kernel compile will fail with Error 127."
+         fi
+      else
+         echo "ucc: amdclang already on PATH -> $(command -v amdclang)"
+      fi
+
       UCC_CONFIGURE_ARGS=(
          --prefix="${UCC_PATH}"
          --with-rocm="${ROCM_PATH}"
@@ -2247,6 +2284,17 @@ else
       cd ../..
       rm -rf openmpi-${OPENMPI_VERSION} openmpi-${OPENMPI_VERSION}.tar.bz2
    fi
+
+   # Scope the amdclang module to the whole MPI stack, not just UCC: OpenMPI
+   # configures with a bare FC=amdflang, and ROCm 7.2.x ships amdflang only under
+   # llvm/bin (7.14.x/10.x also provide bin/amdflang). Unloading after UCC stripped
+   # that PATH entry before OpenMPI configured, which then failed with "Could not
+   # run a simple Fortran program". Restore the compiler variables on the way out.
+   if [ "${_ucc_amdclang_loaded}" = "1" ]; then
+      module unload amdclang 2>/dev/null || true
+      eval "${_ucc_saved_cc}"
+   fi
+   unset _ucc_amdclang_loaded _ucc_saved_cc
 
    if [[ ! -d ${OPENMPI_PATH}/lib ]] ; then
       echo "OpenMPI installation failed -- missing installation directories"

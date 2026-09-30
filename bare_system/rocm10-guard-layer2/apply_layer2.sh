@@ -43,17 +43,16 @@ apply_one() {
     if [ $has_l2 -eq 0 ]; then
         sudo -n tee -a "$mf" >/dev/null <<EOF
 
--- $TAG (added $ts): rocprofiler-sdk tool interposer -- the single durable guard
--- for MI300A profiling. Every modern front-end (rocprofv3, rocprof-sys,
--- rocprof-compute, PyTorch/roctracer) initializes through rocprofiler-sdk, so this
--- one tool covers them all; there is no rocprofv2/rocprof to wrap. On MI300A it
--- (a) STRIPS the PC-sampling/SPM/ATT beta HW modes that hard-reset the node even
--- single-session, and (b) SERIALIZES concurrent profiling sessions node-wide
--- (per-SLURM_JOB leader election so MPI ranks never deadlock; inherits an
--- ancestor's guard instead of re-locking). It STANDS DOWN for non-profiling GPU
--- apps, so ordinary GPU work is unaffected. Src/tests: /shared/rocm-sweep/rocm10-guard-layer2 .
--- Revert: apply_layer2.sh --revert-all  (restores $mf.bak-l2guard-$ts).
-prepend_path("ROCP_TOOL_LIBRARIES", "$so", ":")
+-- $TAG (beta-mode block only, added $ts): the PC-sampling/SPM/ATT beta HW
+-- modes hard-reset MI300A even single-session and on any ROCm line (7.2.4
+-- included), so they are stripped at module load.
+-- The rocprofiler-sdk tool interposer (librocprof_guard.so) that used to
+-- SERIALIZE concurrent profiling sessions node-wide is deliberately NOT wired
+-- in: that serialization was retired 2026-09-30 after the ROCm 10.0 fix.
+-- Re-enable serialization by adding back:
+--   prepend_path("ROCP_TOOL_LIBRARIES", "$so", ":")
+-- Src/tests: /shared/rocm-sweep/rocm10-guard-layer2 .
+-- Revert: restore $mf.bak-l2guard-$ts.
 unsetenv("ROCPROFILER_PC_SAMPLING_BETA_ENABLED")
 unsetenv("ROCPROFILER_SPM_BETA_ENABLED")
 unsetenv("ROCPROF_ATT_LIBRARY_PATH")

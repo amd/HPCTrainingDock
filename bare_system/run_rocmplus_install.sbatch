@@ -375,6 +375,23 @@ if [[ -n "${TOP_MODULE_PATH:-}" && -d "${TOP_MODULE_PATH}/base" ]]; then
       *) export MODULEPATH="${TOP_MODULE_PATH}/base${MODULEPATH:+:${MODULEPATH}}" ;;
    esac
    echo "Augmented MODULEPATH with site tree: ${TOP_MODULE_PATH}/base"
+
+   # Prepending alone is not sufficient. Lmod resolves an exact `rocm/<v>`
+   # request from whichever tree marks <v> as its default (a `default`
+   # symlink in that tree's rocm/ dir) BEFORE it honors MODULEPATH order.
+   # The cluster-default tree from /etc/lmod/modulespath therefore serves
+   # its own default version -- and only that one version -- out of the
+   # wrong subtree, which then trips the TOP_INSTALL_PATH guard below.
+   # Drop the competing ROCm stacks so ${TOP_MODULE_PATH}/base is the sole
+   # provider of rocm/<v>; non-ROCm trees are left alone so unrelated
+   # modules still fall through.
+   for _mp in ${MODULEPATH//:/ }; do
+      [[ "${_mp}" == "${TOP_MODULE_PATH}/base" ]] && continue
+      [[ -d "${_mp}/rocm" ]] || continue
+      module unuse "${_mp}" 2>/dev/null || true
+      echo "Removed competing ROCm module tree from MODULEPATH: ${_mp}"
+   done
+   unset _mp
 fi
 echo "Effective MODULEPATH: ${MODULEPATH}"
 
