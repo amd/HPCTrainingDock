@@ -2,6 +2,14 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-10-06
+
+- Slurm partitions:
+    + MI250:6
+    - MI250:4
+    - MI250_7_8_Degraded:1
+
+[Full snapshot](archive/AAC6_system_status_2026-10-06.md)
 ## 2026-10-01
 
 - Slurm partitions:
