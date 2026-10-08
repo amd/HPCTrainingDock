@@ -2,6 +2,12 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-10-08
+
+- Down/drained nodes:
+    + ppac-pl1-s24-16:drain
+
+[Full snapshot](archive/AAC6_system_status_2026-10-08.md)
 ## 2026-10-06
 
 - Slurm partitions:
