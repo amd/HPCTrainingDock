@@ -8,7 +8,7 @@
 LEAF_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
 
 # Variables controlling setup process
-ROCM_VERSION=6.2.0
+ROCM_VERSION=7.2.0
 BUILD_JAX=0
 MODULE_PATH=/etc/lmod/modules/ROCmPlus-AI/jax
 AMDGPU_GFXMODEL_INPUT=""
@@ -603,8 +603,8 @@ else
       # ── Build recipe selection ───────────────────────────────────────
       #   fork         (>= 0.10) jax + jaxlib from PyPI; plugin + pjrt from the
       #                ROCm/jax rocm-jaxlib-v0.X branch (rocm-jax README).
-      #   split        (0.7.1 - 0.9.x) jaxlib from ROCm/jax, plugin + pjrt from
-      #                the ROCm/rocm-jax release branch, both on ROCm/xla.
+      #   split        (0.7.1 - 0.9.x) jax + jaxlib from PyPI; plugin + pjrt from
+      #                the ROCm/rocm-jax release tag, on the XLA commit it pins.
       #   monorepo     (5.0, 6.0) all three wheels from ROCm/jax.
       #   clang_legacy (4.35 on ROCm >= 6.4) / gcc_legacy (ROCm < 6.4): jaxlib
       #                with the built-in GPU plugin from ROCm/jax.
@@ -633,6 +633,10 @@ else
          echo "JAX ${JAX_V} needs Python >= ${JAX_MIN_PY} (got ${PYMAJOR}.${PYMINOR}): https://docs.jax.dev/en/latest/deprecation.html"
          compat_info
       fi
+      if [[ "${JAX_V}" == 0.9.0* && "${ROCM_VERSION}" =~ (^|-)7\.13(\.|$) ]]; then
+         echo "JAX ${JAX_V} fails to link libamd_comgr_stub.a against ROCm 7.13; use JAX 0.10 or later"
+         compat_info
+      fi
 
       # first of the given refs (branch or tag) that exists in the remote
       _jax_first_ref() {
@@ -645,16 +649,21 @@ else
          echo "jax: none of [$*] found in ${_url} (or remote unreachable)" >&2
          return 1
       }
-      JAX_REF=$(_jax_first_ref https://github.com/ROCm/jax.git "rocm-jaxlib-v${JAX_V}") || compat_info
-      if [ "${JAX_RECIPE}" != fork ]; then
+      if [ "${JAX_RECIPE}" != split ]; then
+         JAX_REF=$(_jax_first_ref https://github.com/ROCm/jax.git "rocm-jaxlib-v${JAX_V}") || compat_info
+      fi
+      if [ "${JAX_RECIPE}" != fork ] && [ "${JAX_RECIPE}" != split ]; then
          XLA_REF=$(_jax_first_ref https://github.com/ROCm/xla.git "rocm-jaxlib-v${JAX_V}") || compat_info
       fi
       if [ "${JAX_RECIPE}" = split ]; then
-         # the README builds from the release branch; the rocm-jax-v* tag is an
-         # older snapshot of it and does not exist for every release
-         PLUGIN_REF=$(_jax_first_ref https://github.com/ROCm/rocm-jax.git "rocm-jaxlib-v${JAX_V}" "rocm-jax-v${JAX_V}") || compat_info
+         # some releases were only tagged as -rc (e.g. 0.9.0); their release
+         # branch is the closest equivalent
+         if ! PLUGIN_REF=$(_jax_first_ref https://github.com/ROCm/rocm-jax.git "rocm-jax-v${JAX_V}"); then
+            echo "jax: WARNING: no rocm-jax-v${JAX_V} release tag; falling back to the rocm-jaxlib-v${JAX_V} branch"
+            PLUGIN_REF=$(_jax_first_ref https://github.com/ROCm/rocm-jax.git "rocm-jaxlib-v${JAX_V}") || compat_info
+         fi
       fi
-      echo "jax: recipe=${JAX_RECIPE} jax_ref=${JAX_REF} xla_ref=${XLA_REF:-pinned} plugin_ref=${PLUGIN_REF:-n/a}"
+      echo "jax: recipe=${JAX_RECIPE} jax_ref=${JAX_REF:-pypi} xla_ref=${XLA_REF:-pinned} plugin_ref=${PLUGIN_REF:-n/a}"
 
       ROCM_VERSION_BAZEL=`echo "$ROCM_VERSION" | sed 's/therock-//' | awk -F. '{print $1}'`
       if [[ "${ROCM_VERSION_BAZEL}" == "6" ]]; then
@@ -864,9 +873,13 @@ else
          --bazel_startup_options=--host_jvm_args=-XX:+UseG1GC
          --bazel_startup_options=--host_jvm_args=-XX:+AlwaysPreTouch
       )
+      # --repo_env=ROCM_PATH: XLA's ROCm repository rule downloads its own ROCm
+      # distribution when ROCM_PATH is absent from the repository environment,
+      # and build.py --rocm_path only sets --action_env
       _jax_build_py() {
          _jax_strip_rocm_cpath
-         python3 build/build.py "$@" "${JAX_BAZEL_PERF_OPTS[@]}" || exit 1
+         python3 build/build.py "$@" --bazel_options=--repo_env=ROCM_PATH=${ROCM_PATH} \
+                 "${JAX_BAZEL_PERF_OPTS[@]}" || exit 1
       }
 
       # $ROCM_PATH/llvm is a symlink on TheRock-style installs; XLA's ROCm
@@ -890,16 +903,18 @@ else
       }
 
       XLA_OVERRIDE=()
-      if [ "${JAX_RECIPE}" != fork ]; then
+      if [ -n "${XLA_REF:-}" ]; then
          git clone --depth 1 --branch ${XLA_REF} https://github.com/ROCm/xla.git
          cd xla
          export XLA_PATH=$PWD
          cd ..
          XLA_OVERRIDE=( --bazel_options=--override_repository=xla=$XLA_PATH )
       fi
-      git clone --depth 1 --branch ${JAX_REF} https://github.com/ROCm/jax.git
-      cd jax
-      _jax_set_gfx_targets .bazelrc
+      if [ -n "${JAX_REF:-}" ]; then
+         git clone --depth 1 --branch ${JAX_REF} https://github.com/ROCm/jax.git
+         cd jax
+         _jax_set_gfx_targets .bazelrc
+      fi
 
       # install necessary packages in installation directory
       ${SUDO} mkdir -p ${JAXLIB_PATH}
@@ -934,31 +949,37 @@ else
             _jax_install_jaxlib_and_jax
             ;;
          split)
+            # no XLA override: the plugin's third_party/xla/workspace.bzl
+            # fetches the pinned commit and applies its patches
             _jax_build_patchelf
-            _jax_use_amdclang .bazelrc
-            _jax_build_py build --rocm_path=$ROCM_PATH "${XLA_OVERRIDE[@]}" \
-                          --rocm_amdgpu_targets=$AMDGPU_GFXMODEL "${JAX_CLANG_OPTS[@]}" \
-                          --wheels=jaxlib
-            _jax_install_jaxlib_and_jax
-            cd ..
             git clone --depth 1 --branch ${PLUGIN_REF} https://github.com/ROCm/rocm-jax.git
             cd rocm-jax/jax_rocm_plugin
             _jax_use_amdclang .bazelrc
             _jax_set_gfx_targets .bazelrc
-            _jax_build_py build --rocm_path=$ROCM_PATH "${XLA_OVERRIDE[@]}" \
+            _jax_build_py build --rocm_path=$ROCM_PATH \
                           --rocm_amdgpu_targets=$AMDGPU_GFXMODEL "${JAX_CLANG_OPTS[@]}" \
                           --wheels=jax-rocm-plugin,jax-rocm-pjrt
-            pip3 install -v --target=${JAXLIB_PATH} dist/jax*.whl --force-reinstall || exit 1
+            pip3 install -v --target=${JAXLIB_PATH} "jaxlib==${JAX_V}" dist/jax*.whl --force-reinstall || exit 1
+            pip3 install --no-deps --target=${JAX_PATH} "jax==${JAX_V}" opt-einsum || exit 1
             ;;
          fork)
             # config:rocm lives only in build/rocm/rocm.bazelrc, whose
             # common:rocm --repo_env TF_ROCM_AMDGPU_TARGETS outranks build.py's
             # --action_env; the trailing --repo_env re-asserts our targets.
             _jax_use_amdclang .bazelrc build/rocm/rocm.bazelrc
+            # from 0.11 config:rocm no longer selects the ROCm crosstool (which
+            # handles `-x rocm`), and under Bazel 8 the --crosstool_top set by
+            # rocm_clang_local is ignored: register it for toolchain resolution
+            JAX_ROCM_LOCAL_CFG=()
+            if grep -q '^common:rocm_clang_local' build/rocm/rocm.bazelrc; then
+               JAX_ROCM_LOCAL_CFG=( --bazel_options=--config=rocm_clang_local
+                                    --bazel_options=--extra_toolchains=@local_config_rocm//crosstool:toolchain-linux-x86_64 )
+            fi
             _jax_build_py build --bazel_startup_options=--bazelrc=build/rocm/rocm.bazelrc \
                           --rocm_path=$ROCM_PATH \
                           --rocm_amdgpu_targets=$AMDGPU_GFXMODEL "${JAX_CLANG_OPTS[@]}" \
                           --wheels=jax-rocm-plugin,jax-rocm-pjrt \
+                          "${JAX_ROCM_LOCAL_CFG[@]}" \
                           --bazel_options=--repo_env=TF_ROCM_AMDGPU_TARGETS=$AMDGPU_GFXMODEL
             pip3 install -v --target=${JAXLIB_PATH} "jaxlib==${JAX_V}" dist/jax*.whl --force-reinstall || exit 1
             pip3 install --no-deps --target=${JAX_PATH} "jax==${JAX_V}" opt-einsum || exit 1
@@ -1171,6 +1192,11 @@ else
    # it True (validated end-to-end: 10/10 epochs, ~94% test acc) restores
    # the working path. autotune_level=3 is retained unchanged.
    JAX_XLA_FLAGS="--xla_gpu_enable_triton_gemm=True --xla_gpu_autotune_level=3"
+   # hipGraphLaunch of XLA command buffers aborts with "AQL packet is malformed"
+   # on these releases (ROCR fix shipped in 7.2.1); an empty list disables them
+   case "${ROCM_VERSION}" in
+      7.1.1|7.2.0) JAX_XLA_FLAGS+=" --xla_gpu_enable_command_buffer=" ;;
+   esac
    # XLA 0.9.1-0.9.x autotunes every hipBLASLt algorithm per GEMM through the
    # hipblaslt_fission backend: ~50 s per GEMM shape on gfx942 (mnist first epoch
    # ~880 s vs ~3 s without it), for ~35% more large-GEMM bf16 throughput.
