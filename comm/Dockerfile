@@ -20,6 +20,7 @@ ARG ROCM_VERSION
 ARG AMDGPU_GFXMODEL
 ARG BUILD_MPI4PY
 ARG BUILD_ROCSHMEM
+ARG BUILD_MPICHECK=1
 
 LABEL maintainer="bob.robey@amd.com"
 
@@ -49,6 +50,19 @@ RUN  /tmp/comm/mpi4py_setup.sh --rocm-version ${ROCM_VERSION}  --amdgpu-gfxmodel
 COPY comm/scripts/rocshmem_setup.sh /tmp/comm/rocshmem_setup.sh
 RUN  /tmp/comm/rocshmem_setup.sh --rocm-version ${ROCM_VERSION} --amdgpu-gfxmodel ${AMDGPU_GFXMODEL} --build-rocshmem ${BUILD_ROCSHMEM} && \
      rm -f /tmp/comm/rocshmem_setup.sh
+
+# mpicheck: MPI oversubscription launch wrapper (mpirun_check / srun_check).
+# Defaults ON (ARG BUILD_MPICHECK=1), unlike roofline-extractor: there is nothing
+# to download or compile, the payload is a single bash script carried in the repo.
+# The leaf and its sidecar payload MUST land in the same parent dir -- the leaf
+# resolves comm/scripts/mpicheck/mpirun_check.sh relative to itself. Container
+# layout: install under /opt/rocmplus-${ROCM_VERSION}; modulefile under the
+# ROCmPlus Lmod tree (like roofline-extractor). NOOP_RC=43 (opt-out /
+# already-installed) is treated as success; any other non-zero rc fails the build.
+COPY comm/scripts/mpicheck_setup.sh          /tmp/comm/mpicheck_setup.sh
+COPY comm/scripts/mpicheck/mpirun_check.sh   /tmp/comm/mpicheck/mpirun_check.sh
+RUN  /tmp/comm/mpicheck_setup.sh --build-mpicheck ${BUILD_MPICHECK} --install-path /opt/rocmplus-${ROCM_VERSION} --module-path /etc/lmod/modules/ROCmPlus/mpicheck || [ "$?" = "43" ] && \
+     rm -rf /tmp/comm/mpicheck_setup.sh /tmp/comm/mpicheck
 
 ENV LC_ALL C.UTF-8
 

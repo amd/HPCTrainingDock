@@ -87,6 +87,29 @@
 #                            modulefile edit, no ELF modification -- just
 #                            lib/rocprofiler-systems/libomp.so ->
 #                            ../llvm/lib/libomp.so.
+#   * ROCm 7.13.0          -- pytorch-ompt-reentrancy-workaround
+#     (ROCM-25067)           (ROCM-25067): `import torch` with PyTorch
+#                            2.12.0 never returns. Not a deadlock -- the
+#                            thread stays runnable at 99% CPU and perf
+#                            puts 89% of samples in libomp.so
+#                            __kmp_wait_4_ptr, libomp's spin on its own
+#                            init flag: libomp init calls ompt_start_tool
+#                            in librocprofiler-sdk, whose dlopen re-enters
+#                            libomp. Deliberately NOT a binary drop-in
+#                            like the 10.x bundle above: no SDK version
+#                            fixes it in place (even sdk 1.1.0, which
+#                            works natively on 7.2.4, still spins inside
+#                            7.13.0), and neither does swapping libomp or
+#                            librocprofiler-register, verified in both
+#                            directions. Instead OMP_TOOL=disabled is set
+#                            on the PYTORCH modulefile -- not the ROCm one
+#                            -- so OMPT stays available to rocprof-sys and
+#                            every other consumer. Soft no-op when no
+#                            pytorch modulefile carries the precondition
+#                            (libtorch_cpu.so defining rocprofiler_configure
+#                            AND listing librocprofiler-sdk as NEEDED; only
+#                            2.12.0 does -- 2.9.1 and 2.11.0 cannot hang).
+#                            See sources/rocm-patches/pytorch-ompt-reentrancy-workaround/.
 #
 # The patch text is vendored under rocm/sources/rocm-patches/ and is the
 # *only* delta this script applies; everything else (clone of the
@@ -435,11 +458,21 @@ rocm_version_to_patches() {
       #      PYTHONPATH, no dep collisions.  build.sh maps 7.13.0 ->
       #      rocm-systems tag `therock-7.13` (no rocm-7.13.0 tag exists).
       #
+      #   4. ROCM-25067: `import torch` with PyTorch 2.12.0 spins forever
+      #      in libomp's __kmp_wait_4_ptr because librocprofiler-sdk's OMPT
+      #      bring-up re-enters libomp.  `pytorch-ompt-reentrancy-workaround`
+      #      sets OMP_TOOL=disabled on the pytorch modulefile only.  It
+      #      soft no-ops (43) unless a pytorch modulefile exists here whose
+      #      torch actually links the SDK, so listing it is safe on trees
+      #      where pytorch is absent or predates 2.12.0.
+      #
       # Order matters: the rocprof-sys-1.6.0 build is the slow step
       # (~30 min) so we list it first to fail fast on a misconfigured
       # cluster; the libomp symlink is a few-millisecond no-op; the
-      # rocprof-compute nuitka build (~10-30 min) runs last.
-      7.13.0)           echo "rocprof-sys-1.6.0 rocprof-sys-instrument-libomp rocprof-compute" ;;
+      # rocprof-compute nuitka build (~10-30 min) runs last.  The pytorch
+      # modulefile edit is listed before it because it is instant and must
+      # not be stranded behind a nuitka failure.
+      7.13.0)           echo "rocprof-sys-1.6.0 rocprof-sys-instrument-libomp pytorch-ompt-reentrancy-workaround rocprof-compute" ;;
       # ROCm 10.x: rocprofiler-sdk node-wedging overlay -- a shutdown-path
       # race could destabilize the node under concurrent per-GPU rocprofv3
       # sessions. The bundle is a binary drop-in (no build): it takes
@@ -783,6 +816,23 @@ already_installed_check() {
             local _omp="${ROCM_PATH}/lib/llvm/lib/libomp.so"
             [ -L "${_link}" ] || return 1
             [ "$(readlink -f "${_link}")" = "$(readlink -f "${_omp}")" ] || return 1
+            ;;
+         pytorch-ompt-reentrancy-workaround)
+            # No INSTALL_PREFIX artifact and nothing in the ROCm tree: the
+            # fix lives entirely in the pytorch modulefiles. "Already
+            # installed" == every pytorch modulefile for this ROCm version
+            # carries the marker. A tree with no pytorch modules at all is
+            # a legitimate soft no-op, not an install, so report NOT-done
+            # and let the bundle exit 43 on its own terms.
+            local _ptdir _ptmf _found=0
+            _ptdir="$(dirname "${MODULE_PATH}")/rocmplus-${ROCM_VERSION}/pytorch"
+            [ -d "${_ptdir}" ] || return 1
+            for _ptmf in "${_ptdir}"/*.lua; do
+               [ -f "${_ptmf}" ] || continue
+               _found=1
+               grep -Fq 'ROCM-25067 OMPT re-entrancy workaround' "${_ptmf}" || return 1
+            done
+            [ "${_found}" -eq 1 ] || return 1
             ;;
          rocm-smi-restore)
             # No INSTALL_PREFIX artifact; the fix restores the missing
@@ -1759,6 +1809,51 @@ apply_rocprofiler_sdk_node_wedging_fix() {
 }
 
 # ─────────────────────────────────────────────────────────────────────
+# apply_pytorch_ompt_reentrancy_workaround
+# ----------------------------------------
+# ROCM-25067. Thin wrapper, same shape as the node-wedging one above:
+# stage the vendored install.sh into the overlay and let it do the work.
+#
+# Unlike that bundle this one touches NO library. `import torch` with
+# PyTorch 2.12.0 spins unbounded in libomp's __kmp_wait_4_ptr because
+# librocprofiler-sdk's ompt_start_tool dlopen re-enters libomp mid-init,
+# and no version of librocprofiler-sdk, libomp or librocprofiler-register
+# fixes it in place (checked by substitution in both directions). So the
+# bundle sets OMP_TOOL=disabled on the PYTORCH modulefile instead, which
+# is why MODULE_ROOT is forwarded: install.sh needs the lmod tree to find
+# rocmplus-<ver>/pytorch/*.lua, not just the ROCm modulefile.
+#
+# Returns the bundle's own 0 / 43 / 1.
+apply_pytorch_ompt_reentrancy_workaround() {
+   local bundle_dir="${PATCH_SOURCE_DIR}/pytorch-ompt-reentrancy-workaround"
+   local overlay_dir="${INSTALL_PREFIX}/pytorch-ompt-reentrancy-workaround"
+
+   [ -d "${bundle_dir}" ]            || send-error "patch bundle missing: ${bundle_dir}"
+   [ -f "${bundle_dir}/install.sh" ] || send-error "missing vendored file: ${bundle_dir}/install.sh"
+
+   ${SUDO} mkdir -p "${overlay_dir}"
+   if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+      ${SUDO} chown -R "$(id -u):$(id -g)" "${overlay_dir}" || true
+   fi
+   install -m 0755 "${bundle_dir}/install.sh" "${overlay_dir}/install.sh"
+
+   # MODULE_PATH is the ROCm subtree (.../base/ROCm); the pytorch modules
+   # live in a sibling rocmplus-<ver>/ one level up. install.sh falls back
+   # to deriving this from MODULEFILE when MODULE_ROOT is empty.
+   local module_root=""
+   [ -n "${MODULE_PATH:-}" ] && module_root="$(dirname "${MODULE_PATH}")"
+
+   local rc=0
+   ROCM_VERSION="${ROCM_VERSION}" \
+   ROCM_PATH="${ROCM_PATH}" \
+   MODULEFILE="${MODULE_FILE}" \
+   MODULE_ROOT="${module_root}" \
+   SUDO="${SUDO}" \
+   bash "${overlay_dir}/install.sh" || rc=$?
+   return ${rc}
+}
+
+# ─────────────────────────────────────────────────────────────────────
 # fix_rocprof_sys_instrument_libomp
 # ---------------------------------
 # ROCm 7.13.0 (AFAR / TheRock RC line) ships rocprof-sys-instrument with
@@ -2493,6 +2588,7 @@ built_rocprof_compute=0
 built_instrument_libomp=0
 built_rocprofiler_sdk_node_wedging_fix=0
 built_rocm_smi_restore=0
+built_pytorch_ompt_reentrancy_workaround=0
 
 for bundle in ${PATCH_BUNDLES}; do
    case "${bundle}" in
@@ -2573,6 +2669,23 @@ for bundle in ${PATCH_BUNDLES}; do
          else
             rc=${bundle_rc}
          fi ;;
+      pytorch-ompt-reentrancy-workaround)
+         # ROCM-25067. No build, no library touched, no ROCm modulefile
+         # edit: sets OMP_TOOL=disabled on the pytorch modulefile(s) so
+         # libomp skips OMPT tool discovery and cannot re-enter itself
+         # during `import torch`. install.sh does its own modulefile edit,
+         # so there is no follow-on hook here. Exit 43 = soft skip (no
+         # pytorch modulefile for this ROCm version, or none whose torch
+         # links librocprofiler-sdk and so could ever hang).
+         apply_pytorch_ompt_reentrancy_workaround
+         bundle_rc=$?
+         if [ "${bundle_rc}" -eq 0 ]; then
+            built_pytorch_ompt_reentrancy_workaround=1
+         elif [ "${bundle_rc}" -eq 43 ]; then
+            : # soft skip; leave built_pytorch_ompt_reentrancy_workaround=0, rc unchanged
+         else
+            rc=${bundle_rc}
+         fi ;;
       rocm-smi-restore)
          # In-place restore of the dropped rocm-smi-dev header + library
          # into the SDK tree from a donor sibling. No build, no modulefile
@@ -2631,7 +2744,8 @@ if [ "${rc}" -eq 0 ] \
           || [ "${built_rocprof_compute}" -eq 1 ] \
           || [ "${built_instrument_libomp}" -eq 1 ] \
           || [ "${built_rocprofiler_sdk_node_wedging_fix}" -eq 1 ] \
-          || [ "${built_rocm_smi_restore}" -eq 1 ]; }; then
+          || [ "${built_rocm_smi_restore}" -eq 1 ] \
+          || [ "${built_pytorch_ompt_reentrancy_workaround}" -eq 1 ]; }; then
    write_rocm_patches_provenance || rc=$?
 fi
 
@@ -2641,7 +2755,8 @@ if [ "${rc}" -eq 0 ]; then
         && [ "${built_rocprof_compute}" -eq 0 ] \
         && [ "${built_instrument_libomp}" -eq 0 ] \
         && [ "${built_rocprofiler_sdk_node_wedging_fix}" -eq 0 ] \
-        && [ "${built_rocm_smi_restore}" -eq 0 ]; then
+        && [ "${built_rocm_smi_restore}" -eq 0 ] \
+        && [ "${built_pytorch_ompt_reentrancy_workaround}" -eq 0 ]; then
       # All bundles dispatched ran (or were skipped) without error, but
       # nothing landed on disk -- e.g. every dispatched bundle was a
       # soft no-op (RC tree without a public-resolvable VERSION.sha).
@@ -2677,6 +2792,10 @@ if [ "${rc}" -eq 0 ]; then
       if [ "${built_rocm_smi_restore}" -eq 1 ]; then
          echo "[rocm_patches]   rocm_smi (restored):  ${ROCM_PATH}/include/rocm_smi/rocm_smi.h"
          echo "[rocm_patches]                         ${ROCM_PATH}/lib/librocm_smi64.so"
+      fi
+      if [ "${built_pytorch_ompt_reentrancy_workaround}" -eq 1 ]; then
+         echo "[rocm_patches]   pytorch OMPT re-entrancy (ROCM-25067): OMP_TOOL=disabled set on"
+         echo "[rocm_patches]                         $(dirname "${MODULE_PATH}")/rocmplus-${ROCM_VERSION}/pytorch/*.lua"
       fi
       echo "[rocm_patches]   module file:         ${MODULE_FILE}"
    fi
