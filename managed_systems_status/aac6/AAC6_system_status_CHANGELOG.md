@@ -2,6 +2,16 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-10-12
+
+- User-facing modules:
+    + mpicheck
+- AAC6 man pages:
+    + aac6_mpi_oversubscribed
+- Modules:
+    + mpicheck/dev
+
+[Full snapshot](archive/AAC6_system_status_2026-10-12.md)
 ## 2026-10-09
 
 - ROCm versions:
