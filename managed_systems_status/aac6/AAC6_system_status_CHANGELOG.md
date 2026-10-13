@@ -2,6 +2,17 @@
 
 Newest entries first. Each entry summarises user-visible changes since the previous snapshot. The dated full snapshots live under `archive/`.
 
+## 2026-10-13
+
+- ROCm versions:
+    - 10.0.0
+- AAC6 man pages:
+    + aac6_mpi_oversubscribe
+    - aac6_mpi_oversubscribed
+- Modules:
+    - rocm/10.0.0
+
+[Full snapshot](archive/AAC6_system_status_2026-10-13.md)
 ## 2026-10-12
 
 - User-facing modules:
