@@ -62,6 +62,24 @@ KOKKOS_ARCH_AMD_GFX942_APU="OFF"
 # gfx950 (MI350) is a discrete GPU, so it uses the plain GFX950 flag (no _APU).
 KOKKOS_ARCH_AMD_GFX950="OFF"
 KOKKOS_VERSION="4.7.04"
+# --kokkos-pr N: build from github.com/kokkos/kokkos pull/N/head instead of the
+# ${KOKKOS_VERSION} tag. Needed for multi-arch (several -DKokkos_ARCH_AMD_* ON at
+# once): until PR 9384 lands, kokkos_arch.cmake's check_amdgpu_arch() raises
+# FATAL_ERROR "Multiple GPU architectures given!" on the second arch, so the
+# multi-arch configure below can only ever fall back to single-arch.
+# A PR head is an unmerged development snapshot, not a release -- the build is
+# labelled ${KOKKOS_VERSION}-pr${KOKKOS_PR} so it can never overwrite or be
+# mistaken for the tagged install.
+KOKKOS_PR=""
+KOKKOS_GIT_REF=""
+# Host CPU arch. ZEN4 keeps the previous hardcoded behaviour. This is a separate
+# axis from AMDGPU_GFXMODEL and it does NOT follow it: a GPU multi-arch build is
+# still a single-host-arch build. ZEN4 implies KOKKOS_ARCH_AVX512XEON, and an
+# AVX-512 binary dies with SIGILL on a CPU without it -- e.g. AAC6's MI250 nodes
+# (EPYC 7643, Zen3, no avx512 in /proc/cpuinfo) vs its MI300A nodes (Zen4 cores,
+# avx512f present). So an install meant to serve both families must be built to
+# the OLDEST host CPU in that set (ZEN3 here); newer CPUs run it fine.
+KOKKOS_CPU_ARCH="ZEN4"
 KOKKOS_PATH=/opt/rocmplus-${ROCM_VERSION}/kokkos-v${KOKKOS_VERSION}
 KOKKOS_PATH_INPUT=""
 # --install-path: parent dir; the script appends kokkos-v${KOKKOS_VERSION}
@@ -90,6 +108,12 @@ usage()
    echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL_INPUT ] default is autodetected "
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --kokkos-version [ KOKKOS_VERSION ] default $KOKKOS_VERSION (used as git branch/tag)"
+   echo "  --kokkos-pr [ KOKKOS_PR ] build from kokkos/kokkos pull/N/head instead of the tag;"
+   echo "        install + modulefile are named \${KOKKOS_VERSION}-pr\${KOKKOS_PR}. Use 9384 for"
+   echo "        multi-arch (more than one gfx model in --amdgpu-gfxmodel). Default: unset"
+   echo "  --cpu-arch [ KOKKOS_CPU_ARCH ] host CPU arch, passed as -DKokkos_ARCH_<VALUE>=ON,"
+   echo "        default $KOKKOS_CPU_ARCH. Build to the OLDEST host CPU the install must run on;"
+   echo "        ZEN4 emits AVX-512, which SIGILLs on Zen3 hosts (e.g. MI250 nodes)"
    echo "  --build-kokkos [ BUILD_KOKKOS ], set to 0 to skip Kokkos, default is $BUILD_KOKKOS"
    echo "  --replace [ 0|1 ] remove prior install + modulefile before building, default $REPLACE"
    echo "  --keep-failed-installs [ 0|1 ] skip EXIT-trap cleanup of partial install on failure, default $KEEP_FAILED_INSTALLS"
@@ -151,6 +175,16 @@ do
           KOKKOS_VERSION=${1}
           reset-last
           ;;
+      "--kokkos-pr")
+          shift
+          KOKKOS_PR=${1}
+          reset-last
+          ;;
+      "--cpu-arch")
+          shift
+          KOKKOS_CPU_ARCH=${1}
+          reset-last
+          ;;
       "--replace")
           shift
           REPLACE=${1}
@@ -171,6 +205,14 @@ do
    n=$((${n} + 1))
    shift
 done
+
+# KOKKOS_VERSION serves double duty: the git ref to clone AND the label used for
+# the install dir and modulefile. Split them here so a PR build clones the PR head
+# but is still named distinctly. Must run before the KOKKOS_PATH derivation below.
+KOKKOS_GIT_REF="${KOKKOS_VERSION}"
+if [ -n "${KOKKOS_PR}" ]; then
+   KOKKOS_VERSION="${KOKKOS_VERSION}-pr${KOKKOS_PR}"
+fi
 
 if [ "${KOKKOS_PATH_INPUT}" != "" ]; then
    KOKKOS_PATH=${KOKKOS_PATH_INPUT}
@@ -489,8 +531,21 @@ else
       trap '[ -n "${KOKKOS_BUILD_ROOT:-}" ] && rm -rf "${KOKKOS_BUILD_ROOT}"' EXIT
       cd "${KOKKOS_BUILD_ROOT}"
 
-      git clone --branch ${KOKKOS_VERSION} https://github.com/kokkos/kokkos
-      cd kokkos
+      if [ -n "${KOKKOS_PR}" ]; then
+         # pull/N/head is the PR branch as its author last pushed it, which is a
+         # complete tree -- not a merge of the PR into the base branch. GitHub also
+         # publishes pull/N/merge, but that ref only exists while the PR is
+         # conflict-free, and 9384 currently conflicts with develop, so /head is
+         # the only ref that can be relied on here.
+         git clone https://github.com/kokkos/kokkos
+         cd kokkos
+         git fetch origin "pull/${KOKKOS_PR}/head:kokkos-pr-${KOKKOS_PR}"
+         git checkout "kokkos-pr-${KOKKOS_PR}"
+         echo "kokkos: building PR ${KOKKOS_PR} at $(git rev-parse --short HEAD)"
+      else
+         git clone --branch ${KOKKOS_GIT_REF} https://github.com/kokkos/kokkos
+         cd kokkos
+      fi
 
       # Build dir under ${KOKKOS_BUILD_ROOT} (per-job /tmp). Owned by
       # the script user (admin) -- NOT sudo'd. See audit_2026_05_01.md
@@ -559,7 +614,7 @@ else
                        -DKokkos_ARCH_AMD_GFX90A=${KOKKOS_ARCH_AMD_GFX90A} \
                        -DKokkos_ARCH_AMD_GFX942_APU=${KOKKOS_ARCH_AMD_GFX942_APU} \
                        -DKokkos_ARCH_AMD_GFX950=${KOKKOS_ARCH_AMD_GFX950} \
-                       -DKokkos_ARCH_ZEN4=ON \
+                       -DKokkos_ARCH_${KOKKOS_CPU_ARCH}=ON \
                        -DGPU_TARGETS="${gpu_targets}" \
                        -DCMAKE_CXX_COMPILER=${ROCM_PATH}/llvm/bin/amdclang++ ..
       }
@@ -571,16 +626,20 @@ else
       # The first attempt's stdout+stderr is filtered to demote upstream
       # "CMake Error" / "Configuring incomplete, errors occurred!"
       # text to "CMake Warning [...]" / "Configuring incomplete
-      # (...)". Rationale: a failed multi-arch probe is an *expected*
-      # outcome with newer Kokkos+CMake combos and is fully recovered
-      # by the single-arch retry below -- it is not a build failure of
-      # kokkos. The unfiltered text was tripping log-audit greps for
+      # (...)". Rationale: on a Kokkos without PR 9384 a multi-arch
+      # probe *always* fails -- check_amdgpu_arch() raises FATAL_ERROR
+      # "Multiple GPU architectures given!" as soon as a second
+      # Kokkos_ARCH_AMD_* is ON -- and is fully recovered by the
+      # single-arch retry below; it is not a build failure of kokkos.
+      # (With --kokkos-pr 9384 the probe succeeds and this filter is
+      # inert.) The unfiltered text was tripping log-audit greps for
       # "Error|FAILED" (jobs 7975/7980), producing false-positive
       # alerts. The demotion preserves the full diagnostic content
       # and only changes the leading keyword so audit tools can
       # distinguish "kokkos multi-arch probe" from a real build error.
       # PIPESTATUS[0] holds the cmake exit code regardless of sed
       # success; sed exits 0 unless its own input is malformed.
+      MULTIARCH_FELL_BACK=0
       set +e
       kokkos_cmake_configure "${AMDGPU_GFXMODEL}" 2>&1 \
          | sed -u \
@@ -590,6 +649,7 @@ else
       set -e
 
       if [ ${cmake_rc} -ne 0 ]; then
+         MULTIARCH_FELL_BACK=1
          FIRST_ARCH="${AMDGPU_GFXMODEL%%;*}"
          echo ""
          echo "============================"
@@ -619,6 +679,36 @@ else
          mkdir build
          cd build
          kokkos_cmake_configure "${FIRST_ARCH}"
+      fi
+
+      # Report, and when multi-arch was requested and NOT knowingly reduced,
+      # enforce, the architecture set Kokkos actually configured. Kokkos records
+      # it in KOKKOS_ARCH_AMD_GPU (one value on stock Kokkos, comma-joined with
+      # PR 9384). Without this, a multi-arch request that quietly lands on a
+      # single arch still builds, installs, and reports success, while producing
+      # a library that runs on only part of the cluster.
+      KOKKOS_CONFIG_H="$(find . -maxdepth 2 -name KokkosCore_config.h | head -1)"
+      KOKKOS_CONFIGURED_ARCHS="$(sed -n 's|^#define KOKKOS_ARCH_AMD_GPU "\(.*\)"$|\1|p' "${KOKKOS_CONFIG_H}" 2>/dev/null)"
+      echo "kokkos: requested AMD GPU target(s): ${AMDGPU_GFXMODEL}"
+      echo "kokkos: configured AMD GPU target(s): ${KOKKOS_CONFIGURED_ARCHS:-<none>}"
+      if [ "${MULTIARCH_FELL_BACK}" = "0" ]; then
+         _missing=""
+         _old_ifs="${IFS}"; IFS=";"
+         for _a in ${AMDGPU_GFXMODEL}; do
+            case ",${KOKKOS_CONFIGURED_ARCHS}," in
+               *",${_a},"*) ;;
+               *) _missing="${_missing} ${_a}" ;;
+            esac
+         done
+         IFS="${_old_ifs}"; unset _old_ifs _a
+         if [ -n "${_missing}" ]; then
+            echo "ERROR: Kokkos configured '${KOKKOS_CONFIGURED_ARCHS}' but these" >&2
+            echo "       requested architectures are missing:${_missing}" >&2
+            echo "       Multi-arch HIP builds need Kokkos PR 9384; re-run with" >&2
+            echo "       --kokkos-pr 9384 (or a Kokkos release that has it merged)." >&2
+            exit 1
+         fi
+         unset _missing
       fi
 
       make -j

@@ -381,7 +381,7 @@ rocm_version_to_patches() {
       # so we don't litter `rocm-patches-afar-*/rocprof-compute/`. The
       # therock-* rows keep the dispatch because the policy still
       # applies there.
-      7.2.0)            echo "rocprof-sys-1.3.0 rocprof-compute" ;;
+      7.2.0)            echo "rccl-sb6033 rocprof-sys-1.3.0 rocprof-compute" ;;
       7.2.1)            echo "rocprof-sys-1.3.0 rocprof-compute" ;;
       # 7.2.2: the 4 vendored rocprof-sys 1.3.0 patches apply cleanly to
       # the rocm-7.2.2 source tag (same projects/rocprofiler-systems
@@ -390,7 +390,7 @@ rocm_version_to_patches() {
       # on the AAC6 Ubuntu 22.04 hosts (rocprof-sys SIGSEGV regression
       # reproducer in MPI_Ghost_Exchange_Ver2_Rocprof-Sys passes
       # post-overlay; see slurm-9046).
-      7.2.2)            echo "rocprof-sys-1.3.0 rocprof-compute" ;;
+      7.2.2)            echo "rccl-sb6033 rocprof-sys-1.3.0 rocprof-compute" ;;
       # 7.2.3: same source baseline as 7.2.0 / 7.2.1 / 7.2.2 (rocm-systems
       # tag rocm-7.2.3 ships projects/rocprofiler-systems VERSION 1.3.0
       # and all 4 patches apply cleanly).  An earlier 7.2.3 build of the
@@ -400,13 +400,13 @@ rocm_version_to_patches() {
       # amdclang and the SDK both load cleanly and the in-tree builder
       # produces a working librocprof-sys.so.1.3.0 against rocm-7.2.3's
       # rocprofiler-sdk 1.1.0.
-      7.2.3)            echo "rocprof-sys-1.3.0 rocprof-compute" ;;
+      7.2.3)            echo "rccl-sb6033 rocprof-sys-1.3.0 rocprof-compute" ;;
       # 7.2.4: same source baseline as 7.2.0 / 7.2.1 / 7.2.2 / 7.2.3
       # (rocm-systems tag rocm-7.2.4 ships projects/rocprofiler-systems
       # VERSION 1.3.0 and the 4 vendored patches apply cleanly).  Added
       # to the enumerated 7.2.x list rather than a 7.2.* wildcard so each
       # new tag is verified to apply before being enabled.
-      7.2.4)            echo "rocprof-sys-1.3.0 rocprof-compute" ;;
+      7.2.4)            echo "rccl-sb6033 rocprof-sys-1.3.0 rocprof-compute" ;;
       # 7.12.0 (AFAR / TheRock RC line, e.g. rocm-afar-23.1.0-7.12.0):
       # ships rocprof-sys 1.5.0 -- the SAME SDK 7.12.0 / rocprof-sys 1.5.0
       # baseline as afar-23.1.0 (see the afar-23.1.0 case below), so it
@@ -491,10 +491,10 @@ rocm_version_to_patches() {
       # no-ops (43) when the tree already has rocm_smi or no donor is on
       # the cluster, so listing it for the whole 10.* line is safe.
       10.*)             echo "rocprofiler-sdk-node-wedging-fix rocm-smi-restore" ;;
-      6.3.*)            echo "rocprof-compute" ;;
-      6.4.*)            echo "rocprof-compute" ;;
-      7.0.*)            echo "rocprof-compute" ;;
-      7.1.*)            echo "rocprof-compute" ;;
+      6.3.*)            echo "rccl-sb6033 rocprof-compute" ;;
+      6.4.*)            echo "rccl-sb6033 rocprof-compute" ;;
+      7.0.*)            echo "rccl-sb6033 rocprof-compute" ;;
+      7.1.*)            echo "rccl-sb6033 rocprof-compute" ;;
       # AFAR-22.{1,2}.0 dispatch the v1.2.0 rocprof-sys cherry-pick
       # bundle (NOT rocprof-compute -- see soft-no-op note above).
       # build_rocprof_sys_1_2_0() clones rocm-systems @ tag rocm-7.1.0
@@ -536,7 +536,7 @@ rocm_version_to_patches() {
       # `therock-7.13` upstream tag (= projects/rocprofiler-systems
       # VERSION 1.6.0) is the source pin used by build_rocprof_sys_1_6_0().
       afar-23.1.0)      echo "rocprof-sys-1.5.0 rocprof-sys-instrument-libomp" ;;
-      afar-23.2.1)      echo "rocprof-sys-1.6.0 rocprof-sys-instrument-libomp" ;;
+      afar-23.2.1)      echo "rccl-sb6033 rocprof-sys-1.6.0 rocprof-sys-instrument-libomp" ;;
       therock-23.1.0)   echo "rocprof-compute" ;;
       # therock-23.2.0 also ships rocprof-sys 1.6.0 from the same
       # upstream baseline, so the v1.6.0 patch bundle applies (the
@@ -714,6 +714,17 @@ already_installed_check() {
    local bundle bin lib
    for bundle in ${PATCH_BUNDLES}; do
       case "${bundle}" in
+         rccl-sb6033)
+            # Only treat this as installed when the overlay library is both
+            # present and actually carries the guards, so a stale pre-fix
+            # artifact can never mark the bundle done.
+            lib="${INSTALL_PREFIX}/lib/librccl.so.1"
+            [ -e "${lib}" ] || return 1
+            strings -a "${lib}" 2>/dev/null | grep -qF 'tpLocalRank %d out of range' \
+               || return 1
+            grep -qE "rocm-patches-${ROCM_VERSION}/lib" "${mf}" \
+               || return 1
+            ;;
          rocprof-compute)
             bin="${INSTALL_PREFIX}/rocprof-compute/bin/rocprof-compute"
             [ -e "${bin}" ] || return 1
@@ -1767,6 +1778,160 @@ build_rocprof_compute() {
 }
 
 # ─────────────────────────────────────────────────────────────────────
+# build_rccl_sb6033
+# -----------------
+# Security backport for AMD-SB-6033 / CVE-2026-43598 (CVSS 4.0 7.7, CWE-822
+# untrusted pointer dereference). The RCCL proxy RPC setup path trusted two
+# values that arrive over the wire from a peer rank: an opaque connection
+# pointer that it dereferenced directly, and a tpLocalRank index it used
+# unchecked into a fixed-size per-peer table. Either, if forged, let a
+# compromised peer or network-adjacent attacker read out of bounds or dispatch
+# an indirect call through an arbitrary pointer.
+#
+# AMD's only published remedy is "upgrade to ROCm 7.14"; there is no vendor
+# backport for any earlier line. Upstream fix is rocm-systems
+# ccba298bcfb644246e07b1137e948a4cab60eb29 (ROCM-24271), which we re-cut per
+# source baseline under sources/rocm-patches/rccl-sb6033/ -- see that bundle's
+# baselines.conf for the per-version source pin and generate_patches.py for how
+# the patches are produced.
+#
+# Same overlay shape as the rocprof-sys bundles: build a replacement
+# librccl.so.1 into ${INSTALL_PREFIX}/lib and let patch_module_file() put that
+# dir ahead of the SDK's own lib on LD_LIBRARY_PATH. The public rccl.h ABI is
+# untouched by the patch (both new struct fields live in non-installed internal
+# headers), so the rebuilt library is a drop-in for the stock one.
+#
+# NOTE: the patch changes the proxy wire format -- the client sends a 4-byte
+# integer handle where it used to send an 8-byte pointer. A patched and an
+# unpatched librccl therefore cannot share a communicator. Every rank of a job
+# loads one librccl via its rocm module, so this only matters for a job that
+# mixes a container-embedded RCCL with the host one.
+#
+# Returns 0 (built), 43 (soft no-op: no baseline pinned for this ROCM_VERSION),
+# or 1 (hard error).
+# ─────────────────────────────────────────────────────────────────────
+build_rccl_sb6033() {
+   local bundle_dir="${PATCH_SOURCE_DIR}/rccl-sb6033"
+   local out_lib="${INSTALL_PREFIX}/lib/librccl.so.1"
+
+   [ -d "${bundle_dir}" ] || send-error "patch bundle missing: ${bundle_dir}"
+   [ -f "${bundle_dir}/baselines.conf" ] \
+      || send-error "missing vendored file: ${bundle_dir}/baselines.conf"
+
+   # Source pin lookup. A version absent from baselines.conf is a deliberate
+   # soft skip, not an error: 7.12.0 / 7.13.0 / afar-23.1.0 are vulnerable but
+   # were built from rocm-systems commits that are not reachable from any public
+   # ref, so there is no tree that differs from the shipped library only by this
+   # patch. Those trees are remediated by retirement in favour of 7.14+.
+   local row
+   row="$(grep -v '^[[:space:]]*#' "${bundle_dir}/baselines.conf" \
+            | awk -F'|' -v v="${ROCM_VERSION}" '$1==v {print; exit}')"
+   if [ -z "${row}" ]; then
+      echo "[rocm_patches] no rccl-sb6033 source baseline pinned for ROCm ${ROCM_VERSION}"
+      echo "[rocm_patches]   (see ${bundle_dir}/baselines.conf). Skipping (soft no-op; rc=43)."
+      return 43
+   fi
+
+   local repo ref patch_file src_subdir
+   repo="$(echo "${row}"       | cut -d'|' -f2)"
+   ref="$(echo "${row}"        | cut -d'|' -f3)"
+   patch_file="$(echo "${row}" | cut -d'|' -f4)"
+   src_subdir="$(echo "${row}" | cut -d'|' -f5)"
+   [ -f "${bundle_dir}/${patch_file}" ] \
+      || send-error "missing vendored patch: ${bundle_dir}/${patch_file}"
+
+   if [ -f "${out_lib}" ] && [ "${REPLACE}" -eq 0 ]; then
+      echo "[rocm_patches] ${out_lib} already exists -- skipping rebuild (use --replace to force)"
+      return 0
+   fi
+
+   local src_root="${INSTALL_PREFIX}/source/rccl"
+   local build_dir="${INSTALL_PREFIX}/build/rccl"
+   local lib_dir="${INSTALL_PREFIX}/lib"
+
+   ${SUDO} mkdir -p "${INSTALL_PREFIX}" "$(dirname "${src_root}")" "${build_dir}" "${lib_dir}"
+   if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+      ${SUDO} chown -R "$(id -u):$(id -g)" "${INSTALL_PREFIX}" || true
+   fi
+
+   # Fetch exactly the pinned ref. Tags and branch names can be fetched shallow;
+   # a raw commit SHA cannot (git refuses "couldn't find remote ref"), so those
+   # baselines fall back to a blobless full-history clone.
+   if [ ! -d "${src_root}/.git" ]; then
+      rm -rf "${src_root}"
+      if ! git clone --depth 1 --branch "${ref}" "${repo}" "${src_root}" 2>/dev/null; then
+         git clone --filter=blob:none --no-checkout "${repo}" "${src_root}" || return 1
+         git -C "${src_root}" fetch -q --filter=blob:none origin \
+            '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' || return 1
+      fi
+   fi
+   git -C "${src_root}" checkout -q -f "${ref}" || return 1
+   git -C "${src_root}" clean -qfd || true
+
+   local patch_root="${src_root}"
+   [ "${src_subdir}" = "." ] || patch_root="${src_root}/${src_subdir}"
+   # Patches are cut with `git diff --relative`, so -p1 from the rccl tree root
+   # works for both the standalone and monorepo layouts. Re-running after a
+   # successful apply is a no-op rather than a failure.
+   if ! git -C "${patch_root}" apply --check "${bundle_dir}/${patch_file}" 2>/dev/null; then
+      if git -C "${patch_root}" apply --check --reverse "${bundle_dir}/${patch_file}" 2>/dev/null; then
+         echo "[rocm_patches] rccl-sb6033 patch already applied to ${patch_root}"
+      else
+         echo "[rocm_patches] ERROR: ${patch_file} does not apply to ${repo} @ ${ref}" >&2
+         return 1
+      fi
+   else
+      git -C "${patch_root}" apply "${bundle_dir}/${patch_file}" || return 1
+   fi
+
+   # Build against the very SDK we are overlaying, not whatever /opt/rocm points
+   # at, so the result links the same HIP runtime as the stock library.
+   local gfx="${AMDGPU_GFXMODEL:-gfx942;gfx90a}"
+   echo "[rocm_patches] building patched RCCL for ${gfx} from ${repo} @ ${ref}"
+   # -DROCM_PATH is mandatory, not merely helpful: when it is undefined RCCL's
+   # CMakeLists defaults it to /opt/rocm and then does `set(ENV{ROCM_PATH} ...)`,
+   # overwriting the environment for every subsequent try_compile. On a cluster
+   # whose ROCm lives outside /opt/rocm that makes hipcc look for
+   # /opt/rocm/lib/llvm/bin/clang++, and configure dies in find_package(Threads)
+   # with a misleading "Could NOT find Threads".
+   ( set -e
+     cd "${patch_root}"
+     export ROCM_PATH HIP_PATH="${ROCM_PATH}"
+     CXX="${ROCM_PATH}/bin/hipcc" cmake -S . -B "${build_dir}" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DROCM_PATH="${ROCM_PATH}" \
+        -DCMAKE_PREFIX_PATH="${ROCM_PATH}" \
+        -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}/rccl" \
+        -DAMDGPU_TARGETS="${gfx}" \
+        -DGPU_TARGETS="${gfx}" \
+        -DBUILD_TESTS=OFF
+     cmake --build "${build_dir}" --target rccl -j "$(nproc)"
+   ) || return 1
+
+   # Install just the library: the overlay shadows the SDK's librccl.so.1 on
+   # LD_LIBRARY_PATH, and the headers in the SDK are unchanged by this patch.
+   local built
+   built="$(find "${build_dir}" -maxdepth 2 -name 'librccl.so.1.*' -type f | head -1)"
+   [ -n "${built}" ] || built="$(find "${build_dir}" -maxdepth 2 -name 'librccl.so*' -type f | head -1)"
+   if [ -z "${built}" ]; then
+      echo "[rocm_patches] ERROR: build produced no librccl.so under ${build_dir}" >&2
+      return 1
+   fi
+   ${SUDO} install -m 0755 "${built}" "${lib_dir}/$(basename "${built}")"
+   ${SUDO} ln -sfn "$(basename "${built}")" "${out_lib}"
+   ${SUDO} ln -sfn "librccl.so.1" "${lib_dir}/librccl.so"
+
+   # Fail loudly if the artifact somehow lacks the fix: the whole point of the
+   # overlay is that this string is present.
+   if ! strings -a "${out_lib}" 2>/dev/null | grep -qF 'tpLocalRank %d out of range'; then
+      echo "[rocm_patches] ERROR: built librccl lacks the SB-6033 guards -- refusing to ship it" >&2
+      return 1
+   fi
+   echo "[rocm_patches] installed patched librccl: ${out_lib} -> $(basename "${built}")"
+   return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────
 # apply_rocprofiler_sdk_node_wedging_fix
 # ---------------------------
 # In ROCm 10.0 and early 10.1 builds, a race in rocprofiler-sdk's shutdown
@@ -2583,6 +2748,7 @@ fi
 # Track which bundles actually ran so we only invoke bundle-specific
 # post-build hooks (e.g. the rocprof-sys LD_LIBRARY_PATH modulefile edit)
 # when the matching bundle was built this run.
+built_rccl_sb6033=0
 built_rocprof_sys=0
 built_rocprof_compute=0
 built_instrument_libomp=0
@@ -2592,6 +2758,21 @@ built_pytorch_ompt_reentrancy_workaround=0
 
 for bundle in ${PATCH_BUNDLES}; do
    case "${bundle}" in
+      rccl-sb6033)
+         # Security backport (AMD-SB-6033 / CVE-2026-43598). Shares the
+         # rocprof-sys bundles' LD_LIBRARY_PATH overlay, so it only needs
+         # patch_module_file() afterwards -- keyed off built_rccl_sb6033 below.
+         # Exit 43 is a soft skip: no reproducible source baseline is pinned for
+         # this ROCm version, which must not fail the rest of the overlay set.
+         build_rccl_sb6033
+         bundle_rc=$?
+         if [ "${bundle_rc}" -eq 0 ]; then
+            built_rccl_sb6033=1
+         elif [ "${bundle_rc}" -eq 43 ]; then
+            : # soft skip; leave built_rccl_sb6033=0, rc unchanged
+         else
+            rc=${bundle_rc}
+         fi ;;
       rocprof-sys-1.3.0|rocprof-sys-1.2.0|rocprof-sys-1.5.0|rocprof-sys-1.6.0)
          # All three rprof-sys baselines share the same post-build
          # finishing-step set (patch_module_file + install_rocprof_sys_run_wrapper
@@ -2714,6 +2895,13 @@ done
 # then makes the SDK's own librocprof-sys.so.X.Y.Z a symlink to the
 # patched .so so the runtime defeats rocprof-sys-run's own
 # LD_LIBRARY_PATH prepending of ROCPROFSYS_ROOT/lib.
+# The rccl-sb6033 overlay needs the same LD_LIBRARY_PATH module edit, but none
+# of the rocprof-sys finishing steps. patch_module_file() is idempotent, so it is
+# safe when both bundles built in the same run.
+if [ "${rc}" -eq 0 ] && [ "${built_rccl_sb6033}" -eq 1 ]; then
+   patch_module_file || rc=$?
+fi
+
 if [ "${rc}" -eq 0 ] && [ "${built_rocprof_sys}" -eq 1 ]; then
    patch_module_file || rc=$?
    # install_rocprof_sys_run_wrapper() drops a small bash wrapper at
@@ -2740,7 +2928,8 @@ fi
 # (instead of misleadingly claiming a "Built by:" run).  See
 # write_rocm_patches_provenance() for the full idempotency story.
 if [ "${rc}" -eq 0 ] \
-     && { [ "${built_rocprof_sys}" -eq 1 ] \
+     && { [ "${built_rccl_sb6033}" -eq 1 ] \
+          || [ "${built_rocprof_sys}" -eq 1 ] \
           || [ "${built_rocprof_compute}" -eq 1 ] \
           || [ "${built_instrument_libomp}" -eq 1 ] \
           || [ "${built_rocprofiler_sdk_node_wedging_fix}" -eq 1 ] \
@@ -2751,7 +2940,8 @@ fi
 
 if [ "${rc}" -eq 0 ]; then
    echo ""
-   if [ "${built_rocprof_sys}" -eq 0 ] \
+   if [ "${built_rccl_sb6033}" -eq 0 ] \
+        && [ "${built_rocprof_sys}" -eq 0 ] \
         && [ "${built_rocprof_compute}" -eq 0 ] \
         && [ "${built_instrument_libomp}" -eq 0 ] \
         && [ "${built_rocprofiler_sdk_node_wedging_fix}" -eq 0 ] \
@@ -2765,6 +2955,9 @@ if [ "${rc}" -eq 0 ]; then
       echo "[rocm_patches]    see preceding lines for the per-bundle reason)"
    else
       echo "[rocm_patches] ROCm ${ROCM_VERSION} patch overlay applied successfully."
+      if [ "${built_rccl_sb6033}" -eq 1 ]; then
+         echo "[rocm_patches]   rccl (AMD-SB-6033):  ${INSTALL_PREFIX}/lib/librccl.so.1"
+      fi
       if [ "${built_rocprof_sys}" -eq 1 ]; then
          # Print whichever versioned .so the build actually produced.
          # The post-build finishing-step helpers and this summary all
