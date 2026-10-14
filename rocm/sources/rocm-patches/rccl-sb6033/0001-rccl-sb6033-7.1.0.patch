@@ -1,0 +1,268 @@
+diff --git a/src/include/device.h b/src/include/device.h
+index d65ffd36..6b26fada 100644
+--- a/src/include/device.h
++++ b/src/include/device.h
+@@ -193,6 +193,7 @@ struct ncclProxyConnector {
+   int tpRank;
+   int tpLocalRank;
+   int sameProcess;
++  int connId; // Server-issued integer handle, used as the wire identifier on subsequent proxy RPCs.
+   struct ncclProxyConnection* connection;
+   ncclResult_t (*proxyProgress)(struct ncclProxyState* proxyState, struct ncclProxyArgs*); // Copied from transport if necessary
+ };
+diff --git a/src/include/proxy.h b/src/include/proxy.h
+index 1fd0c0f9..e2f82b6a 100644
+--- a/src/include/proxy.h
++++ b/src/include/proxy.h
+@@ -400,6 +400,17 @@ struct ncclProxyConnection {
+   int needsProxyProgress;
+ };
+ 
++#define NCCL_PROXY_CONN_POOL_SIZE_POW2 7
++#define NCCL_PROXY_CONN_POOL_SIZE      (1 << NCCL_PROXY_CONN_POOL_SIZE_POW2)
++#define NCCL_PROXY_CONN_POOL_MASK      (NCCL_PROXY_CONN_POOL_SIZE - 1)
++struct ncclProxyConnectionPool {
++  struct ncclProxyConnection** pools;
++  int banks;
++  int offset;
++};
++ncclResult_t ncclProxyGetConnection(struct ncclProxyConnectionPool* pool, int id, struct ncclProxyConnection** conn);
++ncclResult_t ncclProxyNewConnection(struct ncclProxyConnectionPool* pool, int* id);
++
+ typedef ncclResult_t (*threadFunc_t)(struct ncclProxyArgs*);
+ 
+ enum proxyMode {
+diff --git a/src/proxy.cc b/src/proxy.cc
+index 90b97b18..49cdb6d3 100644
+--- a/src/proxy.cc
++++ b/src/proxy.cc
+@@ -1045,16 +1045,7 @@ ncclResult_t ncclProxyProgressDestroy(struct ncclProxyState* proxyState) {
+   return ncclSuccess;
+ }
+ 
+-#define NCCL_PROXY_CONN_POOL_SIZE_POW2 7
+-#define NCCL_PROXY_CONN_POOL_SIZE (1<<(NCCL_PROXY_CONN_POOL_SIZE_POW2))
+-#define NCCL_PROXY_CONN_POOL_MASK ((NCCL_PROXY_CONN_POOL_SIZE)-1)
+-struct ncclProxyConnectionPool {
+-  struct ncclProxyConnection** pools;
+-  int banks;
+-  int offset;
+-};
+-
+-static ncclResult_t ncclProxyNewConnection(struct ncclProxyConnectionPool* pool, int* id) {
++ncclResult_t ncclProxyNewConnection(struct ncclProxyConnectionPool* pool, int* id) {
+   if (pool->offset == NCCL_PROXY_CONN_POOL_SIZE) {
+     NCCLCHECK(ncclRealloc(&pool->pools, pool->banks, pool->banks+1));
+     NCCLCHECK(ncclCalloc(pool->pools+pool->banks, NCCL_PROXY_CONN_POOL_SIZE));
+@@ -1066,10 +1057,13 @@ static ncclResult_t ncclProxyNewConnection(struct ncclProxyConnectionPool* pool,
+   return ncclSuccess;
+ }
+ 
+-static ncclResult_t ncclProxyGetConnection(struct ncclProxyConnectionPool* pool, int id, struct ncclProxyConnection** conn) {
++ncclResult_t ncclProxyGetConnection(struct ncclProxyConnectionPool* pool, int id, struct ncclProxyConnection** conn) {
++  if (id < 0) return ncclInvalidArgument;
+   int bank = id>>NCCL_PROXY_CONN_POOL_SIZE_POW2;
+   int offset = id&NCCL_PROXY_CONN_POOL_MASK;
+-  if ((pool->pools == NULL) || (bank > pool->banks) || (pool->pools[bank] == NULL)) return ncclInternalError;
++  if ((pool->pools == NULL) || (bank >= pool->banks) || (pool->pools[bank] == NULL)) return ncclInvalidArgument;
++  // Last bank's high-water mark is pool->offset; reject IDs past it so callers can't index uninitialized slots.
++  if (bank == pool->banks - 1 && offset >= pool->offset) return ncclInvalidArgument;
+   *conn = pool->pools[bank]+offset;
+   return ncclSuccess;
+ }
+@@ -1114,6 +1108,7 @@ struct ncclProxyInitReq {
+ 
+ struct ncclProxyInitResp {
+   ncclProxyConnection* connection;
++  int connId; // Server-issued integer handle. Sent on subsequent RPCs in place of the raw pointer.
+   char devShmPath[6]; // "XXXXXX" - May or may not be set
+ };
+ 
+@@ -1127,6 +1122,7 @@ ncclResult_t ncclProxyConnect(struct ncclComm* comm, int transport, int send, in
+                             (comm->peerInfo[proxyRank].pidHash == comm->peerInfo[comm->rank].pidHash)) ? 1 : 0;
+   // Keep one connection per local rank
+   proxyConn->connection = NULL;
++  proxyConn->connId = -1;
+   proxyConn->tpRank = tpProxyRank;
+   proxyConn->rank = proxyRank;
+   if (sharedProxyState->peerSocks == NULL) {
+@@ -1154,10 +1150,11 @@ ncclResult_t ncclProxyConnect(struct ncclComm* comm, int transport, int send, in
+   req.sameProcess = proxyConn->sameProcess;
+ 
+   struct ncclProxyInitResp resp = {0};
+-  // This usually sends proxyConn->connection to identify which connection this is.
+-  // However, this is part of the response and therefore is ignored
++  // The Init RPC ignores the wire connId field (no connection exists yet); the response carries the
++  // server-assigned connId, which we echo back on every subsequent RPC for this connection.
+   NCCLCHECK(ncclProxyCallBlocking(comm, proxyConn, ncclProxyMsgInit, &req, sizeof(req), &resp, sizeof(resp)));
+   proxyConn->connection = resp.connection;
++  proxyConn->connId = resp.connId;
+ 
+   // If we need proxy progress, map progress ops
+   struct ncclTransportComm* tcomm = send ? &ncclTransports[transport]->send : &ncclTransports[transport]->recv;
+@@ -1171,7 +1168,7 @@ ncclResult_t ncclProxyConnect(struct ncclComm* comm, int transport, int send, in
+     }
+   }
+   proxyConn->initialized = true;
+-  INFO(NCCL_NET|NCCL_PROXY, "Connected to proxy localRank %d -> connection %p", proxyConn->tpLocalRank, proxyConn->connection);
++  INFO(NCCL_NET|NCCL_PROXY, "Connected to proxy localRank %d -> connection %p (connId %d)", proxyConn->tpLocalRank, proxyConn->connection, proxyConn->connId);
+   return ncclSuccess;
+ }
+ 
+@@ -1274,7 +1271,9 @@ ncclResult_t ncclProxyCallAsync(struct ncclComm* comm, struct ncclProxyConnector
+   sock = sharedProxyState->peerSocks + proxyConn->tpLocalRank;
+ 
+   NCCLCHECKGOTO(ncclSocketSend(sock, &type, sizeof(int)), ret, error);
+-  NCCLCHECKGOTO(ncclSocketSend(sock, &proxyConn->connection, sizeof(void*)), ret, error);
++  // Send the server-issued integer connId rather than the raw pointer. Server resolves to a
++  // pool-bounds-checked ncclProxyConnection* via ncclProxyGetConnection at the recv site.
++  NCCLCHECKGOTO(ncclSocketSend(sock, &proxyConn->connId, sizeof(int)), ret, error);
+   NCCLCHECKGOTO(ncclSocketSend(sock, &reqSize, sizeof(int)), ret, error);
+   NCCLCHECKGOTO(ncclSocketSend(sock, &respSize, sizeof(int)), ret, error);
+   if (reqSize) NCCLCHECKGOTO(ncclSocketSend(sock, reqBuff, reqSize), ret, error);
+@@ -1425,6 +1424,12 @@ ncclResult_t ncclProxyShmUnlink(struct ncclComm* comm) {
+ 
+ static ncclResult_t proxyConnInit(struct ncclProxyLocalPeer* peer, struct ncclProxyConnectionPool* connectionPool, struct ncclProxyState* proxyState, ncclProxyInitReq* req, ncclProxyInitResp* resp, struct ncclProxyConnection** connection) {
+   int id;
++
++  if ((unsigned)req->tpLocalRank >= (unsigned)proxyState->tpLocalnRanks) {
++    WARN("proxyConnInit: tpLocalRank %d out of range [0,%d)", req->tpLocalRank, proxyState->tpLocalnRanks);
++    return ncclInvalidArgument;
++  }
++
+   NCCLCHECK(ncclProxyNewConnection(connectionPool, &id));
+   NCCLCHECK(ncclProxyGetConnection(connectionPool, id, connection));
+ 
+@@ -1437,6 +1442,7 @@ static ncclResult_t proxyConnInit(struct ncclProxyLocalPeer* peer, struct ncclPr
+   peer->tpRank = req->tpRank;
+ 
+   resp->connection = *connection;
++  resp->connId = id;
+ 
+   (*connection)->tcomm = (*connection)->send ? &ncclTransports[(*connection)->transport]->send : &ncclTransports[(*connection)->transport]->recv;
+   // If we need proxy progress, let's allocate ops and start the thread
+@@ -1564,7 +1570,20 @@ static ncclResult_t proxyServiceInitOp(int type, struct ncclProxyLocalPeer* peer
+   NCCLCHECK(ncclCalloc(&asyncOp, 1));
+ 
+   asyncOp->type = type;
+-  NCCLCHECKGOTO(ncclSocketRecv(sock, &asyncOp->connection, sizeof(void*)), ret, fail);
++  // Read the integer connId from the wire and resolve it through the bounds-checked pool accessor.
++  // Replaces the prior pattern of reading a raw `void*` off the socket and dereferencing it as `this`,
++  // which let any peer that knew the comm magic dispatch an indirect call through an arbitrary pointer.
++  // Init is the exception: no connection exists yet, so we accept the wire sentinel and let
++  // proxyConnInit allocate one and bind it to asyncOp->connection via its out-param.
++  {
++    int connId;
++    NCCLCHECKGOTO(ncclSocketRecv(sock, &connId, sizeof(int)), ret, fail);
++    if (type == ncclProxyMsgInit) {
++      asyncOp->connection = NULL;
++    } else {
++      NCCLCHECKGOTO(ncclProxyGetConnection(connectionPool, connId, &asyncOp->connection), ret, fail);
++    }
++  }
+ 
+   NCCLCHECKGOTO(ncclSocketRecv(sock, &asyncOp->reqSize, sizeof(int)), ret, fail);
+   NCCLCHECKGOTO(ncclSocketRecv(sock, &asyncOp->respSize, sizeof(int)), ret, fail);
+diff --git a/src/transport/net.cc b/src/transport/net.cc
+index a7df9a15..2b8d25be 100644
+--- a/src/transport/net.cc
++++ b/src/transport/net.cc
+@@ -565,6 +565,10 @@ static ncclResult_t sharedNetBuffersInit(struct ncclProxyState* proxyState, int
+       WARN("PXN should not use host buffers for data");
+       return ncclInternalError;
+   }
++  if ((unsigned)tpLocalRank >= (unsigned)proxyState->tpLocalnRanks) {
++    WARN("sharedNetBuffersInit: tpLocalRank %d out of range [0,%d)", tpLocalRank, proxyState->tpLocalnRanks);
++    return ncclInvalidArgument;
++  }
+   struct ncclProxyProgressState* progressState = &proxyState->progressState;
+   if (progressState->localPeers == NULL) {
+     NCCLCHECK(ncclCalloc(&progressState->localPeers, proxyState->tpLocalnRanks));
+@@ -619,6 +623,10 @@ static ncclResult_t sharedBuffersGet(struct ncclProxyState* proxyState, int chan
+ }
+ 
+ static ncclResult_t sharedNetBuffersDestroy(struct ncclProxyState* proxyState, int tpLocalRank, int type, struct ncclProxyConnection* connection) {
++  if ((unsigned)tpLocalRank >= (unsigned)proxyState->tpLocalnRanks) {
++    WARN("sharedNetBuffersDestroy: tpLocalRank %d out of range [0,%d)", tpLocalRank, proxyState->tpLocalnRanks);
++    return ncclInvalidArgument;
++  }
+   if (proxyState->progressState.localPeers == NULL) NCCLCHECK(ncclInternalError);
+   struct ncclProxyPeer* peer = proxyState->progressState.localPeers[tpLocalRank];
+   if (peer == NULL) NCCLCHECK(ncclInternalError);
+@@ -658,6 +666,10 @@ static ncclResult_t proxySharedInit(struct ncclProxyConnection* connection, stru
+ static ncclResult_t sendProxySetup(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
+   struct setupReq* req = (struct setupReq*) reqBuff;
+   if (reqSize != sizeof(struct setupReq)) return ncclInternalError;
++  if ((unsigned)req->tpLocalRank >= (unsigned)proxyState->tpLocalnRanks) {
++    WARN("sendProxySetup: tpLocalRank %d out of range [0,%d)", req->tpLocalRank, proxyState->tpLocalnRanks);
++    return ncclInvalidArgument;
++  }
+ 
+   struct sendNetResources* resources;
+   NCCLCHECK(ncclCalloc(&resources, 1));
+@@ -697,6 +709,10 @@ static ncclResult_t sendProxySetup(struct ncclProxyConnection* connection, struc
+ static ncclResult_t recvProxySetup(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
+   struct setupReq* req = (struct setupReq*) reqBuff;
+   if (reqSize != sizeof(struct setupReq)) return ncclInternalError;
++  if ((unsigned)req->tpLocalRank >= (unsigned)proxyState->tpLocalnRanks) {
++    WARN("recvProxySetup: tpLocalRank %d out of range [0,%d)", req->tpLocalRank, proxyState->tpLocalnRanks);
++    return ncclInvalidArgument;
++  }
+ 
+   struct recvNetResources* resources;
+   NCCLCHECK(ncclCalloc(&resources, 1));
+diff --git a/test/ProxyTests.cpp b/test/ProxyTests.cpp
+index 5c8cf06b..f93b4896 100644
+--- a/test/ProxyTests.cpp
++++ b/test/ProxyTests.cpp
+@@ -1,3 +1,4 @@
++#include <climits>
+ /*************************************************************************
+  * Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+  *
+@@ -430,4 +431,45 @@ TEST(ProxyTests, ncclProxyClientQueryFdBlocking) {
+   INFO(NCCL_LOG_INFO, "[ProxyTests] Test Complete \n");
+ }
+ 
++
++// Regression tests for proxy connection pool bounds checking.
++// Bug 1: before the fix, the wire sent a raw void* that the server dereferenced directly.
++// These tests verify that ncclProxyGetConnection rejects every malformed integer ID that an
++// attacker could substitute for a legitimate connId received over the proxy socket.
++TEST(ProxyTests, ProxyConnectionPoolBoundsCheck)
++{
++    // Build a minimal pool manually: 1 bank, 2 initialized slots (offset = 2).
++    // We bypass ncclProxyNewConnection so the test has no runtime dependencies.
++    struct ncclProxyConnection conns[NCCL_PROXY_CONN_POOL_SIZE] = {};
++    struct ncclProxyConnection* bank0 = conns;
++    struct ncclProxyConnectionPool pool;
++    pool.pools  = &bank0;
++    pool.banks  = 1;
++    pool.offset = 2; // slots 0 and 1 are valid
++
++    struct ncclProxyConnection* out = nullptr;
++
++    // Valid IDs must succeed.
++    EXPECT_EQ(ncclProxyGetConnection(&pool, 0, &out), ncclSuccess);
++    EXPECT_EQ(out, &conns[0]);
++    EXPECT_EQ(ncclProxyGetConnection(&pool, 1, &out), ncclSuccess);
++    EXPECT_EQ(out, &conns[1]);
++
++    // Negative ID -- primary regression: wire attacker sends e.g. -1 to force arbitrary deref.
++    EXPECT_EQ(ncclProxyGetConnection(&pool, -1, &out), ncclInvalidArgument);
++    EXPECT_EQ(ncclProxyGetConnection(&pool, INT_MIN, &out), ncclInvalidArgument);
++
++    // ID at or past high-water mark -- slot was allocated but never initialized.
++    EXPECT_EQ(ncclProxyGetConnection(&pool, 2, &out), ncclInvalidArgument);
++    EXPECT_EQ(ncclProxyGetConnection(&pool, NCCL_PROXY_CONN_POOL_SIZE - 1, &out), ncclInvalidArgument);
++
++    // ID whose bank index exceeds the number of allocated banks.
++    EXPECT_EQ(ncclProxyGetConnection(&pool, NCCL_PROXY_CONN_POOL_SIZE, &out), ncclInvalidArgument);
++    EXPECT_EQ(ncclProxyGetConnection(&pool, INT_MAX, &out), ncclInvalidArgument);
++
++    // Null pool (no banks allocated).
++    struct ncclProxyConnectionPool emptyPool = {nullptr, 0, 0};
++    EXPECT_EQ(ncclProxyGetConnection(&emptyPool, 0, &out), ncclInvalidArgument);
++}
++
+ } // namespace RcclUnitTesting
