@@ -1,0 +1,664 @@
+diff --git a/buildlib/pr/rocm/test_malloc_hook.sh b/buildlib/pr/rocm/test_malloc_hook.sh
+new file mode 100644
+index 00000000000..30863af4dd4
+--- /dev/null
++++ b/buildlib/pr/rocm/test_malloc_hook.sh
+@@ -0,0 +1,68 @@
++#!/bin/bash -eExl
++realdir=$(realpath $(dirname $0))
++source ${realdir}/../../az-helpers.sh
++
++#
++# Prepare build environment
++#
++WORKSPACE=${WORKSPACE:=$PWD}
++ucx_inst=${WORKSPACE}/install
++
++prepare() {
++	echo " ==== Prepare ===="
++	env
++	cd ${WORKSPACE}
++	mkdir -p build-test
++	cd build-test
++}
++
++#
++# Check ROCm (amdgpu/kfd) driver is present
++#
++check_rocm_driver() {
++	if [ ! -e "/dev/kfd" ]; then
++		azure_log_error "ROCm KFD device /dev/kfd not found"
++		exit 1
++	fi
++}
++
++build() {
++	../contrib/configure-devel --enable-gtest --without-valgrind --enable-examples --with-rocm --prefix=$ucx_inst
++
++	make -j$(nproc)
++}
++
++test_malloc_hook_mode() {
++	mode=$1
++
++	export UCX_MEM_ROCM_HOOK_MODE=${mode}
++
++	# Test hooks in gtest for the selected hook mode. Check the exit status
++	# explicitly: a login shell (-l) may reset errexit, so a failing gtest
++	# would otherwise not fail the script.
++	if ! UCX_MEM_LOG_LEVEL=diag ./test/gtest/gtest --gtest_filter='rocm_hooks.*'
++	then
++		azure_log_error "rocm memory hooks test failed in ${mode} mode"
++		exit 1
++	fi
++
++	unset UCX_MEM_ROCM_HOOK_MODE
++}
++
++test_malloc_hook() {
++	echo "==== Running rocm malloc hooks test, using ELF relocation table ===="
++	test_malloc_hook_mode 'reloc'
++
++	echo "==== Running rocm malloc hooks test, using binary instrumentation ===="
++	test_malloc_hook_mode 'bistro'
++
++	echo "==== Running rocm malloc hooks test with far jump, using binary instrumentation ===="
++	export UCX_MEM_BISTRO_FORCE_FAR_JUMP=y
++	test_malloc_hook_mode 'bistro'
++	unset UCX_MEM_BISTRO_FORCE_FAR_JUMP
++}
++
++prepare
++build
++check_rocm_driver
++test_malloc_hook
+diff --git a/src/ucm/api/ucm.h b/src/ucm/api/ucm.h
+index 8d04e4860a6..d2d3812783e 100644
+--- a/src/ucm/api/ucm.h
++++ b/src/ucm/api/ucm.h
+@@ -219,6 +219,7 @@ typedef struct ucm_global_config {
+     int                  enable_malloc_hooks;         /* Enable installing malloc hooks */
+     int                  enable_malloc_reloc;         /* Enable installing malloc relocations */
+     uint64_t             cuda_hook_modes;             /* Bitmap of allowed cuda hooks modes */
++    uint64_t             rocm_hook_modes;             /* Bitmap of allowed rocm hooks modes */
+     int                  enable_dynamic_mmap_thresh;  /* Enable adaptive mmap threshold */
+     size_t               alloc_alignment;             /* Alignment for memory allocations */
+     int                  dlopen_process_rpath;        /* Process RPATH section in dlopen hook */
+diff --git a/src/ucm/bistro/bistro_x86_64.c b/src/ucm/bistro/bistro_x86_64.c
+index 9ea9d61be3a..65f49653534 100644
+--- a/src/ucm/bistro/bistro_x86_64.c
++++ b/src/ucm/bistro/bistro_x86_64.c
+@@ -65,6 +65,18 @@ typedef struct {
+     uint64_t                  addr;
+ } UCS_S_PACKED ucm_bistro_jcc_xlt_t;
+ 
++/* Translation of RIP-relative "mov %reg, disp32(%rip)" (load form) into a
++ * position-independent sequence, since the relocated code is not guaranteed to
++ * be within 32-bit range of the referenced address:
++ *   movabs $addr64, %reg  ; $addr64 = $disp32 + %rip
++ *   mov    (%reg), %reg
++ */
++typedef struct {
++    uint8_t  movabs_reg[2]; /* REX.W ; 0xB8+reg */
++    uint64_t addr;
++    uint8_t  mov_load[3];   /* REX.W ; 0x8B ; ModR/M */
++} UCS_S_PACKED ucm_bistro_mov_rip_xlt_t;
++
+ 
+ /* REX prefix */
+ #define UCM_BISTRO_X86_REX_MASK  0xF0 /* Mask */
+@@ -88,6 +100,15 @@ typedef struct {
+ /* MOV Ev,Gv */
+ #define UCM_BISTRO_X86_MOV_EV_GV 0x89
+ 
++/* MOV Gv,Ev - load form "mov r64, r/m64" */
++#define UCM_BISTRO_X86_MOV_GV_EV 0x8B
++
++/* ENDBR64 (CET landing pad): F3 0F 1E FA */
++#define UCM_BISTRO_X86_ENDBR64_B0 0xF3
++#define UCM_BISTRO_X86_ENDBR64_B1 0x0F
++#define UCM_BISTRO_X86_ENDBR64_B2 0x1E
++#define UCM_BISTRO_X86_ENDBR64_B3 0xFA
++
+ /* MOV immediate word or double into word, double, or quad register
+  * "mov $imm32, %reg"
+  */
+@@ -107,6 +128,7 @@ typedef struct {
+ #define UCM_BISTRO_X86_MODRM_MOD_DISP32 2 /* 0b10 */
+ #define UCM_BISTRO_X86_MODRM_MOD_REG    3 /* 0b11 */
+ #define UCM_BISTRO_X86_MODRM_RM_SIB     4 /* 0b100 */
++#define UCM_BISTRO_X86_MODRM_RM_DISP32  5 /* 0b101 (%rbp / RIP-relative disp32) */
+ 
+ /* ModR/M encoding for SUB RSP
+  * mod=0b11, reg=0b101 (SUB as opcode extension), r/m=0b100
+@@ -123,6 +145,10 @@ typedef struct {
+ #define UCM_BISTRO_X86_JCC_FIRST 0x70
+ #define UCM_BISTRO_X86_JCC_LAST  0x7F
+ 
++/* Grp 5 (0xFF); only the indirect near jump extension (reg=/4) is handled */
++#define UCM_BISTRO_X86_GRP5     0xFF
++#define UCM_BISTRO_X86_GRP5_JMP 4 /* reg field /4: JMP r/m64 */
++
+ 
+ ucs_status_t ucm_bistro_relocate_one(ucm_bistro_relocate_context_t *ctx)
+ {
+@@ -138,7 +164,8 @@ ucs_status_t ucm_bistro_relocate_one(ucm_bistro_relocate_context_t *ctx)
+         .jmp_out = {0xeb, 0x0e},
+         .jmp_rip = {0xff, 0x25, 0}
+     };
+-    uint8_t rex, opcode, modrm, mod;
++    ucm_bistro_mov_rip_xlt_t mov_rip;
++    uint8_t rex, opcode, modrm, mod, reg;
+     size_t dst_length;
+     uint64_t jmpdest;
+     int32_t disp32;
+@@ -154,7 +181,16 @@ ucs_status_t ucm_bistro_relocate_one(ucm_bistro_relocate_context_t *ctx)
+         rex = 0;
+     }
+ 
+-    if (((rex == 0) || rex == UCM_BISTRO_X86_REX_B) &&
++    if ((rex == 0) && (opcode == UCM_BISTRO_X86_ENDBR64_B0) &&
++        (*(const uint8_t*)ctx->src_p                 == UCM_BISTRO_X86_ENDBR64_B1) &&
++        (((const uint8_t*)ctx->src_p)[1]             == UCM_BISTRO_X86_ENDBR64_B2) &&
++        (((const uint8_t*)ctx->src_p)[2]             == UCM_BISTRO_X86_ENDBR64_B3)) {
++        /* endbr64 (CET landing pad) - position independent, copy verbatim */
++        ucs_serialize_next(&ctx->src_p, const uint8_t); /* 0x0F */
++        ucs_serialize_next(&ctx->src_p, const uint8_t); /* 0x1E */
++        ucs_serialize_next(&ctx->src_p, const uint8_t); /* 0xFA */
++        goto out_copy_src;
++    } else if (((rex == 0) || rex == UCM_BISTRO_X86_REX_B) &&
+         ((opcode & UCM_BISTRO_X86_PUSH_R_MASK) == UCM_BISTRO_X86_PUSH_R)) {
+         /* push reg */
+         goto out_copy_src;
+@@ -195,6 +231,37 @@ ucs_status_t ucm_bistro_relocate_one(ucm_bistro_relocate_context_t *ctx)
+                 goto out_copy_src;
+             }
+         }
++    } else if ((rex == UCM_BISTRO_X86_REX_W) &&
++               (opcode == UCM_BISTRO_X86_MOV_GV_EV)) {
++        modrm = *ucs_serialize_next(&ctx->src_p, const uint8_t);
++        /* Handle RIP-relative load "mov disp32(%rip), %reg" (mod=00, r/m=101).
++         * Emitted e.g. by CET-built dispatch thunks that load an API table
++         * pointer. Translate to an absolute-address load, because the relocated
++         * code is not guaranteed to be within 32-bit range of the target. */
++        if ((modrm & 0xC7) == UCM_BISTRO_X86_MODRM_RM_DISP32) {
++            reg = (modrm >> UCM_BISTRO_X86_MODRM_REG_SHIFT) &
++                  UCS_MASK(UCM_BISTRO_X86_MODRM_RM_BITS);
++            /* rm=100 (SIB) and rm=101 (disp8/RIP) can't encode "mov (%reg),
++             * %reg" directly; %rsp/%rbp are never used to hold a loaded
++             * pointer, so leave those unsupported. */
++            if ((reg != UCM_BISTRO_X86_MODRM_RM_SIB) &&
++                (reg != UCM_BISTRO_X86_MODRM_RM_DISP32)) {
++                disp32              = *ucs_serialize_next(&ctx->src_p,
++                                                          const int32_t);
++                mov_rip.movabs_reg[0] = UCM_BISTRO_X86_REX_W;
++                mov_rip.movabs_reg[1] = UCM_BISTRO_X86_MOV_IR | reg;
++                mov_rip.addr          = (uintptr_t)UCS_PTR_BYTE_OFFSET(
++                                                ctx->src_p, disp32);
++                mov_rip.mov_load[0]   = UCM_BISTRO_X86_REX_W;
++                mov_rip.mov_load[1]   = UCM_BISTRO_X86_MOV_GV_EV;
++                /* ModR/M: mod=00, reg=reg, r/m=reg -> "mov (%reg), %reg" */
++                mov_rip.mov_load[2]   = (reg << UCM_BISTRO_X86_MODRM_REG_SHIFT) |
++                                        reg;
++                copy_src              = &mov_rip;
++                dst_length            = sizeof(mov_rip);
++                goto out_copy;
++            }
++        }
+     } else if ((rex == 0) && ((opcode & UCM_BISTRO_X86_MOV_IR_MASK) ==
+                               UCM_BISTRO_X86_MOV_IR)) {
+         /* mov $imm32, %reg */
+@@ -244,6 +311,40 @@ ucs_status_t ucm_bistro_relocate_one(ucm_bistro_relocate_context_t *ctx)
+         /* Prevent patching past jump target */
+         ctx->src_end   = ucs_min(ctx->src_end, (void*)jmpdest);
+         goto out_copy;
++    } else if (((rex == 0) || (rex == UCM_BISTRO_X86_REX_B)) &&
++               (opcode == UCM_BISTRO_X86_GRP5)) {
++        /* Grp 5: handle only "jmp r/m64" (reg=/4), which heads ROCr HSA
++         * dispatch thunks (endbr64; mov tbl(%rip),%rax; jmp *off(%rax)). The
++         * register/memory addressing form is position independent, so it can
++         * be copied verbatim; only the RIP-relative form needs translation and
++         * is left unsupported. */
++        modrm = *ucs_serialize_next(&ctx->src_p, const uint8_t);
++        mod   = modrm >> UCM_BISTRO_X86_MODRM_MOD_SHIFT;
++        reg   = (modrm >> UCM_BISTRO_X86_MODRM_REG_SHIFT) &
++                UCS_MASK(UCM_BISTRO_X86_MODRM_RM_BITS);
++        if (reg == UCM_BISTRO_X86_GRP5_JMP) {
++            if (mod != UCM_BISTRO_X86_MODRM_MOD_REG) {
++                switch (modrm & UCS_MASK(UCM_BISTRO_X86_MODRM_RM_BITS)) {
++                case UCM_BISTRO_X86_MODRM_RM_DISP32:
++                    if (mod == 0) {
++                        /* "jmp *disp32(%rip)": position dependent */
++                        return UCS_ERR_UNSUPPORTED;
++                    }
++                    break;
++                case UCM_BISTRO_X86_MODRM_RM_SIB:
++                    ucs_serialize_next(&ctx->src_p, const uint8_t); /* SIB */
++                    break;
++                }
++                if (mod == UCM_BISTRO_X86_MODRM_MOD_DISP8) {
++                    ucs_serialize_next(&ctx->src_p, const uint8_t);  /* disp8 */
++                } else if (mod == UCM_BISTRO_X86_MODRM_MOD_DISP32) {
++                    ucs_serialize_next(&ctx->src_p, const uint32_t); /* disp32 */
++                }
++            }
++            /* Unconditional transfer - do not relocate past it */
++            ctx->src_end = ucs_min(ctx->src_end, ctx->src_p);
++            goto out_copy_src;
++        }
+     }
+ 
+     /* Could not recognize the instruction */
+diff --git a/src/ucm/rocm/rocmmem.c b/src/ucm/rocm/rocmmem.c
+index 0470e42958c..601239af8b1 100644
+--- a/src/ucm/rocm/rocmmem.c
++++ b/src/ucm/rocm/rocmmem.c
+@@ -10,9 +10,11 @@
+ #include <ucm/rocm/rocmmem.h>
+ 
+ #include <ucm/event/event.h>
++#include <ucm/mmap/mmap.h>
+ #include <ucm/util/log.h>
+ #include <ucm/util/reloc.h>
+ #include <ucm/util/replace.h>
++#include <ucm/bistro/bistro.h>
+ #include <ucs/debug/assert.h>
+ #include <ucm/util/sys.h>
+ #include <ucs/sys/compiler.h>
+@@ -25,11 +27,15 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
+-UCM_DEFINE_REPLACE_DLSYM_FUNC(hsa_amd_memory_pool_allocate, hsa_status_t,
+-                              HSA_STATUS_ERROR, hsa_amd_memory_pool_t,
+-                              size_t, uint32_t, void**)
+-UCM_DEFINE_REPLACE_DLSYM_FUNC(hsa_amd_memory_pool_free, hsa_status_t,
+-                              HSA_STATUS_ERROR, void*)
++/* Use the PTR variant so that ucm_orig_<fn> is a function pointer that bistro
++ * can redirect to the relocated (trampoline) original, allowing us to intercept
++ * callers that resolve the HSA symbol via dlopen/dlsym, which the reloc/GOT 
++ * hook cannot see. */
++UCM_DEFINE_REPLACE_DLSYM_PTR_FUNC(hsa_amd_memory_pool_allocate, hsa_status_t,
++                                  HSA_STATUS_ERROR, hsa_amd_memory_pool_t,
++                                  size_t, uint32_t, void**)
++UCM_DEFINE_REPLACE_DLSYM_PTR_FUNC(hsa_amd_memory_pool_free, hsa_status_t,
++                                  HSA_STATUS_ERROR, void*)
+ 
+ static UCS_F_ALWAYS_INLINE void
+ ucm_dispatch_mem_type_alloc(void *addr, size_t length, ucs_memory_type_t mem_type)
+@@ -129,45 +135,124 @@ hsa_status_t ucm_hsa_amd_memory_pool_allocate(
+     return status;
+ }
+ 
+-static ucm_reloc_patch_t patches[] = {
+-    {UCS_PP_MAKE_STRING(hsa_amd_memory_pool_allocate),
+-     ucm_override_hsa_amd_memory_pool_allocate},
+-    {UCS_PP_MAKE_STRING(hsa_amd_memory_pool_free),
+-     ucm_override_hsa_amd_memory_pool_free},
+-    {NULL, NULL}
++#define UCM_ROCM_FUNC_ENTRY(_func) \
++    { \
++        {UCS_PP_MAKE_STRING(_func), ucm_override_##_func}, \
++        (void**)&ucm_orig_##_func \
++    }
++
++typedef struct {
++    ucm_reloc_patch_t patch;
++    void              **orig_func_ptr;
++} ucm_rocm_func_t;
++
++static ucm_rocm_func_t ucm_rocm_funcs[] = {
++    UCM_ROCM_FUNC_ENTRY(hsa_amd_memory_pool_allocate),
++    UCM_ROCM_FUNC_ENTRY(hsa_amd_memory_pool_free),
++    {{NULL, NULL}, NULL}
+ };
+ 
++static ucs_status_t
++ucm_rocmmem_install_hooks(ucm_mmap_hook_mode_t mode, int *installed_hooks_p)
++{
++    ucm_rocm_func_t *func;
++    ucs_status_t status;
++    void *func_ptr;
++    int count;
++
++    if (*installed_hooks_p & UCS_BIT(mode)) {
++        return UCS_OK;
++    }
++
++    if (!(ucm_global_opts.rocm_hook_modes & UCS_BIT(mode))) {
++        /* Disabled by configuration */
++        ucm_debug("rocm memory hooks mode %s is disabled",
++                  ucm_mmap_hook_modes[mode]);
++        return UCS_OK;
++    }
++
++    count = 0;
++    for (func = ucm_rocm_funcs; func->patch.symbol != NULL; ++func) {
++        func_ptr = ucm_reloc_get_orig(func->patch.symbol, func->patch.value);
++        if (func_ptr == NULL) {
++            /* Symbol not (yet) loaded - e.g. libhsa-runtime64 not mapped */
++            continue;
++        }
++
++        if (mode == UCM_MMAP_HOOK_BISTRO) {
++            status = ucm_bistro_patch(func_ptr, func->patch.value,
++                                      func->patch.symbol, func->orig_func_ptr,
++                                      NULL);
++        } else if (mode == UCM_MMAP_HOOK_RELOC) {
++            status = ucm_reloc_modify(&func->patch);
++        } else {
++            break;
++        }
++
++        if (status != UCS_OK) {
++            ucm_diag("failed to install %s hook for '%s'",
++                     ucm_mmap_hook_modes[mode], func->patch.symbol);
++            return status;
++        }
++
++        ucm_debug("installed %s hook for '%s'", ucm_mmap_hook_modes[mode],
++                  func->patch.symbol);
++        ++count;
++    }
++
++    *installed_hooks_p |= UCS_BIT(mode);
++    ucm_info("rocm memory hooks mode %s: installed %d hooks",
++             ucm_mmap_hook_modes[mode], count);
++    return UCS_OK;
++}
++
+ static ucs_status_t ucm_rocmmem_install(int events)
+ {
+-    static int ucm_rocmmem_installed = 0;
++    static int installed_hooks           = 0;
+     static pthread_mutex_t install_mutex = PTHREAD_MUTEX_INITIALIZER;
+-    ucm_reloc_patch_t *patch;
+-    ucs_status_t status = UCS_OK;
++    ucs_status_t status                  = UCS_OK;
++    ucs_status_t bistro_status, reloc_status;
+ 
+     if (!(events & (UCM_EVENT_MEM_TYPE_ALLOC | UCM_EVENT_MEM_TYPE_FREE))) {
+         goto out;
+     }
+ 
+-    /* TODO: check mem reloc */
++    if (ucm_global_opts.rocm_hook_modes == 0) {
++        ucm_info("rocm memory hooks are disabled by configuration");
++        status = UCS_ERR_UNSUPPORTED;
++        goto out;
++    }
+ 
+     pthread_mutex_lock(&install_mutex);
+ 
+-    if (ucm_rocmmem_installed) {
+-        goto out_unlock;
++    /* Install bistro first: it patches the HSA function body, so it catches
++     * callers regardless of how they resolved the symbol (GOT or dlsym). If
++     * bistro cannot patch (e.g. an unrelocatable prologue or W^X), fall back to
++     * reloc rather than aborting - reloc still provides GOT-based coverage. */
++    bistro_status = ucm_rocmmem_install_hooks(UCM_MMAP_HOOK_BISTRO,
++                                              &installed_hooks);
++    if (bistro_status != UCS_OK) {
++        ucm_debug("failed to install rocm bistro hooks, falling back to reloc");
+     }
+ 
+-    for (patch = patches; patch->symbol != NULL; ++patch) {
+-        status = ucm_reloc_modify(patch);
+-        if (status != UCS_OK) {
+-            ucm_warn("failed to install relocation table entry for '%s'", patch->symbol);
+-            goto out_unlock;
+-        }
++    /* Then install reloc as well: it is harmless (the wrapper calls the bistro
++     * trampoline via ucm_orig_*, which bypasses the patch, so no double
++     * dispatch) and provides coverage where bistro is not installed. */
++    reloc_status = ucm_rocmmem_install_hooks(UCM_MMAP_HOOK_RELOC,
++                                             &installed_hooks);
++    if (reloc_status != UCS_OK) {
++        ucm_debug("failed to install rocm reloc hooks");
+     }
+ 
+-    ucm_info("rocm hooks are ready");
+-    ucm_rocmmem_installed = 1;
++    /* Success as long as at least one hooking mode was installed. */
++    if (installed_hooks & (UCS_BIT(UCM_MMAP_HOOK_BISTRO) |
++                           UCS_BIT(UCM_MMAP_HOOK_RELOC))) {
++        status = UCS_OK;
++        ucm_info("rocm hooks are ready");
++    } else {
++        status = (bistro_status != UCS_OK) ? bistro_status : reloc_status;
++    }
+ 
+-out_unlock:
+     pthread_mutex_unlock(&install_mutex);
+ out:
+     return status;
+diff --git a/src/ucm/rocm/rocmmem.h b/src/ucm/rocm/rocmmem.h
+index 23bb3b54a7a..59bb3988110 100644
+--- a/src/ucm/rocm/rocmmem.h
++++ b/src/ucm/rocm/rocmmem.h
+@@ -13,7 +13,9 @@
+ hsa_status_t ucm_override_hsa_amd_memory_pool_allocate(
+     hsa_amd_memory_pool_t memory_pool, size_t size,
+     uint32_t flags, void** ptr);
+-hsa_status_t ucm_orig_hsa_amd_memory_pool_allocate(
++/* Pointer to the original implementation. Defined via the PTR replace macro so
++ * that bistro can redirect it to the relocated (trampoline) original. */
++extern hsa_status_t (*ucm_orig_hsa_amd_memory_pool_allocate)(
+     hsa_amd_memory_pool_t memory_pool, size_t size,
+     uint32_t flags, void** ptr);
+ hsa_status_t ucm_hsa_amd_memory_pool_allocate(
+@@ -22,7 +24,7 @@ hsa_status_t ucm_hsa_amd_memory_pool_allocate(
+ 
+ /* hsa_amd_memory_pool_free */
+ hsa_status_t ucm_override_hsa_amd_memory_pool_free(void* ptr);
+-hsa_status_t ucm_orig_hsa_amd_memory_pool_free(void* ptr);
++extern hsa_status_t (*ucm_orig_hsa_amd_memory_pool_free)(void* ptr);
+ hsa_status_t ucm_hsa_amd_memory_pool_free(void* ptr);
+ 
+ #endif
+diff --git a/src/ucm/util/sys.c b/src/ucm/util/sys.c
+index ce335eea07c..df47489ae14 100644
+--- a/src/ucm/util/sys.c
++++ b/src/ucm/util/sys.c
+@@ -43,6 +43,11 @@ ucm_global_config_t ucm_global_opts = {
+     .cuda_hook_modes            =
+ #if UCM_BISTRO_HOOKS
+                                   UCS_BIT(UCM_MMAP_HOOK_BISTRO) |
++#endif
++                                  UCS_BIT(UCM_MMAP_HOOK_RELOC),
++    .rocm_hook_modes            =
++#if UCM_BISTRO_HOOKS
++                                  UCS_BIT(UCM_MMAP_HOOK_BISTRO) |
+ #endif
+                                   UCS_BIT(UCM_MMAP_HOOK_RELOC),
+     .enable_dynamic_mmap_thresh = 1,
+diff --git a/src/ucs/config/ucm_opts.c b/src/ucs/config/ucm_opts.c
+index c4a705c0a8f..8f25545c3f8 100644
+--- a/src/ucs/config/ucm_opts.c
++++ b/src/ucs/config/ucm_opts.c
+@@ -85,6 +85,25 @@ static ucs_config_field_t ucm_global_config_table[] = {
+    "The configuration parameter replaced by UCX_MEM_CUDA_HOOK_MODE",
+    UCS_CONFIG_DEPRECATED_FIELD_OFFSET, UCS_CONFIG_TYPE_DEPRECATED},
+ 
++  {"ROCM_HOOK_MODE",
++#if UCM_BISTRO_HOOKS
++   UCM_MMAP_HOOK_BISTRO_STR,
++#else
++   UCM_MMAP_HOOK_RELOC_STR,
++#endif
++   "ROCm memory hook modes. A combination of:\n"
++   " none   - Don't set ROCm hooks.\n"
++   " reloc  - Use ELF relocation table to set hooks. In this mode, if a caller\n"
++   "          resolves the HSA memory APIs via dlopen/dlsym rather than the GOT,\n"
++   "          its allocations may be missed and reported as host memory.\n"
++#if UCM_BISTRO_HOOKS
++   "\n bistro - Use binary instrumentation to set hooks. In this mode, calls\n"
++   "          into the HSA runtime are intercepted regardless of how the symbol\n"
++   "          was resolved, so device allocations are reported properly."
++#endif
++   ,ucs_offsetof(ucm_global_config_t, rocm_hook_modes),
++                 UCS_CONFIG_TYPE_BITMAP(ucm_mmap_hook_modes)},
++
+   {"DYNAMIC_MMAP_THRESH", "yes",
+    "Enable dynamic mmap threshold: for every released block, the\n"
+    "mmap threshold is adjusted upward to the size of the size of\n"
+diff --git a/test/gtest/ucm/malloc_hook.cc b/test/gtest/ucm/malloc_hook.cc
+index 18519ec0844..788870390f2 100644
+--- a/test/gtest/ucm/malloc_hook.cc
++++ b/test/gtest/ucm/malloc_hook.cc
+@@ -1548,3 +1548,155 @@ UCS_MT_TEST_F(malloc_hook_dlopen, dlopen_mt_with_memtype, 2) {
+ 
+     event.unset();
+ }
++
++#if defined(__x86_64__)
++/*
++ * Unit tests for the x86-64 single-instruction relocator used by bistro to
++ * build the trampoline that jumps back to the original (unpatched) function.
++ * These exercise machine-code emission directly, so they need no GPU/HSA and
++ * run in CI regardless of which specific opcodes appear in a given libc/HSA
++ * function prologue.
++ */
++class bistro_relocate : public ucs::test {
++protected:
++    /* Relocate a single instruction from 'src' into 'dst'. On success, reports
++     * how many bytes were consumed from the source and emitted to the
++     * destination. */
++    static ucs_status_t relocate_one(const void *src, size_t src_len, void *dst,
++                                     size_t dst_len, size_t *src_used,
++                                     size_t *dst_used)
++    {
++        ucm_bistro_relocate_context_t ctx;
++        ucs_status_t status;
++
++        ctx.src_p   = src;
++        ctx.src_end = UCS_PTR_BYTE_OFFSET(src, src_len);
++        ctx.dst_p   = dst;
++        ctx.dst_end = UCS_PTR_BYTE_OFFSET(dst, dst_len);
++
++        status = ucm_bistro_relocate_one(&ctx);
++        if (status == UCS_OK) {
++            *src_used = UCS_PTR_BYTE_DIFF(src, ctx.src_p);
++            *dst_used = UCS_PTR_BYTE_DIFF(dst, ctx.dst_p);
++        }
++        return status;
++    }
++};
++
++/* endbr64 (CET landing pad) is position independent and must be copied through
++ * verbatim. */
++UCS_TEST_F(bistro_relocate, endbr64) {
++    const uint8_t src[] = {0xF3, 0x0F, 0x1E, 0xFA};
++    uint8_t dst[64];
++    size_t src_used, dst_used;
++
++    ASSERT_UCS_OK(relocate_one(src, sizeof(src), dst, sizeof(dst), &src_used,
++                               &dst_used));
++    EXPECT_EQ(sizeof(src), src_used);
++    EXPECT_EQ(sizeof(src), dst_used);
++    EXPECT_EQ(0, memcmp(dst, src, sizeof(src)));
++}
++
++/* "mov disp32(%rip), %rax" must be translated to an absolute-address load,
++ * since the relocated code may be out of 32-bit range of the target:
++ *   movabs $addr64, %rax   ; addr64 = next_ip + disp32
++ *   mov    (%rax), %rax
++ */
++UCS_TEST_F(bistro_relocate, mov_rip_relative) {
++    const int32_t disp32 = 0x11223344;
++    uint8_t src[7]       = {0x48, 0x8B, 0x05}; /* REX.W MOV Gv,Ev ; modrm=05 */
++    uint8_t dst[64];
++    size_t src_used, dst_used;
++    uint64_t addr;
++
++    memcpy(&src[3], &disp32, sizeof(disp32));
++
++    ASSERT_UCS_OK(relocate_one(src, sizeof(src), dst, sizeof(dst), &src_used,
++                               &dst_used));
++    EXPECT_EQ(sizeof(src), src_used);
++    EXPECT_EQ(13u, dst_used);
++
++    /* movabs $addr, %rax */
++    EXPECT_EQ(0x48, dst[0]);
++    EXPECT_EQ(0xB8, dst[1]); /* 0xB8 | %rax(0) */
++    memcpy(&addr, &dst[2], sizeof(addr));
++    EXPECT_EQ((uintptr_t)UCS_PTR_BYTE_OFFSET(src, sizeof(src)) + disp32, addr);
++
++    /* mov (%rax), %rax */
++    EXPECT_EQ(0x48, dst[10]);
++    EXPECT_EQ(0x8B, dst[11]);
++    EXPECT_EQ(0x00, dst[12]); /* mod=00, reg=%rax, r/m=%rax */
++}
++
++/* Same translation, but into a non-zero destination register (%rcx), to verify
++ * the register index is propagated into both the movabs and the load. */
++UCS_TEST_F(bistro_relocate, mov_rip_relative_reg) {
++    const int32_t disp32 = 0x100;
++    uint8_t src[7]       = {0x48, 0x8B, 0x0D}; /* modrm=0D -> %rcx */
++    uint8_t dst[64];
++    size_t src_used, dst_used;
++
++    memcpy(&src[3], &disp32, sizeof(disp32));
++
++    ASSERT_UCS_OK(relocate_one(src, sizeof(src), dst, sizeof(dst), &src_used,
++                               &dst_used));
++    EXPECT_EQ(13u, dst_used);
++    EXPECT_EQ(0xB9, dst[1]);  /* 0xB8 | %rcx(1) */
++    EXPECT_EQ(0x09, dst[12]); /* mod=00, reg=%rcx, r/m=%rcx */
++}
++
++/* %rsp (reg=100) and %rbp (reg=101) can't encode "mov (%reg), %reg" directly
++ * and are never used to hold a loaded pointer, so the relocator rejects them. */
++UCS_TEST_F(bistro_relocate, mov_rip_relative_unsupported_reg) {
++    const uint8_t rsp[7] = {0x48, 0x8B, 0x25, 0, 0, 0, 0}; /* dest %rsp */
++    const uint8_t rbp[7] = {0x48, 0x8B, 0x2D, 0, 0, 0, 0}; /* dest %rbp */
++    uint8_t dst[64];
++    size_t src_used, dst_used;
++
++    EXPECT_EQ(UCS_ERR_UNSUPPORTED,
++              relocate_one(rsp, sizeof(rsp), dst, sizeof(dst), &src_used,
++                           &dst_used));
++    EXPECT_EQ(UCS_ERR_UNSUPPORTED,
++              relocate_one(rbp, sizeof(rbp), dst, sizeof(dst), &src_used,
++                           &dst_used));
++}
++
++/* Indirect near jump "jmp *disp8(%reg)" heads ROCr HSA dispatch thunks. It is
++ * position independent, so it must be copied through verbatim. */
++UCS_TEST_F(bistro_relocate, jmp_indirect_mem) {
++    const uint8_t src[] = {0xFF, 0x60, 0x78}; /* jmp *0x78(%rax) */
++    uint8_t dst[64];
++    size_t src_used, dst_used;
++
++    ASSERT_UCS_OK(relocate_one(src, sizeof(src), dst, sizeof(dst), &src_used,
++                               &dst_used));
++    EXPECT_EQ(sizeof(src), src_used);
++    EXPECT_EQ(sizeof(src), dst_used);
++    EXPECT_EQ(0, memcmp(dst, src, sizeof(src)));
++}
++
++/* Register-direct "jmp *%reg" is likewise position independent. */
++UCS_TEST_F(bistro_relocate, jmp_indirect_reg) {
++    const uint8_t src[] = {0xFF, 0xE0}; /* jmp *%rax */
++    uint8_t dst[64];
++    size_t src_used, dst_used;
++
++    ASSERT_UCS_OK(relocate_one(src, sizeof(src), dst, sizeof(dst), &src_used,
++                               &dst_used));
++    EXPECT_EQ(sizeof(src), src_used);
++    EXPECT_EQ(sizeof(src), dst_used);
++    EXPECT_EQ(0, memcmp(dst, src, sizeof(src)));
++}
++
++/* The RIP-relative form "jmp *disp32(%rip)" is position dependent and must be
++ * rejected rather than copied to a different address. */
++UCS_TEST_F(bistro_relocate, jmp_indirect_rip) {
++    const uint8_t src[6] = {0xFF, 0x25, 0, 0, 0, 0}; /* jmp *0x0(%rip) */
++    uint8_t dst[64];
++    size_t src_used, dst_used;
++
++    EXPECT_EQ(UCS_ERR_UNSUPPORTED,
++              relocate_one(src, sizeof(src), dst, sizeof(dst), &src_used,
++                           &dst_used));
++}
++#endif /* __x86_64__ */

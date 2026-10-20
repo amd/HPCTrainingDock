@@ -1675,9 +1675,12 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}
 	set base /opt/rocm-${ROCM_VERSION}
 
 	append-path  LD_LIBRARY_PATH \$base/lib
-	setenv LIBS        "-L\$base/lib -lhipfort-amdgcn.a"
+	setenv LIBS        "-L\$base/lib -lhipfort-amdgcn"
 	setenv HIPFORT_LIB \$base/lib
 	setenv HIPFORT_INC \$base/include/hipfort
+	setenv HIPFORT_FFLAGS "-I\$base/include/hipfort/amdgcn"
+	append-path -d " " FFLAGS  "-I\$base/include/hipfort/amdgcn"
+	append-path -d " " FCFLAGS "-I\$base/include/hipfort/amdgcn"
 EOF
 else
 cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
@@ -1687,9 +1690,12 @@ cat <<-EOF | ${SUDO} tee ${MODULE_PATH}/${ROCM_VERSION}.lua
 	load("amdclang")
 	local base = "/opt/rocm-${ROCM_VERSION}"
 	append_path("LD_LIBRARY_PATH", pathJoin(base, "/lib"))
-	setenv("LIBS", "-L" .. pathJoin(base, "/lib") .. " -lhipfort-amdgcn.a")
+	setenv("LIBS", "-L" .. pathJoin(base, "/lib") .. " -lhipfort-amdgcn")
 	setenv("HIPFORT_LIB", pathJoin(base, "/lib"))
 	setenv("HIPFORT_INC", pathJoin(base, "/include/hipfort"))
+	setenv("HIPFORT_FFLAGS", "-I" .. pathJoin(base, "/include/hipfort/amdgcn"))
+	append_path("FFLAGS",  "-I" .. pathJoin(base, "/include/hipfort/amdgcn"), " ")
+	append_path("FCFLAGS", "-I" .. pathJoin(base, "/include/hipfort/amdgcn"), " ")
 EOF
 fi
 

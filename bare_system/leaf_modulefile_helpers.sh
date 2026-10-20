@@ -24,7 +24,7 @@
 #
 # Each emission is feature-gated on the actual presence of the relevant SDK
 # component in ${install_dir}, because AFAR and TheRock-AFAR drops don't
-# always carry opencl/ or include/hipfort/ -- writing a modulefile that points
+# always carry opencl/ or hipfort .mod files -- writing a modulefile that points
 # at non-existent paths would just confuse users.
 #
 # Args (positional):
@@ -44,7 +44,7 @@
 #
 # Writes (sudo, root:root, 0644):
 #   ${mod_subdir}/amdclang/<AMDCLANG_VER>-<version_label>.lua  (if amdclang present)
-#   ${mod_subdir}/hipfort/<version_label>.lua                  (if include/hipfort present)
+#   ${mod_subdir}/hipfort/<version_label>.lua                  (if hipfort/amdgcn/hipfort.mod present)
 #   ${mod_subdir}/opencl/<version_label>.lua                   (if opencl/bin present)
 #
 # Prints a one-line per-package status (`+ <path>` for emit, `- <pkg> skipped`
@@ -162,7 +162,28 @@ EOF
    fi
 
    # ---------------- hipfort ----------------------------------------------
-   if [[ -d "${_install_dir}/include/hipfort" ]]; then
+   # The hipfort .mod / libhipfort-amdgcn.a location differs per SDK flavor:
+   #   numeric ROCm   include/hipfort/amdgcn                    lib
+   #   AFAR <= 23.x   llvm/include/hipfort/amdgcn               llvm/lib
+   #   AFAR >= 24.x   llvm/include/fortran/flang/hipfort/amdgcn llvm/lib/fortran/flang
+   # Fortran compilers ignore CPATH, so the .mod dir is also exported as an -I
+   # in HIPFORT_FFLAGS and appended to FFLAGS/FCFLAGS.
+   local _hipfort_inc_rel="" _hipfort_lib_rel="" _rel
+   for _rel in include/hipfort llvm/include/hipfort llvm/include/fortran/flang/hipfort; do
+      if [[ -f "${_install_dir}/${_rel}/amdgcn/hipfort.mod" ]]; then
+         _hipfort_inc_rel="${_rel}"; break
+      fi
+   done
+   for _rel in lib llvm/lib llvm/lib/fortran/flang; do
+      if [[ -f "${_install_dir}/${_rel}/libhipfort-amdgcn.a" ]]; then
+         _hipfort_lib_rel="${_rel}"; break
+      fi
+   done
+   if [[ -n "${_hipfort_inc_rel}" ]]; then
+      if [[ -z "${_hipfort_lib_rel}" ]]; then
+         echo "  WARNING: hipfort .mod found but no libhipfort-amdgcn.a; HIPFORT_LIB falls back to lib" >&2
+         _hipfort_lib_rel="lib"
+      fi
       local _hipfort_file="${_mod_subdir}/hipfort/${_version_label}${_ext}"
       ${_sudo} mkdir -p "${_mod_subdir}/hipfort"
       if [ "${_cray}" = "1" ]; then
@@ -173,28 +194,39 @@ module-whatis "ROCm HIPFort ${_version_label}"
 module load amdclang/${_version_label}
 set base ${_install_dir}
 append-path  LD_LIBRARY_PATH \$base/lib
-setenv LIBS        "-L\$base/lib -lhipfort-amdgcn.a"
-setenv HIPFORT_LIB \$base/lib
-setenv HIPFORT_INC \$base/include/hipfort
+setenv LIBS        "-L\$base/${_hipfort_lib_rel} -lhipfort-amdgcn"
+setenv HIPFORT_LIB \$base/${_hipfort_lib_rel}
+setenv HIPFORT_INC \$base/${_hipfort_inc_rel}
+setenv HIPFORT_FFLAGS "-I\$base/${_hipfort_inc_rel}/amdgcn"
+append-path -d " " FFLAGS  "-I\$base/${_hipfort_inc_rel}/amdgcn"
+append-path -d " " FCFLAGS "-I\$base/${_hipfort_inc_rel}/amdgcn"
 EOF
       else
       ${_sudo} tee "${_hipfort_file}" >/dev/null <<EOF
 whatis("Name: ROCm HIPFort")
 whatis("Built by: ${_leaf_name}@${_leaf_commit} (${_leaf_dirty})")
 whatis("Version: ${_version_label}")
+help([[
+Compile: \$FC \$HIPFORT_FFLAGS -c prog.f90   (also appended to \$FFLAGS / \$FCFLAGS)
+Link:    \$FC prog.o \$LIBS -L\$ROCM_PATH/lib -lamdhip64
+]])
 load("amdclang")
 local base = "${_install_dir}"
+local hipfort_mod = pathJoin(base, "${_hipfort_inc_rel}/amdgcn")
 append_path("LD_LIBRARY_PATH", pathJoin(base, "/lib"))
-setenv("LIBS", "-L" .. pathJoin(base, "/lib") .. " -lhipfort-amdgcn.a")
-setenv("HIPFORT_LIB", pathJoin(base, "/lib"))
-setenv("HIPFORT_INC", pathJoin(base, "/include/hipfort"))
+setenv("LIBS", "-L" .. pathJoin(base, "${_hipfort_lib_rel}") .. " -lhipfort-amdgcn")
+setenv("HIPFORT_LIB", pathJoin(base, "${_hipfort_lib_rel}"))
+setenv("HIPFORT_INC", pathJoin(base, "${_hipfort_inc_rel}"))
+setenv("HIPFORT_FFLAGS", "-I" .. hipfort_mod)
+append_path("FFLAGS",  "-I" .. hipfort_mod, " ")
+append_path("FCFLAGS", "-I" .. hipfort_mod, " ")
 EOF
       fi
       _chown_root root:root "${_hipfort_file}"
       ${_sudo} chmod 644 "${_hipfort_file}"
       echo "  + ${_hipfort_file}"
    else
-      echo "  - hipfort skipped (no ${_install_dir}/include/hipfort)"
+      echo "  - hipfort skipped (no hipfort/amdgcn/hipfort.mod under ${_install_dir})"
    fi
 
    # ---------------- opencl ----------------------------------------------

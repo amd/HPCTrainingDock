@@ -394,7 +394,7 @@ default_pytorch_version_for_rocm() {
       # 10.[0-9][0-9] glob (two minor digits) never matched and the
       # nightly silently fell through to the file default 2.12.0. Match
       # both one- and two-digit minors so 10.0 lands on the intended pin.
-      10.[0-9]|10.[0-9][0-9])               echo "2.9.1" ;;
+      10.[0-9]|10.[0-9][0-9])               echo "2.11.0" ;;
       # Off-table guards: too-old / too-new ROCm. Empty stdout means
       # "I don't know" and the resolver keeps the file-default (now
       # 2.12.0, newest known).

@@ -394,6 +394,10 @@ if [ -d "${_leaf_dir}" ] && command -v git >/dev/null 2>&1 \
 fi
 unset _leaf_dir
 
+# apptainer aborts on a missing bind source, so only bind HF_HOME if present.
+PRIMUS_BIND="${PRIMUS_PATH}"
+[ -d "${HF_HOME_DEFAULT}" ] && PRIMUS_BIND="${PRIMUS_BIND},${HF_HOME_DEFAULT}"
+
 # SIF modulefile line: point PRIMUS_SIF at the staged SIF only if it exists;
 # otherwise bake the pull command into a help note.
 if [ -f "${PRIMUS_SIF}" ]; then
@@ -416,6 +420,11 @@ if [ "${IS_APU}" = "1" ]; then
 -- MI300A APU: scratch-reclaim workaround (matches the rocm modulefile).
 setenv("HSA_NO_SCRATCH_RECLAIM","1")
 
+-- The image sets DEBUG_CLR_AQL_DEV_QUEUE=1 (AQL queue in device memory, for
+-- discrete GPUs); on MI300A the first kernel launch then fails in
+-- hsa_amd_queue_create and torch SIGSEGVs. APPTAINERENV_ overrides image env.
+setenv("APPTAINERENV_DEBUG_CLR_AQL_DEV_QUEUE","0")
+
 -- WARNING (MI300A APU): host RAM and GPU HBM are ONE physical pool, so any
 -- CPU/host offload (DeepSpeed/FSDP offload, optimizer offload) moves data
 -- within the same pool and can OOM/HANG. Use a full-GPU SPX partition
@@ -434,9 +443,10 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${PRIMUS_VERSION}.lua
 	help([[
 	Primus is container-first. This module provides the 'primus-cli' launcher and
 	the release-pinned backend sources; the training stack lives in the image.
-	On AAC6 (no Docker) run the stack under Apptainer:
+	On AAC6 (no Docker) run the stack under Apptainer. This module binds its
+	install tree into the container (APPTAINER_BIND) and puts primus-cli on the
+	container PATH (APPTAINERENV_PREPEND_PATH); add --bind for your own data:
 
-	  module load apptainer
 	  apptainer exec --rocm \$PRIMUS_SIF primus-cli direct -- \\
 	    train pretrain --config <your-config.yaml>
 
@@ -452,6 +462,10 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${MODULE_PATH}/${PRIMUS_VERSION}.lua
 	-- (default ~/.cache/Primus/third_party) and prepends these to PYTHONPATH.
 	setenv("PRIMUS_THIRDPARTY_DIR","${PRIMUS_THIRD_PARTY}")
 	setenv("HF_HOME","${HF_HOME_DEFAULT}")
+
+	-- The SIF does not see the host install tree or PATH by default.
+	prepend_path{"APPTAINER_BIND","${PRIMUS_BIND}",delim=","}
+	setenv("APPTAINERENV_PREPEND_PATH","${PRIMUS_BINDIR}")
 ${SIF_MODULE_BLOCK}
 ${APU_MODULE_BLOCK}
 EOF
@@ -470,5 +484,5 @@ fi
 
 echo ""
 echo "[primus] installed. Load with:"
-echo "  module load rocm/<ver> apptainer primus/${PRIMUS_VERSION}"
+echo "  module load rocm/<ver> primus/${PRIMUS_VERSION}"
 echo ""
