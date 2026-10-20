@@ -71,6 +71,12 @@ SITE_CLI=0
 # with pytorch -- a vllm build with BUILD_PYTORCH=0 would have no torch to
 # layer on.
 : ${BUILD_VLLM:="1"}
+# Primus (AMD-AGI training framework) is a CLI-LAUNCHER module, not a from-
+# source build: the heavy stack lives in the rocm/primus image, so it does
+# NOT layer on the pytorch module and is cheap to install (wheel + deps sync
+# + a SIF pull). Default OFF (opt-in) like ollama -- the SIF pull is multi-GB
+# and the module is only useful on gfx942 (MI300/MI3xx), not MI250.
+: ${BUILD_PRIMUS:="0"}
 # Build AMD AITER kernels into the vLLM prefix (threaded to vllm_setup.sh
 # --with-aiter). Default on for best ROCm performance; the leaf build is
 # non-fatal and only applies on gfx942/gfx950, so it never breaks a vllm
@@ -953,6 +959,7 @@ declare -A PKG_FLAG=(
    [ftorch]=BUILD_FTORCH
    [pytorch]=BUILD_PYTORCH
    [vllm]=BUILD_VLLM
+   [primus]=BUILD_PRIMUS
    [magma]=BUILD_MAGMA
    [elpa]=BUILD_ELPA
    [kokkos]=BUILD_KOKKOS
@@ -2890,6 +2897,16 @@ for _req_ver in "${_vllm_req_versions[@]}"; do
       $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/vllm)
 done
 unset _vllm_req_versions _req_ver _pyt_ver _pyt_args _label _label_suffix _vllm_default_pyt
+
+# Primus (AMD-AGI): CLI-launcher module, independent of the pytorch build. The
+# leaf installs the primus-cli wheel + release-pinned backend sources and pulls
+# the rocm/primus image into an Apptainer SIF (AAC6 has no Docker). Default OFF
+# (BUILD_PRIMUS=0); enable with --packages primus or BUILD_PRIMUS=1. No version
+# token wiring (PKG_VERSIONS_REQ) -- pin the release via --primus-version /
+# --primus-image-tag on the leaf if a non-default release is needed.
+run_and_log primus extras/scripts/primus_setup.sh ${COMMON_OPTIONS} \
+   --build-primus ${BUILD_PRIMUS} ${REPLACE_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/primus)
 
 #If ROCm should be installed in a different location
 #if [ "${ROCM_INSTALLPATH}" != "/opt/" ]; then
