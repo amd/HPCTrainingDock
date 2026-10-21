@@ -101,6 +101,28 @@ SITE_CLI=0
 # complete, set BUILD_INSTELLA=1 (or --packages instella) once a compatible
 # pytorch pair exists.
 : ${BUILD_INSTELLA:="0"}
+# ATOM (ROCm/ATOM, "AiTer Optimized Model"): a lightweight vLLM-like LLM
+# inference/serving engine built on AMD's AITER kernels. Like SGLang/Instella
+# it layers on the pytorch module and BUILDS FROM SOURCE at a pinned release
+# tag, bound to a concrete pytorch version, and builds AITER for the node gfx
+# (reusing the module triton); gated out under --quick-installs with pytorch.
+# DEFAULT OFF (opt-in): the AITER kernel build is long and GPU/arch-sensitive.
+# Set BUILD_ATOM=1 (or --packages atom) to build.
+: ${BUILD_ATOM:="0"}
+# xDiT (xfuser): a parallel/distributed inference engine for Diffusion
+# Transformers. Like ATOM/SGLang it layers on the pytorch module (hard-pins its
+# torch/triton/flash-attn) and installs into a per-pytorch prefix, but it is
+# pure-python (no native compile) so a SINGLE pytorch binding suffices. Gated
+# out under --quick-installs with pytorch. DEFAULT OFF (opt-in): the diffusers/
+# transformers dep closure is heavy. Set BUILD_XDIT=1 (or --packages xdit).
+: ${BUILD_XDIT:="0"}
+# ComfyUI: a node-based diffusion-model inference GUI/server (an app, not a
+# library). Reuses the pytorch module's torch/torchvision/torchaudio, installs
+# its requirements closure into a per-pytorch prefix, ships the source and a
+# `comfyui` launcher. Pure-python, single pytorch binding. Gated out under
+# --quick-installs with pytorch. DEFAULT OFF (opt-in): it is an interactive
+# server, not a sweep artifact. Set BUILD_COMFYUI=1 (or --packages comfyui).
+: ${BUILD_COMFYUI:="0"}
 # Hyperloom (AMD-AGI agentic LLM-inference optimizer): a standalone pip venv
 # module under ROCmPlus-AI; not ABI-bound to pytorch (it drives whichever
 # framework module the user loads at runtime). Fast pip install, so it is NOT
@@ -154,6 +176,21 @@ SITE_CLI=0
 # not ABI-bound to pytorch. Fast pip install, so NOT gated under
 # --quick-installs. Set BUILD_TRACELENS=0 to opt out.
 : ${BUILD_TRACELENS:="1"}
+# ONNX Runtime (ROCm, MIGraphX execution provider): installs the prebuilt
+# onnxruntime-migraphx wheel from AMD's ROCm manylinux index into a standalone
+# library prefix under the ROCmPlus-AI overlay. REUSES the system MIGraphX
+# shipped by the rocm module (no separate build), is arch-agnostic and not
+# ABI-bound to pytorch, so it is a fast pip install and NOT gated under
+# --quick-installs. Set BUILD_ONNXRUNTIME=0 to opt out.
+: ${BUILD_ONNXRUNTIME:="1"}
+# AMD Quark (model quantization for PyTorch and ONNX): installs the amd-quark
+# wheel + its non-module deps into a per-pytorch prefix, REUSING the pytorch
+# module's torch/transformers/huggingface_hub/tokenizers/safetensors stack
+# (hard-pinned via a constraints file, never duplicated). TORCH-BOUND like
+# ATOM, because quark.torch/quark.onnx import torch+transformers at import
+# time; one build exists per (quark, pytorch, rocm) triple. Pure-python delta,
+# so fast and NOT gated under --quick-installs. Set BUILD_QUARK=0 to opt out.
+: ${BUILD_QUARK:="1"}
 : ${BUILD_HPCTOOLKIT:="1"}
 : ${BUILD_MPI4PY:="1"}
 : ${BUILD_TAU:="1"}
@@ -343,7 +380,7 @@ usage()
    echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf the versioned subdir under \${TOP_INSTALL_PATH} (the version itself lives in the leaf script). Default $REPLACE_EXISTING"
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
    echo "  --skip-patches [0 or 1]:  operator opt-out for the rocm-patches step (rocm/scripts/rocm_patches.sh) AND the hipblaslt-patch step (rocm/scripts/hipblaslt_patch_setup.sh). Default 0 runs both; for most ROCm versions each script self-no-ops via NOOP_RC=43 so the cost is nil. Set to 1 when targeting a tree where the patches overlay would mismatch the runtime (e.g. 7.2.0 / 7.2.1 patches built for a newer userland and running on Ubuntu 22.04 nodes). When skipped, the per-package summary records 'rocm-patches(--skip-patches)' and 'hipblaslt-patch(--skip-patches)' in the DESELECTED bucket. Default $SKIP_PATCHES"
-   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocshmem, rocprof-sys, rocprof-compute, hpctoolkit, uprof, likwid, mdb, intellikit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, vllm, sglang, instella, hyperloom, tracelens, primus, magma, elpa, kokkos, umpire, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre, heffte, emacs, turbovnc, google-chrome, zellij, qcachegrind, mpicheck. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, rocshmem, hpctoolkit, uprof, likwid, mdb, intellikit, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, vllm, sglang, instella, hyperloom, tracelens, magma, elpa, kokkos, umpire, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre, heffte, emacs, turbovnc, google-chrome, zellij, qcachegrind, mpicheck. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Supported for pytorch (keys: aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds)) and ftorch (key: ref (alias ftorch-ref)). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build. NOTE: for ftorch, the VERSION is the BOUND PYTORCH version (install dir + module are keyed on it, and the bind pytorch must already exist -- ftorch=<ver> does NOT build pytorch), while ftorch's OWN upstream git ref is a separate axis set per-token via :ref=<git-ref> (e.g. \"ftorch=2.12.0:ref=0.7\") or sweep-wide via --ftorch-ref; a bare \"ftorch\" binds to the latest existing pytorch module. Similarly for vllm: VERSION is the BOUND PYTORCH version (install/module keyed as vllm-v<vllm-ver>-pt<pytorch-ver>; vLLM's OWN version auto-derives from the bound torch), and a bare \"vllm\" binds to the latest existing pytorch module (vllm=<ver> does NOT build pytorch -- the bind pytorch must already exist)."
+   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocshmem, rocprof-sys, rocprof-compute, hpctoolkit, uprof, likwid, mdb, intellikit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, vllm, sglang, instella, atom, xdit, comfyui, onnxruntime, quark, hyperloom, tracelens, primus, magma, elpa, kokkos, umpire, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre, heffte, emacs, turbovnc, google-chrome, zellij, qcachegrind, mpicheck. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, rocshmem, hpctoolkit, uprof, likwid, mdb, intellikit, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, vllm, sglang, instella, atom, xdit, comfyui, onnxruntime, quark, hyperloom, tracelens, magma, elpa, kokkos, umpire, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre, heffte, emacs, turbovnc, google-chrome, zellij, qcachegrind, mpicheck. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Supported for pytorch (keys: aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds)) and ftorch (key: ref (alias ftorch-ref)). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build. NOTE: for ftorch, the VERSION is the BOUND PYTORCH version (install dir + module are keyed on it, and the bind pytorch must already exist -- ftorch=<ver> does NOT build pytorch), while ftorch's OWN upstream git ref is a separate axis set per-token via :ref=<git-ref> (e.g. \"ftorch=2.12.0:ref=0.7\") or sweep-wide via --ftorch-ref; a bare \"ftorch\" binds to the latest existing pytorch module. Similarly for vllm: VERSION is the BOUND PYTORCH version (install/module keyed as vllm-v<vllm-ver>-pt<pytorch-ver>; vLLM's OWN version auto-derives from the bound torch), and a bare \"vllm\" binds to the latest existing pytorch module (vllm=<ver> does NOT build pytorch -- the bind pytorch must already exist)."
    echo "  --rocm-rc-prefix [ FAMILY ]:  release-candidate family name (e.g. 'therock', 'afar'). Auto-detected from \${ROCM_PATH} basename for rocm-{therock,afar}-* trees. Empty for regular releases. When non-empty, install/module dirs become rocmplus-\${FAMILY}-\${ROCM_VERSION}/ instead of rocmplus-\${ROCM_VERSION}/ -- EXCEPT for FAMILY='afar', where the suffix is rocmplus-afar-\${ROCM_RC_COMPILER}-\${ROCM_VERSION}/ (compiler-AND-rocm-keyed; see --rocm-rc-compiler). Default: auto-detected (empty for regular releases)."
    echo "  --rocm-rc-compiler [ COMPILER ]:  compiler/AFAR release number for AFAR trees (e.g. '22.2.0' for rocm-afar-22.2.0, '23.2.1' for rocm-afar-23.2.1 a.k.a. the TheRock-AFAR drop). Auto-detected from \${ROCM_PATH} basename when ROCM_RC_PREFIX='afar'. Empty for non-afar trees. When non-empty AND ROCM_RC_PREFIX='afar', the rocmplus suffix becomes afar-\${COMPILER}-\${ROCM_VERSION} so two AFAR drops with the same SDK numeric but different compiler releases get distinct rocmplus trees. Default: auto-detected."
    echo "  --rocmplus-flavor [ amd|cray ]:  programming-environment whose downstream tree this build populates. 'amd' (default) -> rocmplus-\${SUFFIX} (PrgEnv-amd-new: AMD compiler + from-source mpich-wrappers). 'cray' -> rocmplus-cray-\${SUFFIX} (PrgEnv-cray-new: CCE + cray-mpich), the separate tree PrgEnv-cray-new modulefiles point at, so a cray build never clobbers the amd-new tree for the same ROCm numeric. Default: amd (byte-identical legacy behavior)."
@@ -916,7 +953,7 @@ declare -A DESELECTED_BY=()
 # package by exporting BUILD_<name>=1 between this point and sub-script
 # invocation; we don't expose per-package CLI flags here on purpose.
 QUICK_INSTALLS_PKGS=( BUILD_PYTORCH BUILD_TENSORFLOW BUILD_JAX BUILD_FTORCH \
-                     BUILD_VLLM BUILD_SGLANG BUILD_INSTELLA BUILD_JULIA BUILD_INTELLIKIT )
+                     BUILD_VLLM BUILD_SGLANG BUILD_INSTELLA BUILD_ATOM BUILD_XDIT BUILD_COMFYUI BUILD_JULIA BUILD_INTELLIKIT )
 QUICK_INSTALLS_THRESHOLD_MIN=20
 if [[ "${QUICK_INSTALLS}" == "1" ]]; then
    echo ""
@@ -947,6 +984,9 @@ if [[ "${QUICK_INSTALLS}" == "1" ]]; then
          BUILD_VLLM)       DESELECTED_BY[vllm]="quick-installs" ;;
          BUILD_SGLANG)     DESELECTED_BY[sglang]="quick-installs" ;;
          BUILD_INSTELLA)   DESELECTED_BY[instella]="quick-installs" ;;
+         BUILD_ATOM)       DESELECTED_BY[atom]="quick-installs" ;;
+         BUILD_XDIT)       DESELECTED_BY[xdit]="quick-installs" ;;
+         BUILD_COMFYUI)    DESELECTED_BY[comfyui]="quick-installs" ;;
          BUILD_JULIA)      ;;  # dormant: no run_and_log call exists
       esac
    done
@@ -1000,6 +1040,11 @@ declare -A PKG_FLAG=(
    [primus]=BUILD_PRIMUS
    [sglang]=BUILD_SGLANG
    [instella]=BUILD_INSTELLA
+   [atom]=BUILD_ATOM
+   [xdit]=BUILD_XDIT
+   [comfyui]=BUILD_COMFYUI
+   [onnxruntime]=BUILD_ONNXRUNTIME
+   [quark]=BUILD_QUARK
    [hyperloom]=BUILD_HYPERLOOM
    [magma]=BUILD_MAGMA
    [elpa]=BUILD_ELPA
@@ -1082,6 +1127,32 @@ declare -A PKG_VER_FLAG=(
    # below reads PKG_VERSIONS_REQ[instella] directly and passes
    # --pytorch-version / --pytorch-module.
    [instella]="--pytorch-version"
+   # atom=<X>: like sglang/instella, X is the BOUND PYTORCH version (install
+   # dir + module keyed as atom-v<atom-ver>-pt<pytorch-ver>), NOT ATOM's own
+   # release tag. Gates version-token validation; the custom atom dispatch
+   # below reads PKG_VERSIONS_REQ[atom] directly and passes
+   # --pytorch-version / --pytorch-module.
+   [atom]="--pytorch-version"
+   # xdit=<X>: like atom, X is the BOUND PYTORCH version (install dir + module
+   # keyed as xdit-v<xdit-ver>-pt<pytorch-ver>), NOT xDiT's own release. Gates
+   # version-token validation; the custom xdit dispatch below reads
+   # PKG_VERSIONS_REQ[xdit] directly and passes --pytorch-version.
+   [xdit]="--pytorch-version"
+   # comfyui=<X>: like xdit, X is the BOUND PYTORCH version (install dir +
+   # module keyed as comfyui-v<comfyui-ver>-pt<pytorch-ver>), NOT ComfyUI's own
+   # release tag. Gates version-token validation; the custom comfyui dispatch
+   # below reads PKG_VERSIONS_REQ[comfyui] directly and passes --pytorch-version.
+   [comfyui]="--pytorch-version"
+   # onnxruntime=<X>: X is ONNX Runtime's OWN version LABEL (standalone
+   # library prefix, not pytorch-bound), forwarded verbatim via
+   # --onnxruntime-version.
+   [onnxruntime]="--onnxruntime-version"
+   # quark=<X>: like atom, X is the BOUND PYTORCH version (install dir + module
+   # keyed as quark-v<quark-ver>-pt<pytorch-ver>), NOT AMD Quark's own wheel
+   # version -- that is the leaf's --quark-version default. Gates version-token
+   # validation; the custom quark dispatch below reads PKG_VERSIONS_REQ[quark]
+   # directly and passes --pytorch-version / --pytorch-module.
+   [quark]="--pytorch-version"
    # hyperloom=<X>: X is Hyperloom's OWN wheel version (standalone venv
    # module, not pytorch-bound), forwarded verbatim via --hyperloom-version.
    [hyperloom]="--hyperloom-version"
@@ -3060,6 +3131,149 @@ for _req_ver in "${_instella_req_versions[@]}"; do
 done
 unset _instella_req_versions _req_ver _pyt_ver _pyt_args _label _label_suffix _instella_default_pyt
 
+# ATOM (ROCm/ATOM): identical binding model to SGLang/Instella -- layers on the
+# pytorch module and BUILDS FROM SOURCE (plus AITER kernels for the node gfx)
+# against the module's torch, reusing the module triton. So it MUST run AFTER
+# pytorch and is BOUND to a concrete pytorch version (its AITER kernels are
+# ABI-locked to that torch).
+#   * `atom=<pytorch-ver>` tokens pin the BOUND pytorch version -- NOT ATOM's
+#     own release tag (that is the leaf's --atom-version default).
+#   * a bare `atom` binds to the LATEST existing pytorch module.
+# The leaf keys install dir + module on BOTH versions
+# (atom-v<atom-ver>-pt<pytorch-ver>), so multiple coexist.
+_atom_req_versions=()
+if [[ -z "${PKG_VERSIONS_REQ[atom]+SET}" ]]; then
+   _atom_req_versions=("")
+else
+   mapfile -t _atom_req_versions <<< "${PKG_VERSIONS_REQ[atom]}"
+fi
+_atom_default_pyt="$(_ftorch_latest_existing_pytorch)"
+[[ -n "${_atom_default_pyt}" ]] && echo "main_setup: atom default pytorch (latest existing) -> ${_atom_default_pyt}"
+for _req_ver in "${_atom_req_versions[@]}"; do
+   _pyt_ver="${_req_ver:-${_atom_default_pyt}}"
+   _pyt_args=()
+   _label_suffix=""
+   if [[ -n "${_pyt_ver}" ]]; then
+      _pyt_args=( --pytorch-version "${_pyt_ver}" --pytorch-module "pytorch/${_pyt_ver}" )
+      _label_suffix="_pt${_pyt_ver}"
+   fi
+   _label="atom${_label_suffix}"
+   if [[ -n "${DESELECTED_BY[atom]:-}" ]]; then
+      DESELECTED_BY[${_label}]="${DESELECTED_BY[atom]}"
+   fi
+   run_and_log "${_label}" extras/scripts/atom_setup.sh ${COMMON_OPTIONS} \
+      --build-atom ${BUILD_ATOM} --with-aiter ${WITH_AITER} ${REPLACE_OPTS} \
+      "${_pyt_args[@]}" \
+      $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/atom)
+done
+unset _atom_req_versions _req_ver _pyt_ver _pyt_args _label _label_suffix _atom_default_pyt
+
+# xDiT (xfuser): layers on the pytorch module like ATOM, but pure-python (no
+# native compile), so a SINGLE pytorch binding is sufficient.
+#   * `xdit=<pytorch-ver>` tokens pin the BOUND pytorch version -- NOT xDiT's
+#     own release (that is the leaf's --xdit-version default).
+#   * a bare `xdit` binds to the LATEST existing pytorch module.
+# The leaf keys install dir + module on BOTH versions
+# (xdit-v<xdit-ver>-pt<pytorch-ver>), so multiple coexist.
+_xdit_req_versions=()
+if [[ -z "${PKG_VERSIONS_REQ[xdit]+SET}" ]]; then
+   _xdit_req_versions=("")
+else
+   mapfile -t _xdit_req_versions <<< "${PKG_VERSIONS_REQ[xdit]}"
+fi
+_xdit_default_pyt="$(_ftorch_latest_existing_pytorch)"
+[[ -n "${_xdit_default_pyt}" ]] && echo "main_setup: xdit default pytorch (latest existing) -> ${_xdit_default_pyt}"
+for _req_ver in "${_xdit_req_versions[@]}"; do
+   _pyt_ver="${_req_ver:-${_xdit_default_pyt}}"
+   _pyt_args=()
+   _label_suffix=""
+   if [[ -n "${_pyt_ver}" ]]; then
+      _pyt_args=( --pytorch-version "${_pyt_ver}" --pytorch-module "pytorch/${_pyt_ver}" )
+      _label_suffix="_pt${_pyt_ver}"
+   fi
+   _label="xdit${_label_suffix}"
+   if [[ -n "${DESELECTED_BY[xdit]:-}" ]]; then
+      DESELECTED_BY[${_label}]="${DESELECTED_BY[xdit]}"
+   fi
+   run_and_log "${_label}" extras/scripts/xdit_setup.sh ${COMMON_OPTIONS} \
+      --build-xdit ${BUILD_XDIT} ${REPLACE_OPTS} \
+      "${_pyt_args[@]}" \
+      $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/xdit)
+done
+unset _xdit_req_versions _req_ver _pyt_ver _pyt_args _label _label_suffix _xdit_default_pyt
+
+# ComfyUI: an APP (python main.py server) that reuses the pytorch module's
+# torch/torchvision/torchaudio; pure-python, so a SINGLE pytorch binding is
+# sufficient.
+#   * `comfyui=<pytorch-ver>` tokens pin the BOUND pytorch version -- NOT
+#     ComfyUI's own release tag (that is the leaf's --comfyui-version default).
+#   * a bare `comfyui` binds to the LATEST existing pytorch module.
+# The leaf keys install dir + module on BOTH versions
+# (comfyui-v<comfyui-ver>-pt<pytorch-ver>), so multiple coexist.
+_comfyui_req_versions=()
+if [[ -z "${PKG_VERSIONS_REQ[comfyui]+SET}" ]]; then
+   _comfyui_req_versions=("")
+else
+   mapfile -t _comfyui_req_versions <<< "${PKG_VERSIONS_REQ[comfyui]}"
+fi
+_comfyui_default_pyt="$(_ftorch_latest_existing_pytorch)"
+[[ -n "${_comfyui_default_pyt}" ]] && echo "main_setup: comfyui default pytorch (latest existing) -> ${_comfyui_default_pyt}"
+for _req_ver in "${_comfyui_req_versions[@]}"; do
+   _pyt_ver="${_req_ver:-${_comfyui_default_pyt}}"
+   _pyt_args=()
+   _label_suffix=""
+   if [[ -n "${_pyt_ver}" ]]; then
+      _pyt_args=( --pytorch-version "${_pyt_ver}" --pytorch-module "pytorch/${_pyt_ver}" )
+      _label_suffix="_pt${_pyt_ver}"
+   fi
+   _label="comfyui${_label_suffix}"
+   if [[ -n "${DESELECTED_BY[comfyui]:-}" ]]; then
+      DESELECTED_BY[${_label}]="${DESELECTED_BY[comfyui]}"
+   fi
+   run_and_log "${_label}" extras/scripts/comfyui_setup.sh ${COMMON_OPTIONS} \
+      --build-comfyui ${BUILD_COMFYUI} ${REPLACE_OPTS} \
+      "${_pyt_args[@]}" \
+      $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/comfyui)
+done
+unset _comfyui_req_versions _req_ver _pyt_ver _pyt_args _label _label_suffix _comfyui_default_pyt
+
+# AMD Quark: TORCH-BOUND like ATOM -- quark.torch/quark.onnx import torch+
+# transformers at import time, so Quark is bound to a concrete pytorch module's
+# ML stack (which it REUSES, never duplicates). Pure-python delta, so one build
+# per pytorch binding is cheap.
+#   * `quark=<pytorch-ver>` tokens pin the BOUND pytorch version -- NOT Quark's
+#     own wheel version (that is the leaf's --quark-version default).
+#   * a bare `quark` binds to the LATEST existing pytorch module.
+# The leaf keys install dir + module on BOTH versions
+# (quark-v<quark-ver>-pt<pytorch-ver>), and /opt/rocmplus-<rocm> already
+# separates ROCm versions, so one build exists per (quark, pytorch, rocm).
+_quark_req_versions=()
+if [[ -z "${PKG_VERSIONS_REQ[quark]+SET}" ]]; then
+   _quark_req_versions=("")
+else
+   mapfile -t _quark_req_versions <<< "${PKG_VERSIONS_REQ[quark]}"
+fi
+_quark_default_pyt="$(_ftorch_latest_existing_pytorch)"
+[[ -n "${_quark_default_pyt}" ]] && echo "main_setup: quark default pytorch (latest existing) -> ${_quark_default_pyt}"
+for _req_ver in "${_quark_req_versions[@]}"; do
+   _pyt_ver="${_req_ver:-${_quark_default_pyt}}"
+   _pyt_args=()
+   _label_suffix=""
+   if [[ -n "${_pyt_ver}" ]]; then
+      _pyt_args=( --pytorch-version "${_pyt_ver}" --pytorch-module "pytorch/${_pyt_ver}" )
+      _label_suffix="_pt${_pyt_ver}"
+   fi
+   _label="quark${_label_suffix}"
+   if [[ -n "${DESELECTED_BY[quark]:-}" ]]; then
+      DESELECTED_BY[${_label}]="${DESELECTED_BY[quark]}"
+   fi
+   run_and_log "${_label}" extras/scripts/quark_setup.sh ${COMMON_OPTIONS} \
+      --build-quark ${BUILD_QUARK} ${REPLACE_OPTS} \
+      "${_pyt_args[@]}" \
+      $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/quark)
+done
+unset _quark_req_versions _req_ver _pyt_ver _pyt_args _label _label_suffix _quark_default_pyt
+
 # Hyperloom (AMD-AGI agentic inference optimizer): a STANDALONE pip venv
 # module, NOT ABI-bound to pytorch -- it drives whichever framework module
 # (vllm/sglang) the user loads at runtime. So it is a plain run_and_log_versioned
@@ -3069,6 +3283,16 @@ unset _instella_req_versions _req_ver _pyt_ver _pyt_args _label _label_suffix _i
 run_and_log_versioned hyperloom extras/scripts/hyperloom_setup.sh ${COMMON_OPTIONS} \
    --build-hyperloom ${BUILD_HYPERLOOM} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/hyperloom)
+
+# ONNX Runtime (ROCm, MIGraphX execution provider): a STANDALONE library
+# prefix, NOT ABI-bound to pytorch. Installs the prebuilt onnxruntime-migraphx
+# wheel from AMD's ROCm manylinux index and REUSES the system MIGraphX shipped
+# by the rocm module (the modulefile adds ${ROCM_PATH}/lib to PYTHONPATH), so
+# no separate MIGraphX build. Plain versioned leaf needing only the ROCmPlus-AI
+# overlay the rocm module adds to MODULEPATH; --build-onnxruntime 0 opts out.
+run_and_log_versioned onnxruntime extras/scripts/onnxruntime_setup.sh ${COMMON_OPTIONS} \
+   --build-onnxruntime ${BUILD_ONNXRUNTIME} ${REPLACE_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/onnxruntime)
 
 #If ROCm should be installed in a different location
 #if [ "${ROCM_INSTALLPATH}" != "/opt/" ]; then

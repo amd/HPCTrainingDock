@@ -850,8 +850,8 @@ DEBUG=0
 # pytorch + all its companion packages (aotriton, triton, vision, audio,
 # transformers, flashattention, sageattention, deepspeed) are installed
 # as subdirectories under one ${INSTALL_PATH} root, so a single
-# --replace flag cleans the whole stack. Two modulefiles get written:
-# ${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua and ${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua.
+# --replace flag cleans the whole stack. One modulefile gets written:
+# ${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua.
 # --keep-failed-installs 1: skip EXIT-trap fail-cleanup. See hypre_setup.sh.
 REPLACE=0
 KEEP_FAILED_INSTALLS=0
@@ -1395,8 +1395,11 @@ DEEPSPEED_PATH=$INSTALL_PATH/deepspeed
 # All companion subdirs live under ${INSTALL_PATH}, so a single rm -rf
 # of the root cleans pytorch + aotriton + triton + vision + audio +
 # transformers + flashattention + sageattention + deepspeed in one go.
-# Two modulefiles need cleaning: ${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua and
-# ${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua.
+# Cleanup removes the ${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua modulefile plus any
+# legacy ${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua sibling. The
+# tunableop variant is no longer emitted, but a stale one left by an
+# older install must be scrubbed: sort -V ranks it above the plain
+# modulefile, so it would otherwise become the Lmod family default.
 # ── BUILD_PYTORCH=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
 NOOP_RC=43
 if [ "${BUILD_PYTORCH}" = "0" ]; then
@@ -1485,7 +1488,7 @@ if [ "${REPLACE}" = "1" ]; then
    echo "[pytorch --replace 1] removing prior install + modulefiles if present"
    echo "  install dir:        ${INSTALL_PATH}"
    echo "  modulefile:         ${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}.lua"
-   echo "  modulefile (tunop): ${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua"
+   echo "  modulefile (legacy tunop scrub): ${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled.lua"
    ${SUDO} rm -rf "${INSTALL_PATH}"
    # Remove BOTH modulefile flavors (Lmod .lua and extensionless Tcl) so a
    # re-run that switches flavor (or an operator swapping module systems)
@@ -1578,7 +1581,7 @@ if [[ -z "${ROCM_MODULE_NAME}" ]]; then
 fi
 
 # Provenance: capture this leaf script's git state for the modulefile
-# whatis() lines emitted by the pytorch + tunableop heredocs below.
+# whatis() lines emitted by the pytorch heredoc below.
 # Self-contained (no source dependency); falls back to "unknown" when
 # the install runs from a stripped-of-.git context (Docker layer,
 # release tarball, or git binary missing).
@@ -4710,7 +4713,6 @@ MODULE_COMPANION_PREPENDS_TCL="$(printf '%s' "${MODULE_COMPANION_PREPENDS}" | _l
 MODULE_FA_PREPENDS_TCL="$(printf '%s' "${MODULE_FA_PREPENDS}" | _lua2tcl_prepend)"
 
 PYTORCH_MODULEFILE="${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}${MODEXT}"
-PYTORCH_TUNOP_MODULEFILE="${MODULE_PATH}/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}_tunableop_enabled${MODEXT}"
 
 if [ "${MODFLAVOR}" = "lua" ]; then
 # the - option suppresses tabs
@@ -4820,23 +4822,6 @@ cat <<-EOF | ${PKG_SUDO_MOD} tee ${PYTORCH_MODULEFILE}
 	-- export at pytorch_setup.sh:1305.
 	setenv("PYTORCH_ROCM_ARCH","${AMDGPU_GFXMODEL}")
 EOF
-# An alternate module with tunable gemms
-cat <<-EOF | ${SUDO} tee ${PYTORCH_TUNOP_MODULEFILE}
-	whatis("PyTorch version ${PYTORCH_VERSION} with ROCm Support and Tunable GEMMS${PYTORCH_INSTALL_SUFFIX:+ (variant: ${PYTORCH_INSTALL_SUFFIX#-})}")
-	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
-	whatis("AOTriton: ${AOTRITON_VERSION}")
-	whatis("Triton (post-build wheel): ${TRITON_VERSION}")
-	whatis("FlashAttention: ${FLASHATTENTION_VERSION}")
-
-	-- Load the EXACT matching plain build (pytorch/<this-version>), NOT a
-	-- bare load("pytorch"). A bare load resolves to the pytorch FAMILY
-	-- default -- Lmod picks the highest version in this dir -- so e.g.
-	-- pytorch/2.7.1_tunableop_enabled would pull pytorch/2.12.0 instead of
-	-- 2.7.1. Pinning the full version keeps the tunableop variant matched to
-	-- its own build.
-	load("pytorch/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}")
-	setenv("PYTORCH_TUNABLEOP_ENABLED","1")
-EOF
 
 else
 # ── Classic Tcl Environment Modules flavor (Lmod absent) ─────────────
@@ -4898,31 +4883,10 @@ setenv Torch_DIR "${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages"
 # find_package(Torch) -> LoadHIP.cmake does not hard-error.
 setenv PYTORCH_ROCM_ARCH "${AMDGPU_GFXMODEL}"
 EOF
-# An alternate module with tunable gemms
-cat <<EOF | ${SUDO} tee ${PYTORCH_TUNOP_MODULEFILE}
-#%Module1.0
-module-whatis "PyTorch version ${PYTORCH_VERSION} with ROCm Support and Tunable GEMMS${PYTORCH_INSTALL_SUFFIX:+ (variant: ${PYTORCH_INSTALL_SUFFIX#-})}"
-module-whatis "Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})"
-module-whatis "AOTriton: ${AOTRITON_VERSION}"
-module-whatis "Triton (post-build wheel): ${TRITON_VERSION}"
-module-whatis "FlashAttention: ${FLASHATTENTION_VERSION}"
-
-# Load the EXACT matching plain build (pytorch/<this-version>), NOT a bare
-# `module load pytorch`. The bare form would select the pytorch family
-# default (via the .modulerc below), which is not necessarily THIS build's
-# version when multiple pytorch versions share the dir, and it risks
-# resolving to the _tunableop_enabled sibling -> self-recursion. Pinning
-# the full version matches the variant to its own build.
-module load pytorch/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX}
-setenv PYTORCH_TUNABLEOP_ENABLED "1"
-EOF
 # Classic Tcl Environment Modules has no implicit "highest version"
-# default like Lmod. Emit a .modulerc pinning THIS plain build as the
-# family default so a user-facing bare `module load pytorch` resolves to a
-# real plain build instead of erroring or selecting the _tunableop_enabled
-# sibling. NOTE: the tunableop modulefile no longer relies on this default
-# -- it loads its exact matching sibling (pytorch/<ver>) directly (above),
-# which also removes the old bare-load self-recursion hazard.
+# default like Lmod. Emit a .modulerc pinning THIS build as the family
+# default so a user-facing bare `module load pytorch` resolves to a real
+# build instead of erroring when multiple pytorch versions share the dir.
 cat <<EOF | ${SUDO} tee ${MODULE_PATH}/.modulerc
 #%Module1.0
 module-version $(basename ${MODULE_PATH})/${PYTORCH_VERSION}${PYTORCH_INSTALL_SUFFIX} default
