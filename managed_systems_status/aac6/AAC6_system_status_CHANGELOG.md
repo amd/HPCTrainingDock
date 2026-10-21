@@ -25,6 +25,21 @@ Newest entries first. Each entry summarises user-visible changes since the previ
     - aac6_mpi_oversubscribed
 - Modules:
     - rocm/10.0.0
+- Security (RCCL, CVE-2026-43598 / AMD-SB-6033, CVSS 7.7 HIGH):
+    - AMD ships no patch or workaround for this CVE; its only stated mitigation is
+      "upgrade to ROCm 7.14". 30 deployed ROCm trees here are pre-7.14 and vulnerable.
+    - Backported the upstream fix (ROCm/rocm-systems `ccba298`) to 8 source baselines
+      covering 19 of those 30 trees, delivered through the existing `rocm_patches.sh`
+      LD_LIBRARY_PATH overlay as the new `rccl-sb6033` bundle.
+    - Validated on ROCm 7.2.4 only so far: 1-node and 2-node `rccl-tests` and a 4-rank
+      PyTorch distributed all-reduce all pass against the patched library, on both
+      MI300A (gfx942) and MI250 (gfx90a).
+    - Roll-out to the remaining trees is still pending. 11 trees (7.12.0, 7.13.0,
+      afar-23.1.0, nightly 7.14.0a20260612) have no reproducible source baseline and
+      stay exposed; point users at 7.14.1 or newer.
+    - Audit any library with:
+      `strings -a librccl.so.1 | grep -c 'tpLocalRank %d out of range'` (0 = vulnerable).
+    - Full write-up: `System_Management_Reports/33_RCCL_CVE-2026-43598_Mitigation.md`.
 
 [Full snapshot](archive/AAC6_system_status_2026-10-13.md)
 ## 2026-10-12
