@@ -32,11 +32,12 @@
 #     Empty for non-afar trees (in which case the rocmplus suffix
 #     reduces to the legacy <prefix>-<numeric> shape).
 #
-# Why the system tree (not /nfsapps/modules/base/rocm)?  The /nfsapps SDKs
-# were built for Ubuntu 24.04 (GLIBC 2.38, libstdc++.so.6 GLIBCXX_3.4.32+)
-# and will not run on the current sh5 nodes, which are 22.04 (GLIBC 2.35).
-# When the cluster moves to 24.04, switch the module load below to point
-# at /nfsapps/modules/base.
+# Why the system tree (not /nfsapps/modules/base/rocm)?  The legacy
+# /nfsapps SDKs were built for Ubuntu 24.04 (GLIBC 2.38, libstdc++.so.6
+# GLIBCXX_3.4.32+) while the sh5 nodes were still 22.04 (GLIBC 2.35). The
+# sh5 nodes now run 24.04: target the distro-segregated tree by passing
+# TOP_INSTALL_PATH / ROCM_INSTALLPATH=/nfsapps/ubuntu-24.04/opt and
+# TOP_MODULE_PATH=/nfsapps/ubuntu-24.04/modules.
 #
 # The submitter chains one of these per ROCm version with --dependency=afterany
 # so the chain proceeds even if a single version fails.
@@ -514,8 +515,8 @@ case "${ROCM_PATH}" in
       fi
       if [[ "${_allow_nfsapps}" != 1 ]]; then
          echo "ERROR: rocm/${ROCM_VERSION} resolved to ${ROCM_PATH}, which is the" >&2
-         echo "       legacy distro-mixed /nfsapps tree. The current nodes are Ubuntu" >&2
-         echo "       22.04; that tree was 24.04-built and produces GLIBC errors at" >&2
+         echo "       legacy distro-mixed /nfsapps tree, whose SDKs need not match this" >&2
+         echo "       node's Ubuntu release and then fail with GLIBC errors at" >&2
          echo "       runtime. Either:" >&2
          echo "       (a) load a system rocm module under" >&2
          echo "           /shared/apps/modules/ubuntu/lmodfiles/base, or" >&2

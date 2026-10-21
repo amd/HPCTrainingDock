@@ -92,6 +92,15 @@ SITE_CLI=0
 # complete; set BUILD_SGLANG=1 (or --packages sglang) once a compatible
 # pytorch/SGLang pair exists. See reasoning note 2026-10-19-hyperloom-sglang.
 : ${BUILD_SGLANG:="0"}
+# Instella (AMD fully-open LLM training framework, built on OLMo): like SGLang
+# it layers on the pytorch module and BUILDS FROM SOURCE, bound to a concrete
+# pytorch version, and builds Flash-Attention for the node gfx; gated out under
+# --quick-installs with pytorch. DEFAULT OFF (opt-in): the training codebase
+# pins a concrete stable torch while this tree's pytorch modules are 2.x.0a0
+# git alphas, so strict pip resolution may not satisfy; the leaf + wiring are
+# complete, set BUILD_INSTELLA=1 (or --packages instella) once a compatible
+# pytorch pair exists.
+: ${BUILD_INSTELLA:="0"}
 # Hyperloom (AMD-AGI agentic LLM-inference optimizer): a standalone pip venv
 # module under ROCmPlus-AI; not ABI-bound to pytorch (it drives whichever
 # framework module the user loads at runtime). Fast pip install, so it is NOT
@@ -140,6 +149,11 @@ SITE_CLI=0
 : ${BUILD_MDB:="1"}
 : ${BUILD_INTELLIKIT:="1"}
 : ${BUILD_ROC_OPTIQ:="1"}
+# TraceLens (AMD-AGI trace-analysis tool): a standalone pip venv in the tools
+# layer (ROCmPlus-AMDResearchTools overlay, like roc-optiq); arch-agnostic and
+# not ABI-bound to pytorch. Fast pip install, so NOT gated under
+# --quick-installs. Set BUILD_TRACELENS=0 to opt out.
+: ${BUILD_TRACELENS:="1"}
 : ${BUILD_HPCTOOLKIT:="1"}
 : ${BUILD_MPI4PY:="1"}
 : ${BUILD_TAU:="1"}
@@ -329,7 +343,7 @@ usage()
    echo "  --replace-existing [0 or 1]:  per-package replacement -- before each package block, if its BUILD_<PKG> flag is 1, remove that one package's install + module dirs so the setup script reinstalls it. Packages whose BUILD_<PKG> is 0 (e.g. under --quick-installs 1 or not in --packages) keep their existing install untouched. Never touches \${TOP_INSTALL_PATH}/rocm-\${ROCM_VERSION} or \${TOP_MODULE_PATH}/rocm-\${ROCM_VERSION}. Also exempts miniconda3 and miniforge3, whose install dirs are shared across ROCm versions; to force a rebuild of those, manually rm -rf the versioned subdir under \${TOP_INSTALL_PATH} (the version itself lives in the leaf script). Default $REPLACE_EXISTING"
    echo "  --keep-failed-installs [0 or 1]:  on a per-package failure, default (0) wipes the partial install dir + half-written modulefile so the next run starts clean. Set to 1 to leave the artifacts on disk for post-mortem inspection. Default $KEEP_FAILED_INSTALLS"
    echo "  --skip-patches [0 or 1]:  operator opt-out for the rocm-patches step (rocm/scripts/rocm_patches.sh) AND the hipblaslt-patch step (rocm/scripts/hipblaslt_patch_setup.sh). Default 0 runs both; for most ROCm versions each script self-no-ops via NOOP_RC=43 so the cost is nil. Set to 1 when targeting a tree where the patches overlay would mismatch the runtime (e.g. 7.2.0 / 7.2.1 patches built for a newer userland and running on Ubuntu 22.04 nodes). When skipped, the per-package summary records 'rocm-patches(--skip-patches)' and 'hipblaslt-patch(--skip-patches)' in the DESELECTED bucket. Default $SKIP_PATCHES"
-   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocshmem, rocprof-sys, rocprof-compute, hpctoolkit, uprof, likwid, mdb, intellikit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, vllm, sglang, hyperloom, magma, elpa, kokkos, umpire, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre, heffte, emacs, turbovnc, google-chrome, zellij, qcachegrind, mpicheck. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, rocshmem, hpctoolkit, uprof, likwid, mdb, intellikit, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, vllm, sglang, hyperloom, magma, elpa, kokkos, umpire, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre, heffte, emacs, turbovnc, google-chrome, zellij, qcachegrind, mpicheck. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Supported for pytorch (keys: aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds)) and ftorch (key: ref (alias ftorch-ref)). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build. NOTE: for ftorch, the VERSION is the BOUND PYTORCH version (install dir + module are keyed on it, and the bind pytorch must already exist -- ftorch=<ver> does NOT build pytorch), while ftorch's OWN upstream git ref is a separate axis set per-token via :ref=<git-ref> (e.g. \"ftorch=2.12.0:ref=0.7\") or sweep-wide via --ftorch-ref; a bare \"ftorch\" binds to the latest existing pytorch module. Similarly for vllm: VERSION is the BOUND PYTORCH version (install/module keyed as vllm-v<vllm-ver>-pt<pytorch-ver>; vLLM's OWN version auto-derives from the bound torch), and a bare \"vllm\" binds to the latest existing pytorch module (vllm=<ver> does NOT build pytorch -- the bind pytorch must already exist)."
+   echo "  --packages \"name1 name2 ...\":  whitelist; only these packages are built. Disables every other gated package (overrides --quick-installs for listed names). Recognized: flang-new, openmpi, mpi4py, mvapich, rocshmem, rocprof-sys, rocprof-compute, hpctoolkit, uprof, likwid, mdb, intellikit, scorep, tau, cupy, hip-python, tensorflow, jax, ftorch, pytorch, vllm, sglang, instella, hyperloom, tracelens, primus, magma, elpa, kokkos, umpire, miniconda3, miniforge3, hipifly, hdf5, netcdf, fftw, petsc, hypre, heffte, emacs, turbovnc, google-chrome, zellij, qcachegrind, mpicheck. Empty = all (subject to --quick-installs). Versioned form name=VERSION (with optional 'v' prefix, e.g. cupy=v13.0.1 or pytorch=2.7.1) is supported for: openmpi, mpi4py, rocshmem, hpctoolkit, uprof, likwid, mdb, intellikit, scorep, cupy, hip-python, tensorflow, jax, ftorch, pytorch, vllm, sglang, instella, hyperloom, tracelens, magma, elpa, kokkos, umpire, miniconda3, miniforge3, hdf5, netcdf, fftw, petsc, hypre, heffte, emacs, turbovnc, google-chrome, zellij, qcachegrind, mpicheck. For netcdf, VERSION is the netcdf-c version; the matching netcdf-fortran is auto-derived inside the leaf script via its NETCDF_C_TO_F map (pass --netcdf-f-version directly to the leaf to override). Repeating the same name with different versions (e.g. \"pytorch=2.7.1 pytorch=2.8.0\") drives one build per version inside the same job; each lands in its own pkg-vVERSION/ install dir + VERSION.lua module so versions coexist. A bare name uses the leaf script's internal default version. Inline overrides via name=VERSION:OK1=OV1[:OK2=OV2...]: append \":\"-separated key=value pairs after the version to override per-package leaf-script flags. Supported for pytorch (keys: aotriton, torchvision (alias tv), torchaudio (alias ta), triton, flashattention (alias flash), pillow, sageattention (alias sage), deepspeed (alias ds)) and ftorch (key: ref (alias ftorch-ref)). Example: \"pytorch=2.8.0:flash=2.7.4:tv=0.22.1\" runs pytorch_setup.sh --pytorch-version 2.8.0 --flashattention-version 2.7.4 --torchvision-version 0.22.1. Each (name,version) pair carries its OWN override set, so \"pytorch=2.8.0:flash=2.7.4 pytorch=2.9.1\" overrides flash only on the 2.8.0 build. NOTE: for ftorch, the VERSION is the BOUND PYTORCH version (install dir + module are keyed on it, and the bind pytorch must already exist -- ftorch=<ver> does NOT build pytorch), while ftorch's OWN upstream git ref is a separate axis set per-token via :ref=<git-ref> (e.g. \"ftorch=2.12.0:ref=0.7\") or sweep-wide via --ftorch-ref; a bare \"ftorch\" binds to the latest existing pytorch module. Similarly for vllm: VERSION is the BOUND PYTORCH version (install/module keyed as vllm-v<vllm-ver>-pt<pytorch-ver>; vLLM's OWN version auto-derives from the bound torch), and a bare \"vllm\" binds to the latest existing pytorch module (vllm=<ver> does NOT build pytorch -- the bind pytorch must already exist)."
    echo "  --rocm-rc-prefix [ FAMILY ]:  release-candidate family name (e.g. 'therock', 'afar'). Auto-detected from \${ROCM_PATH} basename for rocm-{therock,afar}-* trees. Empty for regular releases. When non-empty, install/module dirs become rocmplus-\${FAMILY}-\${ROCM_VERSION}/ instead of rocmplus-\${ROCM_VERSION}/ -- EXCEPT for FAMILY='afar', where the suffix is rocmplus-afar-\${ROCM_RC_COMPILER}-\${ROCM_VERSION}/ (compiler-AND-rocm-keyed; see --rocm-rc-compiler). Default: auto-detected (empty for regular releases)."
    echo "  --rocm-rc-compiler [ COMPILER ]:  compiler/AFAR release number for AFAR trees (e.g. '22.2.0' for rocm-afar-22.2.0, '23.2.1' for rocm-afar-23.2.1 a.k.a. the TheRock-AFAR drop). Auto-detected from \${ROCM_PATH} basename when ROCM_RC_PREFIX='afar'. Empty for non-afar trees. When non-empty AND ROCM_RC_PREFIX='afar', the rocmplus suffix becomes afar-\${COMPILER}-\${ROCM_VERSION} so two AFAR drops with the same SDK numeric but different compiler releases get distinct rocmplus trees. Default: auto-detected."
    echo "  --rocmplus-flavor [ amd|cray ]:  programming-environment whose downstream tree this build populates. 'amd' (default) -> rocmplus-\${SUFFIX} (PrgEnv-amd-new: AMD compiler + from-source mpich-wrappers). 'cray' -> rocmplus-cray-\${SUFFIX} (PrgEnv-cray-new: CCE + cray-mpich), the separate tree PrgEnv-cray-new modulefiles point at, so a cray build never clobbers the amd-new tree for the same ROCm numeric. Default: amd (byte-identical legacy behavior)."
@@ -902,7 +916,7 @@ declare -A DESELECTED_BY=()
 # package by exporting BUILD_<name>=1 between this point and sub-script
 # invocation; we don't expose per-package CLI flags here on purpose.
 QUICK_INSTALLS_PKGS=( BUILD_PYTORCH BUILD_TENSORFLOW BUILD_JAX BUILD_FTORCH \
-                     BUILD_VLLM BUILD_SGLANG BUILD_JULIA BUILD_INTELLIKIT )
+                     BUILD_VLLM BUILD_SGLANG BUILD_INSTELLA BUILD_JULIA BUILD_INTELLIKIT )
 QUICK_INSTALLS_THRESHOLD_MIN=20
 if [[ "${QUICK_INSTALLS}" == "1" ]]; then
    echo ""
@@ -932,6 +946,7 @@ if [[ "${QUICK_INSTALLS}" == "1" ]]; then
          BUILD_INTELLIKIT) DESELECTED_BY[intellikit]="quick-installs" ;;
          BUILD_VLLM)       DESELECTED_BY[vllm]="quick-installs" ;;
          BUILD_SGLANG)     DESELECTED_BY[sglang]="quick-installs" ;;
+         BUILD_INSTELLA)   DESELECTED_BY[instella]="quick-installs" ;;
          BUILD_JULIA)      ;;  # dormant: no run_and_log call exists
       esac
    done
@@ -972,6 +987,7 @@ declare -A PKG_FLAG=(
    [mdb]=BUILD_MDB
    [intellikit]=BUILD_INTELLIKIT
    [roc-optiq]=BUILD_ROC_OPTIQ
+   [tracelens]=BUILD_TRACELENS
    [scorep]=BUILD_SCOREP
    [tau]=BUILD_TAU
    [cupy]=BUILD_CUPY
@@ -983,6 +999,7 @@ declare -A PKG_FLAG=(
    [vllm]=BUILD_VLLM
    [primus]=BUILD_PRIMUS
    [sglang]=BUILD_SGLANG
+   [instella]=BUILD_INSTELLA
    [hyperloom]=BUILD_HYPERLOOM
    [magma]=BUILD_MAGMA
    [elpa]=BUILD_ELPA
@@ -1028,6 +1045,9 @@ declare -A PKG_VER_FLAG=(
    [mdb]="--mdb-version"
    [intellikit]="--intellikit-version"
    [roc-optiq]="--roc-optiq-version"
+   # tracelens=<X>: X is TraceLens's OWN version LABEL (standalone venv
+   # module, not pytorch-bound), forwarded verbatim via --tracelens-version.
+   [tracelens]="--tracelens-version"
    [zellij]="--zellij-version"
    [scorep]="--scorep-version"
    [cupy]="--cupy-version"
@@ -1056,6 +1076,12 @@ declare -A PKG_VER_FLAG=(
    # below reads PKG_VERSIONS_REQ[sglang] directly and passes
    # --pytorch-version / --pytorch-module.
    [sglang]="--pytorch-version"
+   # instella=<X>: like sglang, X is the BOUND PYTORCH version (install dir +
+   # module keyed as instella-v<instella-ver>-pt<pytorch-ver>), NOT Instella's
+   # own version. Gates version-token validation; the custom instella dispatch
+   # below reads PKG_VERSIONS_REQ[instella] directly and passes
+   # --pytorch-version / --pytorch-module.
+   [instella]="--pytorch-version"
    # hyperloom=<X>: X is Hyperloom's OWN wheel version (standalone venv
    # module, not pytorch-bound), forwarded verbatim via --hyperloom-version.
    [hyperloom]="--hyperloom-version"
@@ -2229,6 +2255,14 @@ run_and_log_versioned intellikit tools/scripts/intellikit_setup.sh ${COMMON_OPTI
 run_and_log_versioned roc-optiq tools/scripts/roc-optiq_setup.sh ${COMMON_OPTIONS} --build-roc-optiq ${BUILD_ROC_OPTIQ} ${REPLACE_OPTS} \
    $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/roc-optiq)
 
+# TraceLens is the AMD-AGI trace-analysis tool: a standalone pip venv exposing
+# TraceLens_* CLIs, installed into a version-suffixed dir + VERSION.lua module
+# in the ROCmPlus-AMDResearchTools overlay (same as roc-optiq). Arch-agnostic
+# and not pytorch-bound, so it is a plain versioned leaf; --build-tracelens 0
+# opts out (leaf exits NOOP_RC).
+run_and_log_versioned tracelens tools/scripts/tracelens_setup.sh ${COMMON_OPTIONS} --build-tracelens ${BUILD_TRACELENS} ${REPLACE_OPTS} \
+   $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/tracelens)
+
 # hpctoolkit builds hpcprof-mpi when meson's dependency('MPI') finds mpicc/
 # mpicxx. The leaf default MPI module is "openmpi", which does not exist on a
 # Cray system. When cray-mpich is loaded ($MPICH_DIR exported) prefer the
@@ -2989,6 +3023,42 @@ for _req_ver in "${_sglang_req_versions[@]}"; do
       $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/sglang)
 done
 unset _sglang_req_versions _req_ver _pyt_ver _pyt_args _label _label_suffix _sglang_default_pyt
+
+# Instella: identical binding model to SGLang -- layers on the pytorch module
+# and BUILDS FROM SOURCE (plus Flash-Attention for the node gfx) against the
+# module's torch. So it MUST run AFTER pytorch and is BOUND to a concrete
+# pytorch version (its Flash-Attn kernels are ABI-locked to that torch).
+#   * `instella=<pytorch-ver>` tokens pin the BOUND pytorch version -- NOT
+#     Instella's own version (that is the leaf's --instella-version default).
+#   * a bare `instella` binds to the LATEST existing pytorch module.
+# The leaf keys install dir + module on BOTH versions
+# (instella-v<instella-ver>-pt<pytorch-ver>), so multiple coexist.
+_instella_req_versions=()
+if [[ -z "${PKG_VERSIONS_REQ[instella]+SET}" ]]; then
+   _instella_req_versions=("")
+else
+   mapfile -t _instella_req_versions <<< "${PKG_VERSIONS_REQ[instella]}"
+fi
+_instella_default_pyt="$(_ftorch_latest_existing_pytorch)"
+[[ -n "${_instella_default_pyt}" ]] && echo "main_setup: instella default pytorch (latest existing) -> ${_instella_default_pyt}"
+for _req_ver in "${_instella_req_versions[@]}"; do
+   _pyt_ver="${_req_ver:-${_instella_default_pyt}}"
+   _pyt_args=()
+   _label_suffix=""
+   if [[ -n "${_pyt_ver}" ]]; then
+      _pyt_args=( --pytorch-version "${_pyt_ver}" --pytorch-module "pytorch/${_pyt_ver}" )
+      _label_suffix="_pt${_pyt_ver}"
+   fi
+   _label="instella${_label_suffix}"
+   if [[ -n "${DESELECTED_BY[instella]:-}" ]]; then
+      DESELECTED_BY[${_label}]="${DESELECTED_BY[instella]}"
+   fi
+   run_and_log "${_label}" extras/scripts/instella_setup.sh ${COMMON_OPTIONS} \
+      --build-instella ${BUILD_INSTELLA} ${REPLACE_OPTS} \
+      "${_pyt_args[@]}" \
+      $(rocmplus_args rocmplus-${ROCMPLUS_SUFFIX}/instella)
+done
+unset _instella_req_versions _req_ver _pyt_ver _pyt_args _label _label_suffix _instella_default_pyt
 
 # Hyperloom (AMD-AGI agentic inference optimizer): a STANDALONE pip venv
 # module, NOT ABI-bound to pytorch -- it drives whichever framework module

@@ -174,7 +174,8 @@ fi
 # Primus kernels in the image target gfx942 (MI300/MI3xx). gfx90a (MI250) is
 # not a supported SKU -- warn but do not fail, since the image is arch-fixed.
 case ";${AMDGPU_GFXMODEL};" in
-   *gfx90a*) echo "[primus] WARNING gfx90a (MI250) detected: Primus images target gfx942 and MI250 is not a supported Primus SKU (no FP8/MXFP4, gfx942-only kernels). The module installs but is not expected to run on MI250." ;;
+   *gfx942*|*gfx950*) ;;
+   *gfx90a*) echo "[primus] WARNING gfx90a (MI250) is the only target: Primus images target gfx942 and MI250 is not a supported Primus SKU (no FP8/MXFP4, gfx942-only kernels). The module installs but is not expected to run on MI250." ;;
 esac
 
 # ── APU vs discrete-GPU gating (see vllm_setup.sh IS_APU) ─────────────

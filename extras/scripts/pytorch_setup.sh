@@ -257,12 +257,18 @@ declare -A PYTORCH_STACK_MANIFEST=(
    ["2.7|6.4"]="aotriton=0.9.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
    ["2.7|7.0"]="aotriton=0.9.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
    ["2.7|7.1"]="aotriton=0.9.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
-   ["2.7|7.2"]="aotriton=0.9.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   # flashattention bumped 2.7.4.post1 -> 2.8.3 for ROCm 7.2: 2.7.4.post1's
+   # bundled composable_kernel fails to compile against ROCm 7.2.4's clang
+   # (ck_tile "constexpr variable 'warpSize' must be initialized by a constant
+   # expression"), leaving an empty flash_attn install. 2.8.3 (already used by
+   # the 2.9 line) compiles cleanly for gfx942 and is ABI-built against torch 2.7.
+   ["2.7|7.2"]="aotriton=0.9.2b;torchvision=0.22.0;torchaudio=2.7.0;triton=3.2.0;flashattention=2.8.3;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
    ["2.8|6.3"]="aotriton=0.10b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
    ["2.8|6.4"]="aotriton=0.10b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
    ["2.8|7.0"]="aotriton=0.10b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
    ["2.8|7.1"]="aotriton=0.10b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
-   ["2.8|7.2"]="aotriton=0.10b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.2.0;flashattention=2.7.4.post1;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
+   # flashattention bumped 2.7.4.post1 -> 2.8.3 for ROCm 7.2 (see 2.7|7.2 note).
+   ["2.8|7.2"]="aotriton=0.10b;torchvision=0.22.1;torchaudio=2.7.1;triton=3.2.0;flashattention=2.8.3;pillow=11.0.0;sageattention=1.0.5;deepspeed=latest"
    ["2.9|7.0"]="aotriton=0.11.2b;torchvision=0.24.1;torchaudio=2.9.1;triton=3.4.0;flashattention=2.8.3;pillow=12.1.1;sageattention=1.0.6;deepspeed=latest"
    ["2.9|7.1"]="aotriton=0.11.2b;torchvision=0.24.1;torchaudio=2.9.1;triton=3.4.0;flashattention=2.8.3;pillow=12.1.1;sageattention=1.0.6;deepspeed=latest"
    ["2.9|7.2"]="aotriton=0.11.2b;torchvision=0.24.1;torchaudio=2.9.1;triton=3.4.0;flashattention=2.8.3;pillow=12.1.1;sageattention=1.0.6;deepspeed=latest"
@@ -1908,9 +1914,17 @@ else
 
       pip3 install --target=${FLASHATTENTION_PATH} packaging
       export PYTHONPATH=$PYTHONPATH:${FLASHATTENTION_PATH}
+      export PYTHONPATH=$PYTHONPATH:${FLASHATTENTION_PATH}/lib/python3.${PYTHON_VERSION}/site-packages
       git clone --depth 1 --branch v${FLASHATTENTION_VERSION} https://github.com/Dao-AILab/flash-attention.git
       cd flash-attention
-      python3 setup.py install --prefix=${FLASHATTENTION_PATH}
+      # flash-attention must be built for ROCm explicitly: its setup.py only
+      # auto-detects the ROCm path for newer releases (>= 2.8.x). Older pins
+      # (e.g. 2.7.4.post1 for PT 2.7/2.8) build a no-op/CUDA target without
+      # BUILD_TARGET=rocm + GPU_ARCHS, leaving an EMPTY flash_attn install
+      # (only the `packaging` dir above) -> `import flash_attn` fails. Mirror
+      # the source-build branch's working invocation so every PT line installs
+      # a real ROCm flash_attn.
+      BUILD_TARGET="rocm" GPU_ARCHS="$AMDGPU_GFXMODEL" FLASH_ATTENTION_SKIP_CUDA_BUILD="FALSE" python3 setup.py install --prefix=${FLASHATTENTION_PATH}
 
       export PYTHONPATH=$PYTORCH_PATH:$PYTHONPATH
 
