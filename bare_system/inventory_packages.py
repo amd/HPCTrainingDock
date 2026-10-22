@@ -3,26 +3,32 @@
 
 Surveys every rocmplus-${VERSION} install root under one or more
 top-level paths and emits a Markdown (or text) table per ROCm bucket.
-There are THREE buckets, emitted in this order:
+There is ONE bucket per numeric ROCm major present on disk, emitted
+newest-major-first, followed by the RC bucket:
 
-  1. `ROCm 7.x.x`                  -- numeric 7.x releases (7.0.x, 7.1.x,
-                                      7.2.x, ...). With 7.2.2 + 7.2.3 in
-                                      flight this is the widest bucket
-                                      -- splitting the RC trees out
-                                      keeps it manageable.
+  1. `ROCm <N>.x.x`                -- one bucket per numeric major
+                                      discovered on disk (6.x, 7.x,
+                                      8.x, 9.x, 10.x, ...), rendered
+                                      highest-major-first. Majors are
+                                      derived from the trees found, so
+                                      new majors (10.1.0 and beyond)
+                                      bucket automatically with no code
+                                      change. With 7.2.2 + 7.2.3 in
+                                      flight the 7.x bucket is the
+                                      widest -- splitting the RC trees
+                                      out keeps it manageable.
   2. `ROCm RC trees (therock + afar)`
                                    -- release-candidate flavours
-                                      (`therock-*`, `afar-*`).
-                                      As of 2026-05-26 AFAR columns
-                                      carry both the compiler/AFAR
-                                      release tag AND the SDK numeric:
-                                      `afar-22.2.0-7.2.0`,
+                                      (`therock-*`, `afar-*`), always
+                                      emitted last. As of 2026-05-26
+                                      AFAR columns carry both the
+                                      compiler/AFAR release tag AND the
+                                      SDK numeric: `afar-22.2.0-7.2.0`,
                                       `afar-23.2.1-7.13.0` (the second
                                       replaces the legacy
                                       `therock-afar-7.13.0`). therock
                                       columns stay single-numeric
                                       (`therock-7.13.0`).
-  3. `ROCm 6.x.x`                  -- numeric 6.x releases.
 
 For each canonical package family it reports:
 
@@ -111,8 +117,8 @@ Markers are dropped by the per-package setup scripts at the moment
 they take a no-op path (afar-skip / rocm-bundled / ftorch missing
 Lmod prereq / jax blocked on Python vs ROCm). See:
 
-  extras/scripts/{pytorch,magma,kokkos,hypre,hipfort,ftorch,jax}_setup.sh
-  tools/scripts/tau_setup.sh
+  extras/scripts/{pytorch,magma,kokkos,hypre,heFFTe,primus,hipfort,ftorch,jax}_setup.sh
+  tools/scripts/{tau,roc-optiq}_setup.sh
 
 The marker file lives as a sibling of the install dir (i.e. directly
 under rocmplus-${VERSION}/), is named ${pkg}.SKIPPED, ${pkg}.BUNDLED,
@@ -223,6 +229,9 @@ DEFAULT_ROOTS = ["/nfsapps/ubuntu-24.04/opt"]
 #     mode these packages still render as `Y` (versionless).
 PKG_LIST = [
     ("openblas",   r"^openblas(-v.*)?$",                  r"^openblas-v?(.+)$"),
+    # flang-new installs the AFAR flang toolchain into the rocmplus tree
+    # as rocm-afar-<FLANG_RELEASE_NUMBER>/ (rocm/scripts/flang-new_setup.sh).
+    ("flang-new",  r"^rocm-afar-.*",                      r"^rocm-afar-(.+)$"),
     ("openmpi",    r"^openmpi-.*",                        r"^openmpi-(\d[^-]*)"),
     ("ucx",        r"^ucx-.*",                            r"^ucx-(\d[^-]*)"),
     ("ucc",        r"^ucc-.*",                            r"^ucc-(\d[^-]*)"),
@@ -247,6 +256,13 @@ PKG_LIST = [
     ("magma",      r"^magma(-v.*)?$",                     r"^magma-v(.+)$"),
     ("hypre",      r"^hypre(-v.*)?$",                     r"^hypre-v(.+)$"),
     ("petsc",      r"^petsc(-v.*)?$",                     r"^petsc-v(.+)$"),
+    # umpire installs to umpire-v<UMPIRE_VERSION>/
+    # (extras/scripts/umpire_setup.sh).
+    ("umpire",     r"^umpire-v.*",                        r"^umpire-v(.+)$"),
+    # heffte installs to heffte-v<HEFFTE_VERSION>/ and drops
+    # heffte.SKIPPED (AFAR SDK missing rocfft) / heffte.FAILED markers
+    # (extras/scripts/heFFTe_setup.sh).
+    ("heffte",     r"^heffte-v.*",                        r"^heffte-v(.+)$"),
     # elpa installs to elpa-v<ELPA_VERSION>/ (extras/scripts/elpa_setup.sh).
     ("elpa",       r"^elpa(-v.*)?$",                      r"^elpa-v(.+)$"),
     ("scorep",     r"^scorep(-v.*)?$",                    r"^scorep-v(.+)$"),
@@ -259,6 +275,20 @@ PKG_LIST = [
     ("intellikit", r"^intellikit(-.*)?$",                 r"^intellikit-(.+)$"),
     ("hpctoolkit", r"^hpctoolkit(-v.*)?$",                r"^hpctoolkit-v(.+)$"),
     ("hpcviewer",  r"^hpcviewer(-v.*)?$",                 r"^hpcviewer-v(.+)$"),
+    # Source-built rocprof-sys lands under rocmplus-<v>/ as omnitrace/
+    # (ROCm <= 6.2.9) or rocprofiler-systems/ (newer); no version in the
+    # basename (tools/scripts/rocprof-sys_setup.sh). Distinct from the
+    # rocm_patches overlay (rocm-patches-<v>/) tracked by rocm_patches.
+    ("rocprof-sys", r"^(?:omnitrace|rocprofiler-systems)$", None),
+    # Source-built rocprof-compute lands as rocprofiler-compute-<branch>/
+    # (tools/scripts/rocprof-compute_setup.sh); "version" is the git branch.
+    ("rocprof-compute", r"^rocprofiler-compute-.*",       r"^rocprofiler-compute-(.+)$"),
+    # roc-optiq installs to roc-optiq-v<ROC_OPTIQ_VERSION>/ and drops a
+    # roc-optiq.FAILED marker on failure (tools/scripts/roc-optiq_setup.sh).
+    ("roc-optiq",  r"^roc-optiq-v.*",                     r"^roc-optiq-v(.+)$"),
+    # tracelens installs to tracelens-v<TRACELENS_VERSION>/
+    # (tools/scripts/tracelens_setup.sh).
+    ("tracelens",  r"^tracelens-v.*",                     r"^tracelens-v(.+)$"),
     ("mpi4py",     r"^mpi4py(-v.*)?$",                    r"^mpi4py-v(.+)$"),
     # rocshmem installs to rocshmem-<ROCSHMEM_VERSION>-<BACKEND_CONFIG>/
     # (comm/scripts/rocshmem_setup.sh); BACKEND_CONFIG is one of ro_ipc,
@@ -266,6 +296,15 @@ PKG_LIST = [
     # capture greedily grabs everything up to the trailing -<backend>.
     ("rocshmem",   r"^rocshmem-.*",
                    r"^rocshmem-(.+)-(?:ro_ipc|ipc_single|all_backends)$"),
+    # rccl-tests installs to rccl-tests-<RCCL_TESTS_VERSION>/
+    # (comm/scripts/rccl-tests_setup.sh).
+    ("rccl-tests", r"^rccl-tests-.*",                     r"^rccl-tests-(.+)$"),
+    # mpitrace installs to mpitrace-<ROCM_VERSION>/ (keyed on the ROCm
+    # version, not mpitrace's own; extras/scripts/mpitrace_setup.sh).
+    ("mpitrace",   r"^mpitrace-.*",                       r"^mpitrace-(.+)$"),
+    # mvapich installs to mvapich/ (no version in the basename;
+    # comm/scripts/mvapich_setup.sh).
+    ("mvapich",    r"^mvapich$",                          None),
     ("cupy",       r"^cupy(-v.*)?$",                      r"^cupy-v(.+)$"),
     ("pytorch",    r"^pytorch-v.*$",                      r"^pytorch-v(.+)$"),
     ("jax",        r"^jax(-v.*)?$",                       r"^jax-v(.+)$"),
@@ -286,6 +325,23 @@ PKG_LIST = [
     # rocmplus tree slash-join in markdown / spill onto continuation rows in
     # --text, the same as pytorch/tensorflow.
     ("vllm",       r"^vllm(-v.*)?$",                       r"^vllm-v(.+)$"),
+    # primus installs to primus-v<PRIMUS_VERSION>/ and drops a
+    # primus.FAILED marker on failure (extras/scripts/primus_setup.sh).
+    ("primus",     r"^primus-v.*",                         r"^primus-v(.+)$"),
+    # The following ML apps install to <pkg>-v<VER>-pt<PYTORCH_VERSION>/
+    # (layered on the matching pytorch module). The version_capture is
+    # non-greedy so it stops at the trailing -pt<PYTORCH_VERSION> and the
+    # cell shows the app's OWN version, not the bound pytorch release.
+    ("sglang",     r"^sglang-v.*",                         r"^sglang-v(.+?)-pt"),
+    ("instella",   r"^instella-v.*",                       r"^instella-v(.+?)-pt"),
+    ("atom",       r"^atom-v.*",                           r"^atom-v(.+?)-pt"),
+    ("xdit",       r"^xdit-v.*",                           r"^xdit-v(.+?)-pt"),
+    ("comfyui",    r"^comfyui-v.*",                        r"^comfyui-v(.+?)-pt"),
+    ("quark",      r"^quark-v.*",                          r"^quark-v(.+?)-pt"),
+    # hyperloom / onnxruntime install to <pkg>-v<VERSION>/
+    # (extras/scripts/{hyperloom,onnxruntime}_setup.sh).
+    ("hyperloom",  r"^hyperloom-v.*",                      r"^hyperloom-v(.+)$"),
+    ("onnxruntime", r"^onnxruntime-v.*",                   r"^onnxruntime-v(.+)$"),
 ]
 
 # Packages disabled by --quick-installs (QUICK_INSTALLS=1). Mirrors the
@@ -2101,11 +2157,26 @@ def main():
               file=sys.stderr)
         return 1
 
-    v6 = [v for v in all_versions if v.startswith("6.")]
-    v7 = [v for v in all_versions if v.startswith("7.")]
+    # One bucket per numeric ROCm major present (6.x, 7.x, 8.x, 9.x,
+    # 10.x, ...), rendered newest-major-first, followed by the RC
+    # bucket (therock + afar). Majors are discovered from the on-disk
+    # trees, so new majors (10.1.0 and beyond) bucket automatically
+    # without further edits here.
     vrc = sorted([v for v in all_versions
                   if v.startswith("therock-") or v.startswith("afar-")],
                  key=rc_version_sort_key)
+    numeric_majors = {}
+    for v in all_versions:
+        if v.startswith("therock-") or v.startswith("afar-"):
+            continue
+        m = re.match(r"(\d+)\.", v)
+        if m:
+            numeric_majors.setdefault(int(m.group(1)), []).append(v)
+    buckets = [(f"ROCm {maj}.x.x",
+                sorted(vs, key=version_sort_key))
+               for maj, vs in sorted(numeric_majors.items(), reverse=True)]
+    if vrc:
+        buckets.append(("ROCm RC trees (therock + afar)", vrc))
 
     # ── --install-provenance: provenance-only output (exclusive) ────
     if args.install_provenance:
@@ -2172,21 +2243,12 @@ def main():
                   + ("  '?' = empty / unresolved hash" if args.with_dates
                      else ""))
             print()
-            if v7:
-                render_provenance_text("ROCm 7.x.x", v7,
-                                       module_path, scan_cache,
-                                       per_version_rows=args.per_version_rows,
-                                       pvcache=pvcache)
-            if vrc:
-                render_provenance_text("ROCm RC trees (therock + afar)",
-                                       vrc, module_path, scan_cache,
-                                       per_version_rows=args.per_version_rows,
-                                       pvcache=pvcache)
-            if v6:
-                render_provenance_text("ROCm 6.x.x", v6,
-                                       module_path, scan_cache,
-                                       per_version_rows=args.per_version_rows,
-                                       pvcache=pvcache)
+            for title, vers in buckets:
+                if vers:
+                    render_provenance_text(title, vers,
+                                           module_path, scan_cache,
+                                           per_version_rows=args.per_version_rows,
+                                           pvcache=pvcache)
         else:
             print(f"Module path: `{module_path}`  ")
             print("Install roots (column source): "
@@ -2206,24 +2268,13 @@ def main():
                   "on the openblas row). **`unknown`** = modulefile lacks "
                   "a `Built by:` line; **`-`** = no module category dir "
                   "for that (version, pkg)." + unresolved_hint + "\n")
-            if v7:
-                render_provenance_md("ROCm 7.x.x", v7,
-                                     module_path, scan_cache,
-                                     per_table=prov_per_table,
-                                     per_version_rows=args.per_version_rows,
-                                     pvcache=pvcache)
-            if vrc:
-                render_provenance_md("ROCm RC trees (therock + afar)", vrc,
-                                     module_path, scan_cache,
-                                     per_table=prov_per_table,
-                                     per_version_rows=args.per_version_rows,
-                                     pvcache=pvcache)
-            if v6:
-                render_provenance_md("ROCm 6.x.x", v6, module_path,
-                                     scan_cache,
-                                     per_table=prov_per_table,
-                                     per_version_rows=args.per_version_rows,
-                                     pvcache=pvcache)
+            for title, vers in buckets:
+                if vers:
+                    render_provenance_md(title, vers,
+                                         module_path, scan_cache,
+                                         per_table=prov_per_table,
+                                         per_version_rows=args.per_version_rows,
+                                         pvcache=pvcache)
         return 0
 
     versions_note_text = (
@@ -2274,15 +2325,9 @@ def main():
               "- = absent / missing (no install, no marker)."
               + versions_note_text + queue_note_text)
         print()
-        if v7:  render_text_table("ROCm 7.x.x", v7, args.roots,
-                                  versions_mode=args.versions,
-                                  queue_map=queue_map,
-                                  per_version_rows=args.per_version_rows)
-        if vrc: render_text_table("ROCm RC trees (therock + afar)", vrc,
-                                  args.roots, versions_mode=args.versions,
-                                  queue_map=queue_map,
-                                  per_version_rows=args.per_version_rows)
-        if v6:  render_text_table("ROCm 6.x.x", v6, args.roots,
+        for title, vers in buckets:
+            if vers:
+                render_text_table(title, vers, args.roots,
                                   versions_mode=args.versions,
                                   queue_map=queue_map,
                                   per_version_rows=args.per_version_rows)
@@ -2299,15 +2344,9 @@ def main():
               "(see `<pkg>.FAILED` marker; partial install auto-removed), "
               "**-** = absent / missing (no install, no marker)."
               + versions_note_md + queue_note_md + "\n")
-        if v7:  render_table("ROCm 7.x.x", v7,
-                             args.roots, per_table=md_per_table,
-                             versions_mode=args.versions, queue_map=queue_map,
-                             per_version_rows=args.per_version_rows)
-        if vrc: render_table("ROCm RC trees (therock + afar)", vrc,
-                             args.roots, per_table=md_per_table,
-                             versions_mode=args.versions, queue_map=queue_map,
-                             per_version_rows=args.per_version_rows)
-        if v6:  render_table("ROCm 6.x.x", v6,
+        for title, vers in buckets:
+            if vers:
+                render_table(title, vers,
                              args.roots, per_table=md_per_table,
                              versions_mode=args.versions, queue_map=queue_map,
                              per_version_rows=args.per_version_rows)
