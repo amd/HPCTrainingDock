@@ -3055,11 +3055,15 @@ else
       # crash only triggers deep inside ATen's reduce_kernel template
       # instantiation and no small vendored kernel reproduces it reliably,
       # so a canary would risk a false negative (bug present, canary
-      # passes, real build then crashes). The affected class is a ROCm
-      # 10.x NIGHTLY (datestamped token, e.g. 10.1.0a2026MMDD) whose HIP
-      # clang major version is 24 (the LLVM generation carrying the bug);
-      # if clang can't be probed we still apply on a 10.x nightly (safe
-      # default), and a future clang>=25 10.x nightly is left untouched.
+      # passes, real build then crashes). The affected class is any ROCm
+      # 10.x tree -- datestamped nightly (e.g. 10.1.0a2026MMDD) OR plain
+      # release (e.g. 10.1.0) -- whose HIP clang major version is 24 (the
+      # LLVM generation carrying the bug). The gate keys on clang 24, not
+      # the datestamp: a plain 10.1.0 release ships the same buggy AMD
+      # clang 24.0.0git and crashed identically (job 24097, token 10.1.0,
+      # clang 24, ReduceNormKernel RAGreedy segfault). If clang can't be
+      # probed we still apply on any 10.x tree (safe default), and a
+      # future clang>=25 10.x tree is left untouched.
       # Override with PYTORCH_HIP_REGALLOC_BASIC:
       #   auto (default) -- enable iff the toolchain matches the class
       #   1              -- force the workaround ON
@@ -3080,13 +3084,14 @@ else
             # main_setup.sh keys ROCM_VERSION on the bare .info/version
             # numeric (e.g. 10.1.0) and keeps the datestamp ONLY in the
             # ROCM_PATH basename (e.g. rocm-10.1.0a20260910). Classify on
-            # that basename numeric tail so the gate can actually see the
-            # datestamp; fall back to ROCM_VERSION when ROCM_PATH is unusable.
+            # that basename numeric tail so the gate sees the real 10.x
+            # numeric (and any datestamp); fall back to ROCM_VERSION when
+            # ROCM_PATH is unusable.
             _ra_rocm_token="${ROCM_PATH##*/}"        # rocm-10.1.0a20260910 | rocm-therock-10.1.0a...
             _ra_rocm_token="${_ra_rocm_token#rocm-}" # strip leading rocm-
             _ra_rocm_token="${_ra_rocm_token##*-}"   # drop any family prefix (therock-/afar-/...)
             [ -n "${_ra_rocm_token}" ] || _ra_rocm_token="${ROCM_VERSION}"
-            if [[ "${_ra_rocm_token}" =~ ^10\..*a[0-9]{6} ]] \
+            if [[ "${_ra_rocm_token}" =~ ^10\. ]] \
                && { [ -z "${_ra_clang_major}" ] || [ "${_ra_clang_major}" = "24" ]; }; then
                _ra_wa_enable=1
             fi ;;
