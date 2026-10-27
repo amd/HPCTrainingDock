@@ -1,25 +1,27 @@
 #!/bin/bash
 
 # ── HYPRE × ROCm compatibility matrix ─────────────────────────────────
-# Which HYPRE release this script installs by default, and whether the
-# downstream HYPRE_THRUST_IDENTITY patch (further below) is applied.
-# Default is chosen by ROCm *major* version; override with --hypre-version.
+# Which HYPRE release this script installs by default, keyed on the ROCm
+# version. Override with --hypre-version.
 #
-#   ROCm      Default HYPRE   Identity patch?            Notes
-#   -------   -------------   ------------------------   ------------------------------
-#   <= 9.x    3.1.0           yes (-> thrust::identity)  v3.1.0 ships no HIP identity
-#                                                        branch; the patch supplies one.
-#   >= 10.x   3.2.0           no                         Upstream v3.2.0 added the HIP
-#                                                        `::internal::identity()` branch
-#                                                        and builds unpatched. Verified
-#                                                        on rocm-10.1.0 / gfx90a
-#                                                        (THRUST_VERSION 200805).
+#   ROCm        Default HYPRE   Notes
+#   ---------   -------------   --------------------------------------------------
+#   <= 7.0.x    3.1.0           v3.1.0 builds unpatched. Verified on rocm-7.0.0.
+#   >= 7.1.0    3.2.0           v3.1.0's HIP build BREAKS starting at ROCm 7.1.0;
+#                               v3.2.0 adds the needed HIP code path and builds
+#                               unpatched. Covers ROCm 7.1.0 ... 10.x and newer.
+#                               Verified: v3.1.0 fails / v3.2.0 builds on
+#                               rocm-7.1.0 and rocm-10.1.0 (gfx90a).
 #
-# Forcing the older release on ROCm >= 10:  --hypre-version 3.1.0
-#   -> patch auto-applies; it emits rocprim::identity when THRUST_VERSION
-#      >= 300000 (CCCL 3.0), else thrust::identity.
-# The patch gate keys on whether the shipped source already defines a HIP
-# HYPRE_THRUST_IDENTITY branch, so it stays correct for any --hypre-version pin.
+# The boundary is ROCm 7.1.0 -- the release where Thrust became 2.8.5 and HYPRE
+# v3.1.0's HYPRE_THRUST_IDENTITY macro lost its HIP branch. It is NOT "CCCL 3.0":
+# public ROCm (through 10.x) still ships pre-CCCL-3 rocThrust, so do not conflate
+# "ROCm 10" with "CCCL 3.0".
+#
+# Forcing the older release on ROCm >= 7.1.0:  --hypre-version 3.1.0
+#   -> the downstream HYPRE_THRUST_IDENTITY patch (further below) auto-applies.
+#      The patch gate keys on whether the shipped source already defines a HIP
+#      branch, so it stays correct for any version pin.
 
 # Capture this script's absolute path BEFORE any cd, so the inline
 # git-provenance block lower down can resolve the script in the repo
@@ -220,15 +222,17 @@ do
    shift
 done
 
-# Resolve the default HYPRE version from the ROCm major (unless pinned on the
-# CLI). ROCm >= 10 ships CCCL-3-era rocThrust; upstream HYPRE v3.2.0 added the
-# HIP branch for HYPRE_THRUST_IDENTITY, so it builds there unpatched (verified on
-# rocm-10.1.0 / gfx90a, THRUST_VERSION 200805). v3.1.0 lacks that branch and
-# still needs the downstream identity patch below. Older ROCm keeps 3.1.0 (its
-# thrust::identity branch is valid there). Pass --hypre-version 3.1.0 to force
-# the older release; the identity patch auto-applies to it.
+# Resolve the default HYPRE version from the ROCm version (unless pinned on the
+# CLI); see the HYPRE x ROCm compatibility matrix at the top of this script.
+# v3.1.0's HIP build breaks starting at ROCm 7.1.0 (Thrust 2.8.5 dropped the
+# macro branch v3.1.0 relied on), so default to v3.2.0 for ROCm >= 7.1.0 and keep
+# v3.1.0 for ROCm <= 7.0.x. Verified: v3.1.0 builds on rocm-7.0.0, fails on
+# rocm-7.1.0 and rocm-10.1.0; v3.2.0 builds on all three (gfx90a). Pass
+# --hypre-version 3.1.0 to force the older release; the identity patch below then
+# auto-applies to it. The >= 7.1.0 test is a version-sort (sort -V), so point
+# releases and suffixed tokens (nightlies/afar) compare correctly.
 if [ "${HYPRE_VERSION_EXPLICIT}" = "0" ]; then
-   if [ "${ROCM_VERSION%%.*}" -ge 10 ] 2>/dev/null; then
+   if [ "$(printf '%s\n' "7.1.0" "${ROCM_VERSION}" | sort -V | head -n1)" = "7.1.0" ]; then
       HYPRE_VERSION="3.2.0"
    fi
 fi
