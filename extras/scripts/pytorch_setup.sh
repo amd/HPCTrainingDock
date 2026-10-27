@@ -3339,39 +3339,51 @@ PY
          echo "Skipping ${_COPYCU} guard-qualifier patch (file missing or already patched)"
       fi
 
-      # ── PT 2.11 + RCCL >= 2.28 nccl_device.h backport (PT 2.12 fix) ──
-      # PT 2.11 torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp
-      # includes <nccl_device.h> unconditionally whenever the bundled
-      # NCCL reports NCCL_VERSION_CODE >= 2.28.0:
-      #   #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
-      #   #define NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-      #   #include <nccl_device.h>
-      #   #endif
-      # RCCL on rocm-7.13.0 reports NCCL_VERSION_CODE=22803 (rccl.h
-      # NCCL_MAJOR=2 NCCL_MINOR=28 NCCL_PATCH=3) but RCCL does NOT ship
-      # nccl_device.h -- the file exists only in upstream NVIDIA NCCL
-      # 2.28+. The same RCCL on rocm-7.2.3 reports 22707 so the gate is
-      # false there and the missing header is never referenced; that is
-      # why PT 2.11.0 builds clean on rocm-7.2.3 (slurm 10537) but fails
-      # on rocm-7.13.0 (slurm 10631, 2026-05-25) with two FAILED HIPCC
-      # steps building NCCLSymmetricMemory.cu and nccl_extension.cu:
-      #   fatal error: 'nccl_device.h' file not found
-      # Upstream PT 2.12 already carries the fix: the include is wrapped
-      # in `#if !defined(USE_ROCM)`. We backport the exact same shape to
-      # PT 2.11 so the symm-mem-device path is skipped under ROCm
-      # identically to PT 2.12's behaviour.
-      # Idempotent: skipped when the file is missing (older PT or an
-      # upstream refactor) or already carries the !defined(USE_ROCM)
-      # guard. Gated strictly to PT 2.11 because PT <= 2.10 lacks the
-      # file (the symm-mem-device feature did not exist) and PT >= 2.12
-      # carries the fix natively.
+      # ── PT >= 2.11 NCCL symmetric-memory backend disable under ROCm ──
+      # PT 2.11 introduced torch/csrc/distributed/c10d/symm_mem, whose
+      # nccl_dev_cap.hpp derives capability macros from RCCL's reported
+      # NCCL_VERSION_CODE:
+      #   >= 2.27   NCCL_HAS_SYMMEM_SUPPORT
+      #   >= 2.28   NCCL_HAS_SYMMEM_DEVICE_SUPPORT  (+ #include <nccl_device.h>)
+      #   >= 2.29   NCCL_HAS_ONE_SIDED_API
+      #   >= 2.29.7 NCCL_DEVICE_HAS_REDUCE_COPY     (PT 2.12+)
+      # The symm-mem .cu files reference NCCLDevCommManager (defined only
+      # under _DEVICE_SUPPORT, in nccl_devcomm_manager.hpp) and
+      # ncclGetLsaMultimemDevicePointer (from nccl_device.h) from code paths
+      # gated on NCCL_HAS_ONE_SIDED_API and a raw `NCCL_VERSION_CODE >= 2.29`
+      # check -- neither of which is ROCm-gated. None of those device /
+      # one-sided symbols build under HIP. Two distinct breakages across
+      # RCCL versions:
+      #   * rocm-7.13.0 RCCL reports 22803 (2.28.3) but ships NO
+      #     nccl_device.h -> "fatal error: 'nccl_device.h' file not found"
+      #     (slurm 10631, 2026-05-25).
+      #   * rocm-10.1.0 RCCL reports 23007 (2.30.7) >= 2.29 -> the one-sided
+      #     and 2.29 paths turn on and reference NCCLDevCommManager /
+      #     ncclGetLsaMultimemDevicePointer -> "use of undeclared identifier"
+      #     (slurm 24014, 2026-10-27). PT 2.12 only gates _DEVICE_SUPPORT on
+      #     !USE_ROCM, so it hits the SAME failure once RCCL crosses 2.29;
+      #     that is why this is NOT restricted to PT 2.11.
+      # Fix (both steps idempotent): (a) guard the <nccl_device.h> include on
+      # !USE_ROCM so the header is never pulled in under ROCm (prevents the
+      # 7.13.0 not-found and strips _DEVICE_SUPPORT, matching PT 2.12); then
+      # (b) #undef every symm-mem capability macro under USE_ROCM so the whole
+      # NCCL symm-mem backend compiles out exactly as in PT <= 2.10. The .cu
+      # bodies are fully #ifdef-guarded with "not supported" #else branches
+      # and the TORCH_LIBRARY_IMPL registrations live outside the guards, so
+      # disabling is link-safe. Applies to PT >= 2.11 (<= 2.10 lacks the
+      # symm_mem dir entirely).
       _NDC="torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp"
-      if [[ "${PYTORCH_SHORT_VERSION}" == "2.11" ]] \
-         && [[ -f "${_NDC}" ]] \
-         && grep -q '#include <nccl_device.h>' "${_NDC}" \
-         && ! grep -q '!defined(USE_ROCM)' "${_NDC}"; then
-         echo "Patching ${_NDC} to gate <nccl_device.h> on !USE_ROCM (backport of upstream PT 2.12 fix)"
-         python3 - "${_NDC}" <<'PY'
+      _PT_MAJOR="${PYTORCH_SHORT_VERSION%%.*}"
+      _PT_MINOR="${PYTORCH_SHORT_VERSION#*.}"; _PT_MINOR="${_PT_MINOR%%.*}"
+      if [[ -f "${_NDC}" ]] \
+         && { [[ "${_PT_MAJOR}" -gt 2 ]] || { [[ "${_PT_MAJOR}" -eq 2 ]] && [[ "${_PT_MINOR}" -ge 11 ]]; }; }; then
+
+         # (a) gate the nccl_device.h include on !USE_ROCM (no-op when the
+         #     include is absent or already guarded, e.g. PT 2.12).
+         if grep -q '#include <nccl_device.h>' "${_NDC}" \
+            && ! grep -q '!defined(USE_ROCM)' "${_NDC}"; then
+            echo "Patching ${_NDC} to gate <nccl_device.h> on !USE_ROCM (backport of upstream PT 2.12 fix)"
+            python3 - "${_NDC}" <<'PY'
 import re, sys, pathlib
 p = pathlib.Path(sys.argv[1])
 s = p.read_text()
@@ -3383,13 +3395,42 @@ pat = re.compile(
 )
 new, n = pat.subn(r'\1#if !defined(USE_ROCM)\n\2\3#endif\n\4', s, count=1)
 if n != 1:
-   sys.exit("ERROR: nccl_dev_cap.hpp pattern did not match exactly once (n=%d); bailing" % n)
+   sys.exit("ERROR: nccl_dev_cap.hpp 2.28 block did not match exactly once (n=%d); bailing" % n)
 p.write_text(new)
 PY
-         echo "  -> patched (verify):"
-         grep -nE 'USE_ROCM|nccl_device\.h|NCCL_HAS_SYMMEM_DEVICE_SUPPORT' "${_NDC}" | sed 's/^/    /'
+         else
+            echo "Skipping ${_NDC} include-guard (absent or already !USE_ROCM-gated)"
+         fi
+
+         # (b) disable the symm-mem capability macros under ROCm. #undef of an
+         #     undefined macro is a legal no-op, so this is robust across PT
+         #     2.11/2.12/future regardless of which macros the file defines.
+         #     Idempotent via the HPCTRAINING_DISABLE_NCCL_SYMMEM sentinel.
+         if ! grep -q 'HPCTRAINING_DISABLE_NCCL_SYMMEM' "${_NDC}"; then
+            echo "Appending ROCm symm-mem disable block to ${_NDC}"
+            cat >> "${_NDC}" <<'EOF'
+
+/* HPCTRAINING_DISABLE_NCCL_SYMMEM: the NCCL symmetric-memory backend
+   references device-comm / one-sided symbols (NCCLDevCommManager,
+   ncclGetLsaMultimemDevicePointer) that do not build under ROCm once RCCL
+   reports NCCL_VERSION_CODE >= 2.29 (rocm-10.1.0 RCCL = 2.30.7). Compile the
+   backend out under HIP, identical to PyTorch <= 2.10. See HPCTrainingDock
+   pytorch_setup.sh and slurm 24014. */
+#if defined(USE_ROCM)
+#undef NCCL_HAS_SYMMEM_SUPPORT
+#undef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#undef NCCL_HAS_ONE_SIDED_API
+#undef NCCL_DEVICE_HAS_REDUCE_COPY
+#endif
+EOF
+         else
+            echo "Skipping ${_NDC} symm-mem disable (sentinel already present)"
+         fi
+
+         echo "  -> ${_NDC} symm-mem state (verify):"
+         grep -nE 'USE_ROCM|nccl_device\.h|NCCL_HAS_SYMMEM_SUPPORT|NCCL_HAS_SYMMEM_DEVICE_SUPPORT|NCCL_HAS_ONE_SIDED_API|NCCL_DEVICE_HAS_REDUCE_COPY|HPCTRAINING_DISABLE_NCCL_SYMMEM' "${_NDC}" | sed 's/^/    /'
       else
-         echo "Skipping ${_NDC} backport (not PT 2.11, file missing, or already patched)"
+         echo "Skipping ${_NDC} symm-mem patch (PT < 2.11 or file missing)"
       fi
 
       # ── MAGMA 2.10+ compatibility (backport of pytorch PR #180388) ───
