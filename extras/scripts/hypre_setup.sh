@@ -1,5 +1,26 @@
 #!/bin/bash
 
+# ── HYPRE × ROCm compatibility matrix ─────────────────────────────────
+# Which HYPRE release this script installs by default, and whether the
+# downstream HYPRE_THRUST_IDENTITY patch (further below) is applied.
+# Default is chosen by ROCm *major* version; override with --hypre-version.
+#
+#   ROCm      Default HYPRE   Identity patch?            Notes
+#   -------   -------------   ------------------------   ------------------------------
+#   <= 9.x    3.1.0           yes (-> thrust::identity)  v3.1.0 ships no HIP identity
+#                                                        branch; the patch supplies one.
+#   >= 10.x   3.2.0           no                         Upstream v3.2.0 added the HIP
+#                                                        `::internal::identity()` branch
+#                                                        and builds unpatched. Verified
+#                                                        on rocm-10.1.0 / gfx90a
+#                                                        (THRUST_VERSION 200805).
+#
+# Forcing the older release on ROCm >= 10:  --hypre-version 3.1.0
+#   -> patch auto-applies; it emits rocprim::identity when THRUST_VERSION
+#      >= 300000 (CCCL 3.0), else thrust::identity.
+# The patch gate keys on whether the shipped source already defines a HIP
+# HYPRE_THRUST_IDENTITY branch, so it stays correct for any --hypre-version pin.
+
 # Capture this script's absolute path BEFORE any cd, so the inline
 # git-provenance block lower down can resolve the script in the repo
 # even after the build has cd'd into a temp dir. (BASH_SOURCE[0] is
@@ -60,7 +81,10 @@ SUDO="sudo"
 DEB_FRONTEND="DEBIAN_FRONTEND=noninteractive"
 AMDGPU_GFXMODEL_INPUT=""
 USE_SPACK=0
+# Default resolved after arg parsing (ROCm-major aware): 3.2.0 for ROCm >= 10,
+# else 3.1.0. A --hypre-version on the CLI pins it and sets HYPRE_VERSION_EXPLICIT=1.
 HYPRE_VERSION="3.1.0"
+HYPRE_VERSION_EXPLICIT=0
 MPI_MODULE="openmpi"
 HYPRE_PATH=/opt/rocmplus-${ROCM_VERSION}/hypre-v${HYPRE_VERSION}
 HYPRE_PATH_INPUT=""
@@ -144,6 +168,7 @@ do
       "--hypre-version")
           shift
           HYPRE_VERSION=${1}
+          HYPRE_VERSION_EXPLICIT=1
           reset-last
           ;;
       "--help")
@@ -194,6 +219,19 @@ do
    n=$((${n} + 1))
    shift
 done
+
+# Resolve the default HYPRE version from the ROCm major (unless pinned on the
+# CLI). ROCm >= 10 ships CCCL-3-era rocThrust; upstream HYPRE v3.2.0 added the
+# HIP branch for HYPRE_THRUST_IDENTITY, so it builds there unpatched (verified on
+# rocm-10.1.0 / gfx90a, THRUST_VERSION 200805). v3.1.0 lacks that branch and
+# still needs the downstream identity patch below. Older ROCm keeps 3.1.0 (its
+# thrust::identity branch is valid there). Pass --hypre-version 3.1.0 to force
+# the older release; the identity patch auto-applies to it.
+if [ "${HYPRE_VERSION_EXPLICIT}" = "0" ]; then
+   if [ "${ROCM_VERSION%%.*}" -ge 10 ] 2>/dev/null; then
+      HYPRE_VERSION="3.2.0"
+   fi
+fi
 
 if [ "${INSTALL_PATH_INPUT}" != "" ]; then
    HYPRE_PATH=${INSTALL_PATH_INPUT}
@@ -748,6 +786,17 @@ else
             echo "hypre: (line numbers shifted upstream; if build fails on __syncwarp redefinition, re-add a version-correct patch here)"
          fi
 
+         # Only patch HYPRE_THRUST_IDENTITY when the shipped source lacks a HIP
+         # branch for it. Upstream v3.2.0+ defines
+         # `HYPRE_THRUST_IDENTITY(type) ::internal::identity()` under
+         # HYPRE_USING_HIP and builds unpatched (verified: rocm-10.1.0/gfx90a,
+         # THRUST 200805). v3.1.0 has only the thrust/CUDA branches, so on
+         # ROCm with THRUST_VERSION >= 200802 the macro is undefined for HIP and
+         # needs the substitution below.
+         if grep -Rqs 'HYPRE_THRUST_IDENTITY(type) ::internal::identity' \
+               utilities/device_utils.h utilities/_hypre_utilities.hpp 2>/dev/null; then
+            echo "hypre: upstream defines a HIP HYPRE_THRUST_IDENTITY branch; skipping downstream identity patch (HYPRE_VERSION=${HYPRE_VERSION})"
+         else
          # Pick the identity functor namespace based on the *installed*
          # Thrust version (not the ROCm marketing string): CCCL 3.0
          # (THRUST_VERSION >= 300000, shipped by ROCm 10) dropped
@@ -784,6 +833,7 @@ else
             # thrust::identity does not exist on CCCL 3.0, so this cannot
             # clobber a still-valid symbol; on older ROCm it is skipped.
             grep -rlZ 'thrust::identity' . 2>/dev/null | xargs -0 -r sed -i 's/thrust::identity/rocprim::identity/g' || true
+         fi
          fi
 
          mkdir build && cd build
