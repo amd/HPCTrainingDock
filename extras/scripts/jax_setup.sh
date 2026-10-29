@@ -89,9 +89,13 @@ usage()
 # therock- sorts after digits, so therock-7.13.0 counts as >= 7.0)
 _jax_ver_ge() { [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" = "$2" ]; }
 
-# JAX lines whose ROCm GPU support ships as separate jax_rocm*_plugin wheels
+# JAX lines whose ROCm GPU support ships as separate jax_rocm*_plugin wheels.
+# The separate rocm-jax plugin was deprecated for JAX 0.10.0 onwards (ROCm GPU
+# support ships in the upstream pip wheels from 0.10.1), so 0.10+ is NOT a
+# plugin-wheel line and must not be gated on a jax_rocm*_plugin dir.
 _jax_uses_plugin_wheels() {
-   [[ ${JAX_VERSION} == 5.0 || ${JAX_VERSION} == 6.0 ]] || _jax_ver_ge "0.${JAX_VERSION}" 0.7.1
+   [[ ${JAX_VERSION} == 5.0 || ${JAX_VERSION} == 6.0 ]] && return 0
+   _jax_ver_ge "0.${JAX_VERSION}" 0.7.1 && ! _jax_ver_ge "0.${JAX_VERSION}" 0.10
 }
 
 # prints "sudo" unless the caller can already write $1 (or its nearest
@@ -310,13 +314,37 @@ unset -f _jax_pymajor _jax_pyminor
 # ── JAX_VERSION policy gate (python-version-keyed) ───────────────────
 # Only applies when the operator did NOT pass --jax-version (that
 # override always wins; see JAX_VERSION_USER_SET). Compatibility:
-#   python >= 3.11  ->  keep default JAX 8.0 (ROCm 7+)
-#   python == 3.10  ->  JAX 6.0 (transition line, cp310 wheels)  (ROCm 7+)
-#   python <  3.10  ->  no ROCm-7 JAX line supports it; mark not-buildable
-#   ROCm 6.x        ->  JAX 5.0 (newest line for ROCm 6.x + py3.10)
+#   ROCm >= 10 + py >= 3.12  ->  JAX 11.2 (current supported line; ROCm GPU
+#                                support ships in pip wheels, not the
+#                                deprecated rocm-jax plugin)
+#   ROCm >= 10 + py == 3.11  ->  JAX 10.2 (newest line still supporting 3.11)
+#   ROCm 7-9  + py >= 3.11   ->  keep default JAX 8.0
+#   ROCm 7-9  + py == 3.10   ->  JAX 6.0 (transition line, cp310 wheels)
+#   py < 3.10 (ROCm 7+)      ->  no supported JAX line; mark not-buildable
+#   ROCm 6.x                 ->  JAX 5.0 (newest line for ROCm 6.x + py3.10)
 ROCM_MAJOR=${ROCM_VERSION%%.*}
 if [ "${JAX_VERSION_USER_SET}" = "0" ]; then
-   if [ "${ROCM_MAJOR}" -ge 7 ] 2>/dev/null; then
+   if [ "${ROCM_MAJOR}" -ge 10 ] 2>/dev/null; then
+      if [ "${PYMAJOR}" -eq 3 ] && [ "${PYMINOR}" -ge 12 ] 2>/dev/null; then
+         echo "[jax policy] ROCm ${ROCM_VERSION} (>= 10) + python ${PYMAJOR}.${PYMINOR} (>= 3.12):"
+         echo "             defaulting JAX_VERSION to 11.2 (current supported line; ROCm GPU"
+         echo "             support ships in the pip wheels, not the deprecated rocm-jax plugin)."
+         echo "             Override with --jax-version X.Y for a different line."
+         JAX_VERSION=11.2
+      elif [ "${PYMAJOR}" -eq 3 ] && [ "${PYMINOR}" -eq 11 ] 2>/dev/null; then
+         echo "[jax policy] ROCm ${ROCM_VERSION} (>= 10) + python 3.11: JAX 0.11 needs 3.12;"
+         echo "             defaulting JAX_VERSION to 10.2 (newest line still supporting 3.11)."
+         echo "             Override with --jax-version X.Y for a different line."
+         JAX_VERSION=10.2
+      else
+         echo "[jax policy] python ${PYMAJOR}.${PYMINOR} is too old for the ROCm >= 10 JAX lines"
+         echo "             (JAX 0.11 needs 3.12, JAX 0.10 needs 3.11) and no cray-python"
+         echo "             >= 3.12 module was found: marking jax NOT buildable on this stack."
+         echo "             Fixes: load/install Python >= 3.12 (cray-python)."
+         JAX_POLICY_SKIP=1
+         BUILD_JAX=0
+      fi
+   elif [ "${ROCM_MAJOR}" -ge 7 ] 2>/dev/null; then
       if [ "${PYMAJOR}" -eq 3 ] && [ "${PYMINOR}" -ge 11 ] 2>/dev/null; then
          echo "[jax policy] python ${PYMAJOR}.${PYMINOR} (>= 3.11) on ROCm ${ROCM_VERSION}: keeping JAX ${JAX_VERSION}."
       elif [ "${PYMAJOR}" -eq 3 ] && [ "${PYMINOR}" -eq 10 ] 2>/dev/null; then

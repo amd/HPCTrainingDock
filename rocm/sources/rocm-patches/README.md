@@ -59,6 +59,71 @@ under the appropriate directory and extend that mapping.
 
 ## Currently vendored patches
 
+### `rccl-sb6033/` -- RCCL proxy-RPC hardening backport for CVE-2026-43598 / AMD-SB-6033
+
+Affected ROCm releases (source baselines we can reproducibly patch):
+**6.3.0, 6.3.1, 6.3.2, 6.3.3, 6.3.4, 6.4.0, 6.4.1, 6.4.2, 6.4.3, 7.0.0,
+7.0.1, 7.0.2, 7.1.0, 7.1.1, 7.2.0, 7.2.2, 7.2.3, 7.2.4, afar-23.2.1**.
+7.2.1 is excluded on purpose: it is absent from `baselines.conf` and from the
+dispatch table, so it is treated as a soft no-op rather than patched.
+
+This is the Radeon collective communications library (RCCL). The proxy remote
+procedure call (RPC) setup path trusted two values arriving over the wire from a
+peer rank: an opaque connection pointer it dereferenced directly, and a
+`tpLocalRank` index it used unchecked into a fixed-size per-peer table. A forged
+value lets a compromised peer or a network-adjacent attacker read out of bounds
+or dispatch an indirect call through an arbitrary pointer (CWE-822, common
+vulnerability scoring system (CVSS) 4.0 base 7.7, high). AMD's only published
+remedy is to move to ROCm 7.14, which carries the fix; there is no vendor
+backport for any earlier line. This bundle re-cuts the upstream fix (rocm-systems
+`ccba298bcfb644246e07b1137e948a4cab60eb29`, ROCM-24271) per source baseline so
+the rebuilt library differs from the stock one only by this patch. The public
+`rccl.h` application binary interface (ABI) is untouched (both new struct fields
+live in non-installed internal headers), so the result is a drop-in replacement.
+
+The bundle is patch-style, with one refinement over the `rocprof-sys` reference:
+the context around the fix drifted across release lines (6.3/6.4 use `NCCLCHECK`
+where 7.0+ use `NCCLCHECKGOTO`), so a single diff does not apply everywhere.
+`baselines.conf` therefore maps each ROCm release to its exact upstream git ref
+plus the matching per-line `.patch` file, and `generate_patches.py` regenerates
+those patches by anchoring each edit on a verified-unique string. The directory
+is named by the security bulletin (`sb6033`) rather than by a single component
+version, because one logical fix spans every component version in that table.
+`build_rccl_sb6033()` in `rocm_patches.sh` looks up the row, clones upstream at
+the pinned ref, applies the patch, builds `librccl.so.1`, and asserts the guard
+sites are present before shipping it. A release vulnerable but absent from
+`baselines.conf` (7.12.0, 7.13.0, afar-23.1.0, the 7.14.0a20260612 nightly) is a
+deliberate soft no-op: its recorded build commit is not reachable from any public
+ref, so no tree differs from the shipped library by this patch alone. Those are
+remediated by retirement in favour of 7.14.0 / 7.14.1 / afar-24.3.0, which already
+carry the fix.
+
+The fix can be delivered two ways. In overlay form the patched `librccl.so.1`
+installs to a separate prefix that precedes the SDK on `LD_LIBRARY_PATH`: the
+stock library stays on disk but is shadowed, and the change is reversible by
+dropping the overlay from the path. This is the only mode the in-tree
+`build_rccl_sb6033()` uses: it writes the library into `${INSTALL_PREFIX}/lib`
+and `patch_module_file()` puts that directory ahead of the SDK's own `lib` on the
+modulefile's `LD_LIBRARY_PATH`. In replace form the patched library overwrites
+the SDK's `librccl` in place so the unpatched original cannot be selected at all;
+the original is stowed outside any library search path for rollback. The
+standalone `RCCL_CVE-2026-43598_patch.sh` in this directory offers both modes
+(`--mode overlay` default, `--mode replace`) together with a five-check
+verification suite (`--test-only`) and a `--restore` for replace mode; it is
+self-contained and can remediate an SDK with no HPCTrainingDock machinery present.
+
+The upstream fix changes the proxy wire format: the client now sends a 4-byte
+integer handle where it used to send an 8-byte pointer. A patched and an
+unpatched `librccl` cannot share a communicator, so every rank of a job must use
+the same one. Since each rank loads one `librccl` via its ROCm module, this only
+bites when a container-embedded RCCL is mixed with the host one; roll the patch
+out to all nodes together and check any container images that bundle their own
+`librccl`.
+
+On AAC6 the patch is applied to every installed ROCm version that has a pinned
+baseline (overlay form, via the modulefile), so each `rocm/<version>` module
+there resolves `librccl.so.1` to the remediated library.
+
 ### `rocprof-sys-1.6.0/` -- one cherry-pick onto v1.6.0's outer once-guard
 
 Affected ROCm releases: **7.13.0, afar-23.2.1, therock-23.2.0**

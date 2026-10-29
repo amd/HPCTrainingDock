@@ -728,6 +728,20 @@ def _pkg_version_sort_key(s):
     return out
 
 
+# A captured "version" is sometimes a git commit SHA (e.g. rccl-tests keys
+# its install dir on the upstream commit, not a release number). A full
+# 40-char hash blows out the fixed-width column and dwarfs the real version
+# numbers, so shorten pure-hex hashes to a still-unambiguous prefix.
+_HASH_VER_LEN = 15
+_HASH_RE = re.compile(r"^[0-9a-f]+$", re.IGNORECASE)
+
+
+def _shorten_hash_version(v):
+    if len(v) > _HASH_VER_LEN and _HASH_RE.match(v):
+        return v[:_HASH_VER_LEN]
+    return v
+
+
 def presence_with_version(roots, version, pkg, presence_regex, version_regex):
     """Like presence(), but on a Y hit returns the installed version string(s).
 
@@ -774,7 +788,7 @@ def presence_with_version(roots, version, pkg, presence_regex, version_regex):
         for b in matched_basenames:
             m = ver_rgx.match(b)
             if m:
-                captured.append(m.group(1))
+                captured.append(_shorten_hash_version(m.group(1)))
         if not captured:
             # Install dir matched the presence regex but no version was
             # extractable -- treat like the versionless case so the cell
