@@ -124,6 +124,31 @@ On AAC6 the patch is applied to every installed ROCm version that has a pinned
 baseline (overlay form, via the modulefile), so each `rocm/<version>` module
 there resolves `librccl.so.1` to the remediated library.
 
+To apply this fix on its own, without the rest of the HPCTrainingDock patch
+machinery, run the standalone script against a target SDK. It autodetects the
+ROCm version, picks the matching source baseline, builds, installs, and verifies:
+
+```bash
+cd rccl-sb6033
+
+# Shadow the stock library (overlay, default); nothing in the SDK is modified.
+./RCCL_CVE-2026-43598_patch.sh --rocm-path /opt/rocm-7.2.4
+
+# Overwrite the SDK library in place so the vulnerable copy cannot be loaded.
+sudo ./RCCL_CVE-2026-43598_patch.sh --rocm-path /opt/rocm-7.2.4 --mode replace --yes
+
+# Re-verify an existing remediation (builds and installs nothing).
+./RCCL_CVE-2026-43598_patch.sh --rocm-path /opt/rocm-7.2.4 --test-only
+
+# Roll a replace-mode install back to the original library.
+sudo ./RCCL_CVE-2026-43598_patch.sh --rocm-path /opt/rocm-7.2.4 --mode replace --restore
+```
+
+Overlay installs take effect only once their prefix is first on
+`LD_LIBRARY_PATH`; the script prints the exact `export` line to add to the
+modulefile or site profile. Run `./RCCL_CVE-2026-43598_patch.sh --help` for the
+full option list.
+
 ### `rocprof-sys-1.6.0/` -- one cherry-pick onto v1.6.0's outer once-guard
 
 Affected ROCm releases: **7.13.0, afar-23.2.1, therock-23.2.0**
