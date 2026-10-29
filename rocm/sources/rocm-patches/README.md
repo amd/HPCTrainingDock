@@ -149,6 +149,29 @@ Overlay installs take effect only once their prefix is first on
 modulefile or site profile. Run `./RCCL_CVE-2026-43598_patch.sh --help` for the
 full option list.
 
+To confirm an install is working, the quickest check is to count the bounds-check
+guard strings the patch adds: a patched library carries exactly five, a stock one
+carries none. With the `rocm/<version>` module loaded so the overlay is on the
+path, resolve the library the loader would pick and count them:
+
+```bash
+# First librccl.so.1 on LD_LIBRARY_PATH, which is what the overlay relies on;
+# fall back to the SDK's own copy if nothing is on the path.
+lib=$(IFS=:; for d in $LD_LIBRARY_PATH; do
+        [ -e "$d/librccl.so.1" ] && { echo "$d/librccl.so.1"; break; }
+      done)
+lib=${lib:-$ROCM_PATH/lib/librccl.so.1}
+strings -a "$(readlink -f "$lib")" | grep -c 'tpLocalRank %d out of range'
+# 5 = patched; 0 = unpatched and still vulnerable
+```
+
+That is a static check of the file. For a fuller confirmation that the loader
+actually resolves to the patched copy and that the fixed proxy path runs,
+`./RCCL_CVE-2026-43598_patch.sh --rocm-path <sdk> --test-only` runs the five-check
+suite: loader precedence, guard presence with a negative control against the
+stock library, a live `ncclAllReduce`, and the proxy handshake emitting the new
+integer-handle log line.
+
 ### `rocprof-sys-1.6.0/` -- one cherry-pick onto v1.6.0's outer once-guard
 
 Affected ROCm releases: **7.13.0, afar-23.2.1, therock-23.2.0**
