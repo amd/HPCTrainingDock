@@ -33,8 +33,12 @@
 # GridBased catch-all, so a heuristic miss returns 0 solutions exactly
 # like fp16. We append the same small-N shape grid there (SPX side) and
 # rewrite WGMXCC 4->1 in the 3 BB_BB CU38 bias .dat (CPX side), mirroring
-# the fp16 treatment. Confirmed on 7.2.4 (SPX + CPX); other versions are
-# left bf16-untouched for lack of an on-system pytorch to verify against.
+# the fp16 treatment. GPU-verified via hipblaslt_regression_check.sh on
+# 7.1.0/7.1.1/7.2.0/7.2.2/7.2.3/7.2.4 and 7.12.0 (SPX always; CPX WGMXCC
+# rewrite where the CU38 defect is present). The family-D versions
+# (7.13.0/7.14.0/7.14.1/10.1.0) show no bf16 short-circuit on MI300A --
+# their bf16 backward leaf already returns solutions -- so they stay
+# fp16-only.
 #
 # CLI matches the sibling *_setup.sh leaves:
 #   --rocm-version <X.Y.Z>     required
@@ -48,17 +52,25 @@
 #
 # Exit codes: 0 ok / already up-to-date, 43 NOOP (no fix for this V), 1 error.
 #
-# Currently handled ROCm versions (others exit NOOP_RC):
-#   * 7.1.0, 7.1.1  -- family A
-#   * 7.2.0         -- family B
-#   * 7.2.2, 7.2.3  -- family C
-#   * 7.2.4         -- family C + bf16 coverage (BB_BB no-bias backward
-#                     SPX rows + BB_BB CU38 CPX WGMXCC rewrite)
+# Currently handled ROCm versions (others exit NOOP_RC). All carry fp16
+# coverage; "+ bf16" marks versions that also get the BB_BB no-bias
+# backward SPX rows + BB_BB CU38 CPX WGMXCC rewrite:
+#   * 7.1.0, 7.1.1  -- family A + bf16
+#   * 7.2.0         -- family B + bf16
+#   * 7.2.2, 7.2.3  -- family C + bf16
+#   * 7.2.4         -- family C + bf16
+#   * 7.12.0        -- flat layout (like 7.2.x) + bf16; CPX WGMXCC=4
+#                     already fixed upstream so the CPX rewrite is a
+#                     sentinel-only no-op (like 7.13.0)
 #   * 7.13.0        -- family D (per-arch lib subdir gfx942/; CPX
 #                     WGMXCC=4 defect already fixed upstream so the
 #                     CPX rewrite step is a sentinel-only no-op there)
 #   * 7.14.0        -- family D (*.dat.zlib in gfx942/; fp16 forward
 #                     leaf only, solution 243113; no CPX rewrite)
+#   * 7.14.1        -- family D (same as 7.14.0: forward leaf reuses
+#                     solution 243113; no CPX rewrite)
+#   * 10.1.0        -- family D (*.dat.zlib in gfx942/; fp16 forward
+#                     leaf only, solution 243183; no CPX rewrite)
 #
 
 set -euo pipefail
@@ -145,7 +157,7 @@ done
 
 # ── version gate ────────────────────────────────────────────────────
 case "${ROCM_VERSION}" in
-   7.1.0|7.1.1|7.2.0|7.2.2|7.2.3|7.2.4|7.13.0|7.14.0) ;;
+   7.1.0|7.1.1|7.2.0|7.2.2|7.2.3|7.2.4|7.12.0|7.13.0|7.14.0|7.14.1|10.1.0) ;;
    *)
       echo "[hipblaslt_patch] no fix vendored for rocm/${ROCM_VERSION}; exiting NOOP (rc=${NOOP_RC})"
       exit ${NOOP_RC}
@@ -231,9 +243,12 @@ python3 - --rocm-version "${ROCM_VERSION}" \
           --dst-libdir "${WORKDIR}" <<'PYEOF'
 """Inline patcher for hipBLASLt .dat libraries (SPX heuristic + CPX WGMXCC).
 
-Three SPX shapes (heuristic-row append) and three CPX shapes (WGMXCC=4 -> 1
-rewrite) per ROCm version, all fp16. Idempotent on the CPX side via an
-in-band msgpack sentinel at library.rows[0].library['__cpx_patch_v1__'].
+Per ROCm version, fp16 (HH): heuristic-row append on the forward leaf
+(120-shape grid) + 2 CU228 backward rows (SPX side), and a WGMXCC=4 -> 1
+rewrite on the 3 HH CU38 leaves (CPX side). bf16-enabled versions also
+append the BB no-bias backward grid and rewrite the 3 BB_HA CU38 leaves.
+Idempotent on the CPX side via an in-band msgpack sentinel at
+library.rows[0].library['__cpx_patch_v1__'].
 """
 import argparse
 import os
@@ -268,7 +283,7 @@ DAT_PREFIXES = {
 #   batches  bs  in {32, 64, 128, 256, 512, 1024}
 #   classes  nc  in {10, 100, 256, 1000, 2048}
 #   hiddens  hd  in {512, 1024, 2048, 4096}
-# all to one fp16 kernel per version (MT16x16x256, MI16x16x32, WGMXCC=1).
+# all to one fp16 kernel per version (MT16x16x256, MI16x16x1, WGMXCC=1).
 #
 # Backward (Ailk_Bljk + Ailk_Bjlk on CU228): we keep 1 row each
 # defensively against future upstream regressions.
@@ -311,21 +326,29 @@ CPX_DATS = [
 # the catalogue is reordered each release; the kernel NAME / tile
 # signature is the version-stable identifier we hand-verified.
 SOLUTION_INDEX = {
+    # BB entry = bf16 no-bias backward coverage (same treatment as 7.2.4):
+    # the MT32x16x32/MI16x16x1/GSU1/WGMXCC1 kernel (0 size-multiple
+    # assertions), mapped per version by tile signature and GPU-verified.
     "7.1.0": {("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       299906,
               ("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"): 291111,
-              ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 287925},
+              ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 287925,
+              ("BB", "Ailk_Bljk_Cijk_Dijk_gfx942.dat"):       165243},
     "7.1.1": {("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       299906,
               ("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"): 291111,
-              ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 287925},
+              ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 287925,
+              ("BB", "Ailk_Bljk_Cijk_Dijk_gfx942.dat"):       165243},
     "7.2.0": {("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       347698,
               ("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"): 338868,
-              ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 335682},
+              ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 335682,
+              ("BB", "Ailk_Bljk_Cijk_Dijk_gfx942.dat"):       204009},
     "7.2.2": {("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       348921,
               ("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"): 340091,
-              ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 336905},
+              ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 336905,
+              ("BB", "Ailk_Bljk_Cijk_Dijk_gfx942.dat"):       205232},
     "7.2.3": {("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       348921,
               ("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"): 340091,
-              ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 336905},
+              ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 336905,
+              ("BB", "Ailk_Bljk_Cijk_Dijk_gfx942.dat"):       205232},
     # rocm/7.2.4: fp16 catalogue matches 7.2.3 byte-for-byte (same
     # kernel names at the same indices), so it reuses family-C's HH
     # indices. It ALSO gets bf16 coverage: the no-bias backward BB_BB
@@ -338,6 +361,14 @@ SOLUTION_INDEX = {
               ("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"): 340091,
               ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 336905,
               ("BB", "Ailk_Bljk_Cijk_Dijk_gfx942.dat"):       205232},
+    # rocm/7.12.0: flat layout (like 7.2.x). fp16 fwd + 2 CU228 backward
+    # mapped by tile signature (MT16x16x256 fwd; MT128x{32,16}x32 bwd),
+    # plus bf16 BB (MT32x16x32, same kernel family as 7.2.4's 205232).
+    # All four GPU-verified. CPX applies (not in NO_CPX_VERSIONS).
+    "7.12.0":{("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       236682,
+              ("HH", "Ailk_Bljk_Cijk_Dijk_CU228_gfx942.dat"): 225756,
+              ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 222570,
+              ("BB", "Ailk_Bljk_Cijk_Dijk_gfx942.dat"):       89769},
     # rocm/7.13.0: catalogue was substantially regenerated -- the
     # 7.2.x indices don't survive. Mapped by tile signature:
     # MT16x16x256/MI16x16x1/WGMXCC1/GSU1 for fwd, MT128x{32,16}x32
@@ -349,12 +380,20 @@ SOLUTION_INDEX = {
               ("HH", "Ailk_Bjlk_Cijk_Dijk_CU228_gfx942.dat"): 222586},
     # rocm/7.14.0: *.dat.zlib; fp16 forward leaf -> 243113.
     "7.14.0":{("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       243113},
+    # rocm/7.14.1: forward leaf catalogue matches 7.14.0 byte-for-byte
+    # (same kernel name at the same index), so it reuses 243113.
+    "7.14.1":{("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       243113},
+    # rocm/10.1.0: catalogue reordered vs 7.14.x -- the 243113 kernel
+    # (Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_MT16x16x256_MI16x16x1/GSU1/
+    # WGMXCC1, depthU256) is unchanged by tile signature but now sits at
+    # index 243183. Mapped by that signature, verified on GPU.
+    "10.1.0":{("HH", "Alik_Bljk_Cijk_Dijk_gfx942.dat"):       243183},
 }
 CPX_SENTINEL = "__cpx_patch_v1__"
 
-ZLIB_VERSIONS = {"7.14.0"}
+ZLIB_VERSIONS = {"7.14.0", "7.14.1", "10.1.0"}
 
-NO_CPX_VERSIONS = {"7.14.0"}
+NO_CPX_VERSIONS = {"7.14.0", "7.14.1", "10.1.0"}
 
 
 def _read_lib(path):
@@ -505,12 +544,23 @@ ${SUDO} mkdir -p "${EFFECTIVE_DST_LIBDIR}"
 
 # The set of patched .dat is whatever the inline patcher actually wrote
 # into WORKDIR. Deriving it here (rather than hard-coding) keeps this
-# section correct as coverage grows: fp16-only versions yield the 6 HH
-# files; bf16-enabled versions (7.2.4) additionally yield the BB SPX
-# leaf + 3 BB_HA CU38 leaves.
+# section correct as coverage grows: HH-only versions yield 1 file
+# (forward leaf only, e.g. 7.14.x / 10.1.0) up to 6 (forward + 2 CU228
+# + 3 HH CU38, e.g. 7.1.x / 7.2.x / 7.13.0); bf16-enabled versions
+# additionally yield the BB SPX leaf + 3 BB_HA CU38 leaves.
 mapfile -t PATCHED_FILES < <(cd "${WORKDIR}" && ls -1 2>/dev/null | grep -E '\.dat(\.zlib)?$')
 [ "${#PATCHED_FILES[@]}" -gt 0 ] \
    || send-error "inline patcher produced no .dat files in ${WORKDIR}"
+
+# Datatype coverage of THIS overlay, derived from what the patcher wrote
+# (BB*.dat present => bf16 was patched). Feeds the generated README /
+# modulefile text so each overlay describes itself accurately rather
+# than hard-coding a single version.
+HAS_BF16=0
+for fname in "${PATCHED_FILES[@]}"; do
+   case "${fname}" in TensileLibrary_BB_*) HAS_BF16=1; break ;; esac
+done
+DTYPE_DESC=$([ "${HAS_BF16}" -eq 1 ] && echo "fp16 + bf16" || echo "fp16 only")
 for fname in "${PATCHED_FILES[@]}"; do
    # --remove-destination is REQUIRED: on a --replace re-run the dst may
    # already be a symlink into the base SDK (from a prior run's symlink
@@ -570,8 +620,7 @@ cat <<-EOF | ${SUDO} tee "${DST_DOCDIR}/README.md" >/dev/null
 
 	Produced by ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY}).
 
-	hipBLASLt heuristic regressions on MI300A (fp16 always; bf16 on
-	versions that carry a BB index -- 7.2.4):
+	hipBLASLt heuristic regressions on MI300A (this overlay: ${DTYPE_DESC}):
 
 	* SPX heuristic-table hole -- appends exact-match rows to the
 	  failing .dat files, routing the shapes to known-good kernels
@@ -592,7 +641,7 @@ ${SUDO} mkdir -p "$(dirname "${MODULE_FILE}")"
 cat <<-EOF | ${SUDO} tee "${MODULE_FILE}" >/dev/null
 	-- ${MODULE_FILE}
 	--
-	-- Opt-in hipBLASLt overlay for rocm/${ROCM_VERSION} (fp16; bf16 on 7.2.4):
+	-- Opt-in hipBLASLt overlay for rocm/${ROCM_VERSION} (${DTYPE_DESC}):
 	--   1. SPX heuristic restoration -- exact-match .dat rows.
 	--   2. CPX WGMXCC: 4 -> 1 predicate fix (CU38 .dat).
 	-- ${#PATCHED_FILES[@]} patched .dat total this version.
@@ -604,7 +653,7 @@ cat <<-EOF | ${SUDO} tee "${MODULE_FILE}" >/dev/null
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("Version: patched (rocm-${ROCM_VERSION} base)")
 	whatis("Category: AMD")
-	whatis("Description: Restores perf on MI300A SPX and CPX for skinny fp16 (and bf16 on 7.2.4) GEMMs")
+	whatis("Description: Restores perf on MI300A SPX and CPX for skinny ${DTYPE_DESC} GEMMs")
 
 	-- No prereq("rocm/${ROCM_VERSION}"): structural via MODULEPATH-scoping
 	-- under rocmplus-${ROCM_VERSION}/. A real prereq() also breaks the
