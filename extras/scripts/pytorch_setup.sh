@@ -3438,6 +3438,123 @@ EOF
          echo "Skipping ${_NDC} symm-mem patch (PT < 2.11 or file missing)"
       fi
 
+      # ── PT >= 2.12 rocSHMEM symmetric-memory backend API-skew fix ────
+      # PT 2.12 added a ROCm symmetric-memory backend
+      # (torch/csrc/distributed/c10d/symm_mem/rocshmem_extension.cu) that is
+      # auto-enabled (USE_NVSHMEM=ON rocshmem_FOUND=1) whenever the SDK ships
+      # rocshmem headers, gated in-source on rocshmem::VERSION >= 3.3.0. The
+      # ROCm 7.12.0 rocSHMEM reports exactly "3.3.0" so the gate fires, but
+      # its device API diverges from the revision PT was written against, so
+      # torch_rocshmem fails to compile (slurm 57936):
+      #   1. rocshmem_barrier_wg() is undeclared -- the SDK spells the same
+      #      work-group barrier rocshmem_barrier_all_wg() (rocshmem_COLL.hpp).
+      #   2. ROCSHMEM_TEAM_WORLD is referenced from __global__ code, but the
+      #      SDK declares it host-only (extern rocshmem_team_t), so device use
+      #      is illegal ("reference to __host__ variable ... in __global__").
+      # Fix (verified to compile against rocm-7.12.0 rocshmem 3.3.0 for
+      # gfx942/gfx90a): rename the barrier to its SDK name, and thread the
+      # world-team handle in as a kernel parameter (world_team) at the 4
+      # affected kernels + their launch sites -- sound because these kernels
+      # already receive rocshmem_team_t `team` by value and dereference it on
+      # device, so the same-typed world handle is equally device-usable. The
+      # in-source VERSION>=3.3.0 gate is left intact. Only applied when the
+      # SDK actually exhibits the skew (ships rocshmem but lacks the
+      # rocshmem_barrier_wg spelling); a future SDK matching PT's API is left
+      # untouched. Idempotent via the HPCTRAINING_ROCSHMEM_APISKEW_v1 sentinel;
+      # the embedded exact-match asserts fail the build loudly if a future PT
+      # reshapes these kernels (rather than silently mis-patching).
+      _RSE="torch/csrc/distributed/c10d/symm_mem/rocshmem_extension.cu"
+      if [ -f "${_RSE}" ] \
+         && [ -f "${ROCM_PATH:-/opt/rocm}/include/rocshmem/rocshmem.hpp" ] \
+         && ! grep -rq 'rocshmem_barrier_wg' "${ROCM_PATH:-/opt/rocm}/include/rocshmem" 2>/dev/null; then
+         echo "Patching ${_RSE} for rocSHMEM 3.3.0 device-API skew (barrier_wg -> _all_wg; device ROCSHMEM_TEAM_WORLD -> world_team kernel param)"
+         python3 - "${_RSE}" <<'PY'
+import re, sys, pathlib
+
+p = pathlib.Path(sys.argv[1])
+s = p.read_text()
+
+SENTINEL = "HPCTRAINING_ROCSHMEM_APISKEW_v1"
+if SENTINEL in s:
+    print("  already patched (sentinel present); no-op")
+    sys.exit(0)
+
+errors = []
+
+# (A) work-group barrier: upstream PyTorch calls rocshmem_barrier_wg(); the
+#     ROCm 7.12.0 rocSHMEM 3.3.0 SDK spells the same op rocshmem_barrier_all_wg().
+n_barrier = s.count("rocshmem_barrier_wg()")
+s = s.replace("rocshmem_barrier_wg()", "rocshmem_barrier_all_wg()")
+if n_barrier < 1:
+    errors.append("rocshmem_barrier_wg() not found")
+
+# (B) ROCSHMEM_TEAM_WORLD used from device code is illegal (host-only extern in
+#     the SDK). It appears only as the 3rd arg of rocshmem_team_translate_pe in
+#     __global__ bodies -> rewrite to a device-usable kernel parameter world_team.
+n_world = s.count(", ROCSHMEM_TEAM_WORLD)")
+s = s.replace(", ROCSHMEM_TEAM_WORLD)", ", world_team)")
+if n_world != 4:
+    errors.append("expected 4 device ROCSHMEM_TEAM_WORLD uses, found %d" % n_world)
+
+# (C) add the world_team parameter to the 4 affected kernel signatures.
+sig_counts = {}
+def add_sig_param(name):
+    global s
+    pat = re.compile(r'(__global__ void ' + re.escape(name) + r'\([^;{]*?)(\)\s*\{)')
+    def repl(m):
+        if 'world_team' in m.group(1):
+            return m.group(0)
+        return m.group(1) + ', rocshmem_team_t world_team' + m.group(2)
+    s, c = pat.subn(repl, s)
+    sig_counts[name] = c
+
+for k in ("exchangeSplitAndOffset", "allToAllV",
+          "exchangeSplitAndOffset_2d", "allToAllV_2d"):
+    add_sig_param(k)
+for k, c in sig_counts.items():
+    if c != 1:
+        errors.append("kernel signature %s matched %d times (expected 1)" % (k, c))
+
+# (D) pass ROCSHMEM_TEAM_WORLD as the final launch argument at every call site.
+launch_counts = {}
+def add_launch_arg(name):
+    global s
+    pat = re.compile(r'(' + re.escape(name) + r'\s*<<<[^;]*?>>>\s*\([^;]*?)(\)\s*;)')
+    def repl(m):
+        if 'ROCSHMEM_TEAM_WORLD' in m.group(1):
+            return m.group(0)
+        return m.group(1) + ', ROCSHMEM_TEAM_WORLD' + m.group(2)
+    s, c = pat.subn(repl, s)
+    launch_counts[name] = c
+
+for k in ("exchangeSplitAndOffset", "allToAllV",
+          "exchangeSplitAndOffset_2d", "allToAllV_2d"):
+    add_launch_arg(k)
+expected_launch = {"exchangeSplitAndOffset": 1, "allToAllV": 1,
+                   "exchangeSplitAndOffset_2d": 2, "allToAllV_2d": 2}
+for k, want in expected_launch.items():
+    if launch_counts.get(k, 0) != want:
+        errors.append("launch %s matched %d times (expected %d)"
+                      % (k, launch_counts.get(k, 0), want))
+
+if errors:
+    sys.exit("ERROR: rocshmem_extension.cu API-skew patch did not match cleanly:\n  - "
+             + "\n  - ".join(errors))
+
+s = ("// " + SENTINEL + ": HPCTrainingDock pytorch_setup.sh rewrote this file for\n"
+     "// ROCm rocSHMEM 3.3.0 device-API skew (rocshmem_barrier_wg -> _all_wg;\n"
+     "// device ROCSHMEM_TEAM_WORLD threaded in as the world_team kernel param).\n") + s
+
+p.write_text(s)
+print("  patched: barrier=%d, team_world_uses=%d, sigs=%s, launches=%s"
+      % (n_barrier, n_world, sig_counts, launch_counts))
+PY
+         echo "  -> ${_RSE} rocshmem API-skew state (verify):"
+         grep -nE 'HPCTRAINING_ROCSHMEM_APISKEW|rocshmem_barrier_all_wg|world_team' "${_RSE}" | sed 's/^/    /'
+      else
+         echo "Skipping ${_RSE} rocshmem API-skew patch (file missing, SDK ships no rocshmem, or SDK already provides rocshmem_barrier_wg)"
+      fi
+
       # ── MAGMA 2.10+ compatibility (backport of pytorch PR #180388) ───
       # PyTorch v2.9.1 (and earlier) encodes AT_MAGMA_VERSION as
       #   MAJOR*100 + MINOR*10 + MICRO
