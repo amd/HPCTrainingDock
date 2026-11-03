@@ -421,7 +421,23 @@ rocm_version_to_patches() {
       # produces the self-contained nuitka onefile overlay and prepends its
       # bin/ to the modulefile PATH.  build.sh maps 7.12.0 -> rocm-systems tag
       # `therock-7.12` (no rocm-7.12.0 tag exists upstream).
-      7.12.0)           echo "rocprof-sys-1.5.0 rocprof-sys-instrument-libomp rocprof-compute" ;;
+      # `rocm-smi-cmake-abspath`: ROCm 7.12.0 (rockrel/TheRock build) ships
+      # rocm_smi's exported CMake imported-target (lib/cmake/rocm_smi/
+      # rocm_smiTargets.cmake) with a non-relocatable GitHub-Actions build-farm
+      # path baked into INTERFACE_INCLUDE_DIRECTORIES
+      # (/home/runner/_work/rockrel/.../lib/rocm_sysdeps/lib/pkgconfig/../../include).
+      # That dir does not exist on the install, so CMake's imported-target
+      # existence check hard-errors at the generate step for any consumer of
+      # rocm_smi64 -- notably PyTorch's find_package(rocm_smi) via LoadHIP.cmake
+      # ("CMake Generate step failed ... rocm_smi64 includes non-existent path").
+      # The bundle rewrites the dead build-farm prefix to the relocatable
+      # ${_IMPORT_PREFIX}/lib/rocm_sysdeps form (which exists). In-place SDK edit,
+      # no build, no modulefile edit; idempotent (soft no-op 43 once clean). Listed
+      # first because it is an instant sed that must not be stranded behind the slow
+      # rocprof-sys build. (The sibling hsakmt export carries the same dead prefix
+      # only in INTERFACE_LINK_LIBRARIES -L, which CMake does NOT existence-check,
+      # so it does not trip configure and is intentionally left untouched.)
+      7.12.0)           echo "rocm-smi-cmake-abspath rocprof-sys-1.5.0 rocprof-sys-instrument-libomp rocprof-compute" ;;
       # 7.13.0 (AFAR / TheRock RC line, e.g. rocm-afar-23.2.1-7.13.0):
       # ships rocprof-sys 1.6.0 and exhibits TWO independent bugs that
       # both need fixing:
@@ -490,7 +506,23 @@ rocm_version_to_patches() {
       # sibling tree that still ships them (restore_rocm_smi()); it soft
       # no-ops (43) when the tree already has rocm_smi or no donor is on
       # the cluster, so listing it for the whole 10.* line is safe.
-      10.*)             echo "rocprofiler-sdk-node-wedging-fix rocm-smi-restore" ;;
+      #
+      # `rocm-smi-config-restore`: a DISTINCT drop seen on ROCm 10.1.0 --
+      # the tree ships include/rocm_smi/rocm_smi.h + lib/librocm_smi64.so*
+      # (or they are put back by rocm-smi-restore above) but omits the
+      # exported CMake package entirely: there is NO lib/cmake/rocm_smi/
+      # rocm_smi-config.cmake, so PyTorch's find_package(rocm_smi) via
+      # LoadHIP.cmake fails ("Could not find a package configuration file
+      # provided by rocm_smi ... rocm_smiConfig.cmake / rocm_smi-config.cmake").
+      # This is NOT the 7.12.0 case (that one HAS the config but with a
+      # dead build-farm include path -> rocm-smi-cmake-abspath). Here the
+      # config file is simply absent, so restore_rocm_smi_cmake_config()
+      # SYNTHESIZES a minimal self-locating rocm_smi-config.cmake defining
+      # the rocm_smi64 imported target against the tree's own header+lib.
+      # Ordered AFTER rocm-smi-restore so the header+lib it describes are
+      # present first; soft no-ops (43) when a config already exists or the
+      # header/lib are absent (no donor), so listing it for 10.* is safe.
+      10.*)             echo "rocprofiler-sdk-node-wedging-fix rocm-smi-restore rocm-smi-config-restore" ;;
       6.3.*)            echo "rccl-sb6033 rocprof-compute" ;;
       6.4.*)            echo "rccl-sb6033 rocprof-compute" ;;
       7.0.*)            echo "rccl-sb6033 rocprof-compute" ;;
@@ -854,6 +886,24 @@ already_installed_check() {
             # prior run restored them).
             [ -f "${ROCM_PATH}/include/rocm_smi/rocm_smi.h" ]        || return 1
             ls "${ROCM_PATH}"/lib/librocm_smi64.so >/dev/null 2>&1   || return 1
+            ;;
+         rocm-smi-cmake-abspath)
+            # No INSTALL_PREFIX artifact; the fix rewrites the dead
+            # build-farm rocm_sysdeps path in rocm_smi's cmake export in
+            # place. "Already installed" == no /home/runner build-farm
+            # rocm_sysdeps include path remains to rewrite.
+            [ -d "${ROCM_PATH}/lib/cmake/rocm_smi" ] || return 1
+            grep -rqE '/home/runner/_work/[^;" ]*/lib/rocm_sysdeps/lib/pkgconfig/\.\./\.\.' \
+               "${ROCM_PATH}/lib/cmake/rocm_smi" 2>/dev/null && return 1
+            ;;
+         rocm-smi-config-restore)
+            # No INSTALL_PREFIX artifact; the fix synthesizes the missing
+            # rocm_smi CONFIG-mode package in place. "Already installed"
+            # == a rocm_smi config file exists under lib/cmake/rocm_smi
+            # (true because the SDK shipped it or a prior run synthesized
+            # it).
+            [ -f "${ROCM_PATH}/lib/cmake/rocm_smi/rocm_smi-config.cmake" ] \
+               || [ -f "${ROCM_PATH}/lib/cmake/rocm_smi/rocm_smiConfig.cmake" ] || return 1
             ;;
          *)
             return 1
@@ -2239,6 +2289,226 @@ restore_rocm_smi() {
 }
 
 # ─────────────────────────────────────────────────────────────────────
+# fix_rocm_smi_cmake_abspath
+# --------------------------
+# ROCm 7.12.0 (rockrel / TheRock build line) ships rocm_smi's exported
+# CMake imported-target file lib/cmake/rocm_smi/rocm_smiTargets.cmake
+# with a NON-RELOCATABLE GitHub-Actions build-farm path baked into the
+# target's INTERFACE_INCLUDE_DIRECTORIES:
+#
+#   /home/runner/_work/rockrel/rockrel/output/build/third-party/sysdeps/\
+#     linux/libdrm/build/stage/lib/rocm_sysdeps/lib/pkgconfig/../../include
+#   (and the same prefix + /libdrm)
+#
+# That directory does not exist on the installed tree, so CMake's
+# imported-target existence check hard-errors at the GENERATE step for
+# every consumer of the rocm_smi64 target -- notably PyTorch, whose
+# cmake/public/LoadHIP.cmake does find_package(rocm_smi):
+#
+#   CMake Error in caffe2/CMakeLists.txt:
+#     Imported target "rocm_smi64" includes non-existent path
+#     ".../rocm_sysdeps/lib/pkgconfig/../../include" ...
+#   CMake Generate step failed.  Build files cannot be regenerated.
+#
+# The real rocm_sysdeps include dir IS present in the tree at
+# ${ROCM_PATH}/lib/rocm_sysdeps/include (and .../include/libdrm), and the
+# generated Targets file already defines ${_IMPORT_PREFIX}. The fix is to
+# rewrite the dead build-farm prefix
+#   /home/runner/_work/.../lib/rocm_sysdeps/lib/pkgconfig/../..
+# to the relocatable
+#   ${_IMPORT_PREFIX}/lib/rocm_sysdeps
+# in every rocm_smi cmake file that still carries it. The [^;" ]* middle
+# keeps the match inside one semicolon-separated list entry. In-place SDK
+# edit; no overlay, no modulefile edit, no ELF modification -- same
+# philosophy as restore_rocm_smi above.
+#
+# Scope note: the sibling hsakmt export carries the identical dead prefix,
+# but only in INTERFACE_LINK_LIBRARIES ("-L/home/runner/..."), which CMake
+# does NOT existence-check, so it never trips configure; it is left
+# untouched deliberately (smallest diff; verified that 7.12.0's generate
+# step enumerated only rocm_smi64).
+#
+# Idempotent. Returns:
+#   0  -- rewrote the dead path in one or more rocm_smi cmake files
+#   43 -- soft no-op (no rocm_smi cmake dir, or exports already clean)
+#   1  -- hard error (sed failed, or a dead path survived the rewrite)
+# ─────────────────────────────────────────────────────────────────────
+fix_rocm_smi_cmake_abspath() {
+   local smidir="${ROCM_PATH}/lib/cmake/rocm_smi"
+   local dead_re='/home/runner/_work/[^;" ]*/lib/rocm_sysdeps/lib/pkgconfig/\.\./\.\.'
+   if [ ! -d "${smidir}" ]; then
+      echo "[rocm_patches] no rocm_smi cmake dir under ${ROCM_PATH} (soft no-op)"
+      return 43
+   fi
+
+   local -a victims=()
+   local f
+   while IFS= read -r f; do
+      [ -n "${f}" ] && victims+=("${f}")
+   done < <(grep -rlE "${dead_re}" "${smidir}" 2>/dev/null)
+
+   if [ "${#victims[@]}" -eq 0 ]; then
+      echo "[rocm_patches] rocm_smi cmake exports already clean under ${smidir} (idempotent no-op)"
+      return 43
+   fi
+
+   for f in "${victims[@]}"; do
+      echo "[rocm_patches]   rewriting dead rocm_sysdeps build-farm path in ${f}"
+      ${SUDO} sed -i -E "s#${dead_re}#\${_IMPORT_PREFIX}/lib/rocm_sysdeps#g" "${f}" || return 1
+   done
+
+   # verify no dead rocm_sysdeps include path survived in the rocm_smi exports
+   if grep -rqE "${dead_re}" "${smidir}" 2>/dev/null; then
+      echo "[rocm_patches] ERROR: dead rocm_sysdeps path still present under ${smidir}" >&2
+      return 1
+   fi
+   echo "[rocm_patches] rocm_smi cmake imported-target include paths repaired under ${smidir}"
+   return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# restore_rocm_smi_cmake_config
+# -----------------------------
+# ROCm 10.1.0 ships the rocm_smi header + library but OMITS the exported
+# CMake package: lib/cmake/rocm_smi/ has no rocm_smi-config.cmake (nor the
+# rocm_smiConfig.cmake alias), so any CONFIG-mode consumer fails --
+# notably PyTorch's cmake/public/LoadHIP.cmake find_package(rocm_smi):
+#
+#   CMake Error ... Could not find a package configuration file provided
+#   by "rocm_smi" ... add ... to CMAKE_PREFIX_PATH ... rocm_smiConfig.cmake
+#   rocm_smi-config.cmake
+#
+# This is a DIFFERENT defect from fix_rocm_smi_cmake_abspath (7.12.0),
+# where the config file IS present but carries a dead build-farm include
+# path. Here the file is simply absent, so we SYNTHESIZE a minimal,
+# self-locating config that describes the tree's own rocm_smi payload.
+#
+# The synthesized config mirrors the stock rocm_smi-config.cmake's public
+# surface (ROCM_SMI_INCLUDE_DIR[S], ROCM_SMI_LIB_DIR[S], ROCM_SMI_LIBRAR*
+# vars and the rocm_smi64 SHARED IMPORTED target) but:
+#   * derives PACKAGE_PREFIX_DIR from its own install location, so it is
+#     fully relocatable;
+#   * points IMPORTED_LOCATION at the real (non-symlink) librocm_smi64.so.*
+#     actually on disk, with IMPORTED_SONAME read from the ELF;
+#   * only lists lib/rocm_sysdeps/include in INTERFACE_INCLUDE_DIRECTORIES
+#     when that dir exists (a non-existent entry would re-trip the very
+#     imported-target existence hard-error this bundle family fixes);
+#   * omits the stock config's `oam` target (10.1.0 ships no liboam.so*,
+#     so importing it would FATAL the import-file existence check);
+#   * tries libdrm include dirs via pkg-config best-effort (QUIET, not
+#     REQUIRED) -- the bundled lib/rocm_sysdeps/include already carries
+#     libdrm/drm.h when present, so this is belt-and-suspenders.
+#
+# Ordered after rocm-smi-restore so the header+lib it describes are in
+# place first. In-place SDK edit; no overlay, no modulefile edit.
+#
+# Idempotent. Returns:
+#   0  -- synthesized lib/cmake/rocm_smi/rocm_smi-config.cmake
+#   43 -- soft no-op (config already present, or no rocm_smi header/lib
+#         in the tree to describe)
+#   1  -- hard error (mkdir/write failed, or the file did not land)
+# ─────────────────────────────────────────────────────────────────────
+restore_rocm_smi_cmake_config() {
+   local smidir="${ROCM_PATH}/lib/cmake/rocm_smi"
+   local inc_dir="${ROCM_PATH}/include/rocm_smi"
+   local lib_dir="${ROCM_PATH}/lib"
+
+   if [ -f "${smidir}/rocm_smi-config.cmake" ] || [ -f "${smidir}/rocm_smiConfig.cmake" ]; then
+      echo "[rocm_patches] rocm_smi cmake config already present under ${smidir} (idempotent no-op)"
+      return 43
+   fi
+
+   # The config we synthesize points at the in-tree header + library; if
+   # those are absent (e.g. rocm-smi-restore found no donor) there is
+   # nothing coherent to describe -- soft no-op.
+   if [ ! -f "${inc_dir}/rocm_smi.h" ]; then
+      echo "[rocm_patches] no rocm_smi.h under ${ROCM_PATH}; skipping cmake-config synthesis (soft no-op)"
+      return 43
+   fi
+   local real="" f
+   for f in "${lib_dir}"/librocm_smi64.so.*; do
+      [ -f "${f}" ] && [ ! -L "${f}" ] && { real="${f}"; break; }
+   done
+   if [ -z "${real}" ]; then
+      echo "[rocm_patches] no real librocm_smi64.so.* under ${lib_dir}; skipping cmake-config synthesis (soft no-op)"
+      return 43
+   fi
+   local real_base; real_base="$(basename "${real}")"
+   local soname; soname="$(readelf -d "${real}" 2>/dev/null | sed -nE 's/.*SONAME.*\[(.+)\].*/\1/p' | head -1)"
+   [ -z "${soname}" ] && soname="${real_base}"
+
+   # include dirs: always <prefix>/include; add rocm_sysdeps/include ONLY
+   # if it exists on disk.
+   local incdirs='${PACKAGE_PREFIX_DIR}/include'
+   if [ -d "${lib_dir}/rocm_sysdeps/include" ]; then
+      incdirs='${PACKAGE_PREFIX_DIR}/include;${PACKAGE_PREFIX_DIR}/lib/rocm_sysdeps/include'
+   fi
+
+   ${SUDO} mkdir -p "${smidir}" || return 1
+   local tmp; tmp="$(mktemp)" || return 1
+   cat > "${tmp}" <<'EOF'
+# Synthesized by HPCTrainingDock rocm_patches.sh (bundle: rocm-smi-config-restore)
+# for a ROCm tree that shipped the rocm_smi header + library but omitted
+# the exported CMake package. Defines only the rocm_smi64 imported target
+# that CONFIG-mode consumers (e.g. PyTorch find_package(rocm_smi)) need.
+get_filename_component(PACKAGE_PREFIX_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../" ABSOLUTE)
+
+macro(set_and_check _var _file)
+  set(${_var} "${_file}")
+  if(NOT EXISTS "${_file}")
+    message(FATAL_ERROR "File or directory ${_file} referenced by variable ${_var} does not exist !")
+  endif()
+endmacro()
+
+set_and_check(rocm_smi_INCLUDE_DIR "${PACKAGE_PREFIX_DIR}/include")
+set_and_check(ROCM_SMI_INCLUDE_DIR "${PACKAGE_PREFIX_DIR}/include")
+set_and_check(ROCM_SMI_INCLUDE_DIRS "${PACKAGE_PREFIX_DIR}/include")
+set_and_check(rocm_smi_LIB_DIR "${PACKAGE_PREFIX_DIR}/lib")
+set_and_check(ROCM_SMI_LIB_DIR "${PACKAGE_PREFIX_DIR}/lib")
+set_and_check(ROCM_SMI_LIB_DIRS "${PACKAGE_PREFIX_DIR}/lib")
+
+# libdrm include dirs (rocm_smi.h -> kfd_ioctl.h -> libdrm/drm.h),
+# best-effort via system pkg-config.
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+  pkg_check_modules(_ROCM_SMI_DRM QUIET libdrm)
+endif()
+
+if(NOT TARGET rocm_smi64)
+  add_library(rocm_smi64 SHARED IMPORTED)
+  set_target_properties(rocm_smi64 PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "@@INCDIRS@@"
+    IMPORTED_LOCATION "${PACKAGE_PREFIX_DIR}/lib/@@IMPLOC@@"
+    IMPORTED_SONAME "@@SONAME@@"
+  )
+  if(_ROCM_SMI_DRM_INCLUDE_DIRS)
+    set_property(TARGET rocm_smi64 APPEND
+      PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${_ROCM_SMI_DRM_INCLUDE_DIRS}")
+  endif()
+endif()
+
+set(ROCM_SMI_LIBRARIES rocm_smi64)
+set(ROCM_SMI_LIBRARY rocm_smi64)
+set(rocm_smi_FOUND TRUE)
+set(ROCM_SMI_FOUND TRUE)
+EOF
+   sed -i -e "s#@@INCDIRS@@#${incdirs}#g" \
+          -e "s#@@IMPLOC@@#${real_base}#g" \
+          -e "s#@@SONAME@@#${soname}#g" "${tmp}" || { rm -f "${tmp}"; return 1; }
+   ${SUDO} install -m 0644 "${tmp}" "${smidir}/rocm_smi-config.cmake" || { rm -f "${tmp}"; return 1; }
+   rm -f "${tmp}"
+
+   if [ ! -f "${smidir}/rocm_smi-config.cmake" ]; then
+      echo "[rocm_patches] ERROR: rocm_smi cmake config synthesis failed under ${smidir}" >&2
+      return 1
+   fi
+   echo "[rocm_patches] rocm_smi cmake config synthesized:"
+   echo "[rocm_patches]   ${smidir}/rocm_smi-config.cmake"
+   echo "[rocm_patches]   rocm_smi64 -> ${lib_dir}/${real_base} (soname ${soname})"
+   return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────
 # fix_overlay_runpath_and_libunwind
 # ---------------------------------
 # After the patched librocprof-sys.so.X.Y.Z lands in
@@ -2754,6 +3024,8 @@ built_rocprof_compute=0
 built_instrument_libomp=0
 built_rocprofiler_sdk_node_wedging_fix=0
 built_rocm_smi_restore=0
+built_rocm_smi_cmake_abspath=0
+built_rocm_smi_config_restore=0
 built_pytorch_ompt_reentrancy_workaround=0
 
 for bundle in ${PATCH_BUNDLES}; do
@@ -2881,6 +3153,38 @@ for bundle in ${PATCH_BUNDLES}; do
          else
             rc=${bundle_rc}
          fi ;;
+      rocm-smi-cmake-abspath)
+         # In-place rewrite of the dead GitHub-Actions build-farm
+         # rocm_sysdeps include path baked into rocm_smi's exported CMake
+         # imported target, which otherwise hard-errors PyTorch's
+         # find_package(rocm_smi) at the generate step. No build, no
+         # modulefile edit, no ELF modification. Exit 43 = soft skip
+         # (no rocm_smi cmake dir, or exports already clean).
+         fix_rocm_smi_cmake_abspath
+         bundle_rc=$?
+         if [ "${bundle_rc}" -eq 0 ]; then
+            built_rocm_smi_cmake_abspath=1
+         elif [ "${bundle_rc}" -eq 43 ]; then
+            : # soft skip; leave built_rocm_smi_cmake_abspath=0, rc unchanged
+         else
+            rc=${bundle_rc}
+         fi ;;
+      rocm-smi-config-restore)
+         # In-place synthesis of a minimal rocm_smi-config.cmake for a
+         # tree that shipped the rocm_smi header+lib but omitted the
+         # exported CMake package (ROCm 10.1.0), which otherwise fails
+         # PyTorch's find_package(rocm_smi) in CONFIG mode. No build, no
+         # modulefile edit, no ELF modification. Exit 43 = soft skip
+         # (config already present, or no header/lib to describe).
+         restore_rocm_smi_cmake_config
+         bundle_rc=$?
+         if [ "${bundle_rc}" -eq 0 ]; then
+            built_rocm_smi_config_restore=1
+         elif [ "${bundle_rc}" -eq 43 ]; then
+            : # soft skip; leave built_rocm_smi_config_restore=0, rc unchanged
+         else
+            rc=${bundle_rc}
+         fi ;;
       *)
          echo "[rocm_patches] ERROR: no builder registered for bundle '${bundle}'" >&2
          rc=1 ;;
@@ -2934,6 +3238,8 @@ if [ "${rc}" -eq 0 ] \
           || [ "${built_instrument_libomp}" -eq 1 ] \
           || [ "${built_rocprofiler_sdk_node_wedging_fix}" -eq 1 ] \
           || [ "${built_rocm_smi_restore}" -eq 1 ] \
+          || [ "${built_rocm_smi_cmake_abspath}" -eq 1 ] \
+          || [ "${built_rocm_smi_config_restore}" -eq 1 ] \
           || [ "${built_pytorch_ompt_reentrancy_workaround}" -eq 1 ]; }; then
    write_rocm_patches_provenance || rc=$?
 fi
@@ -2946,6 +3252,8 @@ if [ "${rc}" -eq 0 ]; then
         && [ "${built_instrument_libomp}" -eq 0 ] \
         && [ "${built_rocprofiler_sdk_node_wedging_fix}" -eq 0 ] \
         && [ "${built_rocm_smi_restore}" -eq 0 ] \
+        && [ "${built_rocm_smi_cmake_abspath}" -eq 0 ] \
+        && [ "${built_rocm_smi_config_restore}" -eq 0 ] \
         && [ "${built_pytorch_ompt_reentrancy_workaround}" -eq 0 ]; then
       # All bundles dispatched ran (or were skipped) without error, but
       # nothing landed on disk -- e.g. every dispatched bundle was a
@@ -2985,6 +3293,15 @@ if [ "${rc}" -eq 0 ]; then
       if [ "${built_rocm_smi_restore}" -eq 1 ]; then
          echo "[rocm_patches]   rocm_smi (restored):  ${ROCM_PATH}/include/rocm_smi/rocm_smi.h"
          echo "[rocm_patches]                         ${ROCM_PATH}/lib/librocm_smi64.so"
+      fi
+      if [ "${built_rocm_smi_cmake_abspath}" -eq 1 ]; then
+         echo "[rocm_patches]   rocm_smi cmake export: dead build-farm rocm_sysdeps include path"
+         echo "[rocm_patches]                         rewritten to \${_IMPORT_PREFIX}/lib/rocm_sysdeps in"
+         echo "[rocm_patches]                         ${ROCM_PATH}/lib/cmake/rocm_smi/"
+      fi
+      if [ "${built_rocm_smi_config_restore}" -eq 1 ]; then
+         echo "[rocm_patches]   rocm_smi cmake config (synthesized):"
+         echo "[rocm_patches]                         ${ROCM_PATH}/lib/cmake/rocm_smi/rocm_smi-config.cmake"
       fi
       if [ "${built_pytorch_ompt_reentrancy_workaround}" -eq 1 ]; then
          echo "[rocm_patches]   pytorch OMPT re-entrancy (ROCM-25067): OMP_TOOL=disabled set on"
