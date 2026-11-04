@@ -1,5 +1,26 @@
 #!/bin/bash
 
+# ── PyTorch version popularity (reference for install decisions) ─────
+# Top PyTorch versions by real-world usage share, from a sampling of PyTorch
+# applications (sampled 2026-11-03). Use this to decide which versions are worth
+# installing; cross-reference the PYTORCH_COMPANION_VERSIONS / manifest tables
+# below for the companion pins. Re-sample periodically and update these numbers.
+#
+#     version   share    notes
+#     -------   -----    ---------------------------------------------------
+#     2.13.0    22.3%    most-used; single patch (no .1 competitor)
+#     2.6.0     14.3%    older line (ROCm 6.1/6.2 era); build on a 6.x tree
+#     2.14.0    11.6%    install alongside 2.14.1 (both heavily used)
+#     2.8.0     10.8%    already built
+#     2.14.1    10.3%    install alongside 2.14.0
+#     2.10.0     4.7%    already built
+#     2.11.0     3.9%    already built
+#     2.12.1     2.4%    replaces broken/unused 2.12.0 (do NOT keep 2.12.0)
+#
+# Guidance: there is NO blanket "x.x.1 supersedes x.x.0" rule -- decide per line
+# from this usage data plus known breakage. 2.14: install BOTH .0 and .1; 2.12:
+# install ONLY .1; 2.13/2.10/2.11/2.8: keep .0 (only .0 appears in the sample).
+
 # ── In-flight-edit safety: self-snapshot to per-job tmpdir ────────────
 # Defence: on entry, copy ourselves to /tmp/admin/${SLURM_JOB_ID}/ and
 # re-exec from the snapshot.
@@ -3080,6 +3101,26 @@ else
          && { [[ "${_NVS_ROCM_MAJOR}" -ge 10 ]] || { [[ "${_NVS_ROCM_MAJOR}" -eq 7 ]] && [[ "${_NVS_ROCM_MINOR}" -ge 14 ]]; }; }; then
          export USE_NVSHMEM=0
          echo "pytorch: USE_NVSHMEM=0 (disable rocSHMEM symm-mem backend) for PT ${PYTORCH_VERSION} on ROCm ${ROCM_VERSION} -- broken torch_rocshmem link/init on this tree"
+      fi
+
+      # ── rocprofiler-sdk OMPT-init deadlock on `import torch` (ROCm 7.14.x/10.x) ──
+      # rocm-7.14.x/10.x ship a rocprofiler-sdk whose OMPT client discovery
+      # deadlocks during `import torch`: OpenBLAS (USE_OPENMP=1) initializes
+      # OMPT from its library constructor while libomp holds a non-recursive
+      # init lock; libomp calls ompt_start_tool -> rocprofiler::initialize ->
+      # find_clients -> dlopen() of a rocprofiler_configure client, which re-runs
+      # that client's still-pending constructor and re-enters libomp init on the
+      # same thread -> hang (gdb: openblas gotoblas_init -> omp_get_num_places ->
+      # __kmp_middle_initialize ticket-lock spin). Confirmed by ROCm/rocm-systems
+      # PR #7789 and our slurm 58348 backtrace; the SDK fix (ELF-symbol lookup
+      # instead of dlopen) is not in these trees yet. Disable OMPT tool discovery
+      # for every in-build `import torch` (the C1 validation + torchvision /
+      # torchaudio setup.py), so the build does not false-hang. OMP_TOOL only
+      # gates runtime OMPT tool loading, so compile output + the installed
+      # artifact are unaffected. Reuses _NVS_ROCM_* parsed just above.
+      if [[ "${_NVS_ROCM_MAJOR}" -ge 10 ]] || { [[ "${_NVS_ROCM_MAJOR}" -eq 7 ]] && [[ "${_NVS_ROCM_MINOR}" -ge 14 ]]; }; then
+         export OMP_TOOL=disabled
+         echo "pytorch: OMP_TOOL=disabled (avoid rocprofiler-sdk OMPT-init deadlock on import torch, PR #7789) for ROCm ${ROCM_VERSION}"
       fi
 
       # ── ROCm 10.1-nightly RAGreedy (Greedy Register Allocator) crash ──
