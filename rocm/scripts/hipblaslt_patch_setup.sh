@@ -2,10 +2,11 @@
 #
 # hipblaslt_patch_setup.sh
 # ------------------------
-# Apply two vendored hipBLASLt fixes on top of the SDK installed by
-# rocm/scripts/rocm_setup.sh at /opt/rocm-${ROCM_VERSION}, and expose
-# them as an auto-loaded `hipblaslt/patched` Lmod module.
+# Apply a vendored hipBLASLt fix on top of the SDK installed by
+# rocm/scripts/rocm_setup.sh at /opt/rocm-${ROCM_VERSION}, and expose it as an
+# auto-loaded `hipblaslt/patched` Lmod module.
 #
+<<<<<<< Updated upstream
 # Both fixes ride together in one overlay tree:
 #
 #   1. SPX heuristic restoration (228-CU). The gfx942 Equality
@@ -39,6 +40,28 @@
 # (7.13.0/7.14.0/7.14.1/10.1.0) show no bf16 short-circuit on MI300A --
 # their bf16 backward leaf already returns solutions -- so they stay
 # fp16-only.
+=======
+# The fix (patch_general_xcc): the generic (no-CU) gfx942 fallback libraries
+# ship solutions whose workGroupMappingXCC must divide the active partition CU
+# count to pass the runtime predicate. On MI300A the dominant tag is WGMXCC=8
+# (~99% of the fallback solutions; the rest are mostly 16/32, a few 2/4/86),
+# and 8/16/32/86 divide neither 228 (SPX) nor 38 (CPX) -- so those solutions are
+# rejected, the heuristic empties, the empty result is not cached, and the full
+# search is paid on every call. (These libraries are valid on MI300X, whose 304
+# CUs are divisible by 8; MI300A's 228/38 are not, hence the regression is
+# MI300A-specific.) The symptom is twofold: a flat ~500 ms across fp16/bf16/fp32
+# and all transpose layouts, and returnAlgoCount=0 heuristic misses on the
+# small-N fp16 OP_T*OP_N family (same mechanism -- the preferred candidates are
+# all WGMXCC-rejected). We rewrite WGMXCC -> 1 (the only value valid on every
+# partition; the few 2/4 are normalized along the way) in those fallbacks.
+# Version-agnostic
+# by construction: it rewrites whatever the SDK ships (flat *.dat or nested
+# gfx942/*.dat.zlib), so new releases need no code change. This single rewrite
+# supersedes the older per-shape equality-row + CU38 patches (AMD PR #5009,
+# reverted from rocm-rel-7.2 by #5398): verified on MI300A SPX and CPX that it
+# cures both the heuristic misses and the slow cells those patches targeted,
+# and the slow cells they did not. See patch_general_xcc().
+>>>>>>> Stashed changes
 #
 # CLI matches the sibling *_setup.sh leaves:
 #   --rocm-version <X.Y.Z>     required
@@ -52,6 +75,7 @@
 #
 # Exit codes: 0 ok / already up-to-date, 43 NOOP (no fix for this V), 1 error.
 #
+<<<<<<< Updated upstream
 # Currently handled ROCm versions (others exit NOOP_RC). All carry fp16
 # coverage; "+ bf16" marks versions that also get the BB_BB no-bias
 # backward SPX rows + BB_BB CU38 CPX WGMXCC rewrite:
@@ -71,6 +95,12 @@
 #                     solution 243113; no CPX rewrite)
 #   * 10.1.0        -- family D (*.dat.zlib in gfx942/; fp16 forward
 #                     leaf only, solution 243183; no CPX rewrite)
+=======
+# Handled ROCm versions: every rocm >= 7.1.0 (the defect is present from 7.1.0
+# onward). Layout is auto-detected: flat *.dat for 7.1.x/7.2.x, nested
+# gfx942/*.dat for 7.13.0, nested gfx942/*.dat.zlib for 7.14+/10.x. Anything
+# below 7.1.0 exits NOOP_RC.
+>>>>>>> Stashed changes
 #
 
 set -euo pipefail
@@ -156,6 +186,7 @@ done
 [ -n "${ROCM_VERSION}" ] || send-error "--rocm-version is required"
 
 # ── version gate ────────────────────────────────────────────────────
+<<<<<<< Updated upstream
 case "${ROCM_VERSION}" in
    7.1.0|7.1.1|7.2.0|7.2.2|7.2.3|7.2.4|7.12.0|7.13.0|7.14.0|7.14.1|10.1.0) ;;
    *)
@@ -163,6 +194,18 @@ case "${ROCM_VERSION}" in
       exit ${NOOP_RC}
       ;;
 esac
+=======
+# The WGMXCC defect is present from rocm/7.1.0 onward, and the general rewrite
+# is version-agnostic (it rewrites whatever the SDK ships), so every rocm
+# >= 7.1.0 is handled without a per-version list. Anything older is a NOOP.
+ver_ge() {  # ver_ge A B -> 0 (true) if A >= B, dotted-numeric, suffix-tolerant
+   [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$2" ]
+}
+if ! ver_ge "${ROCM_VERSION}" "7.1.0"; then
+   echo "[hipblaslt_patch] no fix vendored for rocm/${ROCM_VERSION}; exiting NOOP (rc=${NOOP_RC})"
+   exit ${NOOP_RC}
+fi
+>>>>>>> Stashed changes
 
 # ── derived paths ───────────────────────────────────────────────────
 ROCM_PATH="${ROCM_PATH_OVERRIDE:-/opt/rocm-${ROCM_VERSION}}"
@@ -190,8 +233,14 @@ fi
 EFFECTIVE_SRC_LIBDIR="${SRC_LIBDIR}${ARCH_SUBDIR:+/${ARCH_SUBDIR}}"
 EFFECTIVE_DST_LIBDIR="${DST_LIBDIR}${ARCH_SUBDIR:+/${ARCH_SUBDIR}}"
 
-# Sentinel: CPX-patched .dat embeds an in-band msgpack marker.
-SENTINEL_DAT="${EFFECTIVE_DST_LIBDIR}/TensileLibrary_HH_HH_HA_Bias_SAV_UA_Type_HH_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_CU38_gfx942.dat"
+# Sentinel: a patched .dat embeds an in-band msgpack marker in rows[0].library.
+# We mark the generic SS fallback the rewrite touches (patched on every
+# supported version). Nested *.dat.zlib layouts ship it compressed, so match
+# that suffix.
+SENTINEL_KEY="__general_xcc_patch_v1__"
+SENTINEL_BASE="TensileLibrary_SS_SS_UA_Type_SS_Contraction_l_Alik_Bjlk_Cijk_Dijk_gfx942.dat"
+[ -f "${EFFECTIVE_SRC_LIBDIR}/${SENTINEL_BASE}.zlib" ] && SENTINEL_BASE="${SENTINEL_BASE}.zlib"
+SENTINEL_DAT="${EFFECTIVE_DST_LIBDIR}/${SENTINEL_BASE}"
 
 echo ""
 echo "=================================="
@@ -217,11 +266,14 @@ fi
 
 # ── idempotency check ───────────────────────────────────────────────
 if [ "${REPLACE}" -eq 0 ] && [ -f "${SENTINEL_DAT}" ] && [ ! -L "${SENTINEL_DAT}" ]; then
-   has_sentinel=$(python3 - "${SENTINEL_DAT}" <<'PYEOF'
-import sys, msgpack
+   has_sentinel=$(python3 - "${SENTINEL_DAT}" "${SENTINEL_KEY}" <<'PYEOF'
+import sys, zlib, msgpack
 try:
-    d = msgpack.unpack(open(sys.argv[1], "rb"), raw=False, strict_map_key=False)
-    print(1 if "__cpx_patch_v1__" in d["library"]["rows"][0]["library"] else 0)
+    raw = open(sys.argv[1], "rb").read()
+    if sys.argv[1].endswith(".zlib"):
+        raw = zlib.decompress(raw)
+    d = msgpack.unpackb(raw, raw=False, strict_map_key=False)
+    print(1 if sys.argv[2] in d["library"]["rows"][0]["library"] else 0)
 except Exception as e:
     sys.stderr.write(f"sentinel check failed: {e}\n"); print(0)
 PYEOF
@@ -237,18 +289,25 @@ fi
 WORKDIR=$(mktemp -d -t hipblaslt-patch.XXXXXX)
 trap '[ -n "${WORKDIR:-}" ] && rm -rf "${WORKDIR}"' EXIT
 
-echo "[hipblaslt_patch] running inline patcher (SPX heuristic + CPX WGMXCC) ..."
+echo "[hipblaslt_patch] running inline patcher ..."
 python3 - --rocm-version "${ROCM_VERSION}" \
           --src-libdir "${EFFECTIVE_SRC_LIBDIR}" \
           --dst-libdir "${WORKDIR}" <<'PYEOF'
-"""Inline patcher for hipBLASLt .dat libraries (SPX heuristic + CPX WGMXCC).
+"""Inline patcher for hipBLASLt .dat libraries.
 
+<<<<<<< Updated upstream
 Per ROCm version, fp16 (HH): heuristic-row append on the forward leaf
 (120-shape grid) + 2 CU228 backward rows (SPX side), and a WGMXCC=4 -> 1
 rewrite on the 3 HH CU38 leaves (CPX side). bf16-enabled versions also
 append the BB no-bias backward grid and rewrite the 3 BB_HA CU38 leaves.
 Idempotent on the CPX side via an in-band msgpack sentinel at
 library.rows[0].library['__cpx_patch_v1__'].
+=======
+Two strategies (see the script header): a GENERAL workGroupMappingXCC -> 1
+rewrite of the generic (no-CU) gfx942 fallbacks (patch_general_xcc), applied
+uniformly to every supported rocm version. Idempotent via an in-band msgpack
+sentinel in rows[0].library.
+>>>>>>> Stashed changes
 """
 import argparse
 import os
@@ -258,6 +317,7 @@ import zlib
 
 import msgpack
 
+<<<<<<< Updated upstream
 # HH = fp16 in / fp16 out / fp32 accumulate (the HPA path, what
 # nn.Linear(...).half() lands on). BB = bf16 counterpart. fp32 / fp64
 # are not patched (see header comment).
@@ -394,6 +454,9 @@ CPX_SENTINEL = "__cpx_patch_v1__"
 ZLIB_VERSIONS = {"7.14.0", "7.14.1", "10.1.0"}
 
 NO_CPX_VERSIONS = {"7.14.0", "7.14.1", "10.1.0"}
+=======
+GENERAL_XCC_SENTINEL = "__general_xcc_patch_v1__"
+>>>>>>> Stashed changes
 
 
 def _read_lib(path):
@@ -403,96 +466,76 @@ def _read_lib(path):
     return msgpack.unpackb(raw, raw=False, strict_map_key=False)
 
 
-def equality_matching(data):
-    for r in data["library"]["rows"]:
-        inner, pred = r.get("library", {}), r.get("predicate", {})
-        if (pred.get("type") == "EqualityMatching"
-                and inner.get("type") == "Matching"
-                and inner.get("distance") == "Equality"):
-            return inner
-    raise SystemExit("no EqualityMatching row in .dat")
+def _write_lib(data, path):
+    """Serialize `data` to `path`, zlib-compressing iff the name ends .zlib
+    (so the overlay file matches the SDK's on-disk encoding for that version)."""
+    blob = msgpack.packb(data, use_bin_type=True)
+    if str(path).endswith(".zlib"):
+        blob = zlib.compress(blob, 9)
+    with open(path, "wb") as f:
+        f.write(blob)
 
 
-def _patch_one_row(table, key, idx):
-    for entry in table:
-        if entry.get("key") == key:
-            entry["index"] = idx
-            entry["speed"] = 0.0
-            return "updated"
-    table.append({"key": key, "index": idx, "speed": 0.0})
-    return "added"
-
-
-def patch_spx(src, dst, shapes_for_file, idx, zlib_mode=False):
-    """Patch one SPX .dat[.zlib] with all `shapes_for_file` rows in one pass.
-
-    A single read+write per file is required when multiple rows share a
-    filename, otherwise the second write would overwrite the first.
-    """
-    data = _read_lib(src)
-    table = equality_matching(data)["table"]
-    actions = []
-    for M, N, B, K in shapes_for_file:
-        actions.append((M, N, B, K, _patch_one_row(table, [M, N, B, K], idx)))
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    if zlib_mode:
-        with open(dst, "wb") as f:
-            f.write(zlib.compress(msgpack.packb(data, use_bin_type=True), 9))
-    else:
-        with open(dst, "wb") as f:
-            msgpack.pack(data, f)
-    print(f"  [spx] {dst.name}: {len(actions)} row(s) -> solution {idx}")
-    for M, N, B, K, what in actions:
-        print(f"           {what:7s}  [{M}, {N}, {B}, {K}]")
-
-
-def find_wgmxcc_predicate(pp):
-    if not isinstance(pp, dict):
-        return None
-    for entry in pp.get("value", []):
-        if isinstance(entry, dict) and entry.get("type") == "WorkgroupMappingXCCCheck":
-            return entry
-    return None
-
-
-def patch_cpx(src, dst, target=1):
-    data = msgpack.unpack(open(src, "rb"), raw=False, strict_map_key=False)
-    inner = data["library"]["rows"][0]["library"]
-    if CPX_SENTINEL in inner:
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        with open(dst, "wb") as f:
-            msgpack.pack(data, f)
-        print(f"  [cpx] {dst.name}: already patched (sentinel present)")
-        return
-    sm_changed = pp_changed = 0
-    for s in data["solutions"]:
-        if s["sizeMapping"]["workGroupMappingXCC"] != target:
+def _rewrite_wgmxcc(data, target=1):
+    """Set every solution's workGroupMappingXCC (sizeMapping + the
+    WorkgroupMappingXCCCheck predicate) to `target`, leaving auto/disabled
+    values (None/-1/0) and already-`target` ones untouched. Returns the number
+    of sizeMapping and predicate edits made."""
+    sm = pp = 0
+    for s in data.get("solutions", []):
+        w = s.get("sizeMapping", {}).get("workGroupMappingXCC")
+        if w not in (None, -1, 0, target):
             s["sizeMapping"]["workGroupMappingXCC"] = target
-            sm_changed += 1
-        pred = find_wgmxcc_predicate(s["problemPredicate"])
-        if pred is not None:
-            v = pred["value"]
-            if isinstance(v, list):
-                if v[0] != target:
-                    new_v = list(v); new_v[0] = target
-                    pred["value"] = new_v
-                    pp_changed += 1
-            elif v != target:
-                pred["value"] = target
-                pp_changed += 1
-    inner[CPX_SENTINEL] = {
-        "target_wgmxcc": target,
-        "sm_changed": sm_changed,
-        "pp_changed": pp_changed,
-        "rows_added": 0,
-        "tool_version": 1,
-    }
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    # use_bin_type=True matches the v1 CPX patcher's on-disk encoding so
-    # md5sums are stable across re-runs against a promoted overlay.
-    with open(dst, "wb") as f:
-        msgpack.pack(data, f, use_bin_type=True)
-    print(f"  [cpx] {dst.name}: {sm_changed} sizeMapping + {pp_changed} predicate edits")
+            sm += 1
+        stack = [s.get("problemPredicate", {})]
+        while stack:
+            d = stack.pop()
+            if isinstance(d, dict):
+                if d.get("type") == "WorkgroupMappingXCCCheck":
+                    v = d.get("value")
+                    if isinstance(v, list) and v and v[0] not in (None, -1, 0, target):
+                        nv = list(v); nv[0] = target; d["value"] = nv; pp += 1
+                    elif not isinstance(v, list) and v not in (None, -1, 0, target):
+                        d["value"] = target; pp += 1
+                stack.extend(d.values())
+            elif isinstance(d, list):
+                stack.extend(d)
+    return sm, pp
+
+
+def patch_general_xcc(sdir, ddir, target=1):
+    """General-path fix (see script header): rewrite WGMXCC->1 in
+    every generic (no-CU) gfx942 fallback library. Handles both the flat
+    uncompressed layout (7.2.x) and the nested gfx942/ *.dat.zlib layout
+    (7.14+, 10.x); the caller passes the arch subdir as sdir, and we key
+    (de)compression off the .zlib suffix. CU-specific sublibraries
+    (..._CU38_/_CU64_/_CU80_/_CU152_/_CU228_...) are tuned per partition and are
+    left untouched. A file that needs no edit is skipped so it stays a symlink
+    into the base SDK. Idempotent via an in-band sentinel in rows[0].library."""
+    import re
+    cu = re.compile(r"_CU\d+_")
+    files = sorted(list(sdir.glob("TensileLibrary_*_Cijk_Dijk_gfx942.dat"))
+                   + list(sdir.glob("TensileLibrary_*_Cijk_Dijk_gfx942.dat.zlib")))
+    ddir.mkdir(parents=True, exist_ok=True)
+    patched = tot_sm = tot_pp = 0
+    for f in files:
+        if cu.search(f.name):
+            continue
+        data = _read_lib(f)
+        sm, pp = _rewrite_wgmxcc(data, target)
+        if sm == 0 and pp == 0:
+            continue
+        rows = data.get("library", {}).get("rows", [])
+        if rows and isinstance(rows[0].get("library"), dict):
+            rows[0]["library"][GENERAL_XCC_SENTINEL] = {
+                "target_wgmxcc": target, "sm_changed": sm,
+                "pp_changed": pp, "tool_version": 1}
+        _write_lib(data, ddir / f.name)
+        patched += 1; tot_sm += sm; tot_pp += pp
+    print(f"  [general-xcc] {patched} generic fallback .dat patched "
+          f"({tot_sm} sizeMapping + {tot_pp} predicate edits)")
+    if patched == 0:
+        sys.exit("general-xcc: no generic fallback needed patching (unexpected)")
 
 
 def main():
@@ -501,38 +544,8 @@ def main():
     ap.add_argument("--src-libdir",   required=True)
     ap.add_argument("--dst-libdir",   required=True)
     args = ap.parse_args()
-    if args.rocm_version not in SOLUTION_INDEX:
-        sys.exit(f"unsupported rocm version {args.rocm_version}; "
-                 f"have {sorted(SOLUTION_INDEX)}")
-    sdir = pathlib.Path(args.src_libdir)
-    ddir = pathlib.Path(args.dst_libdir)
-    idx_map = SOLUTION_INDEX[args.rocm_version]
-    zlib_mode = args.rocm_version in ZLIB_VERSIONS
-    disk = (lambda s: s + ".zlib") if zlib_mode else (lambda s: s)
-    # bf16 (BB / BB_HA) is opt-in per version: it runs only when this
-    # version carries a BB solution index. Versions without one get the
-    # fp16-only (HH) behaviour, unchanged.
-    bf16_enabled = any(tag == "BB" for (tag, _s) in idx_map)
-    # Group shapes by (dtype_tag, suffix): each file is read+written
-    # once with all matching rows applied. Skip any (tag, suffix) this
-    # version has no index for (auto-scopes BB rows to bf16 versions).
-    by_file = {}
-    for tag, suffix, M, N, B, K in SPX_SHAPES:
-        by_file.setdefault((tag, suffix), []).append((M, N, B, K))
-    for (tag, suffix), shapes in by_file.items():
-        if (tag, suffix) not in idx_map:
-            continue
-        prefix = DAT_PREFIXES[tag]
-        patch_spx(sdir / (prefix + disk(suffix)), ddir / (prefix + disk(suffix)),
-                  shapes, idx_map[(tag, suffix)], zlib_mode=zlib_mode)
-    if args.rocm_version in NO_CPX_VERSIONS:
-        print(f"  [cpx] skipped for rocm/{args.rocm_version}")
-    else:
-        for tag, suffix in CPX_DATS:
-            if tag.startswith("BB") and not bf16_enabled:
-                continue
-            prefix = DAT_PREFIXES[tag]
-            patch_cpx(sdir / (prefix + disk(suffix)), ddir / (prefix + disk(suffix)))
+    patch_general_xcc(pathlib.Path(args.src_libdir),
+                      pathlib.Path(args.dst_libdir))
 
 
 if __name__ == "__main__":
@@ -542,12 +555,18 @@ PYEOF
 # ── install into DST_LIBDIR ─────────────────────────────────────────
 ${SUDO} mkdir -p "${EFFECTIVE_DST_LIBDIR}"
 
+<<<<<<< Updated upstream
 # The set of patched .dat is whatever the inline patcher actually wrote
 # into WORKDIR. Deriving it here (rather than hard-coding) keeps this
 # section correct as coverage grows: HH-only versions yield 1 file
 # (forward leaf only, e.g. 7.14.x / 10.1.0) up to 6 (forward + 2 CU228
 # + 3 HH CU38, e.g. 7.1.x / 7.2.x / 7.13.0); bf16-enabled versions
 # additionally yield the BB SPX leaf + 3 BB_HA CU38 leaves.
+=======
+# The set of patched .dat is whatever the inline patcher actually wrote into
+# WORKDIR (the rewritten generic fallbacks). Deriving it here rather than
+# hard-coding keeps this section correct as coverage changes.
+>>>>>>> Stashed changes
 mapfile -t PATCHED_FILES < <(cd "${WORKDIR}" && ls -1 2>/dev/null | grep -E '\.dat(\.zlib)?$')
 [ "${#PATCHED_FILES[@]}" -gt 0 ] \
    || send-error "inline patcher produced no .dat files in ${WORKDIR}"
@@ -613,6 +632,8 @@ if [ -n "${ARCH_SUBDIR}" ]; then
 fi
 
 # ── install README and modulefile ───────────────────────────────────
+FIX_SUMMARY="Rewrites workGroupMappingXCC->1 in every generic (no-CU) gfx942 fallback library. The dominant tag is WGMXCC=8 (plus some 16/32), which divides neither 228 (SPX) nor 38 (CPX), so the predicate rejects those solutions -- the uncached empty-search defect behind the flat ~500ms GEMMs and the small-N fp16 heuristic misses, across fp16/bf16/fp32 and all layouts. WGMXCC=1 is the only value valid on every partition."
+FIX_WHATIS="Restores perf on MI300A SPX+CPX by fixing the generic-fallback WGMXCC divisibility defect (fp16/bf16/fp32, all layouts)"
 ${SUDO} mkdir -p "${DST_DOCDIR}"
 cat <<-EOF | ${SUDO} tee "${DST_DOCDIR}/README.md" >/dev/null
 	hipblaslt opt-in overlay for rocm/${ROCM_VERSION}
@@ -620,6 +641,7 @@ cat <<-EOF | ${SUDO} tee "${DST_DOCDIR}/README.md" >/dev/null
 
 	Produced by ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY}).
 
+<<<<<<< Updated upstream
 	hipBLASLt heuristic regressions on MI300A (this overlay: ${DTYPE_DESC}):
 
 	* SPX heuristic-table hole -- appends exact-match rows to the
@@ -628,6 +650,10 @@ cat <<-EOF | ${SUDO} tee "${DST_DOCDIR}/README.md" >/dev/null
 	* CPX WorkGroupMappingXCC=4 predicate failure -- rewrites WGMXCC=1
 	  in every solution of the CU38 .dat files (HH always; BB on bf16
 	  versions).
+=======
+	hipBLASLt heuristic/dispatch regression fix on MI300A:
+	${FIX_SUMMARY}
+>>>>>>> Stashed changes
 
 	Layout: ${DST_LIBDIR}/ contains ${#PATCHED_FILES[@]} patched .dat plus
 	symlinks back into ${SRC_LIBDIR}/ for everything else.
@@ -641,9 +667,14 @@ ${SUDO} mkdir -p "$(dirname "${MODULE_FILE}")"
 cat <<-EOF | ${SUDO} tee "${MODULE_FILE}" >/dev/null
 	-- ${MODULE_FILE}
 	--
+<<<<<<< Updated upstream
 	-- Opt-in hipBLASLt overlay for rocm/${ROCM_VERSION} (${DTYPE_DESC}):
 	--   1. SPX heuristic restoration -- exact-match .dat rows.
 	--   2. CPX WGMXCC: 4 -> 1 predicate fix (CU38 .dat).
+=======
+	-- Opt-in hipBLASLt overlay for rocm/${ROCM_VERSION}:
+	--   ${FIX_SUMMARY}
+>>>>>>> Stashed changes
 	-- ${#PATCHED_FILES[@]} patched .dat total this version.
 	--
 	-- Selected via HIPBLASLT_TENSILE_LIBPATH; base SDK byte-for-byte
@@ -653,7 +684,11 @@ cat <<-EOF | ${SUDO} tee "${MODULE_FILE}" >/dev/null
 	whatis("Built by: ${LEAF_SCRIPT_NAME}@${LEAF_SCRIPT_COMMIT:0:12} (${LEAF_SCRIPT_DIRTY})")
 	whatis("Version: patched (rocm-${ROCM_VERSION} base)")
 	whatis("Category: AMD")
+<<<<<<< Updated upstream
 	whatis("Description: Restores perf on MI300A SPX and CPX for skinny ${DTYPE_DESC} GEMMs")
+=======
+	whatis("Description: ${FIX_WHATIS}")
+>>>>>>> Stashed changes
 
 	-- No prereq("rocm/${ROCM_VERSION}"): structural via MODULEPATH-scoping
 	-- under rocmplus-${ROCM_VERSION}/. A real prereq() also breaks the
