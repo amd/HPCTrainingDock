@@ -692,6 +692,31 @@ __CUPY_CCCL3_PATCH_PYEOF__
       module unload ${ROCM_MODULE_NAME}
    fi
 
+   # ── RCCL overlay RPATH (CVE-2026-43598 / AMD-SB-6033) ────────────────
+   # CuPy links its RCCL binding with DT_RPATH=<rocm>/lib, which outranks
+   # LD_LIBRARY_PATH and so bypasses the rocm-patches overlay that carries the
+   # patched librccl. Put the overlay first; a missing overlay dir is just a
+   # skipped search entry. Applied to cached installs too, because tarballs
+   # cached before this step still carry the old RPATH.
+   PATCHELF=$(command -v patchelf 2>/dev/null || true)
+   if [ -z "${PATCHELF}" ] && python3 -m venv "${CUPY_BUILD_ROOT}/patchelf_venv" \
+         && "${CUPY_BUILD_ROOT}/patchelf_venv/bin/pip" install -q patchelf; then
+      PATCHELF="${CUPY_BUILD_ROOT}/patchelf_venv/bin/patchelf"
+   fi
+   if [ -z "${PATCHELF}" ]; then
+      echo "WARNING: patchelf unavailable -- CuPy's RCCL binding will load the unpatched ${SAVED_ROCM_HOME}/lib/librccl.so.1"
+   else
+      _overlay_lib="$(dirname "${SAVED_ROCM_HOME}")/rocm-patches-${SAVED_ROCM_HOME##*/rocm-}/lib"
+      while IFS= read -r -d '' _so; do
+         _dyn="$(readelf -d "${_so}" 2>/dev/null || true)"
+         grep -q 'NEEDED.*librccl' <<< "${_dyn}" || continue
+         _rp="$("${PATCHELF}" --print-rpath "${_so}")"
+         case ":${_rp}:" in *":${_overlay_lib}:"*) continue ;; esac
+         ${SUDO} "${PATCHELF}" --force-rpath --set-rpath "${_overlay_lib}${_rp:+:${_rp}}" "${_so}"
+         echo "RPATH: ${_overlay_lib} prepended in ${_so#${CUPY_PATH}/}"
+      done < <(find "${CUPY_PATH}" -name '*.so' -type f -print0)
+   fi
+
    # ── Post-install check: cupy/cupy#9742 (HIP __shfl_*_sync 32-bit mask) ─
    #
    # Refs:  https://github.com/cupy/cupy/issues/9742   (bug report)

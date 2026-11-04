@@ -141,7 +141,9 @@ declare -A PYTORCH_COMPANION_VERSIONS=(
    [2.9]="0.24.1:2.9.1"
    [2.10]="0.25.0:2.10.0"
    [2.11]="0.26.0:2.11.0"
-   [2.12]="0.27.0:2.11.0"
+   [2.12]="0.27.1:2.11.0"
+   [2.13]="0.28.0:2.11.0"
+   [2.14]="0.29.1:2.11.0"
 )
 
 # ── PyTorch stack manifest: (PT major.minor, ROCm major.minor) → all pins ──
@@ -325,6 +327,13 @@ resolve_aotriton_for_pt_only() {
       # explicit pin (or pass --aotriton-version on the CLI).
       # ACTION ITEM: when upstream cuts 0.12b / 0.13b / 0.14b, flip these
       # rows back to the matrix-prescribed values. Both are non-breaking.
+      # UPDATE 2026-11-03: 0.12b / 0.13b / 0.14b now EXIST upstream (verified via
+      # `git ls-remote --tags https://github.com/ROCm/aotriton.git`). Per pytorch
+      # cmake/External/aotriton.cmake __AOTRITON_VER at the release tags, PT 2.13
+      # pins 0.12b and PT 2.14.x pins 0.13b; those rows are added below. PT 2.11
+      # and 2.12 stay at 0.11.2b (their actual upstream __AOTRITON_VER).
+      2.14) echo "0.13b"   ;;   # pytorch v2.14.x __AOTRITON_VER
+      2.13) echo "0.12b"   ;;   # pytorch v2.13.0 __AOTRITON_VER
       2.12) echo "0.11.2b" ;;   # was 0.13b (matrix); upstream tag missing
       2.11) echo "0.11.2b" ;;   # was 0.12b (matrix); upstream tag missing
       2.10) echo "0.11.2b" ;;
@@ -336,6 +345,21 @@ resolve_aotriton_for_pt_only() {
       2.4)  echo "0.6b"    ;;
       2.3)  echo "0.4b"    ;;
       *)    echo ""        ;;
+   esac
+}
+
+# resolve_triton_for_pt_only: standalone (post-build) triton wheel version keyed
+# off PyTorch major.minor, mirroring resolve_aotriton_for_pt_only. Values are
+# pytorch's own .ci/docker/triton_version.txt at the matching release tag (the
+# runtime triton that torch.compile expects). Used only as the PT-fallback when
+# no manifest cell and no --triton-version apply; empty keeps the file default.
+resolve_triton_for_pt_only() {
+   local pt_short="$1"
+   case "${pt_short}" in
+      2.14) echo "3.8.0" ;;   # pytorch v2.14.x triton_version.txt
+      2.13) echo "3.7.1" ;;   # pytorch v2.13.0 triton_version.txt
+      2.12) echo "3.7.1" ;;   # pytorch v2.12.1 triton_version.txt
+      *)    echo ""      ;;
    esac
 }
 
@@ -684,7 +708,13 @@ resolve_pytorch_stack_versions() {
       TRITON_VERSION="${manifest_triton}"
       TRITON_VERSION_SOURCE="manifest cell '${MANIFEST_CELL_KEY}'"
    else
-      TRITON_VERSION_SOURCE="file default"
+      local _pt_triton=$(resolve_triton_for_pt_only "${PT_MAJOR_MINOR}")
+      if [[ -n "${_pt_triton}" ]]; then
+         TRITON_VERSION="${_pt_triton}"
+         TRITON_VERSION_SOURCE="PT-only fallback (resolve_triton_for_pt_only ${PT_MAJOR_MINOR} -> ${TRITON_VERSION})"
+      else
+         TRITON_VERSION_SOURCE="file default"
+      fi
    fi
 
    if [[ "${FLASHATTENTION_VERSION_USER_SET}" -eq 1 ]]; then
@@ -3025,6 +3055,33 @@ else
       export PYTORCH_INSTALL_DIR=${PYTORCH_PATH}
       export AOTRITON_INSTALLED_PREFIX=${AOTRITON_PATH}
 
+      # ── PT >= 2.12 rocSHMEM symmetric-memory backend disable (USE_NVSHMEM=0) ──
+      # PT 2.12 added a ROCm symmetric-memory backend (torch_rocshmem) that is
+      # auto-enabled (USE_NVSHMEM=ON, rocshmem_FOUND=1) whenever the SDK ships
+      # rocSHMEM headers. On the ROCm trees scoped below it is broken:
+      #   * rocm-10.x: torch_rocshmem fails to LINK -- upstream CMake expands
+      #     gfx90a -> gfx90a:xnack-/xnack+ (pytorch commit e2584b2) but
+      #     rocm-10.1.0 librocshmem.a ships only plain gfx90a objects, so
+      #     clang-offload-bundler aborts ("conflicting targets gfx90a and
+      #     gfx90a:xnack+").
+      #   * rocm-7.14.x: torch_rocshmem builds but its load-time init HANGS
+      #     during `import torch` (slurm 58331/58332).
+      # Upstream PyTorch CI disables the same backend with USE_NVSHMEM=0 on its
+      # rocm-preview lane (pytorch commit b3daa6d) for the identical init-hang.
+      # Compile it out here; torch.ops.symm_mem.* (niche distributed API) becomes
+      # unavailable, matching PT <= 2.11. Scoped to the known-bad trees so working
+      # backends (e.g. rocm-7.13.0) are untouched; extend the ROCm test if a
+      # future tree regresses.
+      _NVS_PT_MAJOR="${PYTORCH_VERSION%%.*}"
+      _NVS_PT_MINOR="${PYTORCH_VERSION#*.}"; _NVS_PT_MINOR="${_NVS_PT_MINOR%%.*}"
+      _NVS_ROCM_MAJOR="${ROCM_VERSION%%.*}"
+      _NVS_ROCM_MINOR="${ROCM_VERSION#*.}"; _NVS_ROCM_MINOR="${_NVS_ROCM_MINOR%%.*}"
+      if { [[ "${_NVS_PT_MAJOR}" -gt 2 ]] || { [[ "${_NVS_PT_MAJOR}" -eq 2 ]] && [[ "${_NVS_PT_MINOR}" -ge 12 ]]; }; } \
+         && { [[ "${_NVS_ROCM_MAJOR}" -ge 10 ]] || { [[ "${_NVS_ROCM_MAJOR}" -eq 7 ]] && [[ "${_NVS_ROCM_MINOR}" -ge 14 ]]; }; }; then
+         export USE_NVSHMEM=0
+         echo "pytorch: USE_NVSHMEM=0 (disable rocSHMEM symm-mem backend) for PT ${PYTORCH_VERSION} on ROCm ${ROCM_VERSION} -- broken torch_rocshmem link/init on this tree"
+      fi
+
       # ── ROCm 10.1-nightly RAGreedy (Greedy Register Allocator) crash ──
       # Some ROCm 10.1 nightlies ship an AMD clang 24.0.0git whose AMDGPU
       # Greedy Register Allocator SIGSEGVs during HIP device codegen at
@@ -4093,14 +4150,51 @@ PY
       # diagnostic output. Without this timeout the whole sweep stalled
       # until manual scancel.
       echo "[pytorch C1 validation] running 'import torch' check (timeout 600s)"
+      # Run the check in the background so a wedged import/HIP-init can be
+      # caught live with gdb before `timeout` kills it. A healthy run prints
+      # the is_available() line within seconds; if it has not appeared after
+      # _C1_HANG_PROBE_S the process is stuck (e.g. the PT>=2.12 rocSHMEM
+      # symmetric-memory backend load-time init hang on some ROCm SDKs, slurm
+      # 58256/58257). On that signal we snapshot a full backtrace, then let
+      # `timeout` run its course so the downstream rc=124 handling is unchanged.
+      _c1_out=$(mktemp)
+      _c1_sent='torch.cuda.is_available() ='
+      _c1_bt="$(dirname "${INSTALL_PATH}")/gdb_hang_pytorch_v${PYTORCH_VERSION}_$(date +%Y%m%d_%H%M%S).txt"
+      _C1_HANG_PROBE_S=${HPCTRAINING_C1_HANG_PROBE_S:-90}
       timeout --foreground --kill-after=30 600 python3 -c "
 import torch
 print('  torch.__version__   =', torch.__version__)
 print('  torch.version.hip   =', getattr(torch.version, 'hip', None))
 print('  torch.version.cuda  =', torch.version.cuda)
 print('  torch.cuda.is_available() =', torch.cuda.is_available())
-"
-      _c1_rc=$?
+" >"${_c1_out}" 2>&1 &
+      _c1_bg=$!
+      _c1_captured=0 ; _c1_waited=0
+      while kill -0 ${_c1_bg} 2>/dev/null; do
+         grep -qF "${_c1_sent}" "${_c1_out}" 2>/dev/null && break
+         if [ ${_c1_captured} -eq 0 ] && [ ${_c1_waited} -ge ${_C1_HANG_PROBE_S} ]; then
+            _c1_pid=$(pgrep -P ${_c1_bg} -n python3 2>/dev/null); [ -z "${_c1_pid}" ] && _c1_pid=${_c1_bg}
+            echo "[pytorch C1 validation] import still wedged after ${_c1_waited}s; capturing gdb backtrace of pid ${_c1_pid} -> ${_c1_bt}" >&2
+            {
+               echo "### hung 'import torch' backtrace: pytorch_v${PYTORCH_VERSION}, ROCm ${ROCM_VERSION} (${ROCM_PATH:-?})"
+               echo "### pid=${_c1_pid} host=$(hostname) date=$(date -u +%FT%TZ) waited=${_c1_waited}s"
+               echo "### partial stdout so far:"; sed 's/^/###   /' "${_c1_out}" 2>/dev/null
+               echo "### ===== gdb: info sharedlibrary + thread apply all bt ====="
+               ${SUDO:-sudo} timeout 150 gdb -p ${_c1_pid} -batch -nx \
+                  -ex 'set pagination off' \
+                  -ex 'info sharedlibrary' \
+                  -ex 'thread apply all bt 60' 2>&1
+               echo "### ===== /proc/${_c1_pid}/stack (kernel) ====="
+               ${SUDO:-sudo} cat /proc/${_c1_pid}/stack 2>/dev/null
+               echo "### ===== /proc/${_c1_pid}/wchan ====="; cat /proc/${_c1_pid}/wchan 2>/dev/null; echo
+            } 2>&1 | ${SUDO:-sudo} tee "${_c1_bt}" >/dev/null
+            ${SUDO:-sudo} chmod a+r "${_c1_bt}" 2>/dev/null || true
+            _c1_captured=1
+         fi
+         sleep 2; _c1_waited=$((_c1_waited+2))
+      done
+      wait ${_c1_bg}; _c1_rc=$?
+      cat "${_c1_out}"; rm -f "${_c1_out}"
       if [[ ${_c1_rc} -eq 124 || ${_c1_rc} -eq 137 ]]; then
          echo "" >&2
          echo "######################################################################" >&2
@@ -4128,6 +4222,19 @@ print('  torch.cuda.is_available() =', torch.cuda.is_available())
          echo "     and that ROCm matches the SDK pytorch was built against -- a" >&2
          echo "     driver/runtime version skew on TheRock RC trees is the most" >&2
          echo "     plausible trigger." >&2
+         if [ -n "${_c1_bt:-}" ] && [ -s "${_c1_bt}" ]; then
+            echo "[pytorch C1 validation] gdb backtrace of the hung process saved to:" >&2
+            echo "    ${_c1_bt}" >&2
+         fi
+         # Preserve the just-built (but unvalidated) install for post-mortem
+         # instead of letting the EXIT trap wipe it: move it out of the module
+         # tree so it cannot be mistaken for a good install.
+         if [ -d "${INSTALL_PATH}" ]; then
+            _c1_keep="${INSTALL_PATH}.hang-debug.$(date +%Y%m%d_%H%M%S)"
+            if ${SUDO:-sudo} mv "${INSTALL_PATH}" "${_c1_keep}" 2>/dev/null; then
+               echo "[pytorch C1 validation] preserved hung install at: ${_c1_keep}" >&2
+            fi
+         fi
          echo "######################################################################" >&2
          exit 1
       elif [[ ${_c1_rc} -ne 0 ]]; then

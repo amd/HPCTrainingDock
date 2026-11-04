@@ -222,6 +222,7 @@ do
    shift
 done
 
+<<<<<<< Updated upstream
 # Resolve the default HYPRE version from the ROCm version (unless pinned on the
 # CLI); see the HYPRE x ROCm compatibility matrix at the top of this script.
 # v3.1.0's HIP build breaks starting at ROCm 7.1.0 (Thrust 2.8.5 dropped the
@@ -233,6 +234,17 @@ done
 # releases and suffixed tokens (nightlies/afar) compare correctly.
 if [ "${HYPRE_VERSION_EXPLICIT}" = "0" ]; then
    if [ "$(printf '%s\n' "7.1.0" "${ROCM_VERSION}" | sort -V | head -n1)" = "7.1.0" ]; then
+=======
+# Resolve the default HYPRE version from the ROCm major (unless pinned on the
+# CLI). ROCm >= 10 ships CCCL-3-era rocThrust; upstream HYPRE v3.2.0 added the
+# HIP branch for HYPRE_THRUST_IDENTITY, so it builds there unpatched (verified on
+# rocm-10.1.0 / gfx90a, THRUST_VERSION 200805). v3.1.0 lacks that branch and
+# still needs the downstream identity patch below. Older ROCm keeps 3.1.0 (its
+# thrust::identity branch is valid there). Pass --hypre-version 3.1.0 to force
+# the older release; the identity patch auto-applies to it.
+if [ "${HYPRE_VERSION_EXPLICIT}" = "0" ]; then
+   if [ "${ROCM_VERSION%%.*}" -ge 10 ] 2>/dev/null; then
+>>>>>>> Stashed changes
       HYPRE_VERSION="3.2.0"
    fi
 fi

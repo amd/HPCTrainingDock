@@ -504,9 +504,12 @@ if [[ "${SKIP_EXTRACT}" != "1" ]]; then
       # -type f matches both .lua (Lmod) and extensionless Tcl modulefiles. The
       # Lmod-specific mbase / .lua rules below simply don't match Tcl content,
       # while the /opt/rocm-<v> rewrite (needed by both) applies to all files.
+      # /opt/rocm{,plus}-<v> is only rewritten at the start of a path, so the
+      # pass is idempotent on host-built modulefiles that already contain
+      # ${TOP_INSTALL_PATH}/rocm{,plus}-<v> (unanchored, it doubled the prefix).
       ${SUDO} find "${LUA_TARGETS[@]}" -type f -print0 | ${SUDO} xargs -0 sed -i \
-         -e "s|/opt/rocmplus-${ROCM_VERSION}|${TOP_INSTALL_PATH}/rocmplus-${ROCM_VERSION}|g" \
-         -e "s|/opt/rocm-${ROCM_VERSION}|${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}|g" \
+         -e "s#\(^\|[^[:alnum:]_./-]\)/opt/rocmplus-${ROCM_VERSION}#\1${TOP_INSTALL_PATH}/rocmplus-${ROCM_VERSION}#g" \
+         -e "s#\(^\|[^[:alnum:]_./-]\)/opt/rocm-${ROCM_VERSION}#\1${TOP_INSTALL_PATH}/rocm-${ROCM_VERSION}#g" \
          -e "s|local mbase = \" /etc/lmod/modules/ROCm/rocm\"|local mbase = \"${TOP_MODULE_PATH}\"|" \
          -e "s|local mbase = \"/etc/lmod/modules/ROCm/rocm\"|local mbase = \"${TOP_MODULE_PATH}\"|" \
          -e "s|/etc/lmod/modules/ROCm/rocm|${TOP_MODULE_PATH}/base/rocm|g" \

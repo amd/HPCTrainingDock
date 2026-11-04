@@ -63,7 +63,7 @@ under the appropriate directory and extend that mapping.
 
 Affected ROCm releases (source baselines we can reproducibly patch):
 **6.3.0, 6.3.1, 6.3.2, 6.3.3, 6.3.4, 6.4.0, 6.4.1, 6.4.2, 6.4.3, 7.0.0,
-7.0.1, 7.0.2, 7.1.0, 7.1.1, 7.2.0, 7.2.2, 7.2.3, 7.2.4, afar-23.2.1**.
+7.0.1, 7.0.2, 7.1.0, 7.1.1, 7.2.0, 7.2.2, 7.2.3, 7.2.4, 7.13.0, afar-23.2.1**.
 7.2.1 is excluded on purpose: it is absent from `baselines.conf` and from the
 dispatch table, so it is treated as a soft no-op rather than patched.
 
@@ -91,12 +91,27 @@ is named by the security bulletin (`sb6033`) rather than by a single component
 version, because one logical fix spans every component version in that table.
 `build_rccl_sb6033()` in `rocm_patches.sh` looks up the row, clones upstream at
 the pinned ref, applies the patch, builds `librccl.so.1`, and asserts the guard
-sites are present before shipping it. A release vulnerable but absent from
-`baselines.conf` (7.12.0, 7.13.0, afar-23.1.0, the 7.14.0a20260612 nightly) is a
-deliberate soft no-op: its recorded build commit is not reachable from any public
-ref, so no tree differs from the shipped library by this patch alone. Those are
-remediated by retirement in favour of 7.14.0 / 7.14.1 / afar-24.3.0, which already
-carry the fix.
+sites are present before shipping it. An overlay library already on disk is
+reused only if it carries the guards; otherwise it is rebuilt. Rows for the
+rocm-systems monorepo (`SRC_SUBDIR=projects/rccl`) apply the patch from the
+repository root with `git apply --directory=projects/rccl`. Run from inside the
+subdirectory, `git apply` silently skips every path in the patch while both
+`--check` directions still succeed, so an unpatched tree would build.
+
+ROCm 7.13.0's recorded build commit (`3309c6114a`) is not public either, but its
+RCCL source is pinned to the public `therock-7.13` tag by bracketing. The shipped
+library contains every `NCCL_*` / `RCCL_*` parameter added by the commits up to
+that tag and none of the 61 added after it on the 7.14 line. After the tag, the
+7.13.0 release line changes only RCCL documentation. The afar-23.2.1 patch
+applies to that tag unchanged.
+
+A release vulnerable but absent from `baselines.conf` (7.12.0, afar-23.1.0, the
+7.14.0a20260612 nightly) is a deliberate soft no-op: its recorded build commit
+is not reachable from any public ref, so no tree differs from the shipped
+library by this patch alone. Those are remediated by retirement in favour of
+7.14.1 / afar-24.3.0, which already carry the fix. Prefer 7.14.1 over 7.14.0:
+the only RCCL change between them (ROCM-27881) turns off the InfiniBand
+fault-injection test layer that 7.14.0 enables by default.
 
 The fix can be delivered two ways. In overlay form the patched `librccl.so.1`
 installs to a separate prefix that precedes the SDK on `LD_LIBRARY_PATH`: the
@@ -112,6 +127,29 @@ standalone `RCCL_CVE-2026-43598_patch.sh` in this directory offers both modes
 verification suite (`--test-only`) and a `--restore` for replace mode; it is
 self-contained and can remediate an SDK with no HPCTrainingDock machinery present.
 
+The rebuilt library carries device code only for the GPU targets it was built
+for: `AMDGPU_GFXMODEL` in `build_rccl_sb6033()` and `--gfx` in the standalone
+script, both `gfx942;gfx90a` on AAC6. The stock library covers many more targets
+(23 in 7.13.0), so build for every architecture the install must serve before
+shipping an overlay to other hardware.
+
+The overlay also cannot reach a binary that finds `librccl` through a `DT_RPATH`
+pointing at the SDK, because `DT_RPATH` is searched before `LD_LIBRARY_PATH`
+(`DT_RUNPATH` is searched after it and is fine). CuPy's RCCL binding
+(`cupy_backends/cuda/libs/nccl*.so`) is linked that way. On AAC6 it loaded the
+stock library even with the module loaded. `extras/scripts/cupy_setup.sh` now
+prepends `rocm-patches-<version>/lib` to that RPATH after every install, and the
+installed copies were fixed the same way. To audit an install tree, list its
+`DT_RPATH` consumers of `librccl`, then check each one with the `ldd` command
+in the verification steps below (a fixed CuPy binding is still listed):
+
+```bash
+find <tree> -type f -name '*.so*' | while read -r f; do
+  d=$(readelf -d "$f" 2>/dev/null) || continue
+  grep -q 'NEEDED.*librccl' <<< "$d" && grep -q '(RPATH)' <<< "$d" && echo "$f"
+done
+```
+
 The upstream fix changes the proxy wire format: the client now sends a 4-byte
 integer handle where it used to send an 8-byte pointer. A patched and an
 unpatched `librccl` cannot share a communicator, so every rank of a job must use
@@ -122,7 +160,10 @@ out to all nodes together and check any container images that bundle their own
 
 On AAC6 the patch is applied to every installed ROCm version that has a pinned
 baseline (overlay form, via the modulefile), so each `rocm/<version>` module
-there resolves `librccl.so.1` to the remediated library.
+there resolves `librccl.so.1` to the remediated library, and so does CuPy's RCCL
+binding in the matching `rocmplus-<version>` tree. 7.2.1 loads 7.2.2; 7.14.x,
+10.1.0 and afar-24.3.0 ship the vendor fix. 7.12.0 and afar-23.1.0 remain
+unpatched.
 
 To apply this fix on its own, without the rest of the HPCTrainingDock patch
 machinery, run the standalone script against a target SDK. It autodetects the
@@ -165,7 +206,15 @@ strings -a "$(readlink -f "$lib")" | grep -c 'tpLocalRank %d out of range'
 # 5 = patched; 0 = unpatched and still vulnerable
 ```
 
-That is a static check of the file. For a fuller confirmation that the loader
+That covers binaries that honour `LD_LIBRARY_PATH`. For one specific binary,
+ask the loader directly, since a `DT_RPATH` can override the path:
+
+```bash
+strings -a "$(readlink -f "$(ldd <binary> | awk '/librccl/{print $3}')")" \
+  | grep -c 'tpLocalRank %d out of range'
+```
+
+Both are static checks of the file. For a fuller confirmation that the loader
 actually resolves to the patched copy and that the fixed proxy path runs,
 `./RCCL_CVE-2026-43598_patch.sh --rocm-path <sdk> --test-only` runs the five-check
 suite: loader precedence, guard presence with a negative control against the

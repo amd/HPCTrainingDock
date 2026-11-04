@@ -488,7 +488,7 @@ rocm_version_to_patches() {
       # rocprof-compute nuitka build (~10-30 min) runs last.  The pytorch
       # modulefile edit is listed before it because it is instant and must
       # not be stranded behind a nuitka failure.
-      7.13.0)           echo "rocprof-sys-1.6.0 rocprof-sys-instrument-libomp pytorch-ompt-reentrancy-workaround rocprof-compute" ;;
+      7.13.0)           echo "rccl-sb6033 rocprof-sys-1.6.0 rocprof-sys-instrument-libomp pytorch-ompt-reentrancy-workaround rocprof-compute" ;;
       # ROCm 10.x: rocprofiler-sdk node-wedging overlay -- a shutdown-path
       # race could destabilize the node under concurrent per-GPU rocprofv3
       # sessions. The bundle is a binary drop-in (no build): it takes
@@ -1891,8 +1891,11 @@ build_rccl_sb6033() {
       || send-error "missing vendored patch: ${bundle_dir}/${patch_file}"
 
    if [ -f "${out_lib}" ] && [ "${REPLACE}" -eq 0 ]; then
-      echo "[rocm_patches] ${out_lib} already exists -- skipping rebuild (use --replace to force)"
-      return 0
+      if strings -a "${out_lib}" 2>/dev/null | grep -qF 'tpLocalRank %d out of range'; then
+         echo "[rocm_patches] ${out_lib} already exists -- skipping rebuild (use --replace to force)"
+         return 0
+      fi
+      echo "[rocm_patches] ${out_lib} exists but lacks the SB-6033 guards -- rebuilding"
    fi
 
    local src_root="${INSTALL_PREFIX}/source/rccl"
@@ -1920,18 +1923,22 @@ build_rccl_sb6033() {
 
    local patch_root="${src_root}"
    [ "${src_subdir}" = "." ] || patch_root="${src_root}/${src_subdir}"
-   # Patches are cut with `git diff --relative`, so -p1 from the rccl tree root
-   # works for both the standalone and monorepo layouts. Re-running after a
-   # successful apply is a no-op rather than a failure.
-   if ! git -C "${patch_root}" apply --check "${bundle_dir}/${patch_file}" 2>/dev/null; then
-      if git -C "${patch_root}" apply --check --reverse "${bundle_dir}/${patch_file}" 2>/dev/null; then
+   # Patches are cut with `git diff --relative` (paths relative to the rccl
+   # tree root). Apply from the repo root with --directory: run from inside a
+   # monorepo subdir, `git apply` silently skips every path outside that subdir,
+   # so both --check directions "succeed" and nothing is applied. Re-running
+   # after a successful apply is a no-op rather than a failure.
+   local -a git_apply=(git -C "${src_root}" apply)
+   [ "${src_subdir}" = "." ] || git_apply+=(--directory="${src_subdir}")
+   if ! "${git_apply[@]}" --check "${bundle_dir}/${patch_file}" 2>/dev/null; then
+      if "${git_apply[@]}" --check --reverse "${bundle_dir}/${patch_file}" 2>/dev/null; then
          echo "[rocm_patches] rccl-sb6033 patch already applied to ${patch_root}"
       else
          echo "[rocm_patches] ERROR: ${patch_file} does not apply to ${repo} @ ${ref}" >&2
          return 1
       fi
    else
-      git -C "${patch_root}" apply "${bundle_dir}/${patch_file}" || return 1
+      "${git_apply[@]}" "${bundle_dir}/${patch_file}" || return 1
    fi
 
    # Build against the very SDK we are overlaying, not whatever /opt/rocm points
@@ -1967,16 +1974,17 @@ build_rccl_sb6033() {
       echo "[rocm_patches] ERROR: build produced no librccl.so under ${build_dir}" >&2
       return 1
    fi
-   ${SUDO} install -m 0755 "${built}" "${lib_dir}/$(basename "${built}")"
-   ${SUDO} ln -sfn "$(basename "${built}")" "${out_lib}"
-   ${SUDO} ln -sfn "librccl.so.1" "${lib_dir}/librccl.so"
 
    # Fail loudly if the artifact somehow lacks the fix: the whole point of the
-   # overlay is that this string is present.
-   if ! strings -a "${out_lib}" 2>/dev/null | grep -qF 'tpLocalRank %d out of range'; then
+   # overlay is that this string is present. Checked before install, because the
+   # overlay dir is already on LD_LIBRARY_PATH and would serve whatever lands there.
+   if ! strings -a "${built}" 2>/dev/null | grep -qF 'tpLocalRank %d out of range'; then
       echo "[rocm_patches] ERROR: built librccl lacks the SB-6033 guards -- refusing to ship it" >&2
       return 1
    fi
+   ${SUDO} install -m 0755 "${built}" "${lib_dir}/$(basename "${built}")"
+   ${SUDO} ln -sfn "$(basename "${built}")" "${out_lib}"
+   ${SUDO} ln -sfn "librccl.so.1" "${lib_dir}/librccl.so"
    echo "[rocm_patches] installed patched librccl: ${out_lib} -> $(basename "${built}")"
    return 0
 }

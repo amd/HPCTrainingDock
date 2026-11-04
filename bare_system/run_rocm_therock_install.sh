@@ -1117,18 +1117,23 @@ unset _guard_apply
 
 # ---------------- shared-location perms --------------------------------
 # NIGHTLY MODE: the rolling test tree is owned root:${NIGHTLY_GROUP} with
-# group-rw / no-other perms (setgid dirs) -- NOT world-readable -- so only the
-# nightlies group can read/write it. The rocm-patches-<ver> overlay is included
-# when present (make_group_rw skips missing paths). Off nightly, keep the
-# world-readable default (auto-enabled outside $HOME).
+# group-rw perms (setgid dirs) so only the nightlies group can WRITE it, and is
+# then made world-readable so any user (e.g. tutorial attendees) can load it.
+# The rocm-patches-<ver> overlay is included when present (both helpers skip
+# missing paths). Off nightly, keep the world-readable default (auto-enabled
+# outside $HOME).
 if [ "${NIGHTLY_MODE}" = "1" ]; then
-   make_group_rw "${NIGHTLY_GROUP}" \
-      "${INSTALL_DIR}" \
-      "${TOP_MODULE_PATH}/base" \
-      "${TOP_MODULE_PATH}/rocm-${ROCM_NUMERIC}" \
-      "${TOP_MODULE_PATH}/rocmplus-${ROCM_NUMERIC}" \
-      "${TOP_INSTALL_PATH}/rocm-patches-${ROCM_NUMERIC}" \
+   _nightly_paths=(
+      "${INSTALL_DIR}"
+      "${TOP_MODULE_PATH}/base"
+      "${TOP_MODULE_PATH}/rocm-${ROCM_NUMERIC}"
+      "${TOP_MODULE_PATH}/rocmplus-${ROCM_NUMERIC}"
+      "${TOP_INSTALL_PATH}/rocm-patches-${ROCM_NUMERIC}"
       "${MODULE_FILE}"
+   )
+   make_group_rw "${NIGHTLY_GROUP}" "${_nightly_paths[@]}"
+   make_world_readable "${_nightly_paths[@]}"
+   unset _nightly_paths
 else
    _world_ro=0
    case "${WORLD_READABLE}" in
