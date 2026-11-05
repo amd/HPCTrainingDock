@@ -695,6 +695,110 @@ open(f,'w').write(txt.replace(old, new))
 print('ScaLAPACK.py patched successfully')
 "
 
+         # ── thrust/CCCL feature probes (replace stale header-path gates) ──
+         # The ROCm CCCL headers moved from include/cuda/std/ (ROCm <= 10.1) to
+         # include/hipccl/cuda/std/ (ROCm 10.2+), so the old
+         # `-f ${ROCM_PATH}/include/cuda/std/__cccl/version.h` test silently
+         # MISFIRES on 10.2 (reports "no CCCL" though CCCL_VERSION is 3000002)
+         # and would wrongly SKIP the iter_difference_t / tuple-get / identity
+         # patches. The thrust API also churned BOTH ways across 10.x:
+         # thrust::async + thrust::identity were REMOVED in 10.0/10.1 then
+         # RESTORED in 10.2, and rocThrust gained CCCL-3.0 parity in 10.2 so it
+         # now transitively provides cuda::std::iter_difference_t. No fixed path
+         # test can track that. Instead, compile-probe each exact thrust/CCCL API
+         # the patches below depend on -- with the SAME HIP compiler + flags
+         # PETSc's make uses -- and apply a patch ONLY when its API is genuinely
+         # missing/broken on this SDK. Each probe falls back to the legacy
+         # header-path heuristic if hipcc cannot be run at patch time.
+         PETSC_HIPCC="${ROCM_PATH:-/opt/rocm}/bin/hipcc"
+         _probe_gfx="${AMDGPU_GFXMODEL%%,*}"; _probe_gfx="${_probe_gfx%%;*}"
+         [ -n "${_probe_gfx}" ] || _probe_gfx="gfx942"
+         # petsc_hip_compiles: compile the HIP snippet on stdin with hipcc.
+         # rc 0 = compiles, 1 = compile error, 2 = probe cannot run (no hipcc).
+         petsc_hip_compiles() {
+            [ -x "${PETSC_HIPCC}" ] || return 2
+            local _s _o _rc
+            _s=$(mktemp --suffix=.hip.cxx 2>/dev/null) || return 2
+            _o="${_s}.o"
+            cat > "${_s}"
+            "${PETSC_HIPCC}" --offload-arch="${_probe_gfx}" -std=gnu++20 \
+               -I"${ROCM_PATH}/include" -c -x hip "${_s}" -o "${_o}" >/dev/null 2>&1
+            _rc=$?
+            rm -f "${_s}" "${_o}"
+            return ${_rc}
+         }
+         echo "petsc: probing thrust/CCCL APIs with ${PETSC_HIPCC} (--offload-arch=${_probe_gfx})"
+
+         # Probe 1 -> matdensecupmimpl.h cuda/std/iterator include.
+         # Needed only when PETSc's CCCL>=3.0 branch references
+         # cuda::std::iter_difference_t but thrust does NOT transitively supply it
+         # (ROCm 7.13..10.1). On pre-CCCL3 rocms the #if is false (empty TU
+         # compiles -> not needed); on 10.2 the symbol is transitively available
+         # (compiles -> not needed).
+         if petsc_hip_compiles <<'PETSC_PROBE'
+#include <thrust/device_vector.h>
+#include <thrust/copy.h>
+#if defined(CCCL_VERSION) && CCCL_VERSION >= 3000000
+using _petsc_probe_t = cuda::std::iter_difference_t<int *>;
+_petsc_probe_t _petsc_probe_v = 0;
+#endif
+PETSC_PROBE
+         then PETSC_NEED_ITERDIFF_PATCH=0
+         else
+            _rc=$?
+            if [ "${_rc}" -eq 1 ]; then PETSC_NEED_ITERDIFF_PATCH=1
+            elif [ -n "${ROCM_PATH:-}" ] && [ -f "${ROCM_PATH}/include/cuda/std/__cccl/version.h" ]; then PETSC_NEED_ITERDIFF_PATCH=1
+            else PETSC_NEED_ITERDIFF_PATCH=0; fi
+         fi
+
+         # Probe 2 -> aijhipsparse async-include guard. Needed when
+         # <thrust/async/for_each.h> is gone (CCCL 3.0 in 10.0/10.1).
+         if petsc_hip_compiles <<'PETSC_PROBE'
+#include <thrust/async/for_each.h>
+PETSC_PROBE
+         then PETSC_NEED_ASYNC_GUARD=0
+         else
+            _rc=$?
+            if [ "${_rc}" -eq 1 ]; then PETSC_NEED_ASYNC_GUARD=1
+            elif [ -n "${ROCM_PATH:-}" ] && [ ! -f "${ROCM_PATH}/include/thrust/async/for_each.h" ]; then PETSC_NEED_ASYNC_GUARD=1
+            else PETSC_NEED_ASYNC_GUARD=0; fi
+         fi
+
+         # Probe 3 -> aijhipsparse thrust::tuple member get<N>(). Needed when the
+         # MEMBER form t.get<N>() does not compile. On some CCCL 3.0 SDKs
+         # (e.g. ROCm 10.0/10.1) thrust::tuple aliases cuda::std::tuple with no
+         # member get<N>(); others (10.2+) keep the member, so probe, don't assume.
+         if petsc_hip_compiles <<'PETSC_PROBE'
+#include <thrust/tuple.h>
+bool _petsc_tuple_probe() {
+  thrust::tuple<int, int> t(1, 2);
+  return t.get<0>() < t.get<1>();
+}
+PETSC_PROBE
+         then PETSC_NEED_TUPLEGET_PATCH=0
+         else
+            _rc=$?
+            if [ "${_rc}" -eq 1 ]; then PETSC_NEED_TUPLEGET_PATCH=1
+            elif [ -n "${ROCM_PATH:-}" ] && [ -f "${ROCM_PATH}/include/cuda/std/__cccl/version.h" ]; then PETSC_NEED_TUPLEGET_PATCH=1
+            else PETSC_NEED_TUPLEGET_PATCH=0; fi
+         fi
+
+         # Probe 4 -> aijhipsparse thrust::identity removal. Needed when
+         # thrust::identity is absent (removed in CCCL 3.0 / ROCm 10.0/10.1;
+         # restored in 10.2).
+         if petsc_hip_compiles <<'PETSC_PROBE'
+#include <thrust/functional.h>
+auto _petsc_identity_probe() { return thrust::identity<int>(); }
+PETSC_PROBE
+         then PETSC_NEED_IDENTITY_PATCH=0
+         else
+            _rc=$?
+            if [ "${_rc}" -eq 1 ]; then PETSC_NEED_IDENTITY_PATCH=1
+            elif [ -n "${ROCM_PATH:-}" ] && [ -f "${ROCM_PATH}/include/cuda/std/__cccl/version.h" ]; then PETSC_NEED_IDENTITY_PATCH=1
+            else PETSC_NEED_IDENTITY_PATCH=0; fi
+         fi
+         echo "petsc: thrust-API patch decisions -> iterdiff=${PETSC_NEED_ITERDIFF_PATCH} async-guard=${PETSC_NEED_ASYNC_GUARD} tuple-get=${PETSC_NEED_TUPLEGET_PATCH} identity=${PETSC_NEED_IDENTITY_PATCH}"
+
          # Patch matdensecupmimpl.h: add <cuda/std/iterator> include for
          # CCCL 3.0+ rocms (rocm-therock-23.2.0 today; presumably rocm 7.3+
          # later). PETSc 3.24.1 line 310 uses cuda::std::iter_difference_t<T>
@@ -707,15 +811,16 @@ print('ScaLAPACK.py patched successfully')
          # undeclared in MatrixIteratorBase / DiagonalIterator / SubMatrixIterator
          # (slurm 8225, 2026-05-05).
          #
-         # Shell-guarded on the CCCL header presence so the patch only runs
-         # on rocms that actually ship libcudacxx. Numbered 7.0.0 ... 7.2.1
-         # have no <cuda/std/...> headers (verified by inspection), so the
-         # source tree on those builds remains byte-identical to upstream
-         # PETSc 3.24.1. Easy to tell at a glance which build flavor a given
-         # install came from: grep cuda/std/iterator
-         # ${PETSC_PATH}/include/petsc/private/matdensecupmimpl.h.
-         if [ -n "${ROCM_PATH:-}" ] && [ -f "${ROCM_PATH}/include/cuda/std/__cccl/version.h" ]; then
-            echo "petsc: detected libcudacxx (CCCL) under ${ROCM_PATH}/include/cuda/std/ -- applying matdensecupmimpl.h cuda/std/iterator patch"
+         # Gated on Probe 1 (PETSC_NEED_ITERDIFF_PATCH): only applied when
+         # cuda::std::iter_difference_t fails to compile after thrust's own
+         # includes on this SDK. Pre-CCCL3 rocms (7.0.0 ... 7.2.1, no
+         # <cuda/std/...>) and 10.2+ (rocThrust CCCL-3.0 parity supplies it
+         # transitively) both compile the probe, so the source tree stays
+         # byte-identical to upstream PETSc 3.24.1 there. Easy to tell at a
+         # glance which build flavor a given install came from: grep
+         # cuda/std/iterator ${PETSC_PATH}/include/petsc/private/matdensecupmimpl.h.
+         if [ "${PETSC_NEED_ITERDIFF_PATCH}" = "1" ]; then
+            echo "petsc: cuda::std::iter_difference_t not transitively provided by thrust on this SDK -- applying matdensecupmimpl.h cuda/std/iterator patch"
             python3 -c "
 import os
 f = os.path.join('include','petsc','private','matdensecupmimpl.h')
@@ -731,7 +836,7 @@ open(f,'w').write(txt.replace(old, new))
 print('matdensecupmimpl.h patched: added <cuda/std/iterator> for CCCL 3.0+')
 "
          else
-            echo "petsc: no libcudacxx detected (no ${ROCM_PATH:-<unset>}/include/cuda/std/__cccl/version.h) -- skipping matdensecupmimpl.h cuda/std/iterator patch"
+            echo "petsc: cuda::std::iter_difference_t is available (or probe/path inconclusive) -- skipping matdensecupmimpl.h cuda/std/iterator patch"
          fi
 
          # Patch aijhipsparse.hip.cpp: guard the thrust/async/for_each.h include
@@ -752,12 +857,14 @@ print('matdensecupmimpl.h patched: added <cuda/std/iterator> for CCCL 3.0+')
          # tested. So add an __has_include guard: the include is skipped when the
          # header is absent (CCCL 3.0+) and left untouched otherwise.
          #
-         # Shell-guarded on the header's ABSENCE so rocms that still ship
-         # thrust/async/for_each.h (numbered + <= 7.x nightlies) keep the source
-         # byte-identical to upstream PETSc 3.24.1. Easy to tell at a glance:
+         # Gated on Probe 2 (PETSC_NEED_ASYNC_GUARD): only applied when
+         # #include <thrust/async/for_each.h> fails to compile on this SDK.
+         # rocms that still ship the header (numbered + <= 7.x nightlies, and
+         # 10.2+ which restored it) keep the source byte-identical to upstream
+         # PETSc 3.24.1. Easy to tell at a glance:
          # grep __has_include ${PETSC_REPO}/src/mat/impls/aij/seq/seqhipsparse/aijhipsparse.hip.cpp
-         if [ -n "${ROCM_PATH:-}" ] && [ ! -f "${ROCM_PATH}/include/thrust/async/for_each.h" ]; then
-            echo "petsc: thrust/async/for_each.h absent under ${ROCM_PATH}/include (CCCL 3.0+) -- applying aijhipsparse.hip.cpp async-include guard"
+         if [ "${PETSC_NEED_ASYNC_GUARD}" = "1" ]; then
+            echo "petsc: thrust/async/for_each.h does not compile on this SDK (CCCL 3.0+) -- applying aijhipsparse.hip.cpp async-include guard"
             python3 -c "
 import os
 f = os.path.join('src','mat','impls','aij','seq','seqhipsparse','aijhipsparse.hip.cpp')
@@ -779,7 +886,7 @@ open(f,'w').write(txt.replace(old, new, 1))
 print('aijhipsparse.hip.cpp patched: __has_include guard on thrust/async/for_each.h for CCCL 3.0+')
 "
          else
-            echo "petsc: thrust/async/for_each.h present (or ROCM_PATH unset) -- skipping aijhipsparse.hip.cpp async-include guard"
+            echo "petsc: thrust/async/for_each.h compiles on this SDK -- skipping aijhipsparse.hip.cpp async-include guard"
          fi
 
          # Patch aijhipsparse.hip.cpp: the IJCompare / IJCompare4 comparator
@@ -799,14 +906,15 @@ print('aijhipsparse.hip.cpp patched: __has_include guard on thrust/async/for_eac
          # (CCCL 3.x), so it is a semantically identical no-op on the
          # numbered / <= 7.x rocms.
          #
-         # Gated on libcudacxx (CCCL) presence -- the SAME probe as the
-         # matdensecupmimpl.h patch above -- so trees without CCCL stay
+         # Gated on Probe 3 (PETSC_NEED_TUPLEGET_PATCH): only applied when the
+         # member form thrust::tuple::get<N>() fails to compile on this SDK, so
+         # trees where the member form still works (CCCL 2.x) stay
          # byte-identical to upstream PETSc 3.24.1. Idempotent (asserts the
          # pristine OR already-patched block is present). Greppable at a
          # glance: grep 'thrust::get<' \
          #   ${PETSC_REPO}/src/mat/impls/aij/seq/seqhipsparse/aijhipsparse.hip.cpp
-         if [ -n "${ROCM_PATH:-}" ] && [ -f "${ROCM_PATH}/include/cuda/std/__cccl/version.h" ]; then
-            echo "petsc: detected libcudacxx (CCCL) -- applying aijhipsparse.hip.cpp thrust::tuple get<N>() free-function patch"
+         if [ "${PETSC_NEED_TUPLEGET_PATCH}" = "1" ]; then
+            echo "petsc: thrust::tuple member .get<N>() does not compile on this SDK (CCCL 3.0) -- applying aijhipsparse.hip.cpp thrust::tuple get<N>() free-function patch"
             python3 -c "
 import os
 f = os.path.join('src','mat','impls','aij','seq','seqhipsparse','aijhipsparse.hip.cpp')
@@ -852,7 +960,7 @@ open(f,'w').write(txt)
 print('aijhipsparse.hip.cpp patched: thrust::tuple get<N>() member calls -> thrust::get<N>() free function (CCCL 3.0)')
 "
          else
-            echo "petsc: no libcudacxx detected (no ${ROCM_PATH:-<unset>}/include/cuda/std/__cccl/version.h) -- skipping aijhipsparse.hip.cpp thrust::tuple get<N>() free-function patch"
+            echo "petsc: thrust::tuple member .get<N>() compiles on this SDK -- skipping aijhipsparse.hip.cpp thrust::tuple get<N>() free-function patch"
          fi
 
          # Patch aijhipsparse.hip.cpp: CCCL 3.0 (ROCm 10) REMOVED thrust::identity.
@@ -871,13 +979,15 @@ print('aijhipsparse.hip.cpp patched: thrust::tuple get<N>() member calls -> thru
          # where thrust::identity still exists) and CCCL 3.x, so it is a
          # semantically identical no-op on numbered / <= 7.x rocms.
          #
-         # Gated on libcudacxx (CCCL) presence -- the SAME probe as the two patches
-         # above -- so trees without CCCL stay byte-identical to upstream PETSc
-         # 3.24.1. Idempotent (asserts the pristine OR already-patched form).
+         # Gated on Probe 4 (PETSC_NEED_IDENTITY_PATCH): only applied when
+         # thrust::identity<int>() fails to compile on this SDK (removed in CCCL
+         # 3.0 / ROCm 10.0-10.1; restored in 10.2), so trees where thrust::identity
+         # still exists stay byte-identical to upstream PETSc 3.24.1. Idempotent
+         # (asserts the pristine OR already-patched form).
          # Greppable at a glance: grep PetscHipIdentityInt \
          #   ${PETSC_REPO}/src/mat/impls/aij/seq/seqhipsparse/aijhipsparse.hip.cpp
-         if [ -n "${ROCM_PATH:-}" ] && [ -f "${ROCM_PATH}/include/cuda/std/__cccl/version.h" ]; then
-            echo "petsc: detected libcudacxx (CCCL) -- applying aijhipsparse.hip.cpp thrust::identity removal patch"
+         if [ "${PETSC_NEED_IDENTITY_PATCH}" = "1" ]; then
+            echo "petsc: thrust::identity not available on this SDK (removed in CCCL 3.0 / ROCm 10.0-10.1) -- applying aijhipsparse.hip.cpp thrust::identity removal patch"
             python3 -c "
 import os
 f = os.path.join('src','mat','impls','aij','seq','seqhipsparse','aijhipsparse.hip.cpp')
@@ -904,7 +1014,7 @@ open(f,'w').write(txt)
 print('aijhipsparse.hip.cpp patched: thrust::identity<int>() -> PetscHipIdentityInt() (CCCL 3.0 / ROCm 10)')
 "
          else
-            echo "petsc: no libcudacxx detected (no ${ROCM_PATH:-<unset>}/include/cuda/std/__cccl/version.h) -- skipping aijhipsparse.hip.cpp thrust::identity removal patch"
+            echo "petsc: thrust::identity is available on this SDK -- skipping aijhipsparse.hip.cpp thrust::identity removal patch"
          fi
 
          # System hdf5 is OPTIONAL: if its module loads cleanly we use it
