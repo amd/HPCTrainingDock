@@ -2522,11 +2522,47 @@ else
          "-Damd_comgr_DIR=${ROCM_PATH}/lib/cmake/amd_comgr" \
          "-Dhsakmt_DIR=${ROCM_PATH}/lib/cmake/hsakmt" \
       )
+      # AOTriton >=0.12b configures pybind11 via find_package(pybind11)
+      # (external), whereas <=0.11.2b vendored third_party/pybind11 through
+      # add_subdirectory. So from 0.12b the build host must supply a pybind11
+      # CMake config, otherwise configure dies with "No module named
+      # 'pybind11'" (slurm 59214/59216/59217 on 2026-11-05, PT 2.13.0/2.14.x).
+      # Provision it only for >=0.12b so the known-good 0.11.2b path (PT
+      # 2.9.1/2.12.1) stays byte-identical. apt is the primary install (same
+      # proven apt+proxy path ROCm uses in this job); pip --target is a
+      # fallback. -Dpybind11_DIR is passed when resolvable; otherwise the apt
+      # system config is still found on CMake's default prefixes.
+      PYBIND11_DIR_FLAG=""
+      _aot_num="${AOTRITON_VERSION%b}"
+      if [ -n "${_aot_num}" ] && \
+         [ "$(printf '%s\n%s\n' "${_aot_num}" 0.12 | sort -V | head -1)" = "0.12" ]; then
+         if ! "${PYTHON3_FOR_BUILD}" -c 'import pybind11' >/dev/null 2>&1; then
+            ${PKG_SUDO:-sudo} apt-get install -y pybind11-dev python3-pybind11 >/dev/null 2>&1 || true
+         fi
+         if ! "${PYTHON3_FOR_BUILD}" -c 'import pybind11' >/dev/null 2>&1; then
+            _PYBIND11_PREFIX="$(mktemp -d -t pybind11.XXXXXX)"
+            "${PYTHON3_FOR_BUILD}" -m pip install --quiet --target="${_PYBIND11_PREFIX}" pybind11 >/dev/null 2>&1 \
+               && export PYTHONPATH="${_PYBIND11_PREFIX}${PYTHONPATH:+:${PYTHONPATH}}"
+         fi
+         _PYBIND11_CMAKE_DIR="$("${PYTHON3_FOR_BUILD}" -c 'import pybind11; print(pybind11.get_cmake_dir())' 2>/dev/null || true)"
+         if [ -n "${_PYBIND11_CMAKE_DIR}" ] && [ -d "${_PYBIND11_CMAKE_DIR}" ]; then
+            PYBIND11_DIR_FLAG="-Dpybind11_DIR=${_PYBIND11_CMAKE_DIR}"
+         fi
+         echo "pytorch: [aotriton] ${AOTRITON_VERSION} needs external pybind11: import=$("${PYTHON3_FOR_BUILD}" -c 'import pybind11,sys; sys.stdout.write(pybind11.__version__)' 2>/dev/null || echo none) flag='${PYBIND11_DIR_FLAG}'"
+      fi
+      # Cap AOTriton-stage parallelism. The nested triton wheel build picks
+      # -j from MAX_JOBS (else nproc), and on these 120 GB / 96-thread sh5
+      # nodes -j96 OOM-killed cc1plus on triton's multi-GB ir.cc/gluon_ir.cc
+      # TUs (slurm 59304/59305, PT 2.13.0, 2026-11-05). 40 matches the cap the
+      # later pytorch wheel build already uses safely here. Exported before the
+      # configure so it covers both triton (MAX_JOBS) and the aotriton ninja.
+      export MAX_JOBS=40
+      export CMAKE_BUILD_PARALLEL_LEVEL=40
       # -DPython3_EXECUTABLE pins FindPython3 to the build python resolved
       # above (cray-python on the Cray). Without it, AOTriton's cmake
       # re-runs its own FindPython3 version sort and picks the dev-less
       # /usr/bin/python3.11 (job 8368). See the cray-python block above.
-      cmake -DAOTRITON_HIPCC_PATH=${ROCM_PATH}/bin "${AOTRITON_HIP_OVERRIDES[@]}" ${AOTRITON_EXTRA_CMAKE_FLAGS} -DPython3_EXECUTABLE="${PYTHON3_FOR_BUILD}" -DCMAKE_INSTALL_PREFIX=${AOTRITON_PATH} -DCMAKE_BUILD_TYPE=Release -DAOTRITON_GPU_BUILD_TIMEOUT=0  -G Ninja ..
+      cmake -DAOTRITON_HIPCC_PATH=${ROCM_PATH}/bin "${AOTRITON_HIP_OVERRIDES[@]}" ${AOTRITON_EXTRA_CMAKE_FLAGS} ${PYBIND11_DIR_FLAG} -DPython3_EXECUTABLE="${PYTHON3_FOR_BUILD}" -DCMAKE_INSTALL_PREFIX=${AOTRITON_PATH} -DCMAKE_BUILD_TYPE=Release -DAOTRITON_GPU_BUILD_TIMEOUT=0  -G Ninja ..
       AOTRITON_CONFIGURE_RC=$?
       if [ ${AOTRITON_CONFIGURE_RC} -ne 0 ]; then
          echo ""
@@ -2540,7 +2576,7 @@ else
          exit 1
       fi
 
-      ninja install
+      ninja -j "${MAX_JOBS}" install
       AOTRITON_NINJA_RC=$?
       if [ ${AOTRITON_NINJA_RC} -ne 0 ]; then
          echo ""

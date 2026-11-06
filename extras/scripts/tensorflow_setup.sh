@@ -26,7 +26,7 @@ TF_PATH_INPUT=""
 # default_tensorflow_version_for_rocm() (defined further below). The
 # auto-derive runs when TENSORFLOW_VERSION_USER_SET=0; passing
 # --tensorflow-version flips the sentinel and bypasses the auto-derive.
-TENSORFLOW_VERSION="2.20.0"
+TENSORFLOW_VERSION="2.21.0"
 TENSORFLOW_VERSION_USER_SET=0
 # GIT_BRANCH default is empty: when empty, the resolver below derives it
 # from TENSORFLOW_VERSION's major.minor as `r${MAJ}.${MIN}-rocm-enhanced`,
@@ -58,6 +58,43 @@ declare -A TENSORFLOW_SUPPORTED_VERSIONS=(
    [7.0]="2.19.1 2.18.1 2.17.1"
    [7.1]="2.20.0 2.19.1 2.18.1"
    [7.2]="2.20.0 2.19.1 2.18.1"
+   # ── Rows below are NOT from the ROCm install-on-linux docs (which do
+   # not yet list these pre-release ROCm trees). They are the TF <-> ROCm
+   # build-compatibility matrix determined by HPCTrainingDock on AAC6
+   # (ROCM-25052). They pick the right TF *branch* for each ROCm; a full
+   # end-to-end ROCm-enabled wheel on the very newest nightlies may need the
+   # extra workaround noted at the bottom of this block.
+   # ROCm 7.13.0 introduced TWO source breaks that only the
+   # r2.20+/-rocm-enhanced TF branches build through cleanly:
+   #   1. HIP removed the internal pArgs<n>(tuple,void**) kernel-arg packer
+   #      (fixed upstream by ROCm/tensorflow-upstream c3ad1676, 2026-06-16,
+   #      present on r2.20/r2.21/r2.22 -> public hipLaunchKernel path).
+   #   2. ROCm ships include/flatbuffers/ (FB major 25); TF must bundle FB
+   #      25 to match (r2.20+ pin flatbuffers 25.9.23; earlier TF pinned 24).
+   # => TF < 2.20 requires the in-script HIP-713 + flatbuffers patches below
+   #    to build on ROCm >= 7.13; TF >= 2.20 needs neither.
+   #
+   # IMPORTANT (build-system caveat): r2.22-rocm-enhanced moved ROCm enabling
+   # to a hermetic toolchain -- there, bare "--config=rocm" (used below) is a
+   # no-op for GPU and yields a CPU-ONLY wheel (is_rocm_build=False). Enabling
+   # ROCm on r2.22 requires "--config=rocm_base" + a toolchain config
+   # (rocm_clang_local/rocm_clang_hermetic), which this script does not yet
+   # emit. r2.20 and r2.21 still use the classic configure-written path and
+   # DO enable ROCm (configure appends common:rocm with using_rocm_hipcc=true
+   # + @local_config_rocm//crosstool:toolchain). So 2.22.0 is intentionally
+   # NOT listed until the bazel invocation is updated; 2.21.0 is the newest.
+   #
+   # NOTE on the newest nightlies (ROCm 10.2 / clang-24): engaging the ROCm
+   # clang crosstool also compiles the jpegxl dependency's highway (hwy) SIMD
+   # code with clang-24, which rejects its AVX-512 path ("_mm512_* requires
+   # target feature 'avx512f' ... changes the ABI"). This is a third-party /
+   # clang-24 issue, not the pArgs/flatbuffers breaks. It is handled below by
+   # a scoped per_file_copt that forces HWY_COMPILE_ONLY_STATIC on just the
+   # jpegxl/highway TUs (see the _TF_HWY_COPTS block near the bazel call).
+   [7.13]="2.21.0 2.20.0"
+   [10.0]="2.21.0 2.20.0"
+   [10.1]="2.21.0 2.20.0"
+   [10.2]="2.21.0 2.20.0"
 )
 
 default_tensorflow_version_for_rocm() {
@@ -101,6 +138,7 @@ usage()
    echo "    from the loaded ROCm major.minor via default_tensorflow_version_for_rocm() (highest"
    echo "    supported version per the ROCm install-on-linux docs). Mapping (ROCm -> highest TF):"
    echo "      6.3 -> 2.17.0    6.4 -> 2.18.1    7.0 -> 2.19.1    7.1 -> 2.20.0    7.2 -> 2.20.0"
+   echo "      7.13 -> 2.21.0   10.0/10.1/10.2 -> 2.21.0  (HPCTrainingDock-verified; TF 2.22 needs hermetic rocm_base, not yet wired)"
    echo "    Pass --tensorflow-version VER to override the auto-derive. The leaf clones the"
    echo "    matching r\${MAJOR}.\${MINOR}-rocm-enhanced upstream branch unless --git-branch is given."
    echo "    File-default fallback (when no auto-derive row matches): $TENSORFLOW_VERSION"
@@ -474,16 +512,24 @@ else
 
       cd tensorflow-upstream
 
-      if [[ "${GIT_BRANCH}" != "r2.20-rocm-enhanced" ]]; then
-
+      # Legacy net_zstd v1.4.5 downgrade: needed only on older TF branches.
+      # The r2.20+/-rocm-enhanced branches (r2.20/r2.21/r2.22) use a modern
+      # net_zstd that builds as-is; forcing the 1.4.5 downgrade on their
+      # newer workspace2.bzl shape is unnecessary and risks breaking the
+      # build. Skip it there. (ROCM-25052)
+      case "${GIT_BRANCH}" in
+         r2.20-rocm-enhanced|r2.21-rocm-enhanced|r2.22-rocm-enhanced)
+            echo "tensorflow: skipping legacy net_zstd v1.4.5 downgrade on ${GIT_BRANCH} (not needed)"
+            ;;
+         *)
          sed -i '/name = "net_zstd"/,/tf_mirror_urls/{
          s|build_file = "@local_xla//third_party:net_zstd.BUILD"|build_file = "@local_xla//third_party:net_zstd.BUILD"|
          s|sha256 = ".*"|sha256 = "b6c537b53356a3af3ca3e621457751fa9a6ba96daf3aebb3526ae0f610863532"|
          s|strip_prefix = ".*"|strip_prefix = "zstd-1.4.5/lib"|
          s|urls = tf_mirror_urls("https://github.com/facebook/zstd/archive/.*"|urls = tf_mirror_urls("https://github.com/facebook/zstd/archive/v1.4.5.zip" |
 }' tensorflow//workspace2.bzl
-
-      fi
+            ;;
+      esac
 
       export CLANG_COMPILER=`which clang`
       sed -i "s|/usr/lib/llvm-18/bin/clang|$CLANG_COMPILER|" .bazelrc
@@ -957,6 +1003,28 @@ ROCM_FB_PATCH_EOF
       mkdir -p "${BAZEL_OUTPUT_BASE}"
       echo "tensorflow: bazel --output_base=${BAZEL_OUTPUT_BASE} (off NFS, per-job)"
 
+      # jpegxl/highway SIMD workaround (ROCM-25052). On ROCm clang >= 23
+      # (HIP >= 7.13), compiling the jpegxl dependency pulls highway's
+      # per-target SIMD headers into single TUs; clang-24 strictly rejects
+      # always_inline intrinsics whose target feature exceeds the enclosing
+      # function's, aborting the build on successive ISA levels, e.g.:
+      #   error: always_inline function '_mm512_load_ps' requires target
+      #     feature 'avx512f' ... would be inlined into 'Load' ... changes ABI
+      #   error: always_inline function '_mm256_cvtts_ps_epi32' requires
+      #     target feature 'avx10.2' ... inlined into 'ConvertInRangeTo' ...
+      # Chasing these with per-feature -m flags is whack-a-mole. Instead tell
+      # highway to compile ONLY its static baseline target (dropping the
+      # AVX3/AVX10 dynamic-dispatch TUs entirely) via HWY_COMPILE_ONLY_STATIC
+      # -- a supported highway knob (hwy/detect_targets.h: sets HWY_TARGETS =
+      # HWY_STATIC_TARGET). jpegxl is only a JPEG-XL image codec, irrelevant
+      # to ML, so losing its SIMD dispatch is harmless. Unrelated to the
+      # pArgs/flatbuffers breaks; this is a third-party + clang-24 issue.
+      _TF_HWY_COPTS=()
+      if [[ "${_HIP_VERSION_INT}" -ge 71300000 ]]; then
+         _TF_HWY_COPTS=( "--per_file_copt=.*(jpegxl|highway).*@-DHWY_COMPILE_ONLY_STATIC=1" )
+         echo "tensorflow: applying jpegxl/highway HWY_COMPILE_ONLY_STATIC workaround (ROCm clang>=23)"
+      fi
+
       # Bazel build: explicitly capture rc and fail loudly if non-zero.
       # The leaf-script does NOT use `set -e`, so without this check
       # a Bazel failure (e.g. the librocm_smi64.so.1.0.* duplicate-
@@ -977,6 +1045,7 @@ ROCM_FB_PATCH_EOF
          build --config=opt --config=rocm --repo_env=WHEEL_NAME=tensorflow_rocm \
                --action_env=project_name=tensorflow_rocm/ \
                --noexperimental_check_external_repository_files \
+               "${_TF_HWY_COPTS[@]}" \
                //tensorflow/tools/pip_package:wheel --verbose_failures
       bazel_rc=$?
       if [ ${bazel_rc} -ne 0 ]; then
