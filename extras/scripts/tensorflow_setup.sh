@@ -26,7 +26,7 @@ TF_PATH_INPUT=""
 # default_tensorflow_version_for_rocm() (defined further below). The
 # auto-derive runs when TENSORFLOW_VERSION_USER_SET=0; passing
 # --tensorflow-version flips the sentinel and bypasses the auto-derive.
-TENSORFLOW_VERSION="2.21.0"
+TENSORFLOW_VERSION="2.22.0"
 TENSORFLOW_VERSION_USER_SET=0
 # GIT_BRANCH default is empty: when empty, the resolver below derives it
 # from TENSORFLOW_VERSION's major.minor as `r${MAJ}.${MIN}-rocm-enhanced`,
@@ -60,10 +60,9 @@ declare -A TENSORFLOW_SUPPORTED_VERSIONS=(
    [7.2]="2.20.0 2.19.1 2.18.1"
    # ── Rows below are NOT from the ROCm install-on-linux docs (which do
    # not yet list these pre-release ROCm trees). They are the TF <-> ROCm
-   # build-compatibility matrix determined by HPCTrainingDock on AAC6
-   # (ROCM-25052). They pick the right TF *branch* for each ROCm; a full
-   # end-to-end ROCm-enabled wheel on the very newest nightlies may need the
-   # extra workaround noted at the bottom of this block.
+   # build-compatibility matrix verified end-to-end by HPCTrainingDock on
+   # AAC6 (ROCM-25052; is_rocm_build=True + GPUs enumerated for 2.21.0 and
+   # 2.22.0 on ROCm 10.2 nightly).
    # ROCm 7.13.0 introduced TWO source breaks that only the
    # r2.20+/-rocm-enhanced TF branches build through cleanly:
    #   1. HIP removed the internal pArgs<n>(tuple,void**) kernel-arg packer
@@ -74,27 +73,22 @@ declare -A TENSORFLOW_SUPPORTED_VERSIONS=(
    # => TF < 2.20 requires the in-script HIP-713 + flatbuffers patches below
    #    to build on ROCm >= 7.13; TF >= 2.20 needs neither.
    #
-   # IMPORTANT (build-system caveat): r2.22-rocm-enhanced moved ROCm enabling
-   # to a hermetic toolchain -- there, bare "--config=rocm" (used below) is a
-   # no-op for GPU and yields a CPU-ONLY wheel (is_rocm_build=False). Enabling
-   # ROCm on r2.22 requires "--config=rocm_base" + a toolchain config
-   # (rocm_clang_local/rocm_clang_hermetic), which this script does not yet
-   # emit. r2.20 and r2.21 still use the classic configure-written path and
-   # DO enable ROCm (configure appends common:rocm with using_rocm_hipcc=true
-   # + @local_config_rocm//crosstool:toolchain). So 2.22.0 is intentionally
-   # NOT listed until the bazel invocation is updated; 2.21.0 is the newest.
+   # BUILD-SYSTEM NOTE: r2.22-rocm-enhanced moved ROCm enabling to a
+   # hermetic-capable toolchain -- there, bare "--config=rocm" is a no-op for
+   # GPU (CPU-only wheel). The bazel section below auto-detects this (presence
+   # of common:rocm_clang_local in .bazelrc) and switches to the local-ROCm
+   # config (rocm_clang_local + rocm crosstool_top), so 2.22 now builds
+   # ROCm-enabled too. r2.20/r2.21 keep the classic configure-written path.
    #
-   # NOTE on the newest nightlies (ROCm 10.2 / clang-24): engaging the ROCm
-   # clang crosstool also compiles the jpegxl dependency's highway (hwy) SIMD
-   # code with clang-24, which rejects its AVX-512 path ("_mm512_* requires
-   # target feature 'avx512f' ... changes the ABI"). This is a third-party /
-   # clang-24 issue, not the pArgs/flatbuffers breaks. It is handled below by
-   # a scoped per_file_copt that forces HWY_COMPILE_ONLY_STATIC on just the
-   # jpegxl/highway TUs (see the _TF_HWY_COPTS block near the bazel call).
-   [7.13]="2.21.0 2.20.0"
-   [10.0]="2.21.0 2.20.0"
-   [10.1]="2.21.0 2.20.0"
-   [10.2]="2.21.0 2.20.0"
+   # NOTE on the newest nightlies (ROCm 10.2 / clang-24): the ROCm clang
+   # crosstool also compiles the highway (hwy) SIMD dep (via jpegxl, and on
+   # r2.22 also directly via XLA), which clang-24 rejects on its AVX-512 /
+   # AVX-10.2 paths. Handled below by forcing HWY_COMPILE_ONLY_STATIC (see
+   # the _TF_HWY_COPTS block near the bazel call).
+   [7.13]="2.22.0 2.21.0 2.20.0"
+   [10.0]="2.22.0 2.21.0 2.20.0"
+   [10.1]="2.22.0 2.21.0 2.20.0"
+   [10.2]="2.22.0 2.21.0 2.20.0"
 )
 
 default_tensorflow_version_for_rocm() {
@@ -138,7 +132,7 @@ usage()
    echo "    from the loaded ROCm major.minor via default_tensorflow_version_for_rocm() (highest"
    echo "    supported version per the ROCm install-on-linux docs). Mapping (ROCm -> highest TF):"
    echo "      6.3 -> 2.17.0    6.4 -> 2.18.1    7.0 -> 2.19.1    7.1 -> 2.20.0    7.2 -> 2.20.0"
-   echo "      7.13 -> 2.21.0   10.0/10.1/10.2 -> 2.21.0  (HPCTrainingDock-verified; TF 2.22 needs hermetic rocm_base, not yet wired)"
+   echo "      7.13 -> 2.22.0   10.0/10.1/10.2 -> 2.22.0  (HPCTrainingDock-verified ROCm-enabled; 2.21.0/2.20.0 fallbacks)"
    echo "    Pass --tensorflow-version VER to override the auto-derive. The leaf clones the"
    echo "    matching r\${MAJOR}.\${MINOR}-rocm-enhanced upstream branch unless --git-branch is given."
    echo "    File-default fallback (when no auto-derive row matches): $TENSORFLOW_VERSION"
@@ -1025,6 +1019,56 @@ ROCM_FB_PATCH_EOF
          echo "tensorflow: applying jpegxl/highway HWY_COMPILE_ONLY_STATIC workaround (ROCm clang>=23)"
       fi
 
+      # Select the ROCm bazel config (ROCM-25052). Classic branches (<= r2.21)
+      # enable ROCm via the configure-written common:rocm (plain --config=rocm
+      # turns on using_rocm_hipcc + the @local_config_rocm crosstool). r2.22+
+      # restructured this: there bare --config=rocm only expands to
+      # --config=no_tfrt (a GPU no-op -> a CPU-only wheel). The equivalent
+      # local-ROCm (NON-hermetic, no download) config on those branches is
+      # rocm_clang_local = rocm_base (using_rocm_hipcc=true, TF_NEED_ROCM=1,
+      # AMDGPU targets) + clang_local + @local_config_rocm//crosstool. We reuse
+      # the ROCm install configure already set up, so no hermetic download.
+      _TF_ROCM_CONFIG=(--config=rocm)
+      _TF_ROCM_EXTRA=()
+      if grep -qE "^(common|build):rocm_clang_local" .bazelrc 2>/dev/null; then
+         # Keep --config=rocm too: on r2.22 it is just --config=no_tfrt, which
+         # matches the classic working config and is harmless alongside.
+         _TF_ROCM_CONFIG=(--config=rocm_clang_local --config=rocm)
+         # rocm_clang_local hardcodes CLANG_COMPILER_PATH=/usr/lib/llvm-18 and a
+         # broad multi-arch TF_ROCM_AMDGPU_TARGETS. Override both: point host
+         # clang at the ROCm clang we configured with, and keep the single arch
+         # the MLIR kernel-gen path needs (later flags win).
+         # rocm_clang_local pulls in clang_local, which sets
+         # --noincompatible_enable_cc_toolchain_resolution. With resolution
+         # OFF and no explicit crosstool, device .cu.cc files hit plain
+         # clang-24 directly with "-x rocm" -> "language not recognized".
+         # Point crosstool_top at the ROCm hipcc wrapper (the r2.21-proven
+         # approach): both host and device C++ then go through
+         # crosstool_wrapper_driver_is_not_gcc, which translates "-x rocm".
+         # Also override the hardcoded /usr/lib/llvm-18 host clang to our ROCm
+         # clang and keep the single arch the MLIR kernel-gen path needs.
+         _TF_ROCM_EXTRA=(
+            "--crosstool_top=@local_config_rocm//crosstool:toolchain"
+            "--action_env=CLANG_COMPILER_PATH=${CLANG_COMPILER}"
+            "--repo_env=TF_ROCM_AMDGPU_TARGETS=${AMDGPU_GFXMODEL_SINGLE}"
+         )
+         # r2.22's XLA also pulls highway directly (external/highway, e.g.
+         # xla/packing.cc), not just via jpegxl, so the scoped jpegxl/highway
+         # copt is not enough here -- apply HWY_COMPILE_ONLY_STATIC globally
+         # for this path. Needs BOTH --copt (target config) and --host_copt
+         # (exec config): highway is also compiled in "[for tool]" exec builds
+         # (e.g. xla/packing.cc [for tool]), which --copt does not reach.
+         if [[ "${_HIP_VERSION_INT}" -ge 71300000 ]]; then
+            _TF_HWY_COPTS=(
+               "--copt=-DHWY_COMPILE_ONLY_STATIC=1"
+               "--host_copt=-DHWY_COMPILE_ONLY_STATIC=1"
+            )
+         fi
+         echo "tensorflow: using hermetic-era ROCm config --config=rocm_clang_local (r2.22+), CLANG_COMPILER_PATH=${CLANG_COMPILER}"
+      else
+         echo "tensorflow: using classic ROCm config --config=rocm"
+      fi
+
       # Bazel build: explicitly capture rc and fail loudly if non-zero.
       # The leaf-script does NOT use `set -e`, so without this check
       # a Bazel failure (e.g. the librocm_smi64.so.1.0.* duplicate-
@@ -1042,7 +1086,8 @@ ROCM_FB_PATCH_EOF
          --host_jvm_args=-Xmx16g \
          --host_jvm_args=-XX:+UseG1GC \
          --host_jvm_args=-XX:+AlwaysPreTouch \
-         build --config=opt --config=rocm --repo_env=WHEEL_NAME=tensorflow_rocm \
+         build --config=opt "${_TF_ROCM_CONFIG[@]}" "${_TF_ROCM_EXTRA[@]}" \
+               --repo_env=WHEEL_NAME=tensorflow_rocm \
                --action_env=project_name=tensorflow_rocm/ \
                --noexperimental_check_external_repository_files \
                "${_TF_HWY_COPTS[@]}" \

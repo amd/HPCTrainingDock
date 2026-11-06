@@ -3968,10 +3968,32 @@ PY
       # $<COMPILE_LANGUAGE:CXX> generator expression so the flags only
       # apply to C++ compilations.  The "# experiment" comment is the
       # unique anchor; grep guard makes the patch idempotent.
+      # UPDATE 2026-11-06 (PT >= 2.13): PyTorch 2.13 migrated the HIP build to
+      # CMake-native enable_language(HIP) (PR #180485) and moved -std=c++20 out
+      # of HIP_CXX_FLAGS into CMAKE_HIP_FLAGS. As of 2.13 HIP_CXX_FLAGS holds
+      # only C-safe -D defines + -Wno warnings (incl. -DUSE_ROCM_CK_GEMM), and
+      # the ck_gemm_*.hip / other device TUs are compiled as LANGUAGE HIP (not
+      # CXX). A CXX-only filter therefore strips -DUSE_ROCM_CK_GEMM from those
+      # HIP TUs, so ck_gemm.h's `#if defined(USE_ROCM_CK_GEMM)` body compiles
+      # empty and at::native::gemm_internal_ck<T> is never defined -- while the
+      # .cpp (CXX) call sites in CUDABlas.cpp still reference it, breaking
+      # `import torch` with "undefined symbol ...gemm_internal_ck<c10::Half>"
+      # (slurm 59513/59514, PT 2.13.0, 2026-11-06; proven by configure-only
+      # boundary test 59560 vs 59566). Fix: for PT >= 2.13 widen the filter to
+      # CXX-or-HIP so device TUs keep the defines while any .c TU stays clean;
+      # PT < 2.13 keeps the historical CXX-only patch byte-identical (there the
+      # -std=c++17 leak is real because .cpp compiled as HIP via hip_add_library).
       _CAF=caffe2/CMakeLists.txt
+      if [ "$(printf '%s\n' "${PYTORCH_VERSION}" "2.13.0" | sort -V | head -n1)" = "2.13.0" ]; then
+         _HIP_FLAGS_GENEX='$<$<OR:$<COMPILE_LANGUAGE:CXX>,$<COMPILE_LANGUAGE:HIP>>:${HIP_CXX_FLAGS}>'
+         _HIP_FLAGS_NOTE='filter to CXX-or-HIP so native-HIP device TUs keep -DUSE_ROCM_CK_GEMM while .c TUs stay clean (PT>=2.13 enable_language(HIP), #180485 + #103222)'
+      else
+         _HIP_FLAGS_GENEX='$<$<COMPILE_LANGUAGE:CXX>:${HIP_CXX_FLAGS}>'
+         _HIP_FLAGS_NOTE='filter to CXX so -std=c++17 etc. do not leak to .c files via PUBLIC propagation (workaround for #103222)'
+      fi
       if [ -f "${_CAF}" ] && grep -q 'target_compile_options(torch_hip PUBLIC ${HIP_CXX_FLAGS})  # experiment' "${_CAF}"; then
          echo "Patching ${_CAF} for HIP_CXX_FLAGS C-leak (workaround for pytorch issue #103222)"
-         sed -i 's|target_compile_options(torch_hip PUBLIC ${HIP_CXX_FLAGS})  # experiment|target_compile_options(torch_hip PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:${HIP_CXX_FLAGS}>")  # filter to CXX so -std=c++17 etc. do not leak to .c files via PUBLIC propagation (workaround for #103222)|' "${_CAF}"
+         sed -i "s|target_compile_options(torch_hip PUBLIC \${HIP_CXX_FLAGS})  # experiment|target_compile_options(torch_hip PUBLIC \"${_HIP_FLAGS_GENEX}\")  # ${_HIP_FLAGS_NOTE}|" "${_CAF}"
          echo "  -> patched (verify):"
          grep -nE 'torch_hip PUBLIC.*HIP_CXX_FLAGS' "${_CAF}" | sed 's/^/    /'
       else
