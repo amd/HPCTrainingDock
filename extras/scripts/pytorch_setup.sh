@@ -4175,8 +4175,14 @@ PY
       # install if allowed to finish. Until upstream restores
       # `setup.py install` semantics, the copy step must cover all
       # post-PT-2.9 versions.
-      case "${PYTORCH_SHORT_VERSION}" in
-         2.9|2.10|2.11|2.12)
+      #
+      # Gate converted on 2026-11-06 from the enumerated
+      # "2.9|2.10|2.11|2.12" list to a ">= 2.9" version comparison: PT
+      # 2.13.0 reproduced the hollow install (slurm 59574/59575) solely
+      # because 2.13 was missing from the list. The pip-redirect is an
+      # upstream property of every PT >= 2.9, so match the whole range
+      # rather than re-editing the list for each new release.
+      if [ "$(printf '%s\n' "${PYTORCH_VERSION}" "2.9.0" | sort -V | head -n1)" = "2.9.0" ]; then
             PYTORCH_PATH_SITE_PACKAGES=${PYTORCH_PATH}/lib/python3.${PYTHON_VERSION}/site-packages
             ${SUDO} mkdir -p ${PYTORCH_PATH_SITE_PACKAGES}
             ${SUDO} cp -a lib/python*/site-packages/* ${PYTORCH_PATH_SITE_PACKAGES}
@@ -4206,8 +4212,7 @@ PY
             ${SUDO} find bin/ -maxdepth 1 -type f ! -name 'python*' \
                -exec sed -i '1s|^#!.*python3.*$|#!/usr/bin/env python3|' {} +
             ${SUDO} cp -a bin/* ${PYTORCH_PATH}/bin
-            ;;
-      esac
+      fi
       echo ""
       echo "===================="
       echo "Finished setup.py install"
