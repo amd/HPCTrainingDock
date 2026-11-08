@@ -2662,12 +2662,13 @@ else
       fi
       _aot_hsaco_count=$(find "${AOTRITON_PATH}" -name '*.hsaco' 2>/dev/null | wc -l)
       _aot_aks2_count=$(find "${AOTRITON_PATH}" -name '*.aks2' 2>/dev/null | wc -l)
-      _aot_kernel_count=$(( ${_aot_hsaco_count:-0} + ${_aot_aks2_count:-0} ))
+      _aot_zip_count=$(find "${AOTRITON_PATH}" -path '*/aotriton.images/*' -name '*.zip' 2>/dev/null | wc -l)
+      _aot_kernel_count=$(( ${_aot_hsaco_count:-0} + ${_aot_aks2_count:-0} + ${_aot_zip_count:-0} ))
       if [ "${_aot_kernel_count}" -lt 1 ]; then
          echo ""
          echo "######################################################"
          echo "ERROR: AOTriton post-install probe (2/3) FAILED:"
-         echo "ERROR:   no kernel objects (.hsaco or .aks2) under"
+         echo "ERROR:   no kernel objects (.hsaco/.aks2/.zip) under"
          echo "ERROR:   ${AOTRITON_PATH}"
          echo "ERROR: AOTriton produced libaotriton_v2.so but emitted"
          echo "ERROR: zero kernel objects -- triton codegen ran but"
@@ -2733,8 +2734,8 @@ else
       fi
       echo "pytorch: AOTriton post-install probes OK"
       echo "pytorch:   libaotriton_v2.so : ${_aot_lib} ($(stat -c%s "${_aot_lib}") bytes)"
-      echo "pytorch:   kernel objects    : ${_aot_kernel_count} (.hsaco=${_aot_hsaco_count} .aks2=${_aot_aks2_count})"
-      unset _aot_lib _aot_lib_glob _aot_hsaco_count _aot_aks2_count _aot_kernel_count _aot_needed _aot_hip_resolved
+      echo "pytorch:   kernel objects    : ${_aot_kernel_count} (.hsaco=${_aot_hsaco_count} .aks2=${_aot_aks2_count} .zip=${_aot_zip_count})"
+      unset _aot_lib _aot_lib_glob _aot_hsaco_count _aot_aks2_count _aot_zip_count _aot_kernel_count _aot_needed _aot_hip_resolved
 
       cd ../..
       rm -rf aotriton
