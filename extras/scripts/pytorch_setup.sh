@@ -2212,6 +2212,26 @@ else
       # Belt-and-suspender post-build patchelf below covers the case where
       # PyTorch's setup.py drops env LDFLAGS for a particular TU.
       export LDFLAGS="${LDFLAGS:-} -Wl,-rpath,${ROCM_PATH}/llvm/lib"
+      # PT 2.14.x links libtorch_cpu.so + libamdhip64.so.7 into
+      # torch_shm_manager and runs ld with full transitive symbol
+      # resolution (lwyu). libamdhip64 -> libhsa-runtime64 and
+      # libtorch_cpu -> libmpi expose their dependency dir only via
+      # DT_RUNPATH ($ORIGIN / the MPI prefix), which ld IGNORES when
+      # resolving a *transitive* NEEDED at link time (it honours
+      # -rpath-link / -L / DT_RPATH only). Result: undefined
+      # `hsa_*@ROCR_1` and `ompi_mpi_short_float` at the shm_manager
+      # link. 2.13.x / 2.8.x do not hit this. Give ld a search path it
+      # does honour for those transitive deps. Link-time only; no
+      # runtime rpath is added (RUNPATH already resolves these at load).
+      if [[ "${PT_MAJOR_MINOR}" == "2.14" ]]; then
+         export LDFLAGS="${LDFLAGS:-} -Wl,-rpath-link,${ROCM_PATH}/lib"
+         _pt_mpi_libdirs=$(mpicxx --showme:libdirs 2>/dev/null)
+         for _pt_mpi_d in ${_pt_mpi_libdirs}; do
+            [ -d "${_pt_mpi_d}" ] && export LDFLAGS="${LDFLAGS} -Wl,-rpath-link,${_pt_mpi_d}"
+         done
+         unset _pt_mpi_libdirs _pt_mpi_d
+         echo "[shm-rpath-link] PT ${PYTORCH_VERSION} -- added -rpath-link for ROCm + MPI transitive deps"
+      fi
       if [ ! -f "${OpenMP_omp_LIBRARY}" ]; then
          echo "ERROR: OpenMP_omp_LIBRARY=${OpenMP_omp_LIBRARY} not found."
          echo "ERROR: ROCm clang's libomp.so is required to link fbgemm-using"
