@@ -57,6 +57,14 @@ HIP_VERSION_PATCH_REGULAR=0
 # the HIP version in-source, so it is a no-op on ROCm <= 7.12 and on vLLM
 # refs that already carry the guard. Disable to re-test on a newer vLLM ref.
 ATOMICADD_GUARD_PATCH=1
+# Enable vLLM CustomAllreduce on gfx90a (MI250X), which vLLM otherwise gates to
+# gfx94*/gfx95* (so CDNA2 falls back to RCCL for every TP all-reduce). The
+# applied patch is runtime-gated by VLLM_ROCM_CUSTOM_AR_GFX90A (default 0 ==
+# stock behaviour on every arch), so building it in alone changes nothing.
+# Default OFF: behavioural source patch; enable for an MI250 serving build with
+# --custom-ar-gfx90a-patch 1 once validated on the node. Also exposes
+# VLLM_CUSTOM_AR_MAX_SIZE_MB (default 8) for the max all-reduce size.
+CUSTOM_AR_GFX90A_PATCH=0
 # AITER (AMD's optimized ROCm operator library) provides vLLM's fastest
 # fused-MoE/attention/quant kernels. Built from source against the same torch
 # and gfx target as vLLM, into the SAME prefix. Default ON so the performance
@@ -140,7 +148,7 @@ usage()
 {
    echo "Usage:"
    echo "  WARNING: when specifying --install-path-no-version and --module-path, the directories have to already exist because the script checks for write permissions"
-   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected, specify as a comma separated list"
+   echo "  --amdgpu-gfxmodel [ AMDGPU_GFXMODEL ] default autodetected; a single gfx, a ';'/','-separated list, or the keyword 'cdna' (alias 'all') for the full gfx90a;gfx942;gfx950 multi-arch build"
    echo "  --build-vllm [ BUILD_VLLM ] set to 1 to build vllm, default is $BUILD_VLLM"
    echo "  --vllm-version [ VLLM_VERSION ] vLLM version; default autodetected from the pytorch module's torch"
    echo "  --vllm-repo [ VLLM_REPO ] git repo to build vLLM from, default $VLLM_REPO"
@@ -148,6 +156,7 @@ usage()
    echo "  --hip-version-patch [ 0|1 ] apply the TORCH_HIP_VERSION stable-ABI ROCm compile workaround, default $HIP_VERSION_PATCH (re-evaluate per rocm/torch/vLLM version)"
    echo "  --hip-version-patch-regular [ 0|1 ] also define TORCH_HIP_VERSION=0 on the regular _C/_moe_C/_rocm_C targets, default $HIP_VERSION_PATCH_REGULAR (only needed on older pre-stable-ABI vLLM, e.g. v0.19.1 on torch 2.10)"
    echo "  --atomicadd-guard-patch [ 0|1 ] apply the atomicAdd half/half2 ROCm>=7.13 guard (vllm PR #41802 backport), default $ATOMICADD_GUARD_PATCH (self-gates in-source; no-op on ROCm<=7.12 or vLLM refs that already carry it)"
+   echo "  --custom-ar-gfx90a-patch [ 0|1 ] enable vLLM CustomAllreduce on gfx90a/MI250X behind runtime VLLM_ROCM_CUSTOM_AR_GFX90A=1, default $CUSTOM_AR_GFX90A_PATCH (runtime-gated: applying it alone changes nothing; self-gates in-source to matching vLLM refs; validate on target node before shipping)"
    echo "  --with-aiter [ 0|1 ] build AMD AITER kernels into the vLLM prefix, default $WITH_AITER (non-fatal; built for gfx942/gfx950 only -- inert on gfx90a/CDNA2 where vLLM gates it off; enable at runtime with VLLM_ROCM_USE_AITER=1)"
    echo "  --aiter-repo [ AITER_REPO ] git repo to build AITER from, default $AITER_REPO"
    echo "  --aiter-ref [ AITER_REF ] git tag/branch/commit to build AITER at, default the repo's default branch"
@@ -235,6 +244,11 @@ do
       "--atomicadd-guard-patch")
           shift
           ATOMICADD_GUARD_PATCH=${1}
+          reset-last
+          ;;
+      "--custom-ar-gfx90a-patch")
+          shift
+          CUSTOM_AR_GFX90A_PATCH=${1}
           reset-last
           ;;
       "--with-aiter")
@@ -434,7 +448,15 @@ PY
 # when the SDK is built against a newer glibc than the host, and would
 # kill the script under pipefail.
 if [[ "$AMDGPU_GFXMODEL_INPUT" != "" ]]; then
-   AMDGPU_GFXMODEL=$AMDGPU_GFXMODEL_INPUT
+   # Convenience keyword for a portable, multi-arch module: build ONE wheel that
+   # runs on every current CDNA inference part. 'cdna' (alias 'all') expands to
+   # the full gfx90a;gfx942;gfx950 set (MI2xx/MI300/MI3xx) so operators building
+   # a module for several systems need not spell the list out. Anything else is
+   # taken verbatim: a single gfx, or an explicit ';'/','-separated list.
+   case "${AMDGPU_GFXMODEL_INPUT}" in
+      cdna|CDNA|all|ALL) AMDGPU_GFXMODEL="gfx90a;gfx942;gfx950" ;;
+      *)                 AMDGPU_GFXMODEL="$AMDGPU_GFXMODEL_INPUT" ;;
+   esac
 else
    AMDGPU_GFXMODEL=$(rocminfo 2>/dev/null | grep gfx | sed -e 's/Name://' | head -1 | sed 's/ //g' || true)
 fi
@@ -839,6 +861,141 @@ PY
       unset _vllm_compat
    else
       echo "vllm: atomicAdd guard workaround DISABLED (--atomicadd-guard-patch 0)"
+   fi
+
+   # ── CustomAllreduce on gfx90a / MI250X (opt-in, runtime-gated) ──────
+   # vLLM gates its custom all-reduce to gfx94*/gfx95*, so on a fully-XGMI
+   # MI250 node TP all-reduces needlessly fall back to RCCL. This lifts the
+   # gate on gfx90a behind VLLM_ROCM_CUSTOM_AR_GFX90A (default 0 = unchanged on
+   # every arch) and exposes VLLM_CUSTOM_AR_MAX_SIZE_MB (default 8).
+   #
+   # Edits two source files; vLLM spells the gate and the max_size default a
+   # couple of equivalent ways across the refs this recipe builds, so the
+   # patcher carries each known spelling and applies whichever matches.
+   # Fail-safe: every anchor must match exactly once or the whole patch writes
+   # nothing and prints a notice; idempotent via an in-source marker. RE-DERIVE
+   # the anchors if a future ref introduces a new spelling.
+   if [ "${CUSTOM_AR_GFX90A_PATCH}" = "1" ]; then
+      python3 - "${VLLM_SRC}" <<'PY'
+import os, sys
+root = sys.argv[1]
+MARKER = "patch vllm_custom_ar_gfx90a"
+
+# RocmPlatform.use_custom_allreduce() gate. vLLM spells this gate two ways
+# across the refs this recipe builds (0.9-0.27): carry BOTH, apply whichever
+# one matches this ref's source exactly, skip if neither does.
+# form A (0.10.x / 0.11.x): local gcn_arch var + supported_archs list.
+ROCM_A_OLD = '''    def use_custom_allreduce(cls) -> bool:
+        # We only enable custom allreduce for MI300 series
+        gcn_arch = torch.cuda.get_device_properties(0).gcnArchName
+        supported_archs = ['gfx94', 'gfx95']
+        return any(gfx in gcn_arch for gfx in supported_archs)
+'''
+ROCM_A_NEW = '''    def use_custom_allreduce(cls) -> bool:
+        # We only enable custom allreduce for MI300 series
+        gcn_arch = torch.cuda.get_device_properties(0).gcnArchName
+        supported_archs = ['gfx94', 'gfx95']
+        # (patch vllm_custom_ar_gfx90a) ...and on MI250X (gfx90a) when
+        # VLLM_ROCM_CUSTOM_AR_GFX90A=1: node is fully XGMI-connected and the
+        # kernels are built for gfx90a. AITER and quick AR keep CDNA3+ gates.
+        flag = os.environ.get("VLLM_ROCM_CUSTOM_AR_GFX90A", "0")
+        if flag not in ("0", "1"):
+            raise ValueError(
+                f"VLLM_ROCM_CUSTOM_AR_GFX90A must be 0 or 1, got {flag!r}"
+            )
+        if flag == "1" and "gfx90a" in gcn_arch:
+            return True
+        return any(gfx in gcn_arch for gfx in supported_archs)
+'''
+# form B (0.19.x / 0.27.x): module-level _GCN_ARCH + inline arch list.
+ROCM_B_OLD = '''    def use_custom_allreduce(cls) -> bool:
+        # We only enable custom allreduce for MI300 series
+        return any(gfx in _GCN_ARCH for gfx in ["gfx94", "gfx95"])
+'''
+ROCM_B_NEW = '''    def use_custom_allreduce(cls) -> bool:
+        # We only enable custom allreduce for MI300 series
+        # (patch vllm_custom_ar_gfx90a) ...and on MI250X (gfx90a) when
+        # VLLM_ROCM_CUSTOM_AR_GFX90A=1: node is fully XGMI-connected and the
+        # kernels are built for gfx90a. AITER and quick AR keep CDNA3+ gates.
+        flag = os.environ.get("VLLM_ROCM_CUSTOM_AR_GFX90A", "0")
+        if flag not in ("0", "1"):
+            raise ValueError(
+                f"VLLM_ROCM_CUSTOM_AR_GFX90A must be 0 or 1, got {flag!r}"
+            )
+        if flag == "1" and "gfx90a" in _GCN_ARCH:
+            return True
+        return any(gfx in _GCN_ARCH for gfx in ["gfx94", "gfx95"])
+'''
+
+CA_CONST_OLD = "logger = init_logger(__name__)\n"
+CA_CONST_NEW = (
+    "logger = init_logger(__name__)\n\n"
+    "# (patch vllm_custom_ar_gfx90a) default max all-reduce size; 8 MiB unless\n"
+    "# VLLM_CUSTOM_AR_MAX_SIZE_MB says otherwise (bytes must be < max_size).\n"
+    "_CA_DEFAULT_MAX_SIZE = int(\n"
+    "    __import__(\"os\").environ.get(\"VLLM_CUSTOM_AR_MAX_SIZE_MB\", \"8\")\n"
+    ") * 1024 * 1024\n"
+)
+
+# Each site lists every known spelling as (old, new) pairs; exactly ONE must
+# match exactly once for this ref, else the whole patch skips (fail-safe).
+# max_size shows up with a trailing comma (multiline def: 0.11.x/0.19.x/0.27.x)
+# or closing paren (single-line def: 0.10.x).
+TARGETS = [
+    ("vllm/platforms/rocm.py",
+     [("use_custom_allreduce gate",
+       [(ROCM_A_OLD, ROCM_A_NEW), (ROCM_B_OLD, ROCM_B_NEW)])]),
+    ("vllm/distributed/device_communicators/custom_all_reduce.py",
+     [("max_size constant",
+       [(CA_CONST_OLD, CA_CONST_NEW)]),
+      ("CustomAllreduce max_size default",
+       [("max_size=8192 * 1024,", "max_size=_CA_DEFAULT_MAX_SIZE,"),
+        ("max_size=8192 * 1024)", "max_size=_CA_DEFAULT_MAX_SIZE)")])]),
+]
+
+plans, problems = [], []
+for rel, sites in TARGETS:
+    path = os.path.join(root, rel)
+    if not os.path.exists(path):
+        problems.append(f"{rel}: not found (vLLM layout changed)")
+        continue
+    src = open(path).read()
+    if MARKER in src:
+        print(f"vllm: {rel} already carries the gfx90a custom-AR patch; skipped")
+        continue
+    patched, ok = src, True
+    for name, variants in sites:
+        over = [o for o, _ in variants if patched.count(o) > 1]
+        matched = [(o, n) for o, n in variants if patched.count(o) == 1]
+        if over:
+            problems.append(f"{rel}: {name} (anchor matched >1x; ambiguous)")
+            ok = False
+            break
+        if len(matched) != 1:
+            problems.append(
+                f"{rel}: {name} (matched {len(matched)} known spellings, expected 1)")
+            ok = False
+            break
+        o, n = matched[0]
+        patched = patched.replace(o, n, 1)
+    if ok:
+        plans.append((path, patched))
+
+if problems:
+    sys.stderr.write(
+        "vllm: gfx90a custom-AR patch SKIPPED (vLLM gate/signature not a known "
+        "spelling for this ref; re-derive the anchors):\n")
+    for p in problems:
+        sys.stderr.write(f"  {p}\n")
+    sys.exit(0)
+
+for path, patched in plans:
+    open(path, "w").write(patched)
+    print(f"vllm: patched {os.path.relpath(path, root)} for gfx90a custom AR")
+PY
+      echo "vllm: gfx90a custom AR enabled in-source (runtime-gated by VLLM_ROCM_CUSTOM_AR_GFX90A=1, size by VLLM_CUSTOM_AR_MAX_SIZE_MB; disable with --custom-ar-gfx90a-patch 0)"
+   else
+      echo "vllm: gfx90a custom-AR patch DISABLED (--custom-ar-gfx90a-patch 0)"
    fi
 
    # ── Harden pip against a polluted global/user pip config ───────────
