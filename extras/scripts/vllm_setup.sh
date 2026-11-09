@@ -63,10 +63,17 @@ ATOMICADD_GUARD_PATCH=1
 # path ships, but the build is NON-FATAL (a failure leaves a working vLLM
 # without aiter) and vLLM only USES it when VLLM_ROCM_USE_AITER=1 at runtime
 # (the modulefile sets it to 0 as a discoverable "aiter is built" marker).
-# aiter supports only gfx90a/gfx942/gfx950; on any other gfx it is skipped.
+# aiter BUILDS for gfx90a too, but vLLM gates every AITER entry point on
+# get_cdna_version() > 2, so aiter is INERT at runtime on gfx90a/CDNA2 (MI2xx):
+# VLLM_ROCM_USE_AITER=1 is a no-op there. We therefore build it only for
+# gfx942 (CDNA3) and gfx950 (CDNA4) and skip it on gfx90a and any other gfx.
 WITH_AITER=1
 AITER_REPO="https://github.com/ROCm/aiter.git"
-# Empty ref => aiter repo default branch (main). Pin per validated combo.
+# Empty ref => aiter repo default branch (main). Pin per validated combo for
+# reproducible builds: aiter main moves fast and can break against a fixed vLLM
+# (e.g. the zenith inference image pins aiter b4d9154d, v0.1.22.post1, against
+# its own vLLM build). Set --aiter-ref to a known-good commit for the vLLM you
+# build rather than tracking main.
 AITER_REF=""
 # PREBUILD_KERNELS: 0=JIT-only, 1=core, 2=inference, 3=MHA-only. Default 0
 # (JIT): any non-zero level makes aiter's setup.py run its FlyDSL AOT step at
@@ -141,7 +148,7 @@ usage()
    echo "  --hip-version-patch [ 0|1 ] apply the TORCH_HIP_VERSION stable-ABI ROCm compile workaround, default $HIP_VERSION_PATCH (re-evaluate per rocm/torch/vLLM version)"
    echo "  --hip-version-patch-regular [ 0|1 ] also define TORCH_HIP_VERSION=0 on the regular _C/_moe_C/_rocm_C targets, default $HIP_VERSION_PATCH_REGULAR (only needed on older pre-stable-ABI vLLM, e.g. v0.19.1 on torch 2.10)"
    echo "  --atomicadd-guard-patch [ 0|1 ] apply the atomicAdd half/half2 ROCm>=7.13 guard (vllm PR #41802 backport), default $ATOMICADD_GUARD_PATCH (self-gates in-source; no-op on ROCm<=7.12 or vLLM refs that already carry it)"
-   echo "  --with-aiter [ 0|1 ] build AMD AITER kernels into the vLLM prefix, default $WITH_AITER (non-fatal; only gfx90a/gfx942/gfx950; enable at runtime with VLLM_ROCM_USE_AITER=1)"
+   echo "  --with-aiter [ 0|1 ] build AMD AITER kernels into the vLLM prefix, default $WITH_AITER (non-fatal; built for gfx942/gfx950 only -- inert on gfx90a/CDNA2 where vLLM gates it off; enable at runtime with VLLM_ROCM_USE_AITER=1)"
    echo "  --aiter-repo [ AITER_REPO ] git repo to build AITER from, default $AITER_REPO"
    echo "  --aiter-ref [ AITER_REF ] git tag/branch/commit to build AITER at, default the repo's default branch"
    echo "  --aiter-prebuild-kernels [ 0-3 ] AITER PREBUILD_KERNELS level (0=JIT,1=core,2=inference,3=MHA), default $AITER_PREBUILD_KERNELS"
@@ -1020,11 +1027,14 @@ PY
    # Built from source (ROCm/aiter) against the SAME torch + gfx target and
    # installed into the SAME prefix, so it ships alongside vLLM. NON-FATAL:
    # any failure here leaves a fully working vLLM without aiter (the engine
-   # only uses aiter when VLLM_ROCM_USE_AITER=1 at runtime). aiter supports
-   # only gfx942 (CDNA3) and gfx950 (CDNA4) per the ROCm/aiter README, so we
-   # build for the aiter-supported SUBSET of PYTORCH_ROCM_ARCH and skip if
-   # none qualify. AITER_USE_SYSTEM_TRITON=1 keeps the pytorch module's
-   # (protected) triton instead of letting aiter pull its own.
+   # only uses aiter when VLLM_ROCM_USE_AITER=1 at runtime). aiter's setup.py
+   # (validate_and_update_archs) accepts gfx90a and compiles cleanly on CDNA2,
+   # BUT vLLM gates every AITER entry point on get_cdna_version() > 2, so aiter
+   # is inert at runtime on gfx90a/CDNA2 -- building it there only compiles dead
+   # kernels. So we build for the gfx942 (CDNA3) / gfx950 (CDNA4) SUBSET of
+   # PYTORCH_ROCM_ARCH and skip gfx90a (and any non-CDNA3/4 gfx).
+   # AITER_USE_SYSTEM_TRITON=1 keeps the pytorch module's (protected) triton
+   # instead of letting aiter pull its own.
    if [ "${WITH_AITER}" = "1" ]; then
       AITER_GPU_ARCHS=""
       _OLD_IFS="${IFS}"; IFS=';'
@@ -1035,7 +1045,7 @@ PY
       done
       IFS="${_OLD_IFS}"; unset _OLD_IFS _a
       if [ -z "${AITER_GPU_ARCHS}" ]; then
-         echo "vllm: AITER skipped -- none of PYTORCH_ROCM_ARCH='${PYTORCH_ROCM_ARCH}' is aiter-supported (gfx942/gfx950)."
+         echo "vllm: AITER skipped -- PYTORCH_ROCM_ARCH='${PYTORCH_ROCM_ARCH}' has no gfx942/gfx950 (aiter is inert on gfx90a/CDNA2: vLLM gates it on cdna>2, so only gfx942/gfx950 benefit)."
       else
          echo "vllm: building AITER for GPU_ARCHS=${AITER_GPU_ARCHS} PREBUILD_KERNELS=${AITER_PREBUILD_KERNELS} ref='${AITER_REF:-default}' (non-fatal; this is a second kernel compile)."
          _aiter_ok=1
