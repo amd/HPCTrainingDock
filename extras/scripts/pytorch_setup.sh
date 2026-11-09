@@ -2228,9 +2228,17 @@ else
          _pt_mpi_libdirs=$(mpicxx --showme:libdirs 2>/dev/null)
          for _pt_mpi_d in ${_pt_mpi_libdirs}; do
             [ -d "${_pt_mpi_d}" ] && export LDFLAGS="${LDFLAGS} -Wl,-rpath-link,${_pt_mpi_d}"
+            # mpicxx --showme:libdirs reports only OpenMPI's own prefix. Its UCC/UCX
+            # transports live in SIBLING rocmplus prefixes (ucc-*/lib, ucx-*/lib), and
+            # libucc.so.1 -> libucs.so.0 (ucs_config_doc_nop) is a transitive NEEDED whose
+            # dir is only in DT_RUNPATH (ignored by ld at link time). Add the siblings too.
+            _pt_rocmplus_root=$(dirname "${_pt_mpi_d%/lib}")
+            for _pt_sib in "${_pt_rocmplus_root}"/ucc-*/lib "${_pt_rocmplus_root}"/ucx-*/lib; do
+               [ -d "${_pt_sib}" ] && export LDFLAGS="${LDFLAGS} -Wl,-rpath-link,${_pt_sib}"
+            done
          done
-         unset _pt_mpi_libdirs _pt_mpi_d
-         echo "[shm-rpath-link] PT ${PYTORCH_VERSION} -- added -rpath-link for ROCm + MPI transitive deps"
+         unset _pt_mpi_libdirs _pt_mpi_d _pt_rocmplus_root _pt_sib
+         echo "[shm-rpath-link] PT ${PYTORCH_VERSION} -- added -rpath-link for ROCm + MPI/UCC/UCX transitive deps"
       fi
       if [ ! -f "${OpenMP_omp_LIBRARY}" ]; then
          echo "ERROR: OpenMP_omp_LIBRARY=${OpenMP_omp_LIBRARY} not found."
