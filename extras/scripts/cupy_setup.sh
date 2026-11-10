@@ -536,7 +536,17 @@ else
       if [ -n "${SUDO}" ] && [[ "${USER}" != "root" ]]; then
          ${SUDO} chmod a+w $CUPY_PATH
       fi
-      uv pip install -v --target=$CUPY_PATH pytest mock xarray[complete] build numpy-allocator --no-cache
+      # xarray[complete] expands to xarray[accel,etc,io,parallel,viz]. The io
+      # group pulls in a serial netCDF4 wheel (with its own bundled libnetcdf)
+      # that, because the cupy modulefile prepends ${CUPY_PATH} onto PYTHONPATH,
+      # would shadow an MPI-parallel netCDF4 built in a user virtual environment
+      # ("ValueError: parallel mode requires MPI enabled netcdf-c"). We install
+      # the complete capability set minus netCDF4, listing the other io members
+      # explicitly; xarray netCDF I/O is still available through h5netcdf
+      # (HDF5-based), which does not shadow a parallel netCDF4.
+      uv pip install -v --target=$CUPY_PATH pytest mock \
+         xarray[accel,etc,parallel,viz] h5netcdf[h5py] pydap zarr fsspec cftime pooch \
+         build numpy-allocator --no-cache
       export PYTHONPATH=$PYTHONPATH:$CUPY_PATH
 
       # ── Source selection ─────────────────────────────────────────────
@@ -661,6 +671,7 @@ __CUPY_CCCL3_PATCH_PYEOF__
       uv build --wheel
       uv pip install -v --upgrade --target=$CUPY_PATH dist/*.whl
       uv pip install -v --target=$CUPY_PATH cupy-xarray --no-deps
+
       deactivate
       cd /
       # ── Shebang rewrite ────────────────────────────────────────────
