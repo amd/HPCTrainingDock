@@ -1241,6 +1241,30 @@ else
       unset _jax_help
    fi
 
+   # ── Device bitcode dir (ocml.bc etc.) for XLA ────────────────────────
+   # A from-source jaxlib does NOT bundle the ROCm device libraries, so XLA
+   # must locate them at runtime. XLA loads <dir>/ocml.bc directly from
+   # --xla_gpu_cuda_data_dir (it does NOT append amdgcn/bitcode), and its
+   # default (${ROCM_PATH}/amdgcn/bitcode) does not exist on ROCm >= 6, where
+   # the bitcode lives under the versioned clang resource dir
+   # (lib/llvm/lib/clang/<N>/lib/amdgcn/bitcode). Without this flag, any GPU
+   # kernel that pulls in ocml (erf/tanh/truncated_normal -- i.e. most real
+   # models) dies with "bitcode module not found at ./ocml.bc". Resolve the
+   # dir at build time (prefer the clang resource path, fall back to the
+   # legacy flat layout) and emit the flag only if ocml.bc is really there.
+   _jax_bc=""
+   for _cand in "${ROCM_PATH_FOR_MODULE}"/lib/llvm/lib/clang/*/lib/amdgcn/bitcode \
+                "${ROCM_PATH_FOR_MODULE}"/amdgcn/bitcode; do
+      if [ -f "${_cand}/ocml.bc" ]; then _jax_bc="${_cand}"; break; fi
+   done
+   if [ -n "${_jax_bc}" ]; then
+      JAX_XLA_FLAGS+=" --xla_gpu_cuda_data_dir=${_jax_bc}"
+      echo "jax: XLA device bitcode dir = ${_jax_bc}"
+   else
+      echo "jax: WARNING: ocml.bc not found under ${ROCM_PATH_FOR_MODULE}; XLA may fail to locate device bitcode at runtime"
+   fi
+   unset _jax_bc _cand
+
    # ── Modulefile flavor: Lua (Lmod) vs Tcl (classic Environment Modules) ─
    # Lmod consumes <name>.lua; classic Tcl environment-modules consumes an
    # extensionless Tcl file and CANNOT read .lua (a .lua modulefile is
