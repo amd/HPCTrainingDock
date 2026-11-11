@@ -149,6 +149,11 @@ PDT_PATH_INPUT=""
 # pinned tarball path is taken unless a commit is explicitly requested.
 TAU_VERSION=2.35.2
 GIT_COMMIT=""
+# ── Upstream-pending source patch: wrapper_flags_key init ─────────────
+# Applied to the fetched TAU source before configure; see the long
+# rationale at the apply site. 0 disables it (upstream-fixed TAU, or to
+# reproduce the unpatched crash).
+APPLY_PTHREAD_KEY_PATCH=1
 # TAU's modulefile is currently named dev.lua (no version baked in).
 # PDT is a build-time-only dep shared with scorep, so we expose a
 # separate --replace-pdt flag (analogous to scorep_setup.sh).
@@ -181,6 +186,7 @@ usage()
    echo "  --pdt-install-path [ PDT_PATH_INPUT ] default $PDT_PATH"
    echo "  --tau-version [ TAU_VERSION ] released TAU tarball to pin/build (tau_releases/tau-<ver>.tar.gz), default $TAU_VERSION"
    echo "  --git-commit [ GIT_COMMIT ] build this tau2 git commit instead of the pinned tarball (dev/bisect), default is the pinned tarball"
+   echo "  --pthread-key-patch [ 0|1 ] apply the wrapper_flags_key init fix to the TAU source, default $APPLY_PTHREAD_KEY_PATCH"
    echo "  --rocm-version [ ROCM_VERSION ] default $ROCM_VERSION"
    echo "  --amdgpu-gfxmodel [ AMDGPU-GFXMODEL_INPUT ] default autodetected"
    echo "  --replace [ 0|1 ] remove prior tau install + modulefile before building, default $REPLACE (PDT NOT removed)"
@@ -224,6 +230,11 @@ do
       "--git-commit")
           shift
           GIT_COMMIT=${1}
+          reset-last
+          ;;
+      "--pthread-key-patch")
+          shift
+          APPLY_PTHREAD_KEY_PATCH=${1}
           reset-last
           ;;
       "--c-compiler")
@@ -957,6 +968,114 @@ TAU_EXEC_LAUNCH_EOF
          wget -q "${TAU_TARBALL_URL}" -O "${TAU_TARBALL}" || { echo "ERROR: download of ${TAU_TARBALL_URL} failed"; exit 1; }
          tar xf "${TAU_TARBALL}" || { echo "ERROR: untar of ${TAU_TARBALL} failed"; exit 1; }
          cd "tau-${TAU_VERSION}" || { echo "ERROR: expected source dir tau-${TAU_VERSION} not found after untar"; exit 1; }
+      fi
+
+      # ── wrapper_flags_key initialization fix (ROCM-29037) ─────────────
+      # TAU's three pthread wrappers in src/Profile/PthreadLayer.cpp --
+      # tau_pthread_create_wrapper, tau_pthread_join_wrapper and
+      # tau_pthread_barrier_wait_wrapper -- call
+      #   pthread_getspecific(wrapper_flags_key)
+      # without first calling PthreadLayer::InitializeThreadData(), which is
+      # the only thing that ever runs the pthread_key_create(&wrapper_flags_key)
+      # inside pthread_init_once(). Every other consumer of a TAU pthread key
+      # (RegisterThread, GetThreadId, LockDB, LockEnv) does call it first.
+      # Until it runs, the file-scope wrapper_flags_key is still its BSS zero,
+      # i.e. pthread key 0 -- a perfectly legal key that belongs to whoever
+      # created it first. Under GPU-aware OpenMPI that owner is UCX's profiler
+      # key (only when UCX is built with libfuse3, so the VFS thread exists --
+      # which is why the AMD-side reproduction only triggered once UCX had
+      # fuse3). TAU then stores a 1-byte bool under UCX's key, and at exit
+      # ucs_profile_dump writes a full thread context over that one byte,
+      # overwriting the following heap chunk's size field with a timestamp:
+      # "corrupted size vs. prev_size" / "malloc(): invalid size (unsorted)"
+      # in a HIP static destructor, with mpirun then hanging because OMPI's
+      # abort handler deadlocks on the malloc lock.
+      #
+      # This is what the AAC6 TAU CTests (TAU_Trace_Check, TAU_Profile_Check,
+      # TAU_Check_HIP_Profile, TAU_Check_MPI_Profile) have been failing on for
+      # the 2-rank Jacobi runs. It is a TAU bug, not a rocprofiler-sdk/comgr
+      # one: the ROCm side only decides whether the clobbered chunk is
+      # allocated late enough to abort. Hence it reproduces independently of
+      # the SDK version and is NOT fixed by any ROCm release.
+      #
+      # The patch is the one AMD's profiler team attached to ROCM-29037
+      # (tau-2.35.2-wrapper_flags_key-init.patch), inlined here verbatim --
+      # only the ---/+++ headers are re-rooted from bare PthreadLayer.cpp to
+      # a/b/src/Profile/... so it applies with -p1 from the source root like
+      # the UCX sidecar patch in comm/scripts/openmpi_setup.sh. Carrying it
+      # inline keeps this leaf self-contained; a sidecar
+      # tools/scripts/tau_wrapper_flags_key.patch, if present next to the
+      # script, wins so a newer diff can be tested without editing this file.
+      #
+      # Idempotent + fail-loud, same shape as the UCX patch: apply if it
+      # applies, skip if it reverse-applies (already upstream -- the expected
+      # outcome once UO-OACISS takes it), ABORT if neither (source drifted;
+      # regenerate the diff or pass --pthread-key-patch 0). Pass
+      # --pthread-key-patch 0 to reproduce the unpatched crash on purpose.
+      write_tau_pthread_key_patch() {
+         cat <<'TAU_PTHREAD_KEY_PATCH_EOF'
+--- a/src/Profile/PthreadLayer.cpp
++++ b/src/Profile/PthreadLayer.cpp
+@@ -409,6 +409,7 @@
+ 
+   TauInternalFunctionGuard protects_this_function;
+ 
++  PthreadLayer::InitializeThreadData();
+   bool * wrapped = (bool*)pthread_getspecific(wrapper_flags_key);
+   if (!wrapped) {
+     wrapped = new bool;
+@@ -535,6 +536,7 @@
+ {
+   TauInternalFunctionGuard protects_this_function;
+ 
++  PthreadLayer::InitializeThreadData();
+   bool * wrapped = (bool*)pthread_getspecific(wrapper_flags_key);
+   if (!wrapped) {
+     wrapped = new bool;
+@@ -576,6 +578,7 @@
+ {
+   TauInternalFunctionGuard protects_this_function;
+ 
++  PthreadLayer::InitializeThreadData();
+   bool * wrapped = (bool*)pthread_getspecific(wrapper_flags_key);
+   if (!wrapped) {
+     wrapped = new bool;
+TAU_PTHREAD_KEY_PATCH_EOF
+      }
+
+      if [ "${APPLY_PTHREAD_KEY_PATCH}" = "1" ]; then
+         if ! command -v git >/dev/null 2>&1; then
+            echo "ERROR: --pthread-key-patch enabled but 'git' is unavailable to apply the wrapper_flags_key fix" >&2
+            exit 1
+         fi
+         _tpk_patch_is_temp=0
+         TAU_PTHREAD_KEY_PATCH_FILE="$(dirname "${LEAF_SCRIPT_PATH}")/tau_wrapper_flags_key.patch"
+         if [ -f "${TAU_PTHREAD_KEY_PATCH_FILE}" ]; then
+            echo "tau: using sidecar patch ${TAU_PTHREAD_KEY_PATCH_FILE}"
+         else
+            TAU_PTHREAD_KEY_PATCH_FILE="$(mktemp -t tau_wrapper_flags_key.XXXXXX.patch)"
+            _tpk_patch_is_temp=1
+            write_tau_pthread_key_patch > "${TAU_PTHREAD_KEY_PATCH_FILE}"
+            echo "tau: using inlined wrapper_flags_key fix (materialized to ${TAU_PTHREAD_KEY_PATCH_FILE})"
+         fi
+         if git apply --check -p1 "${TAU_PTHREAD_KEY_PATCH_FILE}" 2>/dev/null; then
+            git apply --whitespace=nowarn -p1 "${TAU_PTHREAD_KEY_PATCH_FILE}"
+            echo "tau:   wrapper_flags_key init fix applied to src/Profile/PthreadLayer.cpp."
+         elif git apply --reverse --check -p1 "${TAU_PTHREAD_KEY_PATCH_FILE}" 2>/dev/null; then
+            echo "tau:   wrapper_flags_key init fix already present in this TAU source; skipping."
+         else
+            echo "ERROR: the wrapper_flags_key init fix does not apply to this TAU source." >&2
+            echo "       src/Profile/PthreadLayer.cpp drifted at the patched hunks. Regenerate the" >&2
+            echo "       inlined diff (or drop an updated tau_wrapper_flags_key.patch next to this" >&2
+            echo "       script), or pass --pthread-key-patch 0 to build without it -- noting that" >&2
+            echo "       an unpatched TAU heap-corrupts at teardown under GPU-aware MPI (ROCM-29037)." >&2
+            [ "${_tpk_patch_is_temp}" = "1" ] && rm -f "${TAU_PTHREAD_KEY_PATCH_FILE}"
+            exit 1
+         fi
+         [ "${_tpk_patch_is_temp}" = "1" ] && rm -f "${TAU_PTHREAD_KEY_PATCH_FILE}"
+         unset TAU_PTHREAD_KEY_PATCH_FILE _tpk_patch_is_temp
+      else
+         echo "tau: --pthread-key-patch 0; NOT applying the wrapper_flags_key init fix (expect teardown heap corruption under GPU-aware MPI; ROCM-29037)."
       fi
 
       # Patch tau's vendored plugins/llvm/Makefile to (a) embed the
