@@ -932,6 +932,19 @@ TAU_EXEC_LAUNCH_EOF
 	 ${SUDO} chmod -R a+rwX $TAU_PATH
       fi
 
+      # Mode bits alone are not enough on a pre-existing install tree. When the
+      # freshly cloned spack finds a bin/sbang written by an older spack it
+      # rewrites it and chmods the enclosing bin/ -- and chmod is EPERM for a
+      # non-owner however open the mode is. That aborted `spack install pdt`
+      # with "[Errno 1] Operation not permitted: <PDT_PATH>/bin" on every tree
+      # whose PDT predates the current spack, and the tau fail-cleanup then
+      # removed the existing tau install. Take ownership for the duration of
+      # the build; the chown back to root:root at the end of this branch is the
+      # matching half.
+      if [[ "${USER}" != "root" ]] && [ -n "${SUDO}" ]; then
+         ${SUDO} chown -R "$(id -u):$(id -g)" "${PDT_PATH}" "${TAU_PATH}"
+      fi
+
       # install PDT with spack
       spack install pdt
 
