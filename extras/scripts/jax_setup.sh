@@ -1,5 +1,27 @@
 #!/bin/bash
 
+# ── JAX version / ROCm pairing + PyPI popularity ─────────────────────
+# Default JAX line this script selects per ROCm major + Python version.
+# The "JAX_VERSION policy gate" block further down is the source of
+# truth; --jax-version always overrides it. "PyPI share" is the
+# version's fraction of jax PyPI downloads over the trailing 90 days
+# (CI traffic included; pepy.tech, ~Nov 2026) -- a rough popularity
+# proxy, not distinct users.
+#
+#   JAX     PyPI share   ROCm pairing (default; Python)
+#   ------  -----------  ------------------------------------------
+#   0.11.2    6.2%       ROCm >= 10, Python >= 3.12   <- current default
+#   0.11.1    9.9%
+#   0.11.0    5.9%
+#   0.10.2    7.7%       ROCm >= 10, Python == 3.11
+#   0.10.1    7.1%
+#   0.8.0    <4.8%       ROCm 7-9,   Python >= 3.11   (JAX_VERSION default below)
+#   0.7.1     6.9%
+#   0.6.2     7.5%
+#   0.6.0    <4.8%       ROCm 7-9,   Python == 3.10
+#   0.5.0    <4.8%       ROCm 6.x,   Python == 3.10
+#
+
 # Capture this script's absolute path BEFORE any cd, so the inline
 # git-provenance block lower down can resolve the script in the repo
 # even after the build has cd'd into a temp dir. (BASH_SOURCE[0] is
