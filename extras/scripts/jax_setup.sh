@@ -1025,11 +1025,51 @@ else
                JAX_ROCM_LOCAL_CFG=( --bazel_options=--config=rocm_clang_local
                                     --bazel_options=--extra_toolchains=@local_config_rocm//crosstool:toolchain-linux-x86_64 )
             fi
+            # ââ Fix ROCm/xla hardcoded APPARENT bzlmod repo name âââââââ
+            # From jax 0.11, XLA routes the hipcc toolchain through a separate
+            # config_rocm_hipcc repo but hardcodes its APPARENT name
+            #   external/config_rocm_hipcc/rocm/...
+            # in third_party/gpus/crosstool/{hipcc_cc_toolchain_config.bzl,
+            # BUILD.rocm}.tpl. Under bzlmod the execroot only exposes the
+            # CANONICAL name (xla++rocm_configure_ext+config_rocm_hipcc), so
+            # HIPCC_PATH resolves to a path that does not exist and the
+            # make_batch_pointers.cu.cc compile dies with "sh: ... hipcc: not
+            # found" though hipcc IS present. Override xla with a local copy of
+            # the SAME pinned commit whose templates derive the prefix from the
+            # repo's real workspace_root. The sed is a no-op on XLA refs that
+            # predate this wiring, and a failed fetch leaves the build unchanged.
+            FORK_XLA_OVERRIDE=()
+            # highway 1.3.0 mis-detects AMD clang (major 22) as upstream clang>=18/20 and
+            # emits evex512/avx10.2-512 target tokens this ROCm fork rejects, dropping the
+            # whole target attribute and losing avx512f -> _mm512 always_inline errors in
+            # xla/packing.cc. Disable highway's AVX-512 targets; host dispatch falls to AVX2.
+            JAX_HWY_COPT=( '--bazel_options=--copt=-DHWY_DISABLED_TARGETS=(HWY_AVX3|HWY_AVX3_DL|HWY_AVX3_ZEN4|HWY_AVX3_SPR|HWY_AVX10_2)' '--bazel_options=--host_copt=-DHWY_DISABLED_TARGETS=(HWY_AVX3|HWY_AVX3_DL|HWY_AVX3_ZEN4|HWY_AVX3_SPR|HWY_AVX10_2)' )
+            _xla_commit=$(grep -oE 'xla/archive/[0-9a-f]{40}' MODULE.bazel 2>/dev/null | head -1 | grep -oE '[0-9a-f]{40}')
+            if [ -n "${_xla_commit}" ]; then
+               _xla_local="${JAX_BUILD_ROOT}/xla-${_xla_commit}"
+               if [ ! -d "${_xla_local}" ]; then
+                  ( cd "${JAX_BUILD_ROOT}" \
+                    && curl -fsSL "https://github.com/ROCm/xla/archive/${_xla_commit}.tar.gz" | tar xz ) \
+                    || rm -rf "${_xla_local}"
+               fi
+               if [ -d "${_xla_local}" ]; then
+                  for _tpl in \
+                     "${_xla_local}/third_party/gpus/crosstool/hipcc_cc_toolchain_config.bzl.tpl"; do
+                     [ -f "${_tpl}" ] && sed -i 's#"external/config_rocm_hipcc/rocm#"external/" + Label("@config_rocm_hipcc//rocm:build_defs.bzl").repo_name + "/rocm#g' "${_tpl}"
+                  done
+                  FORK_XLA_OVERRIDE=( --local_xla_path=${_xla_local} )
+                  echo "jax: overriding xla with locally-patched ${_xla_local} (config_rocm_hipcc apparent-name fix)"
+               else
+                  echo "jax: WARNING could not fetch xla ${_xla_commit}; building unpatched (hipcc fix NOT applied)" >&2
+               fi
+            fi
             _jax_build_py build --bazel_startup_options=--bazelrc=build/rocm/rocm.bazelrc \
                           --rocm_path=$ROCM_PATH \
                           --rocm_amdgpu_targets=$AMDGPU_GFXMODEL "${JAX_CLANG_OPTS[@]}" \
                           --wheels=jax-rocm-plugin,jax-rocm-pjrt \
                           "${JAX_ROCM_LOCAL_CFG[@]}" \
+                          "${FORK_XLA_OVERRIDE[@]}" \
+                          "${JAX_HWY_COPT[@]}" \
                           --bazel_options=--repo_env=TF_ROCM_AMDGPU_TARGETS=$AMDGPU_GFXMODEL
             pip3 install -v --target=${JAXLIB_PATH} "jaxlib==${JAX_V}" dist/jax*.whl --force-reinstall || exit 1
             pip3 install --no-deps --target=${JAX_PATH} "jax==${JAX_V}" opt-einsum || exit 1

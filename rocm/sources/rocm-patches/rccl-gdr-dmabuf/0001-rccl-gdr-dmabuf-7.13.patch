@@ -1,0 +1,70 @@
+diff --git a/src/transport/net.cc b/src/transport/net.cc
+index a3154b0a..23d362cf 100644
+--- a/src/transport/net.cc
++++ b/src/transport/net.cc
+@@ -1234,6 +1234,16 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
+           NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, resources->buffers[p], resources->buffSizes[p], type, 0ULL, dmabuf_fd, &resources->mhandles[p]));
+           (void)close(dmabuf_fd);
+         }
++      } else if (type == NCCL_PTR_CUDA && proxyState->dmaBufSupport
++                 && pfn_hsa_amd_portable_export_dmabuf) {
++        INFO(NCCL_INIT|NCCL_NET, "rccl-gdr-dmabuf: registering GPU buffer via HSA dma-buf export");
++        int dmabuf_fd;
++        uint64_t offset;
++        HSACHECK(hsa_amd_portable_export_dmabuf((const void*)resources->buffers[p], resources->buffSizes[p], &dmabuf_fd, &offset));
++        NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, resources->buffers[p], resources->buffSizes[p], type, offset, dmabuf_fd, &resources->mhandles[p]));
++        (void)close(dmabuf_fd);
++        TRACE(NCCL_INIT|NCCL_NET, "hsa_amd_portable_export_dmabuf buffer %p size %d handle %x offset %ld",
++          (const void*)resources->buffers[p], resources->buffSizes[p], dmabuf_fd, offset);
+       } else // FALL-THROUGH to nv_peermem GDR path
+ #else
+       /* DMA-BUF support */
+@@ -1448,6 +1458,16 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
+           NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, resources->buffers[p], resources->buffSizes[p], type, 0ULL, dmabuf_fd, &resources->mhandles[p]));
+           (void)close(dmabuf_fd);
+         }
++      } else if (type == NCCL_PTR_CUDA && proxyState->dmaBufSupport
++                 && pfn_hsa_amd_portable_export_dmabuf) {
++        INFO(NCCL_INIT|NCCL_NET, "rccl-gdr-dmabuf: registering GPU buffer via HSA dma-buf export");
++        int dmabuf_fd;
++        uint64_t offset;
++        HSACHECK(hsa_amd_portable_export_dmabuf((const void*)resources->buffers[p], resources->buffSizes[p], &dmabuf_fd, &offset));
++        NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, resources->buffers[p], resources->buffSizes[p], type, offset, dmabuf_fd, &resources->mhandles[p]));
++        (void)close(dmabuf_fd);
++        TRACE(NCCL_INIT|NCCL_NET, "hsa_amd_portable_export_dmabuf buffer %p size %d handle %x offset %ld",
++          (const void*)resources->buffers[p], resources->buffSizes[p], dmabuf_fd, offset);
+       } else // FALL-THROUGH to nv_peermem GDR path
+ #else
+       /* DMA-BUF support */
+@@ -2371,6 +2391,15 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
+     (void)close(dmabuf_fd);
+     needReg = false;
+   }
++  if (needReg && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
++    INFO(NCCL_INIT|NCCL_NET, "rccl-gdr-dmabuf: registering GPU buffer via HSA dma-buf export");
++    int dmabuf_fd;
++    uint64_t offset;
++    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret, peermem);
++    NCCLCHECKGOTO(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, offset, dmabuf_fd, &handle), ret, peermem);
++    (void)close(dmabuf_fd);
++    needReg = false;
++  }
+ peermem:
+ #else
+   if (resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
+@@ -2415,6 +2444,15 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
+     (void)close(dmabuf_fd);
+     needReg = false;
+   }
++  if (needReg && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
++    INFO(NCCL_INIT|NCCL_NET, "rccl-gdr-dmabuf: registering GPU buffer via HSA dma-buf export");
++    int dmabuf_fd;
++    uint64_t offset;
++    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret, peermem);
++    NCCLCHECKGOTO(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, offset, dmabuf_fd, &handle), ret, peermem);
++    (void)close(dmabuf_fd);
++    needReg = false;
++  }
+ peermem:
+ #else
+   if (resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
