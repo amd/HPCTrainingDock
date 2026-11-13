@@ -521,6 +521,23 @@ else
 fi
 OPENMPI_PATH="${OPENMPI_PATH%/}"
 
+# The single modulefile THIS run writes (keyed by all four component
+# versions). The fail-cleanup trap removes only this file on failure,
+# never the whole MODULE_PATH dir, so other openmpi versions' modulefiles
+# and the default-pinning .modulerc under the same dir are preserved.
+OPENMPI_MODULEFILE="${MODULE_PATH}/${OPENMPI_VERSION}-ucc${UCC_VERSION}-ucx${UCX_VERSION}${XPMEM_STRING}.lua"
+
+# Per-component "(re)built or cache-restored THIS run" flags. Set to 1 only
+# when a component takes its build/cache branch below; a component skipped
+# because a prior install existed and --replace was not given stays 0. The
+# fail-cleanup trap keys off these so it removes only what this run created
+# and never a pre-existing SHARED xpmem/ucx/ucc that another openmpi version
+# under the same --install-path is using (slurm-61661 regression).
+XPMEM_BUILT_THIS_RUN=0
+UCX_BUILT_THIS_RUN=0
+UCC_BUILT_THIS_RUN=0
+OPENMPI_BUILT_THIS_RUN=0
+
 # ── BUILD_OPENMPI=0 short-circuit: operator opt-out (see hypre_setup.sh) ─
 NOOP_RC=43
 if [ "${BUILD_OPENMPI}" = "0" ]; then
@@ -751,13 +768,21 @@ _openmpi_on_exit() {
    [ -n "${OPENMPI_BUILD_DIR:-}" ]      && ${SUDO:-sudo} rm -rf "${OPENMPI_BUILD_DIR}"
    # attempted-but-failed markers (inventory 'F' glyph): persistent siblings
    # of the install dirs that survive the rm -rf below; cleared on success.
-   # Inventory tracks openmpi/ucx/ucc/xpmem as separate rows. openmpi/ucx/ucc
-   # are always built once we reach the trap (the BUILD_OPENMPI=0 opt-out
-   # exits before this trap is registered); xpmem only when BUILD_XPMEM=1.
+   # Inventory tracks openmpi/ucx/ucc/xpmem as separate rows. A marker is
+   # written only for a component actually (re)built this run (…_BUILT_THIS_RUN),
+   # so a skipped pre-existing component is not falsely flagged as failed.
    _ompi_marker_dir="$(dirname "${OPENMPI_PATH}")"
+   # Components actually (re)built / cache-restored this run -- the ONLY
+   # ones this run's failure is allowed to touch. A skipped pre-existing
+   # component (…_BUILT_THIS_RUN=0) is left strictly alone.
+   local _built_pkgs=""
+   [ "${XPMEM_BUILT_THIS_RUN:-0}" = "1" ]   && _built_pkgs="${_built_pkgs} xpmem"
+   [ "${UCX_BUILT_THIS_RUN:-0}" = "1" ]     && _built_pkgs="${_built_pkgs} ucx"
+   [ "${UCC_BUILT_THIS_RUN:-0}" = "1" ]     && _built_pkgs="${_built_pkgs} ucc"
+   [ "${OPENMPI_BUILT_THIS_RUN:-0}" = "1" ] && _built_pkgs="${_built_pkgs} openmpi"
    if [ ${rc} -ne 0 ]; then
       ${SUDO:-sudo} mkdir -p "${_ompi_marker_dir}" 2>/dev/null || true
-      for _ompi_pkg in openmpi ucx ucc; do
+      for _ompi_pkg in ${_built_pkgs}; do
          ${SUDO:-sudo} tee "${_ompi_marker_dir}/${_ompi_pkg}.FAILED" >/dev/null 2>/dev/null <<MARKER_EOF || true
 FAILED package: ${_ompi_pkg}
 ROCm SDK:        ${ROCM_PATH:-unknown}
@@ -767,16 +792,6 @@ Setup script:    openmpi_setup.sh (EXIT-trap fail marker)
 Reason:          build exited rc=${rc}; partial install wiped (see log_openmpi_*.txt).
 MARKER_EOF
       done
-      if [ "${BUILD_XPMEM}" = "1" ]; then
-         ${SUDO:-sudo} tee "${_ompi_marker_dir}/xpmem.FAILED" >/dev/null 2>/dev/null <<MARKER_EOF || true
-FAILED package: xpmem
-ROCm SDK:        ${ROCM_PATH:-unknown}
-ROCm token:      ${ROCM_VERSION:-unknown}
-Date:            $(date -u +%Y-%m-%dT%H:%M:%SZ)
-Setup script:    openmpi_setup.sh (EXIT-trap fail marker)
-Reason:          build exited rc=${rc}; partial install wiped (see log_openmpi_*.txt).
-MARKER_EOF
-      fi
    else
       ${SUDO:-sudo} rm -f "${_ompi_marker_dir}/openmpi.FAILED" \
                           "${_ompi_marker_dir}/ucx.FAILED" \
@@ -784,9 +799,23 @@ MARKER_EOF
                           "${_ompi_marker_dir}/xpmem.FAILED"
    fi
    if [ ${rc} -ne 0 ] && [ "${KEEP_FAILED_INSTALLS}" != "1" ]; then
-      echo "[openmpi fail-cleanup] rc=${rc}: removing partial xpmem/ucx/ucc/openmpi installs + modulefile"
-      ${SUDO:-sudo} rm -rf "${XPMEM_PATH}" "${UCX_PATH}" "${UCC_PATH}" "${OPENMPI_PATH}"
-      ${SUDO:-sudo} rm -rf "${MODULE_PATH}"
+      # Remove ONLY components built this run, and only THIS run's
+      # modulefile -- never the shared MODULE_PATH dir (holds every
+      # version's modulefile + the default .modulerc) or a pre-existing
+      # xpmem/ucx/ucc another openmpi version depends on. slurm-61661: a
+      # second openmpi version's failed build used to wipe the in-use
+      # 5.0.10 UCX/UCC/XPMEM because the old cleanup rm'd all four paths
+      # unconditionally plus the whole MODULE_PATH.
+      local _removed=""
+      [ "${XPMEM_BUILT_THIS_RUN:-0}" = "1" ]   && { ${SUDO:-sudo} rm -rf "${XPMEM_PATH}"; _removed="${_removed} xpmem"; }
+      [ "${UCX_BUILT_THIS_RUN:-0}" = "1" ]     && { ${SUDO:-sudo} rm -rf "${UCX_PATH}";   _removed="${_removed} ucx"; }
+      [ "${UCC_BUILT_THIS_RUN:-0}" = "1" ]     && { ${SUDO:-sudo} rm -rf "${UCC_PATH}";   _removed="${_removed} ucc"; }
+      if [ "${OPENMPI_BUILT_THIS_RUN:-0}" = "1" ]; then
+         ${SUDO:-sudo} rm -rf "${OPENMPI_PATH}"
+         [ -n "${OPENMPI_MODULEFILE:-}" ] && ${SUDO:-sudo} rm -f "${OPENMPI_MODULEFILE}"
+         _removed="${_removed} openmpi(+modulefile)"
+      fi
+      echo "[openmpi fail-cleanup] rc=${rc}: removed partial installs built this run:${_removed:- none (all components pre-existing/skipped)}"
    elif [ ${rc} -ne 0 ]; then
       echo "[openmpi fail-cleanup] rc=${rc} but KEEP_FAILED_INSTALLS=1: leaving artifacts on disk"
    fi
@@ -917,6 +946,7 @@ if [ "${BUILD_XPMEM}" == "1" ]; then
       echo "There is a previous installation and the replace flag is false"
       echo "  use --replace to request replacing the current installation"
    else
+      XPMEM_BUILT_THIS_RUN=1
       if [[ -d "${XPMEM_PATH}" ]] && [[ "${REPLACE_XPMEM}" != "0" ]] ; then
          ${SUDO_XPMEM} rm -rf "${XPMEM_PATH}"
       fi
@@ -1687,6 +1717,7 @@ if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE_UCX}" == "0" ]] ; then
    echo "There is a previous installation and the replace flag is false"
    echo "  use --replace to request replacing the current installation"
 else
+   UCX_BUILT_THIS_RUN=1
    if [[ -d "${UCX_PATH}" ]] && [[ "${REPLACE_UCX}" != "0" ]] ; then
       ${SUDO_UCX} rm -rf "${UCX_PATH}"
    fi
@@ -1863,6 +1894,7 @@ if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE_UCC}" == "0" ]] ; then
    echo "There is a previous installation and the replace flag is false"
    echo "  use --replace to request replacing the current installation"
 else
+   UCC_BUILT_THIS_RUN=1
    if [[ -d "${UCC_PATH}" ]] && [[ "${REPLACE_UCC}" != "0" ]] ; then
       ${SUDO_UCC} rm -rf "${UCC_PATH}"
    fi
@@ -2108,6 +2140,7 @@ if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE_OPENMPI}" == "0" ]] ; then
    echo "There is a previous installation and the replace flag is false"
    echo "  use --replace to request replacing the current installation"
 else
+   OPENMPI_BUILT_THIS_RUN=1
    if [[ -d "${OPENMPI_PATH}" ]] && [[ "${REPLACE_OPENMPI}" != "0" ]] ; then
       ${SUDO_OPENMPI} rm -rf "${OPENMPI_PATH}"
    fi
