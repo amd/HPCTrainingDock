@@ -26,6 +26,11 @@ set -eo pipefail
 : ${TOP_INSTALL_PATH:="/nfsapps/opt"}
 : ${TOP_MODULE_PATH:="/nfsapps/modules"}
 : ${KEEP_TARBALLS:="3"}
+# Host directory bind-mounted into the build container as /CacheFiles. Root on
+# the build node must be able to read and write it (dockerd bind source, the
+# container's tarball writes, Phase 3 sudo tar), so on NFS with root_squash it
+# must live outside any user-private home (e.g. /nfsapps/CacheFiles).
+: ${CACHE_ROOT:="CacheFiles"}
 : ${SKIP_EXTRACT:="0"}
 : ${SKIP_PRUNE:="0"}
 : ${SKIP_PATCHES:="0"}
@@ -84,6 +89,7 @@ usage() {
    echo "  --base-rocm-version [VER]:              delta-release base (install <VER> first then merge \${ROCM_VERSION} on top). Default: empty (auto-consulted from bare_system/rocm_delta_releases.conf)"
    echo "  --supersedes [VER]:                     emit a tombstone rocm/<VER>.lua that redirects to rocm/\${ROCM_VERSION}. Default: empty"
    echo "  --keep-tarballs [N]:                    prune policy; keep N most recent (default $KEEP_TARBALLS)"
+   echo "  --cache-root [DIR]:                     host dir mounted as /CacheFiles; must be root-accessible on the build node (default $CACHE_ROOT)"
    echo "  --skip-extract [0 or 1]:                skip phase 3 (default $SKIP_EXTRACT)"
    echo "  --skip-patches [0 or 1]:                skip phase 3.6 (rocm_patches.sh) (default $SKIP_PATCHES)"
    echo "  --skip-prune [0 or 1]:                  skip phase 4 (default $SKIP_PRUNE)"
@@ -116,6 +122,7 @@ while [[ $# -gt 0 ]]; do
       "--base-rocm-version")   shift; BASE_ROCM_VERSION=${1};  reset-last ;;
       "--supersedes")          shift; SUPERSEDES_VERSION=${1}; reset-last ;;
       "--keep-tarballs")       shift; KEEP_TARBALLS=${1};      reset-last ;;
+      "--cache-root")          shift; CACHE_ROOT=${1};         reset-last ;;
       "--skip-extract")        shift; SKIP_EXTRACT=${1};       reset-last ;;
       "--skip-patches")        shift; SKIP_PATCHES=${1};       reset-last ;;
       "--skip-prune")          shift; SKIP_PRUNE=${1};         reset-last ;;
@@ -192,7 +199,9 @@ fi
 : ${PATCHES_LOG:="patches_${ROCM_VERSION}.out"}
 
 AMDGPU_GFXMODEL_STRING=$(echo "${AMDGPU_GFXMODEL}" | sed -e 's/;/_/g')
-CACHE_DIR="CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}"
+# Absolute: a relative -v source would be taken as a named docker volume.
+CACHE_ROOT="$(realpath -m "${CACHE_ROOT}")"
+CACHE_DIR="${CACHE_ROOT}/${DISTRO}-${DISTRO_VERSION}-rocm-${ROCM_VERSION}-${AMDGPU_GFXMODEL_STRING}"
 TARBALL="${CACHE_DIR}/rocm-${ROCM_VERSION}.tgz"
 mkdir -p "${CACHE_DIR}"
 
@@ -220,15 +229,15 @@ prune_cache() {
       return ${rc}
    fi
    echo "============================================================"
-   echo "  Phase 4: prune CacheFiles/.../rocm-*.tgz (keep ${KEEP_TARBALLS} most recent)"
+   echo "  Phase 4: prune ${CACHE_ROOT}/.../rocm-*.tgz (keep ${KEEP_TARBALLS} most recent)"
    echo "============================================================"
-   df -h "$PWD/CacheFiles" 2>/dev/null || true
+   df -h "${CACHE_ROOT}" 2>/dev/null || true
    # Match rocm-X.Y.Z.tgz but exclude rocm-modules-*.tgz and rocm-afar-*.tgz
    # from the prune set. The afar tarballs are the AMD AFAR flang-new
    # compiler payload (see Phase 3c); they are tied to a specific cache dir
    # (and therefore a specific ROCm version) and do not consume the
    # KEEP_TARBALLS budget the way the multi-GB rocm-X.Y.Z.tgz files do.
-   mapfile -t TARBALLS < <(find CacheFiles -maxdepth 2 -type f -name 'rocm-*.tgz' \
+   mapfile -t TARBALLS < <(find "${CACHE_ROOT}" -maxdepth 2 -type f -name 'rocm-*.tgz' \
                               ! -name 'rocm-modules-*.tgz' \
                               ! -name 'rocm-afar-*.tgz' \
                               -printf '%T@ %p\n' 2>/dev/null \
@@ -244,7 +253,7 @@ prune_cache() {
    else
       echo "Found ${N} rocm-*.tgz tarballs; <= keep-tarballs (${KEEP_TARBALLS}). Nothing to prune."
    fi
-   df -h "$PWD/CacheFiles" 2>/dev/null || true
+   df -h "${CACHE_ROOT}" 2>/dev/null || true
    return ${rc}
 }
 trap prune_cache EXIT
@@ -360,7 +369,7 @@ echo "============================================================"
 ${BUILDER} run --device=/dev/kfd --device=/dev/dri \
     --group-add video --group-add render ${ADD_OPTIONS_RUN} \
     -p ${PORT_NUMBER}:22 --name ${NAME}  --security-opt seccomp=unconfined \
-    --rm -v $PWD/CacheFiles:/CacheFiles ${IMAGE_NAME} \
+    --rm -v "${CACHE_ROOT}":/CacheFiles ${IMAGE_NAME} \
     -c "set -eo pipefail; cd /home/sysadmin && ${MAKE_TARGETS}" \
     2>&1 | tee "${MAKE_LOG}"
 

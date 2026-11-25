@@ -164,6 +164,17 @@ donor_has_fix() {
    esac
 }
 
+# Overlaying a tree that already carries the fix would only swap its SDK for
+# an older donor build.  "Cannot tell" (2) falls through to the overlay.
+_site_so="$(sdk_library_in "${ROCM_PATH}")"
+if [ -n "${_site_so}" ]; then
+   _site_fx=0; donor_has_fix "${_site_so}" || _site_fx=$?
+   if [ "${_site_fx}" -eq 0 ]; then
+      echo "[node-wedging] $(basename "${_site_so}") in ${ROCM_PATH} already carries the fix (soft no-op)"
+      exit 43
+   fi
+fi
+
 if [ -z "${FIXED_ROCM}" ]; then
    _parent="$(dirname "${ROCM_PATH}")"
    _best=""
@@ -260,10 +271,12 @@ mkdir -p "${OVR_LIB}" "${OVR_BIN}"
 ls "${FIXED_ROCM}"/lib/librocprofiler-sdk.so.* >/dev/null 2>&1 \
    || { echo "[node-wedging] ERROR: ${FIXED_ROCM}/lib has no librocprofiler-sdk.so.*" >&2; exit 1; }
 echo "[node-wedging] staging rocprofiler-sdk libraries from ${FIXED_ROCM}/lib"
-cp -a "${FIXED_ROCM}"/lib/librocprofiler-sdk*.so* "${OVR_LIB}/"
+# Not cp -a/-p: preserving mode reads the source ACL, which fails with
+# "Operation not supported" when the donor tree is on NFS and aborts under set -e.
+cp -dR --preserve=timestamps,links "${FIXED_ROCM}"/lib/librocprofiler-sdk*.so* "${OVR_LIB}/"
 if [ -d "${FIXED_ROCM}/lib/rocprofiler-sdk" ]; then
    rm -rf "${OVR_LIB}/rocprofiler-sdk"
-   cp -a "${FIXED_ROCM}/lib/rocprofiler-sdk" "${OVR_LIB}/"
+   cp -dR --preserve=timestamps,links "${FIXED_ROCM}/lib/rocprofiler-sdk" "${OVR_LIB}/"
 fi
 
 _sdk_so="$(first_versioned_sdk_so "${OVR_LIB}")"

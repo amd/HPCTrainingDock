@@ -19,6 +19,7 @@
 #                     FORCE_EXTRACT is still honoured as a deprecated alias.
 #   SKIP_PATCHES      0|1 (default 0) -- skip Phase 3.6 (rocm_patches.sh)
 #   KEEP_TARBALLS     N   (default 3)
+#   CACHE_ROOT        docker-build tarball cache (default CacheFiles in the submit dir)
 #   TOP_INSTALL_PATH  on-host SDK extract destination (default /nfsapps/opt)
 #   TOP_MODULE_PATH   on-host Lmod root for deployed modulefiles (default /nfsapps/modules)
 #   DISTRO, DISTRO_VERSION, AMDGPU_GFXMODEL
@@ -40,6 +41,7 @@ fi
 REPLACE_EXISTING="${REPLACE_EXISTING:-0}"
 SKIP_PATCHES="${SKIP_PATCHES:-0}"
 KEEP_TARBALLS="${KEEP_TARBALLS:-3}"
+CACHE_ROOT="${CACHE_ROOT:-CacheFiles}"
 DISTRO="${DISTRO:-ubuntu}"
 DISTRO_VERSION="${DISTRO_VERSION:-24.04}"
 AMDGPU_GFXMODEL="${AMDGPU_GFXMODEL:-gfx942;gfx90a}"
@@ -240,6 +242,7 @@ SUMMARY="sweep_summary_$(date +%Y%m%d_%H%M%S)_job${SLURM_JOB_ID}.out"
    echo " REPLACE_EXISTING: ${REPLACE_EXISTING}"
    echo " SKIP_PATCHES:     ${SKIP_PATCHES}"
    echo " KEEP_TARBALLS:    ${KEEP_TARBALLS}"
+   echo " CACHE_ROOT:       ${CACHE_ROOT}"
    echo " BUILD_METHOD:     ${BUILD_METHOD}  (bare-numeric token routing)"
    echo " SITE:             ${SITE:-<none>}"
    echo " TOP_INSTALL_PATH: ${TOP_INSTALL_PATH}"
@@ -621,7 +624,7 @@ EOF
                         prepare_podman_storage
                         echo "[$(date)] building rocm package for ${tok} (builder=${BUILDER}${PODMAN_ROOT:+, store=${PODMAN_ROOT}})" | tee -a "${SUMMARY}"
                         AMDGPU_GFXMODEL_STRING="${AMDGPU_GFXMODEL//;/_}"
-                        _cachetb="CacheFiles/${DISTRO}-${DISTRO_VERSION}-rocm-${tok}-${AMDGPU_GFXMODEL_STRING}/rocm-${tok}.tgz"
+                        _cachetb="${CACHE_ROOT}/${DISTRO}-${DISTRO_VERSION}-rocm-${tok}-${AMDGPU_GFXMODEL_STRING}/rocm-${tok}.tgz"
                         if bare_system/run_rocm_build.sh \
                               --rocm-version "${tok}" \
                               --distro "${DISTRO}" --distro-version "${DISTRO_VERSION}" \
@@ -630,6 +633,7 @@ EOF
                               --replace-existing "${REPLACE_EXISTING}" \
                               --skip-patches "${SKIP_PATCHES}" \
                               --keep-tarballs "${KEEP_TARBALLS}" \
+                              --cache-root "${CACHE_ROOT}" \
                               --skip-extract 1 \
                               --top-install-path "${TOP_INSTALL_PATH}" \
                               --top-module-path  "${TOP_MODULE_PATH}"; then
@@ -1058,6 +1062,7 @@ for v in "${VERSIONS[@]}"; do
                --replace-existing "${REPLACE_EXISTING}" \
                --skip-patches "${SKIP_PATCHES}" \
                --keep-tarballs "${KEEP_TARBALLS}" \
+               --cache-root "${CACHE_ROOT}" \
                --top-install-path "${TOP_INSTALL_PATH}" \
                --top-module-path  "${TOP_MODULE_PATH}" || rc=$?
          ;;

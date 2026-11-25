@@ -3120,7 +3120,8 @@ for bundle in ${PATCH_BUNDLES}; do
          # wrapper on PATH via the modulefile, or an SDK symlink swap on
          # a rocprofv3 without that option). install.sh does its own
          # modulefile edit, so there is no follow-on hook here. Exit 43 =
-         # soft skip (no rocprofv3 on this tree, or no post-fix donor).
+         # soft skip (no rocprofv3 on this tree, the tree's own SDK already
+         # carries the fix, or no post-fix donor).
          apply_rocprofiler_sdk_node_wedging_fix
          bundle_rc=$?
          if [ "${bundle_rc}" -eq 0 ]; then

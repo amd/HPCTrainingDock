@@ -78,6 +78,7 @@ fi
 : ${REPLACE_EXISTING:="0"}
 : ${SKIP_PATCHES:="0"}
 : ${KEEP_TARBALLS:="3"}
+: ${CACHE_ROOT:=""}                    # empty => sbatch default (CacheFiles in the submit dir)
 # BUILD_METHOD selects HOW a bare-numeric ROCm token is installed (the docker
 # build path the sweep has always used, or a no-docker alternative). Explicit
 # therock-*/afar-* tokens ignore this -- their token shape already IS the
@@ -310,6 +311,9 @@ Usage: $0 [opts]
                                  (alias: --force-extract -- deprecated, kept for backward compat)
    --skip-patches 0|1            skip Phase 3.6 (rocm_patches.sh) (default $SKIP_PATCHES)
    --keep-tarballs N             prune policy (default $KEEP_TARBALLS)
+   --cache-root DIR              docker-build tarball cache, mounted as /CacheFiles (default: CacheFiles
+                                 in the submit dir). Root on the compute node must be able to read and
+                                 write it, so with root-squashed NFS homes use e.g. /nfsapps/CacheFiles.
    --distro NAME                 default $DISTRO
    --distro-version VER          default $DISTRO_VERSION
    --amdgpu-gfxmodel GFX         default $AMDGPU_GFXMODEL
@@ -354,6 +358,7 @@ while [[ $# -gt 0 ]]; do
                           echo "[rocm_sweep] NOTE: --force-extract is deprecated; use --replace-existing" >&2 ;;
       --skip-patches)     shift; SKIP_PATCHES=${1} ;;
       --keep-tarballs)    shift; KEEP_TARBALLS=${1} ;;
+      --cache-root)       shift; CACHE_ROOT=${1} ;;
       --distro)           shift; DISTRO=${1} ;;
       --distro-version)   shift; DISTRO_VERSION=${1} ;;
       --amdgpu-gfxmodel)  shift; AMDGPU_GFXMODEL=${1} ;;
@@ -692,6 +697,7 @@ cat <<EOF
  Replace existing: ${REPLACE_EXISTING}
  Skip patches:     ${SKIP_PATCHES}
  Keep tarballs:    ${KEEP_TARBALLS}
+ Cache root:       ${CACHE_ROOT:-<default: CacheFiles in submit dir>}
  Distro:           ${DISTRO} ${DISTRO_VERSION}
  GFX:              ${AMDGPU_GFXMODEL}
  Site preset:      ${SITE:-<none>}
@@ -731,6 +737,7 @@ fi
 # safe in --export). The sbatch passes it to the leaf therock installer's
 # --url-base for therock-* tokens (nightlies/prereleases); unset -> stable default.
 [[ -n "${THEROCK_URL_BASE}" ]] && EXPORT_VARS="${EXPORT_VARS},THEROCK_URL_BASE=${THEROCK_URL_BASE}"
+[[ -n "${CACHE_ROOT}" ]] && EXPORT_VARS="${EXPORT_VARS},CACHE_ROOT=${CACHE_ROOT}"
 
 CMD=( sbatch
       --time="${TIME_STR}"
